@@ -275,6 +275,28 @@ describe("POST /api/cases/:id/re-analyze", () => {
     expect(mockRunIntakeAgent).not.toHaveBeenCalled();
   });
 
+  it.each(["en_liquidacion", "pagado", "rechazado"])(
+    "does not re-analyze a %s case, not even an admin (B25: settlement is human-only)",
+    async (status) => {
+      // Admin is the default in beforeEach (role: "admin")
+      mockDb.select.mockReturnValue(
+        makeSelectChain([{ id: CASE_ID, status, assigned_to: null, extraction_lease_at: null, extraction_pending: false }])
+      );
+
+      const res = await POST(makeRequest(), {
+        params: Promise.resolve({ id: CASE_ID }),
+      });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { code: "FSM_INVALID_TRANSITION" },
+      });
+      expect(mockDb.update).not.toHaveBeenCalled();
+      expect(mockAfter).not.toHaveBeenCalled();
+      expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+    }
+  );
+
   it("does not schedule the agent for closed cases", async () => {
     // Return a closed case
     mockDb.select.mockReturnValue(

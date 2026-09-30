@@ -35,7 +35,7 @@ import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
-import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import { enTenant, enTenantVarias, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { firstRow, policyNumberEquals } from "@/lib/db/helpers";
 import {
   auditLog,
@@ -55,6 +55,12 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
+import {
+  ajusteDeVencimiento,
+  efectosDeTransicion,
+  type CriteriosDeTrabajo,
+} from "@/server/cases/efectos-de-transicion";
+import { auditoriaSiCambia } from "@/server/cases/auditoria-si-quedo";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 import { deliberate } from "@/server/ai/deliberate";
 import {
@@ -87,6 +93,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
 import { redactObject } from "@/lib/audit/redact";
 import { errorCode } from "@/lib/observability/error-code";
+import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { logger } from "@/lib/observability/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -211,6 +218,7 @@ const mudo: AgentMessenger = {
       { case_id: message.caseId, template: message.template },
       "orchestrate.envio_omitido"
     );
+    return true;
   },
 };
 
@@ -224,7 +232,14 @@ export async function orchestratePostExtraction(
    * decision tree grew up; WhatsApp passes its own so the two channels share
    * the reasoning instead of each keeping a copy that drifts.
    */
-  messengerPedido: AgentMessenger = emailMessenger
+  messengerPedido: AgentMessenger = emailMessenger,
+  /**
+   * Lo que el equipo configuró para repartir, plazar y armar el plan del caso.
+   *
+   * Va aparte y nunca dentro de lo extraído: es un criterio de trabajo del
+   * equipo, y nada de lo que se arma acá lo lee el asegurado ni el redactor.
+   */
+  trabajo?: CriteriosDeTrabajo
 ): Promise<void> {
   const { extractedClaim, senderEmail, inReplyToMessageId, latestMessageText, heredadaEn } =
     extractedOutput;
@@ -284,6 +299,7 @@ export async function orchestratePostExtraction(
     await escalate({
       caseId,
       tenantId,
+      trabajo,
       senderEmail,
       latestMessageText,
       inReplyToMessageId,
@@ -629,6 +645,7 @@ export async function orchestratePostExtraction(
     await escalate({
       caseId,
       tenantId,
+      trabajo,
       senderEmail,
       latestMessageText,
       inReplyToMessageId,
@@ -785,6 +802,7 @@ export async function orchestratePostExtraction(
     await escalate({
       caseId,
       tenantId,
+      trabajo,
       senderEmail,
       latestMessageText,
       inReplyToMessageId,
@@ -989,7 +1007,7 @@ export async function orchestratePostExtraction(
     // The branches that do send a question set their own status above, so
     // reaching here means the conversation is finished as far as we are
     // concerned.
-    await setStatus(caseId, tenantId, "listo_para_core");
+    await setStatus(caseId, tenantId, "listo_para_core", trabajo);
   }
 
   if (acknowledgeOnly && !confirmationEmailDispatched && !missingInfoEmailDispatched) {
@@ -1551,6 +1569,8 @@ async function inicialesDelTitularAjeno(
 async function escalate(opts: {
   caseId: string;
   tenantId: string;
+  /** Con qué criterios del equipo se autoasigna al traspasar. */
+  trabajo?: CriteriosDeTrabajo;
   senderEmail: string;
   latestMessageText?: string;
   inReplyToMessageId?: string;
@@ -1595,7 +1615,7 @@ async function escalate(opts: {
 }): Promise<void> {
   const { caseId, tenantId, severity } = opts;
 
-  if (!(await setStatus(caseId, tenantId, "requiere_especialista"))) {
+  if (!(await setStatus(caseId, tenantId, "requiere_especialista", opts.trabajo))) {
     // Otra mano ya movió el caso: ni el mensaje al asegurado, ni la auditoría,
     // ni el aviso al especialista corresponden a un traspaso que no ocurrió.
     logger.warn({ case_id: caseId, reason: opts.reason }, "escalation.skipped_case_moved");
@@ -1836,26 +1856,78 @@ const ESTADOS_QUE_PISA_EL_AGENTE = [...ESTADOS_DE_ARRANQUE, "listo"] as const;
  * ninguna fila y no se pisa nada. Devuelve si se aplicó, para que quien llama
  * decida si lo que sigue (el mensaje, la auditoría) todavía corresponde.
  */
-async function setStatus(
+export async function setStatus(
   caseId: string,
   tenantId: string,
-  status: CaseRow["status"]
+  status: CaseRow["status"],
+  trabajo?: CriteriosDeTrabajo
 ): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
-  try {
-    const filas = await enTenant(tenantCtx, (db) =>
-      db
-        .update(cases)
-        .set({ status, updated_at: new Date().toISOString() })
-        .where(
-          and(
-            eq(cases.id, caseId),
-            or(inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE), eq(cases.status, status))
-          )
+  const cambiarEstado = (db: ClienteDatos, ajuste: ReturnType<typeof ajusteDeVencimiento> = {}) => {
+    return db
+      .update(cases)
+      .set({ status, updated_at: new Date().toISOString(), ...ajuste })
+      .where(
+        and(
+          eq(cases.id, caseId),
+          or(inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE), eq(cases.status, status))
         )
-        .returning({ id: cases.id })
-    );
+      )
+      .returning({ id: cases.id });
+  };
+  try {
+    /*
+     * La auditoría del cambio, el estado, el vencimiento, la asignación y el
+     * plan salen en un mismo lote: si algo de lo que rodea al estado falla
+     * —una migración sin aplicar, un dato roto— no se pierde el cambio, que es
+     * lo que el agente necesita para seguir. El lote es atómico, así que al
+     * fallar no quedó nada a medias y el UPDATE de siempre corre limpio.
+     *
+     * La auditoría va primero porque lee el estado de antes (B14: de ahí sale
+     * cuánto estuvo el caso en cada estado); sólo queda si el estado cambia.
+     *
+     * Si falla lo del equipo, el segundo intento es el estado con su auditoría
+     * y nada más: sin ella el tablero no ve el paso a listo y la revisión
+     * nocturna marcaría, para siempre, un cierre «sin pasar por listo». El
+     * UPDATE solo es el último recurso, para cuando falla hasta la auditoría.
+     */
+    let filas: { id: string }[] | null = null;
+    for (const conEfectos of trabajo ? [true, false] : [false]) {
+      const criterios = conEfectos ? trabajo : undefined;
+      try {
+        [, filas] = await enTenantVarias<[unknown, { id: string }[]]>(tenantCtx, (db) => [
+          auditoriaSiCambia(
+            db,
+            {
+              caseId,
+              actorId: null,
+              eventType: AuditEvent.CASE_STATUS_CHANGED,
+              payload: { trigger: "agent" },
+              desde: ESTADOS_QUE_PISA_EL_AGENTE,
+            },
+            status
+          ),
+          cambiarEstado(db, criterios ? ajusteDeVencimiento(status, criterios) : {}),
+          ...(criterios
+            ? efectosDeTransicion(db, {
+                caseId,
+                hacia: status,
+                origen: "agente",
+                actorId: null,
+                criterios,
+              })
+            : []),
+        ]);
+        break;
+      } catch (err) {
+        logger.warn(
+          { code: errorCode(err), case_id: caseId, status, con_efectos: conEfectos },
+          "orchestrate.efectos_fallaron"
+        );
+      }
+    }
+    filas ??= await enTenant(tenantCtx, (db) => cambiarEstado(db));
     if (filas.length === 0) {
       logger.warn({ case_id: caseId, status }, "orchestrate.status_not_applied");
       return false;
@@ -2203,29 +2275,6 @@ async function factsLearnedSinceWeLastSpoke(
   } catch (err) {
     // Callarse es la dirección insegura acá: ante la duda, contestar.
     logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_for_new_facts");
-    return false;
-  }
-}
-
-/** Whether anything has already gone out to the claimant on this case. */
-async function hasPriorOutbound(caseId: string, tenantId: string): Promise<boolean> {
-  // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
-  try {
-    const rows = await enTenant(tenantCtx, (db) =>
-      db
-        .select({ id: outboundMessages.id })
-        .from(outboundMessages)
-        .where(
-          eq(outboundMessages.case_id, caseId)
-        )
-        .limit(1)
-    );
-    return rows.length > 0;
-  } catch (err) {
-    // Fall back to the first-contact wording: greeting someone twice is a
-    // smaller error than closing a conversation that never happened.
-    logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_prior_outbound");
     return false;
   }
 }

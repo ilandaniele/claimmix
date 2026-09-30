@@ -148,7 +148,7 @@ describe("el padrón se busca por los tres modos", () => {
     // Si alguien recorta la promesa, este test se cae y le recuerda que la
     // alternativa era recortar la consulta.
     const i18n = await import("node:fs").then((fs) =>
-      fs.readFileSync("src/lib/i18n/es-AR.ts", "utf8")
+      fs.readFileSync("src/lib/i18n/es-AR.servidor.ts", "utf8")
     );
     expect(i18n).toContain("Buscar por nombre, DNI o email");
   });

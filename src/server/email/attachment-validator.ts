@@ -11,11 +11,11 @@
  */
 
 import { randomBytes } from "crypto";
+import { AUDIO_PERMITIDO, MAX_ATTACHMENT_SIZE_BYTES, normalizarMime } from "@/core/adjuntos/firma";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Per-attachment maximum: 10 MB */
-export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
+export { MAX_ATTACHMENT_SIZE_BYTES };
 
 /** Per-email aggregate maximum: 25 MB */
 export const MAX_AGGREGATE_SIZE_BYTES = 25 * 1024 * 1024;
@@ -35,6 +35,8 @@ export const CONTENT_TYPE_ALLOWLIST: ReadonlySet<string> = new Set([
   "application/msword",
   "application/vnd.openxmlformats-officedocument.*",
   "message/rfc822",
+  // Las notas de voz, con nombre exacto: nada de `audio/*`.
+  ...AUDIO_PERMITIDO,
 ]);
 
 /**
@@ -77,8 +79,7 @@ export type ValidateResult =
  *     (everything before the wildcard) must match the start of the incoming type.
  */
 function matchesAllowlist(contentType: string): boolean {
-  // Normalise: lowercase, strip parameters (e.g. "; charset=utf-8").
-  const normalised = contentType.toLowerCase().split(";")[0].trim();
+  const normalised = normalizarMime(contentType);
 
   // La lista negra manda: está para los que un glob de la blanca dejaría pasar.
   if (CONTENT_TYPE_DENYLIST.has(normalised)) return false;

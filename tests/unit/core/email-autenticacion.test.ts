@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { autenticacionFallida } from "@/core/email/autenticacion";
+import { autenticacionFallida, ORIGEN_WEB } from "@/core/email/autenticacion";
 
 const cab = (name: string, value: string) => [{ name, value }];
 
@@ -44,6 +44,12 @@ describe("autenticacionFallida", () => {
 
   it("dkim=fail al lado de un dkim=pass no falla", () => {
     expect(autenticacionFallida(cab("Authentication-Results", "mx.google.com; dkim=fail header.i=@a; dkim=pass header.i=@b"))).toBe(false);
+  });
+
+  it("el formulario web (B17) cuenta como no verificado: cualquiera puede escribir cualquier correo ahí", () => {
+    expect(autenticacionFallida([ORIGEN_WEB])).toBe(true);
+    expect(autenticacionFallida(cab("x-claimmix-origen", "WEB"))).toBe(true);
+    expect(autenticacionFallida(cab("X-ClaimMix-Origen", "otro"))).toBe(false);
   });
 
   it("mira el nombre de la cabecera sin importar mayúsculas", () => {

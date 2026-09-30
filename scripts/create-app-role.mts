@@ -30,6 +30,7 @@ dotenv.config({ path: ".env.local" });
 
 import { randomBytes } from "node:crypto";
 import { escribirEnEnvLocal } from "./lib/env-local.mjs";
+import { PERMISOS_QUITADOS } from "./lib/permisos-quitados.mjs";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
@@ -98,13 +99,16 @@ try {
     await cx.query(sql);
   }
 
-  // Lo único que el rol NO puede: reescribir la auditoría (migración 0032).
+  // Lo que el rol NO puede (`permisos-quitados.mjs`): reescribir la auditoría
+  // (0032) o borrar la configuración de la entrega al Core (0036).
   // Va después del GRANT ON ALL TABLES, que lo volvería a conceder.
   // En una base todavía sin migrar la tabla no existe: no hay nada que sacar.
-  await cx.query(
-    `DO $$ BEGIN IF to_regclass('public.audit_log') IS NOT NULL THEN REVOKE UPDATE, DELETE ON public.audit_log FROM ${ROL}; END IF; END $$`,
-  );
-  ok("lectura, escritura, secuencias y funciones — más los permisos por omisión; audit_log sólo de alta");
+  for (const [tabla, privilegios] of Object.entries(PERMISOS_QUITADOS)) {
+    await cx.query(
+      `DO $$ BEGIN IF to_regclass('public.${tabla}') IS NOT NULL THEN REVOKE ${privilegios.join(", ")} ON public.${tabla} FROM ${ROL}; END IF; END $$`,
+    );
+  }
+  ok(`lectura, escritura, secuencias y funciones — más los permisos por omisión; sin ${Object.entries(PERMISOS_QUITADOS).map(([t, p]) => `${p.join("/")} en ${t}`).join(", ")}`);
 
   // ── Comprobación de atributos ─────────────────────────────────────────────
   paso("Comprobación");

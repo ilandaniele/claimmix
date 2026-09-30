@@ -13,11 +13,25 @@ export type AmbitoDeCupo =
   | "auth:in"
   | "auth:up"
   | "auth:reset"
+  | "auth:sso"
   | "auth:ip"
   | "demo-public"
+  | "denuncia-web"
+  | "denuncia-slug"
+  | "denuncia-mail"
   | "batch-simulate"
   | "re-analyze"
-  | "whatsapp";
+  | "whatsapp"
+  | "core-api"
+  | "aviso-tardio"
+  | "clasificacion-tardia"
+  | "condiciones-poliza"
+  | "subida-condiciones"
+  | "lectura-presupuesto"
+  | "lectura-reclamo"
+  | "asistente-caso"
+  | "revision-de-desvios"
+  | "purga-y-retencion";
 
 export function claveDeCupo(ambito: AmbitoDeCupo, ...partes: string[]): string {
   return [ambito, ...partes.map((p) => p.trim().toLowerCase())].join(":");

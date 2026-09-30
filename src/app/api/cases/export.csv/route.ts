@@ -15,7 +15,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
-import { CaseQuerySchema, type CaseStatus, type ClaimType } from "@/lib/schemas/cases";
+import { CaseQuerySchema, type CaseStatus } from "@/lib/schemas/cases";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { formatDate } from "@/lib/utils";
@@ -29,6 +29,9 @@ import {
   getClientIp,
 } from "@/lib/rate-limit/index";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { esRamoNativo } from "@/core/case/ramos";
+import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { logger } from "@/lib/observability/logger";
 
 /** CSV column headers (es-AR labels as specified in AC13) */
@@ -53,27 +56,11 @@ const CSV_HEADERS = [
  * abre en Excel, se manda por correo, se archiva— y se leía peor que la
  * pantalla.
  *
- * Los `Record<ClaimType, …>` y `Record<CaseStatus, …>` son a propósito: si
- * mañana se agrega un estado al esquema, esto no compila. Un mapa
- * `Record<string, string>` es exactamente cómo se llegó a que faltaran ocho sin
- * que nadie se enterara.
+ * El `Record<CaseStatus, …>` es a propósito: si mañana se agrega un estado al
+ * esquema, esto no compila. Un mapa `Record<string, string>` es exactamente
+ * cómo se llegó a que faltaran ocho sin que nadie se enterara. Los tipos se
+ * nombran con `nombreDeTipo`, que ya cubre nativos, propios y desconocidos.
  */
-export function etiquetasDeTipo(
-  t: (k: TranslationKey) => string
-): Record<ClaimType, string> {
-  return {
-    choque: t("type.choque"),
-    robo: t("type.robo"),
-    granizo: t("type.granizo"),
-    incendio: t("type.incendio"),
-    cristales: t("type.cristales"),
-    rc: t("type.rc"),
-    robo_contenido: t("type.robo_contenido"),
-    accidente_personal: t("type.accidente_personal"),
-    other: t("type.other"),
-  };
-}
-
 export function etiquetasDeEstado(
   t: (k: TranslationKey) => string
 ): Record<CaseStatus, string> {
@@ -91,6 +78,9 @@ export function etiquetasDeEstado(
     enviado_a_core: t("status.enviado_a_core"),
     error_core: t("status.error_core"),
     no_relevante: t("status.no_relevante"),
+    en_liquidacion: t("status.en_liquidacion"),
+    pagado: t("status.pagado"),
+    rechazado: t("status.rechazado"),
   };
 }
 
@@ -166,6 +156,9 @@ export async function GET(request: NextRequest) {
     // por fraude aunque la pantalla sí lo estuviera.
     fraude: searchParams.getAll("fraude"),
     channel: searchParams.getAll("channel"),
+    // Sólo filtran: el CSV no lleva columnas de plazo ni de puntaje.
+    vencimiento: searchParams.getAll("vencimiento"),
+    complejidad: searchParams.getAll("complejidad"),
     is_claim: searchParams.get("is_claim") ?? undefined,
     para_responder: searchParams.get("para_responder") ?? undefined,
     customer_id: searchParams.get("customer_id") ?? undefined,
@@ -200,6 +193,8 @@ export async function GET(request: NextRequest) {
       severity: parsed.data.severity,
       fraude: parsed.data.fraude,
       channel: parsed.data.channel,
+      vencimiento: parsed.data.vencimiento,
+      complejidad: parsed.data.complejidad,
       is_claim: parsed.data.is_claim,
       para_responder: parsed.data.para_responder,
       customer_id: parsed.data.customer_id,
@@ -220,14 +215,17 @@ export async function GET(request: NextRequest) {
   // acá no vale: un Route Handler no es un render de React.
   const locale = await resolveAccountLocale(ctx.userRow.locale);
   const t = getT(locale);
-  const TIPOS = etiquetasDeTipo(t);
   const ESTADOS = etiquetasDeEstado(t);
+  // Los ramos propios se leen sólo si el archivo trae alguno: un tipo propio sin nombre saldría como su clave.
+  const ramosPropios = cases.some((c) => c.claim_type && !esRamoNativo(c.claim_type))
+    ? await cargarRamosDelInquilino(userRow.tenant_id)
+    : [];
 
   const rows = cases.map((c) => [
     c.id,                                               // Nro. Siniestro (UUID)
     c.policyholder_name ?? "",                           // Asegurado
     c.policy_number ?? "",                               // Póliza
-    c.claim_type ? (TIPOS[c.claim_type as ClaimType] ?? c.claim_type) : "",  // Tipo
+    c.claim_type ? nombreDeTipo(c.claim_type, t, ramosPropios, locale) : "",  // Tipo
     ESTADOS[c.status as CaseStatus] ?? c.status,        // Situación
     // Drizzle numeric → string; convert to number at the boundary.
     formatConfidence(c.confidence_min === null ? null : Number(c.confidence_min)), // Confianza

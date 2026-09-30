@@ -449,6 +449,35 @@ describe("composeReply — what it refuses to send", () => {
     }
   });
 
+  it("refuses to name who is at fault or cite the traffic law (B18)", async () => {
+    for (const draft of [
+      "El culpable es el tercero, así que quedate tranquilo.",
+      "Según la Ley 24.449 el otro conductor responde.",
+      "Por el artículo 48 la culpa no es tuya.",
+    ]) {
+      replies(draft + " Necesito tu número de póliza.");
+      const out = await composeReply(base({ fields: ["policy_number"] }));
+      expect(out, draft).toBe(FALLBACK);
+    }
+  });
+
+  it("al reintentar tras nombrar la culpa, el redactor recibe ese motivo y no el de las promesas (B18)", async () => {
+    replies("El culpable es el tercero, quedate tranquilo. Necesito tu número de póliza.");
+
+    expect(await composeReply(base({ fields: ["policy_number"] }))).toBe(FALLBACK);
+
+    const reintento = mockCall.mock.calls[1][0] as string;
+    expect(reintento).toContain("nombraste quién tuvo la culpa o citaste una ley");
+    expect(reintento).not.toContain("prometiste algo sobre cobertura");
+  });
+
+  it("una patente vieja o un DNI que se parecen a la ley no lo frenan (B18)", async () => {
+    const draft = "Anotamos la patente ART 123 del titular. Necesito tu número de póliza.";
+    replies(draft);
+
+    expect(await composeReply(base({ fields: ["policy_number"] }))).toBe(draft);
+  });
+
   it("refuses a message too long to read on a phone", async () => {
     replies("Necesito tu número de póliza. " + "Detalle innecesario. ".repeat(60));
 
@@ -636,6 +665,17 @@ describe("composeReply — the brief it hands the model", () => {
     replies(`Recibimos tu denuncia, ya quedó registrada. ${AVISO_DE_TRASPASO}`);
     await composeReply(base({ intent: "closing" }));
     expect(mockCall.mock.calls[0][0] as string).toContain("primer mensaje");
+  });
+
+  it("si el caso entró por el formulario web, el primer mensaje agradece el formulario y no un mail", async () => {
+    replies(`Recibimos tu denuncia, ya quedó registrada. ${AVISO_DE_TRASPASO}`);
+    await composeReply(base({ intent: "closing", origenWeb: true }));
+    expect(mockCall.mock.calls[0][0] as string).toContain("completó el formulario de denuncia");
+
+    vi.clearAllMocks();
+    replies(`Ya tenemos todo lo necesario. ${AVISO_DE_TRASPASO}`);
+    await composeReply(base({ intent: "closing", origenWeb: true, isFollowUp: true }));
+    expect(mockCall.mock.calls[0][0] as string).not.toContain("completó el formulario de denuncia");
   });
 });
 
@@ -865,6 +905,66 @@ describe("composeReply — lo que acaba de escribir no vuelve como «¿…, corr
     expect(mockCall.mock.calls[0][0] as string).toContain(
       "ni le preguntes si es correcto algo que escribió ahí"
     );
+  });
+});
+
+/*
+ * Ensayo `silencio`, 30/09: a «choqué contra un poste en Alem al 500» se le
+ * contestó «Entendemos que fue en CABA.» y, en la misma respuesta, se le pidió
+ * la provincia. La calle no dice la provincia: el redactor la inventó, y el
+ * extractor —que tiene la regla— no había escrito ninguna (`knownValues` vacío).
+ */
+describe("composeReply — no afirma la provincia que está pidiendo", () => {
+  const ALEM = "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz.";
+  const PIDE = "¿Nos decís en qué provincia ocurrió?";
+  const pideProvincia = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({ fields: ["provincia_siniestro"], lastMessage: ALEM, claimantName: "Ana Ruiz", ...over });
+
+  it.each(["Entendemos que fue en CABA.", "Fue en la Ciudad de Buenos Aires, ¿no?", "Entendemos que fue en Córdoba."])(
+    "rechaza «%s» y el reintento dice por qué",
+    async (afirma) => {
+      replies(`Recibimos tu denuncia del choque. ${afirma} ${PIDE}`);
+
+      expect(await composeReply(pideProvincia())).toBe(FALLBACK);
+      expect(mockCall.mock.calls[1][0] as string).toContain("una calle no la dice");
+    }
+  );
+
+  it("un pedido que no supone ninguna pasa", async () => {
+    replies(`Recibimos tu denuncia del choque contra el poste en Alem al 500. ${PIDE}`);
+
+    expect(await composeReply(pideProvincia())).not.toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    // La dijo la persona o la tenemos: no es inventarla.
+    ["lo dijo en el mensaje", { lastMessage: "Choqué en Córdoba, en Alem al 500." }, "Entendemos que fue en Córdoba. " + PIDE],
+    ["la tenemos como valor", { knownValues: { provincia_siniestro: "Santa Fe" } }, "¿Fue en Santa Fe? Si no, decinos en qué provincia ocurrió."],
+    // El apellido en el saludo no es una provincia.
+    ["es el apellido", { claimantName: "Ana Mendoza" }, `¡Hola, Ana Mendoza! ${PIDE}`],
+  ] as Array<[string, Partial<Parameters<typeof composeReply>[0]>, string]>)(
+    "deja pasar la provincia que %s",
+    async (_caso, over, mensaje) => {
+      replies(mensaje);
+
+      expect(await composeReply(pideProvincia(over))).not.toBe(FALLBACK);
+      expect(mockCall).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("si no pide la provincia, no la mira", async () => {
+    replies("Ya vimos que fue en CABA. Para seguir necesitamos las fotos de los daños.");
+
+    expect(await composeReply(pideProvincia({ fields: ["fotos_danos"] }))).not.toBe(FALLBACK);
+  });
+
+  it("el brief lo prohíbe", async () => {
+    replies(`Recibimos tu denuncia del choque. ${PIDE}`);
+
+    await composeReply(pideProvincia());
+
+    expect(mockCall.mock.calls[0][0] as string).toContain("Una calle no dice la provincia");
   });
 });
 

@@ -29,6 +29,8 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { getCaseDetail } from "@/server/cases/get";
 import { db } from "@/lib/db";
 
@@ -280,6 +282,43 @@ describe("getCaseDetail — el historial no lleva de más", () => {
 
     const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
     expect(res!.audit_log[1].reason).toBeNull();
+  });
+});
+
+describe("getCaseDetail — el historial no se llena con los cambios del agente", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** El `where` de la consulta del historial (la cuarta), ya renderizado con el dialecto de verdad. */
+  async function dondeDelHistorial() {
+    setupSelectMock({ caseRows: [mockCase], extractedRows: [], missingRows: [], auditRows: mockAuditEntries });
+    const original = vi.mocked(db.select).getMockImplementation()!;
+    const cadenas: any[] = [];
+    vi.mocked(db.select).mockImplementation((...args: unknown[]) => {
+      const c = (original as (...a: unknown[]) => unknown)(...args);
+      cadenas.push(c);
+      return c as never;
+    });
+
+    await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    const donde = cadenas[3].where.mock.calls[0][0] as SQL;
+    return new PgDialect().sqlToQuery(donde);
+  }
+
+  it("deja afuera el cambio de estado que escribió el agente, y sólo ese", async () => {
+    const { sql, params } = await dondeDelHistorial();
+
+    expect(sql).toContain(`"audit_log"."event_type" <> $`);
+    expect(params).toContain("case.status_changed");
+    expect(sql).toContain(`"audit_log"."payload"->>'trigger' is distinct from 'agent'`);
+  });
+
+  it("un cambio de estado hecho por una persona (sin trigger) sigue entrando: no se compara con <>", async () => {
+    const { sql } = await dondeDelHistorial();
+
+    expect(sql).not.toMatch(/->>'trigger' <> /);
   });
 });
 

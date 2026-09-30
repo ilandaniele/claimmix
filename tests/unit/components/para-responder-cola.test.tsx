@@ -23,7 +23,7 @@ vi.mock("next/navigation", () => ({
 const UNO = "00000000-0000-0000-0000-000000000001";
 const DOS = "00000000-0000-0000-0000-000000000002";
 
-function caso(id: string): CaseRow {
+function caso(id: string, extra: Record<string, unknown> = {}): CaseRow {
   return {
     id,
     tenant_id: "tenant-1",
@@ -38,6 +38,7 @@ function caso(id: string): CaseRow {
     updated_at: null,
     closed_at: null,
     para_responder_desde: "2026-09-07T00:00:00.000Z",
+    ...extra,
   } as unknown as CaseRow;
 }
 
@@ -113,5 +114,22 @@ describe("«Para responder» y el sondeo", () => {
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(nav.refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("«Para responder»: qué pide cada mensaje", () => {
+  it("la cola muestra la clase al lado de la marca, y el resumen al pasar por encima", async () => {
+    const conClase = caso(UNO, { mensaje_tardio_tipo: "consulta_estado", mensaje_tardio_resumen: "Pregunta por el pago" });
+    montar("para_responder=true", [conClase], [[conClase]]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(screen.getByText("Pregunta cómo va")).toHaveAttribute("title", "Pregunta por el pago");
+  });
+
+  it("sin clase no pone un chip vacío", async () => {
+    montar("para_responder=true", [caso(UNO)], [[caso(UNO)]]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(screen.queryByText("Sin clasificar")).toBeNull();
   });
 });

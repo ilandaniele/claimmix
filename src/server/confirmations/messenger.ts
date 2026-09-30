@@ -14,7 +14,8 @@
  * what differ.
  *
  * Nothing here throws. A claim that was extracted and stored must not be lost
- * because we could not tell the claimant about it.
+ * because we could not tell the claimant about it. `send` says instead whether
+ * the message went out (or was recorded without sending, for a test contact).
  */
 
 import "server-only";
@@ -23,7 +24,7 @@ import { eq } from "drizzle-orm";
 import { outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { labelForField, labelForClaimType } from "@/lib/labels/claim-fields";
-import { dispatchOutboundEmail } from "@/server/email/dispatch";
+import { dispatchOutboundEmail, seEntrego } from "@/server/email/dispatch";
 import {
   enmascararCampo,
   renderTemplate,
@@ -42,6 +43,8 @@ import {
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
+import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
+import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { CUIDADO } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
@@ -62,7 +65,7 @@ export interface AgentMessage {
 }
 
 export interface AgentMessenger {
-  send(message: AgentMessage): Promise<void>;
+  send(message: AgentMessage): Promise<boolean>;
 }
 
 /**
@@ -92,10 +95,11 @@ export interface AgentMessenger {
 export const emailMessenger: AgentMessenger = {
   async send(message) {
     let cuerpo: string | null = null;
+    let piso: string | null = null;
     try {
-      const piso = renderTemplate(message.template, message.data);
-      const prosa = await writeReply(message, piso.cuerpo, "email");
-      if (prosa !== piso.cuerpo) cuerpo = prosa;
+      piso = renderTemplate(message.template, message.data).cuerpo;
+      const prosa = await writeReply(message, piso, "email");
+      if (prosa !== piso) cuerpo = prosa;
     } catch (err) {
       // Este módulo promete que nada acá tira: una denuncia ya extraída y
       // guardada no se puede perder porque el redactor falló.
@@ -106,9 +110,39 @@ export const emailMessenger: AgentMessenger = {
       }, "email.messenger.compose_failed");
     }
 
-    await dispatchOutboundEmail(
-      cuerpo === null ? message : { ...message, data: { ...message.data, cuerpo } }
+    // El primer mail a una dirección que escribió alguien en un formulario: la frase va siempre.
+    if (piso !== null && message.data.origenWeb === true && message.data.isFollowUp !== true) {
+      cuerpo = [cuerpo ?? piso, SI_NO_FUISTE_VOS].join("\n\n");
+    }
+
+    return seEntrego(
+      await dispatchOutboundEmail(
+        cuerpo === null ? message : { ...message, data: { ...message.data, cuerpo } }
+      )
     );
+  },
+};
+
+/**
+ * El formulario web: mismo mail, y el redactor sabe que la persona no escribió uno.
+ *
+ * No hay un segundo camino de envío. La dirección sale de lo que la persona
+ * cargó y la respuesta viaja por la casilla de la aseguradora, igual que la de
+ * un correo. Lo único distinto es cómo le habla el primer mensaje.
+ *
+ * «Primero» es lo que hay en `outbound_messages`, no lo que el orquestador
+ * haya marcado: sólo los pedidos de datos traen `isFollowUp`, así que el
+ * pedido de confirmación o la derivación de un caso que ya venía hablando
+ * repetían la frase y el agradecimiento.
+ */
+export const webMessenger: AgentMessenger = {
+  async send(message) {
+    const isFollowUp =
+      message.data.isFollowUp ?? (await hasPriorOutbound(message.caseId, message.tenantId));
+    return emailMessenger.send({
+      ...message,
+      data: { ...message.data, origenWeb: true, isFollowUp },
+    });
   },
 };
 
@@ -503,6 +537,7 @@ async function writeReply(
       typeof message.data.claimType === "string" ? message.data.claimType : null
     ),
     isFollowUp: message.data.isFollowUp === true,
+    origenWeb: message.data.origenWeb === true,
     claimantName:
       typeof message.data.claimantName === "string" ? message.data.claimantName : null,
     question: typeof message.data.question === "string" ? message.data.question : null,
@@ -576,8 +611,7 @@ export const whatsappMessenger: AgentMessenger = {
       // cuenta de WhatsApp Business. La prueba que sirve para no romper
       // producción no puede ser la que nos bloquee el canal.
       if (isReservedTestNumber(message.to)) {
-        await simulatedWhatsappMessenger.send(message);
-        return;
+        return await simulatedWhatsappMessenger.send(message);
       }
 
       // Fuera de la ventana de 24 h con la plantilla aprobada: el piso, el
@@ -595,7 +629,7 @@ export const whatsappMessenger: AgentMessenger = {
         );
         if (!res.ok) olvidarEstadoDePlantilla();
         await anotarEnvio(message, outboundId, finalBody, res);
-        return;
+        return res.ok;
       }
 
       const body = renderForWhatsApp(message);
@@ -604,7 +638,7 @@ export const whatsappMessenger: AgentMessenger = {
         case_id: message.caseId,
         template: message.template,
       }, "whatsapp.messenger.no_renderer");
-        return;
+        return false;
       }
 
       const finalBody = conPie(message, await writeReply(message, body, "whatsapp"));
@@ -619,12 +653,14 @@ export const whatsappMessenger: AgentMessenger = {
       const outboundId = await reservarSalida(message, finalBody);
       const res = await sendWhatsAppText(message.to, finalBody);
       await anotarEnvio(message, outboundId, finalBody, res);
+      return res.ok;
     } catch (err) {
       // Intake already succeeded; a messaging failure must not undo it.
       logger.error({
         case_id: message.caseId,
         error: err instanceof Error ? err.name : "UnknownError",
       }, "whatsapp.messenger.error");
+      return false;
     }
   },
 };
@@ -738,11 +774,11 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
           case_id: message.caseId,
           template: message.template,
         }, "whatsapp.messenger.skipped_simulated");
-      return;
+      return true;
     }
 
     const body = renderForWhatsApp(message);
-    if (!body) return;
+    if (!body) return false;
     // Compose, then do not send. A rehearsal that skipped the writer would be
     // rehearsing a different script: the template is the floor, and what a
     // claimant actually reads is whatever the model made of it.
@@ -752,6 +788,7 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
         case_id: message.caseId,
         template: message.template,
       }, "whatsapp.messenger.skipped_simulated");
+    return true;
   },
 };
 
@@ -759,5 +796,6 @@ export const simulatedWhatsappMessenger: AgentMessenger = {
 export function messengerFor(channel: string): AgentMessenger {
   if (channel === "whatsapp_sim") return simulatedWhatsappMessenger;
   if (channel === "whatsapp") return whatsappMessenger;
+  if (channel === "web") return webMessenger;
   return emailMessenger;
 }

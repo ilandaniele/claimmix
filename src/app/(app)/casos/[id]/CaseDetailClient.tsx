@@ -22,8 +22,9 @@ import { CloseConfirmDialog } from "./components/CloseConfirmDialog";
 import { EscalateDialog } from "./components/EscalateDialog";
 import { TomarElControlDialog } from "./components/TomarElControlDialog";
 import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
+import { ClaseDelTardio } from "@/app/(app)/bandeja/components/ClaseDelTardio";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
@@ -32,6 +33,8 @@ interface CaseDetailClientProps {
   status: CaseStatus;
   caseNumber: string;
   paraResponder: boolean;
+  /** Qué pide el mensaje tardío (B3). Sólo con la marca y ya reservado. */
+  mensajeTardio?: { tipo: string | null; resumen: string | null } | null;
   /** Cuándo el servidor leyó el caso: lo que entró después, nadie lo vio. */
   vistoEn: string;
   /** Sin esto un viewer vería un botón que le contesta 403. */
@@ -44,13 +47,14 @@ interface CaseDetailClientProps {
   puedeDevolverAlAgente: boolean;
 }
 
-type Aviso = [TranslationKey, "success" | "info"];
+type Aviso = [ClaveDelCliente, "success" | "info"];
 
 export function CaseDetailClient({
   caseId,
   status,
   caseNumber,
   paraResponder,
+  mensajeTardio,
   vistoEn,
   puedeMarcar,
   acciones,
@@ -80,7 +84,7 @@ export function CaseDetailClient({
     url: string,
     init: RequestInit,
     aviso: (res: Response) => Aviso | Promise<Aviso>,
-    errores: Partial<Record<number, TranslationKey>> = {}
+    errores: Partial<Record<number, ClaveDelCliente>> = {}
   ) {
     setOcupado(true);
     try {
@@ -218,6 +222,15 @@ export function CaseDetailClient({
             className="flex max-w-md flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 sm:items-end sm:text-right"
           >
             <p>{t("case.paraResponder.banner")}</p>
+            {mensajeTardio && (
+              <div data-testid="mensaje-tardio" className="flex flex-col gap-1 sm:items-end">
+                <p className="inline-flex items-center gap-1.5">
+                  <span className="font-medium">{t("tardio.titulo")}:</span>
+                  <ClaseDelTardio tipo={mensajeTardio.tipo} />
+                </p>
+                {mensajeTardio.resumen && <p>{mensajeTardio.resumen}</p>}
+              </div>
+            )}
             {puedeMarcar && (
               <button
                 type="button"

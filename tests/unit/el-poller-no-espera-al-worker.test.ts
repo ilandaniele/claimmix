@@ -37,10 +37,10 @@ import { describe, expect, it } from "vitest";
  * checkout de CI. Una afirmación sobre el texto no puede depender de eso: la
  * primera versión de esta prueba pasaba acá y fallaba en CI por ese motivo.
  */
-const FUENTE = readFileSync("src/server/email/gmail/gmail-poller.ts", "utf8").replace(
-  /\r\n/g,
-  "\n"
-);
+const leer = (ruta: string) => readFileSync(ruta, "utf8").replace(/\r\n/g, "\n");
+const POLLER = leer("src/server/email/gmail/gmail-poller.ts");
+// El disparo vive aparte desde que el formulario web lo comparte con el poller.
+const FUENTE = leer("src/server/worker/despachar-extraccion.ts");
 
 describe("el poller no espera al worker", () => {
   it("dispara con after() en vez de esperar la respuesta", () => {
@@ -75,7 +75,8 @@ describe("el poller no espera al worker", () => {
   it("el encabezado del archivo ya prometía esto", () => {
     // Si alguien saca la promesa del encabezado, esta prueba deja de tener
     // sentido y hay que revisarla en vez de borrarla.
-    expect(FUENTE).toContain("Fire extraction worker (fire-and-forget)");
+    expect(POLLER).toContain("Fire extraction worker (fire-and-forget)");
+    expect(POLLER).toContain("dispatchExtractionWorker(caseId, tenantId)");
   });
 });
 

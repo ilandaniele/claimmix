@@ -19,7 +19,9 @@ import { AppError } from "@/lib/errors";
 import type { RoleContext } from "@/lib/auth/require-role";
 import { checkBudget, registrarConsumoDelModelo } from "@/server/ai/budget";
 import { callGemini } from "@/server/ai/gemini-extractor";
-import { RE_CENTINELA, sinCentinelas } from "@/core/ai/sin-centinelas";
+import { sinCentinelas } from "@/core/ai/sin-centinelas";
+import type { MotivoSinLeer } from "@/core/ai/sin-leer";
+import { resumenValido } from "@/core/ai/resumen-seguro";
 import { IntencionSchema, textoDelConteo, type Intencion } from "@/core/asistente/intencion";
 import { promptIntencion, PROMPT_RESUMEN } from "@/server/asistente/prompts";
 import {
@@ -37,9 +39,11 @@ import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 export interface RespuestaDelAsistente {
   /** Texto plano, sin HTML ni markdown. <= 1500 caracteres. */
   texto: string;
-  herramienta: "contar_casos" | "buscar_caso" | "ninguna";
+  herramienta: "contar_casos" | "buscar_caso" | "pregunta_caso" | "ninguna";
   /** <= 5. */
   casos: CasoEncontrado[];
+  /** Sólo en `pregunta_caso`: por qué no hay respuesta. `texto` trae la frase que corresponde. */
+  sinLeer?: MotivoSinLeer;
 }
 
 const TEXTO_AYUDA =
@@ -94,58 +98,6 @@ function recortarAPalabra(texto: string, tope: number): string {
   return ultimoEspacio > 0 ? cortado.slice(0, ultimoEspacio) : "";
 }
 
-/** Corridas de 6 o más dígitos: DNI, teléfono, un monto. */
-function digitosLargos(texto: string): string[] {
-  return texto.match(/\d{6,}/g) ?? [];
-}
-
-/**
- * Deshace el punto o el espacio de miles ("5.000.000", "5 000 000") para que
- * un número agrupado no se cuele partido en corridas cortas y esquive
- * `digitosLargos`. No toca nada que no tenga esa forma de a-tres-en-tres.
- */
-function normalizarNumeros(t: string): string {
-  return t.replace(/\d{1,3}(?:[.\s]\d{3})+/g, (m) => m.replace(/[.\s]/g, ""));
-}
-
-/** Los números largos (normalizados) de la póliza y de los campos extraídos: lo único que un resumen puede repetir. */
-function digitosConocidos(d: DetalleDelCaso): Set<string> {
-  return new Set([
-    ...(d.poliza ? digitosLargos(normalizarNumeros(d.poliza)) : []),
-    ...d.campos.flatMap((c) => digitosLargos(normalizarNumeros(c.valor))),
-  ]);
-}
-
-/**
- * Ningún número largo del resumen del modelo puede ser nuevo: tiene que
- * aparecer ya en algún campo estructurado (póliza o extraído). Es la defensa
- * contra el denunciante que escribe "ya me depositaron $50000000" en un
- * mensaje: ese monto vive en el texto libre, nunca en un campo, así que si el
- * modelo lo repite como dato del caso, el resumen entero se descarta. Los dos
- * lados se normalizan antes de comparar, para que "5.000.000" valga lo mismo
- * que "5000000".
- */
-function tieneNumeroInventado(resumen: string, d: DetalleDelCaso): boolean {
-  const conocidos = digitosConocidos(d);
-  return digitosLargos(normalizarNumeros(resumen)).some((n) => !conocidos.has(n));
-}
-
-/**
- * Un monto con signo de moneda ($, ARS, USD, u$s) que el resumen afirma sin
- * que esos mismos dígitos estén en la póliza o en un campo extraído. Es una
- * segunda guarda, aparte de `tieneNumeroInventado`: acá alcanza con un monto
- * corto (por ejemplo "$500") para descartar el resumen, porque un monto nunca
- * es un dato del caso — es una afirmación que el prompt le prohíbe hacer.
- */
-function tieneMontoInventado(resumen: string, d: DetalleDelCaso): boolean {
-  const conocidos = digitosConocidos(d);
-  const montos = normalizarNumeros(resumen).match(/(?:\$|u\$s|\b(?:ars|usd)\b)\s?\d[\d.\s]*/gi) ?? [];
-  return montos.some((m) => {
-    const digitos = m.replace(/\D/g, "");
-    return digitos.length > 0 && !conocidos.has(digitos);
-  });
-}
-
 /**
  * Clasifica la intención con Gemini.
  *
@@ -190,14 +142,9 @@ async function resumenDelCaso(tenantId: string, userId: string, detalle: Detalle
     if (text) {
       const parsed = JSON.parse(text) as { resumen?: unknown };
       const resumen = typeof parsed.resumen === "string" ? parsed.resumen.trim() : "";
-      const valido =
-        resumen.length > 0 &&
-        resumen.length <= 1200 &&
-        !RE_CENTINELA.test(resumen) &&
-        !/https?:\/\//i.test(resumen) &&
-        !tieneNumeroInventado(resumen, detalle) &&
-        !tieneMontoInventado(resumen, detalle);
-      if (valido) {
+      // Lo único que el resumen puede repetir son los números de la póliza y
+      // de los campos extraídos (G12).
+      if (resumenValido(resumen, [detalle.poliza, ...detalle.campos.map((c) => c.valor)])) {
         // El prefijo nunca se recorta acá: es lo único que no puede mentir
         // (ver comentario de `resumenDeterministico`). Lo que cede es el
         // resumen del modelo, y en un borde de palabra — nunca a la mitad.

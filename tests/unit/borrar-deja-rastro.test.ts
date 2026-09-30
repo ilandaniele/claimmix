@@ -13,14 +13,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockEnTenant, mockAudit } = vi.hoisted(() => ({
-  mockEnTenant: vi.fn(),
+const { mockLote, mockAudit } = vi.hoisted(() => ({
+  mockLote: vi.fn(),
   mockAudit: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/data/scope", () => ({ enTenant: mockEnTenant }));
-vi.mock("@/lib/db/schema", () => ({ cases: {} }));
+vi.mock("@/data/scope", () => ({ enTenantVarias: mockLote }));
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockAudit,
   AuditEvent: { CASE_DELETED: "case.deleted" },
@@ -30,6 +29,9 @@ import { deleteCases } from "@/server/cases/delete";
 
 const ADMIN = { id: "user-9", role: "admin" as const };
 
+/** Lo que devuelve el lote: el resultado del encolado y, después, el del DELETE ... RETURNING. */
+const loteQueBorra = (...ids: string[]) => mockLote.mockResolvedValue([[], ids.map((id) => ({ id }))]);
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockAudit.mockResolvedValue(undefined);
@@ -38,7 +40,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("deleteCases", () => {
   it("anota una fila por caso, con quién lo borró", async () => {
-    mockEnTenant.mockResolvedValue([{ id: "caso-1" }, { id: "caso-2" }]);
+    loteQueBorra("caso-1", "caso-2");
 
     const borrados = await deleteCases({ tenantId: "t-1" }, ["caso-1", "caso-2"], ADMIN);
 
@@ -58,7 +60,7 @@ describe("deleteCases", () => {
   it("una por caso y no una por tanda", async () => {
     // El que después busca «qué pasó con este siniestro» busca por id, y un
     // evento con cien ids adentro no aparece.
-    mockEnTenant.mockResolvedValue([{ id: "a" }, { id: "b" }, { id: "c" }]);
+    loteQueBorra("a", "b", "c");
 
     await deleteCases({ tenantId: "t-1" }, ["a", "b", "c"], ADMIN);
 
@@ -68,7 +70,7 @@ describe("deleteCases", () => {
   it("anota lo que se borró de verdad, no lo que se pidió", async () => {
     // El control: si la fila ya no estaba, el DELETE no la devuelve y no hay
     // nada que auditar. Auditar la petición sería inventar un borrado.
-    mockEnTenant.mockResolvedValue([{ id: "caso-1" }]);
+    loteQueBorra("caso-1");
 
     await deleteCases({ tenantId: "t-1" }, ["caso-1", "caso-que-no-existe"], ADMIN);
 
@@ -80,6 +82,32 @@ describe("deleteCases", () => {
     const borrados = await deleteCases({ tenantId: "t-1" }, [], ADMIN);
     expect(borrados).toEqual([]);
     expect(mockAudit).not.toHaveBeenCalled();
-    expect(mockEnTenant).not.toHaveBeenCalled();
+    expect(mockLote).not.toHaveBeenCalled();
+  });
+
+  it("lleva la cantidad de la tanda en el payload, y nada que identifique a otro caso", async () => {
+    loteQueBorra("a", "b");
+
+    await deleteCases({ tenantId: "t-1" }, ["a", "b"], ADMIN);
+
+    expect(mockAudit.mock.calls[0]![0].payload).toEqual({ borrados_en_la_tanda: 2 });
+  });
+
+  it("la retención lo anota sin actor y lo dice en el payload", async () => {
+    loteQueBorra("vencido-1");
+
+    await deleteCases({ tenantId: "t-1" }, ["vencido-1"], { id: null, role: "retencion" }, { antesDe: new Date("2021-09-30") });
+
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ tenant_id: "t-1", actor_id: null, target_id: "vencido-1" })
+    );
+    expect(mockAudit.mock.calls[0]![0].payload).toEqual({ borrados_en_la_tanda: 1, por_retencion: true });
+  });
+
+  it("si el lote falla no se anota nada: no hay borrado que registrar", async () => {
+    mockLote.mockRejectedValue(new Error("falló el lote"));
+
+    await expect(deleteCases({ tenantId: "t-1" }, ["caso-1"], ADMIN)).rejects.toThrow("falló el lote");
+    expect(mockAudit).not.toHaveBeenCalled();
   });
 });

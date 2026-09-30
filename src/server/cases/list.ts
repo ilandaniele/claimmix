@@ -21,12 +21,16 @@ import {
   isNotNull,
   isNull,
   lt,
+  lte,
+  notInArray,
   or,
   sql,
   type SQL,
 } from "drizzle-orm";
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
-import { ESTADOS_ESCALADO, ESTADOS_ESPERANDO_AL_DENUNCIANTE } from "@/core/case/fsm";
+import { ESTADOS_CERRADOS, ESTADOS_ESCALADO, ESTADOS_ESPERANDO_AL_DENUNCIANTE } from "@/core/case/fsm";
+import { limitesDelFiltro } from "@/core/case/plazos";
+import { RANGOS } from "@/core/case/puntaje-complejidad";
 import { medianocheHaceDias } from "@/core/fecha/dia-argentino";
 import { escapeLike, ilikeAny } from "@/lib/db/helpers";
 import {
@@ -63,12 +67,31 @@ export interface CaseListResult {
   };
 }
 
+/**
+ * El plazo sólo corre mientras el caso está abierto. El UPDATE de estado limpia
+ * `vence_en` al cerrar, pero el barrido de abandono y el respaldo que corre sin
+ * la 0042 no lo tocan, y un caso cerrado con plazo puesto aparecería vencido en
+ * la bandeja, el filtro y el orden. Leerlo así evita depender de quién cerró.
+ */
+const vencimientoVigente = sql<string | null>`case when ${cases.status} not in ${[...ESTADOS_CERRADOS]} then ${cases.vence_en} end`;
+
 /** Whitelisted sort columns (SortColumnSchema prevents arbitrary input). */
 const SORT_COLUMNS = {
   created_at: cases.created_at,
   confidence_min: cases.confidence_min,
   status: cases.status,
+  puntaje_complejidad: cases.puntaje_complejidad,
+  vence_en: vencimientoVigente,
 } as const satisfies Record<SortColumn, unknown>;
+
+/**
+ * Las dos columnas que están vacías en la mayoría de los casos —los anteriores
+ * a la 0042 y los que ya no corren plazo— y por eso van al final en cualquier
+ * dirección: un ascendente por vencimiento que abriera con mil casos sin plazo
+ * taparía el que vence mañana. Las demás columnas se ordenan como siempre, para
+ * no cambiar los planes que ya usan sus índices.
+ */
+const ORDEN_CON_NULOS_AL_FINAL: ReadonlySet<SortColumn> = new Set(["puntaje_complejidad", "vence_en"]);
 
 /**
  * El WHERE de un listado de casos, a partir de los filtros de la consulta.
@@ -88,7 +111,9 @@ const SORT_COLUMNS = {
  */
 export function buildCaseFilters(
   query: Omit<CaseQuery, "page" | "per_page" | "sort" | "order">,
-  yo?: string
+  yo?: string,
+  // Parámetro para que el conteo y el listado midan contra el mismo instante.
+  ahora: Date = new Date()
 ): SQL | undefined {
   const {
     status,
@@ -100,6 +125,8 @@ export function buildCaseFilters(
     customer_id,
     policy_id,
     channel,
+    vencimiento,
+    complejidad,
     is_claim,
     para_responder,
     cola,
@@ -167,6 +194,36 @@ export function buildCaseFilters(
   if (customer_id) conditions.push(eq(cases.customer_id, customer_id));
   if (policy_id) conditions.push(eq(cases.policy_id, policy_id));
   if (channel?.length) conditions.push(inArray(cases.channel, channel));
+  /*
+   * B10: cada opción es un rango de `vence_en` y varias son la unión. Un caso sin
+   * plazo (`vence_en` nulo) no cae en ningún rango: la comparación con NULL no
+   * es verdadera, así que no hace falta preguntar por él. Un caso cerrado no
+   * cuenta aunque conserve el plazo (ver `vencimientoVigente`).
+   */
+  if (vencimiento?.length)
+    conditions.push(
+      and(
+        notInArray(cases.status, [...ESTADOS_CERRADOS]),
+        or(
+          ...vencimiento.map((filtro) => {
+            const { desde, hasta } = limitesDelFiltro(filtro, ahora);
+            return and(desde ? gte(cases.vence_en, desde) : undefined, lt(cases.vence_en, hasta));
+          })
+        )
+      )
+    );
+  // B13: las bandas son rangos cerrados del puntaje; `RANGOS` es la única fuente.
+  if (complejidad?.length)
+    conditions.push(
+      or(
+        ...complejidad.map((banda) =>
+          and(
+            gte(cases.puntaje_complejidad, RANGOS[banda].desde),
+            lte(cases.puntaje_complejidad, RANGOS[banda].hasta)
+          )
+        )
+      )
+    );
   if (is_claim !== undefined) conditions.push(eq(cases.is_claim, is_claim));
   if (para_responder) conditions.push(isNotNull(cases.para_responder_desde));
   /*
@@ -222,20 +279,21 @@ export function desdeDePeriodo(periodo: Periodo | undefined, cuando: Date = new 
  * Un armador compartido es la única forma de que el plan que se explica sea el
  * plan que corre.
  */
-export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: string) {
+export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: string, ahora: Date = new Date()) {
   const { page, per_page, sort, order } = query;
   const sortColumn = SORT_COLUMNS[sort];
   // En «Para responder» va primero el que espera hace más tiempo. El índice
   // parcial de la 0031 sirve este orden recorrido al revés. En «Mi cola» el
   // más viejo también va primero: es el que lleva más tiempo sin que nadie lo
   // mire.
-  const orden = query.para_responder
-    ? asc(cases.para_responder_desde)
+  const orden: SQL[] = query.para_responder
+    ? [asc(cases.para_responder_desde)]
     : query.cola === "mia"
-      ? asc(cases.updated_at)
-      : order === "asc"
-        ? asc(sortColumn)
-        : desc(sortColumn);
+      ? [asc(cases.updated_at)]
+      : ORDEN_CON_NULOS_AL_FINAL.has(sort)
+        ? // Muchos casos comparten puntaje o plazo: sin desempate, dos páginas seguidas pueden repetir o saltear filas.
+          [sql`${sortColumn} ${order === "asc" ? sql`asc` : sql`desc`} nulls last`, asc(cases.id)]
+        : [order === "asc" ? asc(sortColumn) : desc(sortColumn)];
   return datos
     .select({
       id: cases.id,
@@ -278,6 +336,12 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
       is_claim: cases.is_claim,
       requires_specialist: cases.requires_specialist,
       para_responder_desde: cases.para_responder_desde,
+      // Sólo para el equipo (B10, B13): la pantalla los pinta, nada de esto sale al asegurado.
+      vence_en: vencimientoVigente,
+      puntaje_complejidad: cases.puntaje_complejidad,
+      // Qué pide el último mensaje (B3): sólo mientras el caso espera respuesta.
+      mensaje_tardio_tipo: sql<string | null>`case when ${cases.para_responder_desde} is not null then ${cases.mensaje_tardio_tipo} end`,
+      mensaje_tardio_resumen: sql<string | null>`case when ${cases.para_responder_desde} is not null then ${cases.mensaje_tardio_resumen} end`,
       assigned_name: sql<string | null>`(select u.full_name from users u where u.id = ${cases.assigned_to})`,
       /*
        * Seis columnas que este listado devolvía y nadie leía.
@@ -310,19 +374,19 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
         )`,
     })
     .from(cases)
-    .where(buildCaseFilters(query, yo))
-    .orderBy(orden)
+    .where(buildCaseFilters(query, yo, ahora))
+    .orderBy(...orden)
     // Pagination — max 100 per page (enforced in CaseQuerySchema)
     .limit(per_page)
     .offset((page - 1) * per_page);
 }
 
 /** El `count(*)` que viaja con el listado. Sin LIMIT: es el que crece. */
-export function consultaConteo(datos: ClienteDatos, query: CaseQuery, yo?: string) {
+export function consultaConteo(datos: ClienteDatos, query: CaseQuery, yo?: string, ahora: Date = new Date()) {
   return datos
     .select({ n: sql<number>`count(*)::int` })
     .from(cases)
-    .where(buildCaseFilters(query, yo));
+    .where(buildCaseFilters(query, yo, ahora));
 }
 
 /**
@@ -382,6 +446,9 @@ export async function listCases(
   yo?: string
 ): Promise<CaseListResult> {
   const { page, per_page } = query;
+  // El mismo instante para el conteo y el listado: si no, un caso que cruza el
+  // vencimiento entre las dos consultas se cuenta y no se lista (o al revés).
+  const ahora = new Date();
 
   // ── Conteo y datos, en un solo viaje ───────────────────────────────────────
   let total: number;
@@ -389,7 +456,7 @@ export async function listCases(
   try {
     const [conteo, filas] = await enTenantVarias<
       [Array<{ n: number }>, Record<string, unknown>[]]
-    >(ctx, (db) => [consultaConteo(db, query, yo), consultaListado(db, query, yo)]);
+    >(ctx, (db) => [consultaConteo(db, query, yo, ahora), consultaListado(db, query, yo, ahora)]);
     total = conteo[0]?.n ?? 0;
     data = filas;
   } catch (err) {

@@ -24,6 +24,17 @@ export interface FilaDeCaso {
   email_thread_id: string | null;
   policyholder_name: string | null;
   policy_number: string | null;
+  /** La tabla de montos del tenant, que el worker lee en el mismo SELECT del caso. */
+  rangos_de_monto?: unknown;
+  /** Lo que el equipo configuró (B9, B10, B11, B13): también sale en el SELECT del caso. */
+  reglas_asignacion?: unknown;
+  plazos_propios?: unknown;
+  plan_por_tipo?: unknown;
+  pesos_puntaje?: unknown;
+  created_at?: string;
+  /** Lo que la base ya tiene del caso: un presupuesto leído se guarda con `origen: "presupuesto"`. */
+  monto_estimado?: unknown;
+  severity?: string | null;
 }
 
 export function filaDeCaso(
@@ -51,6 +62,7 @@ export function filaDeCaso(
  *   · `pedido` como `asked_keys` del último mensaje que salió,
  *   · `conversacion` —si viene— como los mensajes entrantes del caso,
  *   · `propuestos` como las confirmaciones pendientes,
+ *   · `guardados` como los valores de `extracted_fields` que lee el puntaje,
  *   · nada en los demás,
  *   · y le pasa a `espiaDeUpdate` todo lo que se escriba con `.set(...)`.
  *
@@ -62,7 +74,7 @@ export function dbSimulado(
   espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>,
   cuerpo = "Buenos días, tuve un choque ayer.",
   pedido: string[] = [],
-  { conversacion, propuestos = {}, cabecerasDelUltimo, casoMovido = false }: Conversacion = {}
+  { conversacion, propuestos = {}, guardados = {}, guardadosFallan = false, cabecerasDelUltimo, casoMovido = false }: Conversacion = {}
 ) {
   let n = 0;
 
@@ -78,6 +90,7 @@ export function dbSimulado(
     const ultimoPedido = pedido.length > 0 && !!columnas && "asked_keys" in columnas;
     const entrantes = !!columnas && "profile_name" in columnas;
     const pendientes = !!columnas && "suggested_value" in columnas;
+    const deCampos = !!columnas && "field_key" in columnas && "field_value" in columnas;
 
     const limit = vi.fn().mockImplementation(() => {
       if (idx === 1) return Promise.resolve([fila]);
@@ -112,7 +125,11 @@ export function dbSimulado(
             ? Promise.resolve(
                 Object.entries(propuestos).map(([field_name, suggested_value]) => ({ field_name, suggested_value }))
               )
-            : { limit, orderBy, where }
+            : deCampos
+              ? guardadosFallan
+                ? Promise.reject(new Error("se cayó la base"))
+                : Promise.resolve(Object.entries(guardados).map(([field_key, field_value]) => ({ field_key, field_value })))
+              : { limit, orderBy, where }
         ),
         limit,
         orderBy,
@@ -167,6 +184,10 @@ export interface Conversacion {
   conversacion?: { enviado: string; mensajes: Array<[string, string]> };
   /** Las confirmaciones pendientes: `{ clave: valor propuesto }`. */
   propuestos?: Record<string, string>;
+  /** Lo que `extracted_fields` tiene guardado cuando el puntaje lo lee: `{ clave canónica: valor }`. */
+  guardados?: Record<string, string>;
+  /** La lectura de los campos guardados falla. */
+  guardadosFallan?: boolean;
   /** Cabeceras del último entrante, para E17: `spf=fail` sale sin autenticar. */
   cabecerasDelUltimo?: Cabecera[];
   /** El caso ya no es del agente: todo `UPDATE` con guarda no matchea ninguna fila (E2). */
@@ -226,6 +247,8 @@ export function registrarMocks(opciones: {
     pedido,
     conversacion,
     propuestos,
+    guardados,
+    guardadosFallan,
     cabecerasDelUltimo,
     casoMovido,
   } = opciones;
@@ -233,6 +256,8 @@ export function registrarMocks(opciones: {
   const mockDb = dbSimulado(fila, espiaDeUpdate, cuerpo, pedido, {
     conversacion,
     propuestos,
+    guardados,
+    guardadosFallan,
     cabecerasDelUltimo,
     casoMovido,
   });

@@ -54,9 +54,33 @@ describe("marcarParaResponder", () => {
     expect(sql).toContain('"updated_at" = $');
     expect(sql).toContain('"cases"."status" in (');
     expect(params).toEqual(expect.arrayContaining(["listo", "requiere_especialista", "escalado"]));
-    for (const s of ["cerrado", "esperando", "no_relevante", "recibido"]) {
+    for (const s of ["esperando", "no_relevante", "recibido"]) {
       expect(params).not.toContain(s);
     }
+  });
+
+  // Quien contesta el aviso de cierre (B4) tiene que llegarle a alguien. Un
+  // cierre a mano sigue siendo la última palabra del equipo.
+  it("de los cerrados, sólo marca el que cerró el silencio", async () => {
+    await marcarParaResponder(CASE_ID, TENANT_ID);
+
+    const [{ sql, params }] = consultas;
+    expect(sql).toMatch(/or \(\("cases"\."status" = \$\d+ and exists \(select 1 from audit_log a/);
+    expect(sql).toContain('a.target_id = "cases"."id"::text');
+    expect(sql).toContain('a.created_at >= "cases"."closed_at"');
+    expect(params).toEqual(expect.arrayContaining(["cerrado", "claim.closed_abandoned"]));
+  });
+
+  // Sin aviso de cierre (recordatorios apagados, o un cierre de antes de B4)
+  // la respuesta quedaba sólo en la auditoría, y así sigue.
+  it("de los cerrados por silencio, sólo el que recibió el aviso de cierre", async () => {
+    await marcarParaResponder(CASE_ID, TENANT_ID);
+
+    const [{ sql, params }] = consultas;
+    expect(sql.replace(/\s+/g, " ")).toMatch(
+      /and exists \(select 1 from case_recordatorios r where r\.case_id = "cases"\."id" and r\.etapa = \$\d+ and r\.resultado = 'enviar'\)\)\)/
+    );
+    expect(params).toContain(9);
   });
 
   // Tragarse el error hacía que el webhook contestara 200 y Meta no reintentara.
@@ -68,6 +92,21 @@ describe("marcarParaResponder", () => {
       expect.objectContaining({ case_id: CASE_ID }),
       "para_responder.no_se_pudo_marcar"
     );
+  });
+
+  // B3: la clase del mensaje tardío es del episodio. Uno nuevo arranca sin clase;
+  // otro mensaje del mismo episodio no la borra (la reserva la reemplaza).
+  it("limpia el mensaje tardío sólo al abrir un episodio", async () => {
+    await marcarParaResponder(CASE_ID, TENANT_ID);
+    await marcarParaResponderAunqueSigaElAgente(CASE_ID, TENANT_ID);
+
+    for (const { sql } of consultas) {
+      for (const col of ["mensaje_tardio_de", "mensaje_tardio_tipo", "mensaje_tardio_resumen"]) {
+        expect(sql).toContain(
+          `"${col}" = case when "cases"."para_responder_desde" is null then null else "cases"."${col}" end`
+        );
+      }
+    }
   });
 
   it("sin condición, no mira los mensajes", async () => {

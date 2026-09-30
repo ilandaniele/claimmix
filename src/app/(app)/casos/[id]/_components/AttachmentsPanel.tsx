@@ -13,9 +13,12 @@
 
 "use client";
 
+import type { LecturaGuardada } from "@/core/case/presupuesto-taller";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
+
+import { PresupuestoDelTaller } from "./PresupuestoDelTaller";
 
 interface Attachment {
   id: string;
@@ -30,12 +33,23 @@ interface Attachment {
   disponible: boolean;
   /** Qué documento pedido cerró este adjunto, o `null` si no cerró ninguno. */
   matched_doc_key: string | null;
+  /** Una línea de la IA sobre qué es, o `null` si todavía no lo leyó. */
+  resumen: string | null;
+  /** `false` si la IA lo dio por ajeno al reclamo. */
+  util: boolean | null;
+  /** Mismo contenido que un adjunto anterior del caso. */
+  duplicado: boolean;
+  /** Si se ofrece leerlo como presupuesto del taller. */
+  esPresupuesto: boolean;
+  lectura_presupuesto: LecturaGuardada | null;
 }
 
 interface AttachmentsPanelProps {
   attachments: Attachment[];
   caseId: string;
   puedeAbrir: boolean;
+  /** El mismo corte que cambiar el estado del caso; sin él, la lectura se ve y no se pide. */
+  puedeLeerPresupuesto?: boolean;
 }
 
 /** Format bytes as human-readable size string (e.g. "1.2 MB") */
@@ -86,9 +100,9 @@ const MOTIVOS_CONOCIDOS = new Set([
  * y códigos internos de otras partes —«conflict», «unsafe_run»— que hoy salen
  * crudos. Cada llamador decide qué hacer con eso.
  */
-export function claveDeMotivoDeRechazo(motivo: string): TranslationKey | null {
+export function claveDeMotivoDeRechazo(motivo: string): ClaveDelCliente | null {
   return MOTIVOS_CONOCIDOS.has(motivo)
-    ? (`attachment.rejected.${motivo}` as TranslationKey)
+    ? (`attachment.rejected.${motivo}` as ClaveDelCliente)
     : null;
 }
 
@@ -106,10 +120,17 @@ function contentTypeBadge(contentType: string): {
     return { label: "PNG", classes: "bg-indigo-100 text-indigo-700" };
   if (lower.includes("docx") || lower.includes("doc"))
     return { label: "DOC", classes: "bg-sky-100 text-sky-700" };
+  if (lower.startsWith("audio/"))
+    return { label: "Audio", classes: "bg-emerald-50 text-emerald-700" };
   return { label: "FILE", classes: "bg-slate-100 text-slate-600" };
 }
 
-export function AttachmentsPanel({ attachments, caseId, puedeAbrir }: AttachmentsPanelProps) {
+export function AttachmentsPanel({
+  attachments,
+  caseId,
+  puedeAbrir,
+  puedeLeerPresupuesto = false,
+}: AttachmentsPanelProps) {
   const t = useT();
   if (attachments.length === 0) {
     return (
@@ -166,6 +187,25 @@ export function AttachmentsPanel({ attachments, caseId, puedeAbrir }: Attachment
                   >
                     {attachment.filename}
                   </span>
+                  {(attachment.duplicado || attachment.util === false) && (
+                    <span className="flex gap-1 mt-0.5">
+                      {attachment.duplicado && (
+                        <span className="rounded px-1.5 py-0.5 text-[11px] font-medium bg-slate-100 text-slate-600">
+                          {t("attachment.duplicado")}
+                        </span>
+                      )}
+                      {attachment.util === false && (
+                        <span className="rounded px-1.5 py-0.5 text-[11px] font-medium bg-amber-100 text-amber-700">
+                          {t("attachment.noSirve")}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {attachment.resumen && (
+                    <span className="block text-xs text-slate-600" title={attachment.resumen}>
+                      {attachment.resumen}
+                    </span>
+                  )}
                   {/* Qué documento pedido cerró este adjunto, si cerró alguno. */}
                   {attachment.matched_doc_key && (
                     <span className="block text-xs text-slate-500 truncate">
@@ -174,6 +214,14 @@ export function AttachmentsPanel({ attachments, caseId, puedeAbrir }: Attachment
                         etiquetaDeCampo(attachment.matched_doc_key, t)
                       )}
                     </span>
+                  )}
+                  {(attachment.esPresupuesto || attachment.lectura_presupuesto) && (
+                    <PresupuestoDelTaller
+                      caseId={caseId}
+                      attachmentId={attachment.id}
+                      inicial={attachment.lectura_presupuesto}
+                      puedeLeer={attachment.esPresupuesto && puedeLeerPresupuesto}
+                    />
                   )}
                 </span>
                 {/*

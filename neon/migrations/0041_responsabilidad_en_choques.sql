@@ -1,0 +1,40 @@
+-- =============================================================================
+-- 0041 — Opinión orientativa de responsabilidad en choques (B18)
+-- =============================================================================
+--
+-- La ficha del caso ahora dice, sólo para el equipo, quién parece tener la
+-- responsabilidad en un choque según lo que contaron las partes y los
+-- documentos (relato, denuncia amistosa, denuncia policial). Es una opinión
+-- orientativa con la regla de la Ley 24.449 que la sostiene, no un dictamen.
+-- Nada de esto sale al asegurado.
+--
+--   cases.responsabilidad   la opinión (asegurado | tercero | compartida |
+--                           no_determinable) con su regla y su razón, y lo que
+--                           falta para decidir. La mecánica en la que se apoya
+--                           no se guarda acá: la del relato se vuelve a sacar en
+--                           cada extracción y la de cada documento queda en
+--                           claim_attachments.datos.
+--                           NULL = sin calcular (no es un choque o no hay datos).
+--
+-- Admite NULL y no lleva DEFAULT, CHECK ni FK, así que aplicarla no toca filas.
+-- Pero el código NO puede llegar antes: Drizzle lista todas las columnas del
+-- esquema en cada INSERT y en cada lectura de la ficha, así que sin ella no
+-- entra ningún caso y ninguna ficha abre. Hasta que esté aplicada, /api/health
+-- da caído.
+--
+-- El reclamo de un tercero (B24) no lleva columna nueva: queda en
+-- claim_attachments.datos, que ya existe desde la 0037.
+--
+-- Se aplica A MANO, en este orden y antes de mergear el PR:
+--   1. STAGING (y la base del E2E, si es otra).
+--   2. QA.
+--   3. Producción.
+--
+-- No siembra datos de prueba ni toca filas.
+--
+-- Vuelta atrás:
+--   1. ALTER TABLE public.cases DROP COLUMN IF EXISTS responsabilidad;
+--   2. node scripts/migrate.mjs --env <VAR> --forget 0041
+-- =============================================================================
+
+ALTER TABLE public.cases ADD COLUMN IF NOT EXISTS responsabilidad jsonb;

@@ -130,6 +130,23 @@ export const RATE_LIMIT_CONFIGS = {
   SYNC_TO_CORE: { limit: 5, windowMs: 60_000 },
 
   /**
+   * SSO_ADMIN: 10 por minuto por usuario, para /api/admin/sso (B19).
+   *
+   * Verificar el dominio consulta un DNS y guardar la config pide el documento
+   * del IdP a una URL que escribe quien llama: el techo evita que el panel
+   * sirva de trampolín para pedidos salientes.
+   */
+  SSO_ADMIN: { limit: 10, windowMs: 60_000 },
+
+  /**
+   * CORE_API: 120 por minuto por IP, para /api/v1 (B5).
+   *
+   * Lo pide el sistema de la aseguradora, no una persona: sondea y pagina. Con
+   * `lote` por la misma razón que CASES_API.
+   */
+  CORE_API: { limit: 120, windowMs: 60_000, lote: 5 },
+
+  /**
    * ASISTENTE: 20 por minuto por usuario.
    *
    * Cada pregunta paga al menos una llamada a Gemini, y hasta dos cuando hay
@@ -157,6 +174,112 @@ export const RATE_LIMIT_CONFIGS = {
    * ventanas puede pasar 40; la cubeta lleva el teléfono hasheado.
    */
   WHATSAPP_POR_REMITENTE: { limit: 20, windowMs: 10 * 60_000 },
+
+  /**
+   * AVISO_TARDIO_POR_CASO: 3 correos a los especialistas por día y por caso.
+   * Cada mensaje tardío avisa una vez; sin tope, quien escribe veinte veces a
+   * un caso cerrado le manda veinte correos a la guardia.
+   */
+  AVISO_TARDIO_POR_CASO: { limit: 3, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * CLASIFICACION_TARDIA_POR_CASO: 10 llamadas al modelo por día y por caso.
+   * El tope del aviso no frena la clasificación, que va antes: sin esto, quien
+   * escribe cien veces a un caso cerrado gasta el presupuesto de IA del día.
+   */
+  CLASIFICACION_TARDIA_POR_CASO: { limit: 10, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * CONDICIONES_POR_POLIZA: 5 lecturas del PDF de condiciones por día y por
+   * póliza. Cada una es un PDF entero al modelo: sin tope, subir el mismo
+   * archivo en loop gasta el presupuesto de IA del día.
+   */
+  CONDICIONES_POR_POLIZA: { limit: 5, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * SUBIDA_CONDICIONES_POR_POLIZA: 10 PDF de condiciones guardados por día y
+   * por póliza. El cupo de lectura se cuenta después de subir: sin éste, cada
+   * PDF distinto en loop es un objeto más en el bucket.
+   */
+  SUBIDA_CONDICIONES_POR_POLIZA: { limit: 10, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * LECTURA_PRESUPUESTO_POR_CASO: 5 lecturas del presupuesto del taller por día
+   * y por caso. Va el presupuesto y hasta tres fotos: el botón apretado de más
+   * no puede comerse el presupuesto de IA.
+   */
+  LECTURA_PRESUPUESTO_POR_CASO: { limit: 5, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * LECTURA_RECLAMO_POR_CASO: 3 lecturas de una carta de reclamo de un tercero
+   * por día y por caso. Cada carta se lee una sola vez y alcanza para las que un
+   * caso trae de verdad; el resto no puede comerse el presupuesto de IA.
+   */
+  LECTURA_RECLAMO_POR_CASO: { limit: 3, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * ASISTENTE_CASO: 30 preguntas sobre un caso por día, por persona y por caso.
+   * Cada una manda el caso entero al modelo, y el tope por minuto del asistente
+   * no frena a quien insiste con el mismo caso todo el día: sin éste, un caso
+   * abierto en loop gasta el presupuesto de IA.
+   */
+  ASISTENTE_CASO: { limit: 30, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * REVISION_DE_DESVIOS: una revisión de calidad (B22) por día, para todo el
+   * sistema. `reap-stuck` lo dispara GitHub Actions cada quince minutos y el
+   * resto de sus barridos tienen que seguir corriendo así, pero la revisión son
+   * cinco INSERT ... SELECT sobre la auditoría de todos los inquilinos: repetirla
+   * noventa y seis veces por día no encuentra nada nuevo y sí gasta la base. La
+   * ventana fija de 24 h cae en el día UTC, así que corre en la primera llamada
+   * después de las 21 h de Argentina.
+   */
+  REVISION_DE_DESVIOS: { limit: 1, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * PURGA_Y_RETENCION: una purga de adjuntos y una retención (B19) por día, para
+   * todo el sistema. `reap-stuck` se llama cada quince minutos y la ventana de las
+   * 04 UTC todavía deja pasar unas cinco corridas: sin este cupo, los cinco intentos
+   * de la purga se gastan en esa hora y una corrida encimada cuenta dos veces el
+   * mismo fallo. Se pide sólo dentro de la ventana, así que la ventana fija de 24 h
+   * la consume la primera llamada de las 04 UTC.
+   */
+  PURGA_Y_RETENCION: { limit: 1, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * PADRON_IMPORTAR: 30 importaciones o vistas previas del padrón por hora y por
+   * persona (las dos comparten el cupo). Cada una lee el archivo entero (hasta
+   * 1000 filas) y consulta el padrón; una planilla corregida varias veces cabe,
+   * un loop no.
+   */
+  PADRON_IMPORTAR: { limit: 30, windowMs: 60 * 60_000 },
+
+  /**
+   * PADRON_ESCRIBIR: 60 altas o ediciones a mano por minuto y por persona, para
+   * el formulario de cliente y de póliza. Una persona cargando a mano no llega.
+   */
+  PADRON_ESCRIBIR: { limit: 60, windowMs: 60_000 },
+
+  /**
+   * DENUNCIA_WEB: 10 denuncias por hora y por IP en el formulario público. Una persona
+   * tarda en escribir un relato; diez cubren una oficina detrás de un NAT.
+   */
+  DENUNCIA_WEB: { limit: 10, windowMs: 60 * 60_000 },
+
+  /**
+   * DENUNCIA_WEB_SLUG: 200 denuncias por hora por formulario, sumadas todas las
+   * IP. Frena a quien rota direcciones: la IP sola no lo ve. Una aseguradora
+   * mediana recibe una fracción de eso en su hora pico.
+   */
+  DENUNCIA_WEB_SLUG: { limit: 200, windowMs: 60 * 60_000 },
+
+  /**
+   * DENUNCIA_WEB_MAIL: 3 denuncias por hora hacia la misma dirección (la clave
+   * es su sha256). El seguimiento sale por mail a la dirección que escribió
+   * quien llenó el formulario: sin este tope, el formulario es una forma de
+   * mandarle correo a un tercero.
+   */
+  DENUNCIA_WEB_MAIL: { limit: 3, windowMs: 60 * 60_000 },
 } as const;
 
 /**

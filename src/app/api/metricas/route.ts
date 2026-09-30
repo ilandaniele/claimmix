@@ -2,10 +2,13 @@
  * GET /api/metricas — los KPIs del inquilino.
  *
  * El cálculo vive en `@/server/metrics/kpis`, compartido con la pantalla.
+ * `?periodo=` elige el rango de las tarjetas y las distribuciones; cualquier
+ * valor que el tablero no ofrezca cae al mes en curso.
  */
 
 import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
 import { ok, err } from "@/lib/api/respond";
+import { periodoDe } from "@/core/metricas/periodo";
 import { getTenantKpis } from "@/server/metrics/kpis";
 
 /*
@@ -18,10 +21,11 @@ import { getTenantKpis } from "@/server/metrics/kpis";
  * De paso hereda la agregación en SQL: traía la tabla `cases` entera tres
  * veces para contar en JavaScript.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { userRow } = await requireRole(...ALL_ROLES);
-    return ok(await getTenantKpis({ tenantId: userRow.tenant_id }));
+    const periodo = periodoDe(new URL(request.url).searchParams.get("periodo"));
+    return ok(await getTenantKpis({ tenantId: userRow.tenant_id }, { periodo }));
   } catch (e) {
     return err(e);
   }

@@ -128,6 +128,44 @@ describe("POST /api/demo/public-analyze — redacción de datos de salud", () =>
   });
 });
 
+describe("POST /api/demo/public-analyze — la mecánica del choque es del equipo (B18)", () => {
+  const MECANICA = { semaforo_asegurado: "verde", embistio_de_atras: "tercero" };
+  const ADJUNTOS = [{ indice: 0, resumen: "Parte amistoso", util: true, documento: null, mecanica: MECANICA }];
+  const PEDIDO = () =>
+    makeRequest(
+      "Consulta sobre mi póliza",
+      "Buenas tardes, les escribo por un tema administrativo sobre mi póliza. Muchas gracias."
+    );
+
+  it("no la devuelve en la respuesta común", async () => {
+    mockExtract.mockResolvedValue({
+      ...BASE_RESULT,
+      severity: "medium",
+      injury_severity: "none",
+      mecanica: MECANICA,
+      adjuntos: ADJUNTOS,
+    });
+    const data = await (await POST(PEDIDO())).json();
+    expect(data).not.toHaveProperty("mecanica");
+    expect(data).not.toHaveProperty("adjuntos");
+    expect(data.summary).toBe("Resumen del caso.");
+  });
+
+  it("tampoco en la respuesta redactada de una derivación", async () => {
+    mockExtract.mockResolvedValue({
+      ...BASE_RESULT,
+      severity: "medium",
+      injury_severity: "severe",
+      mecanica: MECANICA,
+      adjuntos: ADJUNTOS,
+    });
+    const data = await (await POST(PEDIDO())).json();
+    expect(data.requires_specialist).toBe(true);
+    expect(data).not.toHaveProperty("mecanica");
+    expect(data).not.toHaveProperty("adjuntos");
+  });
+});
+
 describe("los ejemplos de la demo, contra la regla de derivación (A-9)", () => {
   it("choque, granizo y cristales no derivan", async () => {
     const { classifySeverity, requiresSpecialist } = await import("@/server/ai/severity-classifier");

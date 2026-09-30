@@ -19,10 +19,21 @@ import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listCases } from "@/server/cases/list";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
+import { esRamoNativo, FORMATO_DE_CLAVE_DE_RAMO, nombreDeRamoPropio } from "@/core/case/ramos";
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
-import { CaseStatusSchema, ChannelSchema, ClaimTypeSchema, FraudRiskLevelSchema, PeriodoSchema, SeveritySchema } from "@/lib/schemas/cases";
+import {
+  CaseStatusSchema,
+  ChannelSchema,
+  ClaimTypeSchema,
+  ComplejidadFiltroSchema,
+  FraudRiskLevelSchema,
+  PeriodoSchema,
+  SeveritySchema,
+  VencimientoFiltroSchema,
+} from "@/lib/schemas/cases";
 import type { CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
 import { getT } from "@/lib/i18n";
@@ -45,6 +56,8 @@ export const VALID_SEVERITIES: Severity[] = SeveritySchema.options;
 export const VALID_FRAUDE: FraudRiskLevel[] = FraudRiskLevelSchema.options;
 export const VALID_CHANNELS = ChannelSchema.options;
 const VALID_PERIODOS: Periodo[] = PeriodoSchema.options;
+export const VALID_VENCIMIENTOS = VencimientoFiltroSchema.options;
+export const VALID_COMPLEJIDADES = ComplejidadFiltroSchema.options;
 
 /**
  * Normaliza un parámetro multi-valor (`status`, `type`, `severity`,
@@ -95,7 +108,8 @@ interface BandejaPageProps {
 
 async function BandejaContent({ searchParams }: BandejaPageProps) {
   const params = await searchParams;
-  const t = getT(await getAccountLocale());
+  const locale = await getAccountLocale();
+  const t = getT(locale);
 
   const statusParam = params["status"];
   const typeParam = params["type"];
@@ -115,7 +129,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
 
   const status = valores(statusParam, VALID_STATUSES);
 
-  const type = valores(typeParam, VALID_TYPES);
+  // El filtro de tipo se valida más abajo, cuando se sabe qué tipos propios tiene la aseguradora.
 
   const page =
     typeof pageParam === "string" ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
@@ -134,6 +148,10 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const severity = valores(severityParam, VALID_SEVERITIES);
 
   const fraude = valores(fraudeParam, VALID_FRAUDE);
+
+  const vencimiento = valores(params["vencimiento"], VALID_VENCIMIENTOS);
+
+  const complejidad = valores(params["complejidad"], VALID_COMPLEJIDADES);
 
   const is_claim =
     isClaimParam === "true" ? true : isClaimParam === "false" ? false : undefined;
@@ -176,7 +194,19 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
    * que se puede esperar pero que `batch()` no puede armar, y rompió estos
    * mismos contadores en producción. Ver src/lib/db/helpers.ts.
    */
-  const [initialData, porEstado] = await Promise.all([
+  /*
+   * Los tipos propios de la aseguradora salen en paralelo con la lista. Sólo se
+   * espera por ellos ANTES de la lista si la URL pide un tipo que no es del
+   * sistema: para validarlo hay que saber cuáles existen.
+   */
+  const ramosPendientes = cargarRamosDelInquilino(tenantId);
+  const pideTipoPropio = [typeParam ?? []].flat().some((v) => FORMATO_DE_CLAVE_DE_RAMO.test(v) && !esRamoNativo(v));
+  const type = valores(
+    typeParam,
+    pideTipoPropio ? [...VALID_TYPES, ...(await ramosPendientes).map((r) => r.clave)] : VALID_TYPES
+  );
+
+  const [initialData, porEstado, ramosPropios] = await Promise.all([
     listCases({ tenantId }, {
       status,
       type,
@@ -190,6 +220,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
       channel,
       severity,
       fraude,
+      vencimiento,
+      complejidad,
       is_claim,
       para_responder,
       cola,
@@ -197,6 +229,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     // Contadores de las pestañas: sólo búsqueda y período los mueven, nunca
     // los chips de estado/tipo/severidad — ver `consultaPorEstado`.
     contarPorEstado({ tenantId }, buildCaseFilters({ q, desde })),
+    ramosPendientes,
   ]);
 
   /*
@@ -204,7 +237,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
    * estados de la lista de arriba.
    *
    * Hoy da lo mismo: la base tiene `cases_status_check` con exactamente estos
-   * trece valores, así que no puede haber una fila fuera. Se suma todo igual
+   * dieciséis valores (0035), así que no puede haber una fila fuera. Se suma todo igual
    * porque `VALID_STATUSES` sale de `CaseStatusSchema`, no de esa columna, y el
    * día que el CHECK sume un estado y el schema no, la tarjeta «Total casos»
    * bajaría sin error visible. Sumar lo que vuelve no depende de que las dos
@@ -273,6 +306,13 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
             scenarios={OPCIONES_DE_ESCENARIO}
             allStatusCounts={allStatusCounts}
             vista={vista}
+            // Una fila con la clave de un ramo del código no es un tipo aparte: el filtro ya lo tiene.
+            tiposPropios={ramosPropios
+              .filter((r) => !esRamoNativo(r.clave))
+              .map((r) => ({
+                clave: r.clave,
+                nombre: nombreDeRamoPropio(r.clave, ramosPropios, locale),
+              }))}
           />
         </Card>
       </div>

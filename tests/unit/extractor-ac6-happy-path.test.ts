@@ -179,6 +179,7 @@ vi.mock("@/server/ai/hydrate-fields", () => ({
 vi.mock("@/lib/email/claim-parser", () => ({
   mergeExtractedFields: vi.fn().mockImplementation((hydrated: any[], _fallback: any[]) => hydrated),
   parseEmailClaimFields: vi.fn().mockReturnValue([]),
+  anclarPolizaAlTexto: vi.fn().mockImplementation((claim: unknown) => claim),
   sanearContacto: vi.fn().mockImplementation((fields: any[]) => fields),
 }));
 
@@ -340,6 +341,8 @@ describe("AC6 — worker: customer_id and policy_id set on case update", () => {
           policyType: "auto",
           status: "active",
           endDate: null,
+          customerDni: null,
+          plates: [],
           customerName: "Ana García",
           confidence: 0.95,
         },

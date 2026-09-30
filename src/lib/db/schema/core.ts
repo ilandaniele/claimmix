@@ -24,6 +24,13 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { Reglas } from "@/core/case/asignacion";
+import type { MontoEstimado, RangosDeMonto } from "@/core/case/monto-estimado";
+import type { Plan } from "@/core/case/plan-de-trabajo";
+import type { PlazoPropio } from "@/core/case/plazos";
+import type { Pesos } from "@/core/case/puntaje-complejidad";
+import type { Responsabilidad } from "@/core/case/responsabilidad";
+
 import { authUsers } from "./auth";
 
 /**
@@ -61,6 +68,17 @@ export const tenants = pgTable("tenants", {
   trial_ends_at: timestamp("trial_ends_at", { withTimezone: true, mode: "string" }),
   activated_at: timestamp("activated_at", { withTimezone: true, mode: "string" }),
   specialist_alert_emails: text("specialist_alert_emails").array().notNull().default(sql`'{}'::text[]`),
+  // Horas sin respuesta a las que se repite el pedido de lo que falta; vacío =
+  // apagado (migración 0039).
+  recordatorio_horas: integer("recordatorio_horas").array().notNull().default(sql`'{}'::integer[]`),
+  // La tabla de montos propia; NULL = la de por defecto (migración 0040).
+  rangos_de_monto: jsonb("rangos_de_monto").$type<RangosDeMonto>(),
+  // Cómo trabaja el equipo de esta aseguradora, sólo para el equipo; NULL = los
+  // valores por defecto del código (migración 0042).
+  reglas_asignacion: jsonb("reglas_asignacion").$type<Reglas>(),
+  plazos: jsonb("plazos").$type<PlazoPropio[]>(),
+  plan_por_tipo: jsonb("plan_por_tipo").$type<Plan>(),
+  pesos_puntaje: jsonb("pesos_puntaje").$type<Pesos>(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -140,6 +158,9 @@ export const cases = pgTable("cases", {
       "enviado_a_core",
       "error_core",
       "no_relevante",
+      "en_liquidacion",
+      "pagado",
+      "rechazado",
     ],
   })
     .notNull()
@@ -192,6 +213,8 @@ export const cases = pgTable("cases", {
   // Fraud risk assessment (set by AI extractor, migration 0009)
   fraud_risk_level: text("fraud_risk_level").default("none"),
   fraud_indicators: jsonb("fraud_indicators").default(sql`'[]'::jsonb`),
+  // Resumen del caso que devuelve la extracción, ya filtrado (migración 0037).
+  resumen: text("resumen"),
   // Granular injury severity (migration 0009)
   injury_severity: text("injury_severity"),
   // Llegó un mensaje después de que el agente terminó; lo contesta una persona
@@ -200,6 +223,24 @@ export const cases = pgTable("cases", {
     withTimezone: true,
     mode: "string",
   }),
+  // Qué pidió ese mensaje tardío, clasificado por el worker (migración 0038).
+  mensaje_tardio_de: uuid("mensaje_tardio_de"),
+  mensaje_tardio_tipo: text("mensaje_tardio_tipo"),
+  mensaje_tardio_resumen: text("mensaje_tardio_resumen"),
+  mensaje_tardio_reservado_en: timestamp("mensaje_tardio_reservado_en", {
+    withTimezone: true,
+    mode: "string",
+  }),
+  // Rango orientativo, sólo para el equipo (migración 0040).
+  monto_estimado: jsonb("monto_estimado").$type<MontoEstimado>(),
+  // Opinión orientativa de responsabilidad en un choque, sólo para el equipo
+  // (migración 0041). La mecánica en la que se apoya no se guarda acá.
+  responsabilidad: jsonb("responsabilidad").$type<Responsabilidad>(),
+  // Ordenar el trabajo del equipo: puntaje de 0 a 100 y próximo vencimiento con
+  // su clave. NULL = sin calcular / sin plazo corriendo (migración 0042).
+  puntaje_complejidad: smallint("puntaje_complejidad"),
+  vence_en: timestamp("vence_en", { withTimezone: true, mode: "string" }),
+  vence_plazo: text("vence_plazo"),
 });
 
 export const rawMessages = pgTable("raw_messages", {
@@ -258,6 +299,99 @@ export const missingDocs = pgTable("missing_docs", {
   /** What they said, so an analyst can judge whether to insist. */
   declined_note: text("declined_note"),
 });
+
+/**
+ * Cada recordatorio o aviso de cierre que el barrido ya decidió (0039). La
+ * clave primaria es la idempotencia: se inserta ANTES de mandar, y el que no
+ * inserta no manda. Sin UPDATE ni DELETE para `claimmix_app`.
+ */
+export const caseRecordatorios = pgTable(
+  "case_recordatorios",
+  {
+    case_id: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    tenant_id: uuid("tenant_id").notNull(),
+    ancla: timestamp("ancla", { withTimezone: true, mode: "string" }).notNull(),
+    etapa: smallint("etapa").notNull(),
+    resultado: text("resultado").notNull(),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.case_id, t.ancla, t.etapa] })],
+);
+
+/**
+ * Un paso del plan de trabajo de un caso (0042). `titulo` es una foto de la
+ * plantilla al crear el plan. La clave primaria es la idempotencia: el plan se
+ * crea con ON CONFLICT DO NOTHING. Sin DELETE para `claimmix_app`.
+ */
+export const casePlanPasos = pgTable(
+  "case_plan_pasos",
+  {
+    case_id: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    tenant_id: uuid("tenant_id").notNull(),
+    clave: text("clave").notNull(),
+    titulo: text("titulo").notNull(),
+    orden: smallint("orden").notNull(),
+    // Estado que lo tilda solo (en_liquidacion o pagado); NULL = lo tilda una persona.
+    auto: text("auto"),
+    hecho_en: timestamp("hecho_en", { withTimezone: true, mode: "string" }),
+    hecho_por: uuid("hecho_por").references(() => users.id, { onDelete: "set null" }),
+    // 'manual' o 'auto'.
+    origen: text("origen"),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.case_id, t.clave] })],
+);
+
+/**
+ * Un mensaje de la conversación de una persona del equipo con el asistente
+ * sobre un caso (0043). La política de lectura pide inquilino Y usuario: sólo la
+ * lee quien la escribió. Sin UPDATE ni DELETE para `claimmix_app`.
+ */
+export const asistenteTurnos = pgTable("asistente_turnos", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  tenant_id: uuid("tenant_id").notNull(),
+  user_id: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  case_id: uuid("case_id")
+    .notNull()
+    .references(() => cases.id, { onDelete: "cascade" }),
+  rol: text("rol", { enum: ["user", "assistant"] }).notNull(),
+  texto: text("texto").notNull(),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
+
+/**
+ * Lo que la revisión nocturna encontró fuera de lo esperado (0043). La clave
+ * primaria (caso, regla, ancla) es la idempotencia. Lo escribe el barrido con el
+ * rol dueño; `claimmix_app` sólo lee.
+ */
+export const caseDesvios = pgTable(
+  "case_desvios",
+  {
+    case_id: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    tenant_id: uuid("tenant_id").notNull(),
+    regla: text("regla").notNull(),
+    ancla: timestamp("ancla", { withTimezone: true, mode: "string" }).notNull(),
+    dato: text("dato"),
+    detectado_en: timestamp("detectado_en", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.case_id, t.regla, t.ancla] })],
+);
 
 export const outboundMessages = pgTable("outbound_messages", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -323,4 +457,87 @@ export const requiredDocsConfig = pgTable(
     required: boolean("required").notNull().default(true),
   },
   (t) => [primaryKey({ columns: [t.claim_type, t.doc_key] })],
+);
+
+/**
+ * Entrega al Core por aseguradora (0036). El secreto de firma va cifrado y de
+ * la clave de /api/v1 sólo se guarda el sha256; ninguno sale de acá en claro.
+ */
+export const coreSyncSettings = pgTable("core_sync_settings", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  webhook_url: text("webhook_url"),
+  signing_secret_enc: text("signing_secret_enc"),
+  enabled: boolean("enabled").notNull().default(false),
+  api_key_hash: text("api_key_hash"),
+  api_key_prefix: text("api_key_prefix"),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+  updated_by: uuid("updated_by"),
+});
+
+/**
+ * El enlace público del formulario web de cada inquilino (0044). El slug es
+ * propio y nunca el id interno; sin DELETE para `claimmix_app`.
+ */
+export const formularioWeb = pgTable("formulario_web", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  activo: boolean("activo").notNull().default(false),
+  updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+  updated_by: uuid("updated_by"),
+});
+
+/**
+ * El IdP OIDC de la empresa de cada inquilino (0045). El secreto va cifrado y no
+ * sale de acá en claro; el dominio sólo vale con `dominio_verificado_en`.
+ */
+export const ssoSettings = pgTable("sso_settings", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  issuer: text("issuer"),
+  client_id: text("client_id"),
+  client_secret_cifrado: text("client_secret_cifrado"),
+  dominio: text("dominio"),
+  dominio_verificado_en: timestamp("dominio_verificado_en", { withTimezone: true, mode: "string" }),
+  activo: boolean("activo").notNull().default(false),
+  exigir: boolean("exigir").notNull().default(false),
+  creado_en: timestamp("creado_en", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  actualizado_en: timestamp("actualizado_en", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
+
+/**
+ * Tipos de siniestro propios de un inquilino (0044): nombre en las dos lenguas y
+ * los documentos y datos que pide. La clave puede ser la de un ramo del código:
+ * la fila entonces sólo le cambia los documentos (gana la fila) y se guarda sin
+ * datos; el nombre y los datos siguen siendo los del código.
+ */
+export const tenantClaimTypes = pgTable(
+  "tenant_claim_types",
+  {
+    tenant_id: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clave: text("clave").notNull(),
+    nombre_es: text("nombre_es").notNull(),
+    nombre_en: text("nombre_en").notNull(),
+    documentos: text("documentos").array().notNull().default(sql`'{}'`),
+    datos: text("datos").array().notNull().default(sql`'{}'`),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenant_id, t.clave] })],
 );

@@ -16,8 +16,11 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { CASE_EDITOR_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
+import { CASE_EDITOR_ROLES, CORE_SYNC_ROLES, CUSTOMER_PII_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
+import { ESTADOS_CERRADOS } from "@/core/case/fsm";
+import { claveDeTituloDeFabrica } from "@/core/case/plan-de-trabajo";
+import { denunciaEnTermino } from "@/core/case/plazos";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -39,22 +42,40 @@ import {
   InjurySeverityBadge,
 } from "./_components/RiskBadges";
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
+import { CoberturaPanel, VeredictoDeCobertura } from "./_components/CoberturaPanel";
+import { ResponsabilidadPanel, VeredictoDeResponsabilidad } from "./_components/ResponsabilidadPanel";
+import { ReclamoTerceroPanel } from "./_components/ReclamoTerceroPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
-import { modoDeCoreSync } from "@/server/core-sync/client";
+import { AsignarCaso } from "./_components/AsignarCaso";
+import { PlanDeTrabajo } from "./_components/PlanDeTrabajo";
+import {
+  InsigniaDeComplejidad,
+  InsigniaDeDenuncia,
+  InsigniaDeVencimiento,
+} from "@/app/(app)/_components/plazo-y-complejidad";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
-import { getT } from "@/lib/i18n";
+import { getT, type TranslationKey } from "@/lib/i18n";
+import { textoDelMotivo } from "@/lib/i18n/motivo-de-core";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
-import { estadoDelDocumento, esRamoSinCalibrar } from "@/core/case/required-docs";
+import { estadoDelDocumento } from "@/core/case/estado-del-documento";
+import { esRamoSinCalibrar } from "@/core/case/required-docs";
+import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 import { resumenDeCaso } from "@/lib/labels/resumen-de-caso";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { formatCaseNumber } from "@/core/case/numero";
-import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import type { CaseStatus } from "@/lib/schemas/cases";
+import { TIPOS_DE_INDICIO } from "@/lib/schemas/extracted-claim";
+import { resumenDeLaIA, textoDeIndicio } from "@/lib/labels/textos-de-la-ia";
 import Link from "next/link";
+
+/** Un tipo viejo o desconocido se pinta crudo: no hay etiqueta para él. */
+const TIPOS = new Set<string>(TIPOS_DE_INDICIO);
 
 interface CaseDetailPageProps {
   params: Promise<{ id: string }>;
@@ -83,18 +104,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   const locale = await getAccountLocale();
   const t = getT(locale);
   const hoy = diaArgentino();
-
-  const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
-    choque: t("type.choque"),
-    robo: t("type.robo"),
-    granizo: t("type.granizo"),
-    incendio: t("type.incendio"),
-    cristales: t("type.cristales"),
-    rc: t("type.rc"),
-    robo_contenido: t("type.robo_contenido"),
-    accidente_personal: t("type.accidente_personal"),
-    other: t("type.other"),
-  };
 
   // Resolve session + users row (tenant boundary and role gate in one lookup).
   const session = await getSessionContext();
@@ -127,7 +136,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
    * historial de auditoría no se lleva puestos los campos extraídos.
    */
   const [detail, acciones] = await Promise.all([
-    cargarDetalleDeCaso(tenantCtx, id),
+    cargarDetalleDeCaso(tenantCtx, id, me.role),
     leerEstadoDeAcciones(tenantCtx, id),
   ]);
 
@@ -147,10 +156,38 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     attachments,
     messages,
     asignado_nombre,
+    plan,
+    carga,
+    plazo_titulo,
+    cobertura,
+    responsabilidad,
+    cartas,
   } = detail;
 
+  /*
+   * Un ramo propio de la aseguradora se nombra y se juzga por su fila de
+   * `tenant_claim_types`; también la de `other` o de un ramo del código, que
+   * puede pedir documentos. Sólo se lee cuando el código solo no lo resuelve:
+   * un ramo del código con reglas propias no paga la consulta.
+   */
+  const claveDelRamo = caseRow.claim_type;
+  const ramoPropio =
+    claveDelRamo && esRamoSinCalibrar(claveDelRamo)
+      ? ((await cargarRamosDelInquilino(tenantId)).find((r) => r.clave === claveDelRamo) ?? null)
+      : null;
+  const nombreDelRamo = !claveDelRamo
+    ? "—"
+    : nombreDeTipo(claveDelRamo, t, ramoPropio ? [ramoPropio] : [], locale);
+  const ramoSinCalibrar = claveDelRamo ? esRamoSinCalibrar(claveDelRamo, ramoPropio) : false;
+
   const isEmailCase =
-    caseRow.channel === "email" || caseRow.channel === "email_sim";
+    caseRow.channel === "email" || caseRow.channel === "email_sim" || caseRow.channel === "web";
+  const indicios = Array.isArray(caseRow.fraud_indicators)
+    ? (caseRow.fraud_indicators as Array<{ type: string; description: string; clave?: string }>)
+    : [];
+  const resumenIA = resumenDeLaIA(caseRow.resumen, locale);
+  const nivelDeFraude =
+    caseRow.fraud_risk_level && caseRow.fraud_risk_level !== "none" ? caseRow.fraud_risk_level : null;
 
   // Boundary normalization: Drizzle numeric `confidence` arrives as string.
   let displayedExtractedFields: ExtractedFieldRow[] = extracted_fields.map(
@@ -196,10 +233,22 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     email_sim: t("channel.email_sim"),
     whatsapp: t("channel.whatsapp"),
     whatsapp_sim: t("channel.whatsapp_sim"),
+    web: t("channel.web"),
   };
   const channelLabel = CHANNEL_LABELS[caseRow.channel] ?? caseRow.channel;
 
   const puedeCambiarEstadoCaso = puedeCambiarEstado(me, caseRow.assigned_to);
+  const puedeEnviarAlCore = (CORE_SYNC_ROLES as string[]).includes(me.role);
+  // La opinión de responsabilidad y el reclamo de un tercero son para quien trabaja el caso (B18, B24).
+  const esEditor = (CASE_EDITOR_ROLES as string[]).includes(me.role);
+  // El art. 46 y el vencimiento (B10) son del equipo: al asegurado no se los decimos.
+  const denuncia = esEditor ? denunciaEnTermino(fieldValues.get("accident_date") ?? null, caseRow.created_at) : null;
+  // Un caso cerrado puede conservar el plazo (el barrido de abandono no lo limpia): no se muestra como vencido.
+  const venceEn = ESTADOS_CERRADOS.has(caseRow.status as CaseStatus) ? null : caseRow.vence_en;
+  // El art. 46 no se guarda como vencimiento (`PlazosSchema` reserva la clave): sólo corren el art. 56 y los propios.
+  // El título del propio lo eligió la aseguradora; si ya no está configurado, queda la clave.
+  const nombreDelPlazo =
+    caseRow.vence_plazo === "art56" ? t("plazo.art56") : (plazo_titulo ?? caseRow.vence_plazo?.replace(/_/g, " ") ?? null);
   const puedeTomarElControlCaso = puedeTomarElControl({
     puedeCambiarEstado: puedeCambiarEstadoCaso,
     plan: me.plan,
@@ -270,30 +319,34 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 * insignias del mismo peso, y el tipo de siniestro —que no cambia
                 * nunca— competía con el estado, que es lo único que se mira.
                 */}
-              <Pill>
-                {caseRow.claim_type
-                  ? (CLAIM_TYPE_LABELS[caseRow.claim_type as ClaimType] ??
-                    caseRow.claim_type)
-                  : "—"}
-              </Pill>
-              {caseRow.claim_type &&
-                esRamoSinCalibrar(caseRow.claim_type as ClaimType) && (
-                  <Pill tone="espera">{t("case.detail.ramoSinCalibrar")}</Pill>
-                )}
+              <Pill>{nombreDelRamo}</Pill>
+              {ramoSinCalibrar && (
+                <Pill tone="espera">{t("case.detail.ramoSinCalibrar")}</Pill>
+              )}
               <StatusBadge status={caseRow.status as CaseStatus} />
             </div>
-            {caseRow.claim_type &&
-              esRamoSinCalibrar(caseRow.claim_type as ClaimType) && (
-                <p className="mb-3 text-[12.5px] text-slate-500">
-                  {t("case.detail.ramoSinCalibrarAyuda")}
-                </p>
-              )}
+            {ramoSinCalibrar && (
+              <p className="mb-3 text-[12.5px] text-slate-500">
+                {t("case.detail.ramoSinCalibrarAyuda")}
+              </p>
+            )}
 
             <FieldGrid className="sm:grid-cols-3">
               <Field label={t("case.detail.assignedTo")}>
-                {caseRow.assigned_to
-                  ? (asignado_nombre ?? t("case.detail.assigned"))
-                  : t("case.detail.unassigned")}
+                {esEditor ? (
+                  <AsignarCaso
+                    caseId={caseRow.id}
+                    rol={me.role}
+                    miId={me.id}
+                    asignadoA={caseRow.assigned_to}
+                    nombreAsignado={asignado_nombre}
+                    carga={carga}
+                  />
+                ) : caseRow.assigned_to ? (
+                  (asignado_nombre ?? t("case.detail.assigned"))
+                ) : (
+                  t("case.detail.unassigned")
+                )}
               </Field>
               <Field label={t("case.detail.created")}>
                 {/*
@@ -313,6 +366,30 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 ) : null}
               </Field>
               <Field label={t("case.detail.channel")}>{channelLabel}</Field>
+              {esEditor && venceEn ? (
+                <Field label={t("caso.vencimiento")}>
+                  <InsigniaDeVencimiento vence={venceEn} />
+                  {nombreDelPlazo ? (
+                    <span className="mt-0.5 block text-[12.5px] text-slate-500">{nombreDelPlazo}</span>
+                  ) : null}
+                </Field>
+              ) : null}
+              {esEditor && caseRow.puntaje_complejidad !== null ? (
+                <Field label={t("caso.complejidad")}>
+                  <InsigniaDeComplejidad puntaje={caseRow.puntaje_complejidad} />
+                </Field>
+              ) : null}
+              {denuncia ? (
+                <Field label={t("caso.denuncia")}>
+                  <InsigniaDeDenuncia resultado={denuncia} />
+                </Field>
+              ) : null}
+              {/* Pagado y rechazado guardan su fecha en `closed_at`; la de `en_liquidacion` está en el historial. */}
+              {(caseRow.status === "pagado" || caseRow.status === "rechazado") && caseRow.closed_at ? (
+                <Field label={t(caseRow.status === "pagado" ? "case.detail.pagadoAt" : "case.detail.rechazadoAt")}>
+                  <span className="whitespace-nowrap">{formatDate(caseRow.closed_at, locale)}</span>
+                </Field>
+              ) : null}
             </FieldGrid>
           </div>
 
@@ -322,6 +399,11 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             status={caseRow.status as CaseStatus}
             caseNumber={caseNumber}
             paraResponder={caseRow.para_responder_desde !== null}
+            mensajeTardio={
+              caseRow.para_responder_desde !== null && caseRow.mensaje_tardio_de !== null
+                ? { tipo: caseRow.mensaje_tardio_tipo, resumen: caseRow.mensaje_tardio_resumen }
+                : null
+            }
             vistoEn={vistoEn}
             puedeMarcar={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
             acciones={acciones}
@@ -368,8 +450,15 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column — 2/3 width */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-          {/* Resumen del caso, en una línea */}
-          {(() => {
+          {/* Resumen del caso: el de la IA si lo hay, si no el armado con los campos. */}
+          {resumenIA ? (
+            <Card className="px-5 py-4">
+              <div className="flex items-start gap-2">
+                <Pill tone="acento">{t("case.detail.resumenIA")}</Pill>
+                <p className="text-[15px] text-slate-800">{resumenIA}</p>
+              </div>
+            </Card>
+          ) : (() => {
             const resumen = resumenDeCaso(
               {
                 nombre: displayedPolicyholderName,
@@ -387,6 +476,20 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               </Card>
             ) : null;
           })()}
+
+          {/* El checklist de trabajo (B11): sólo para el equipo, y sólo cuando el caso ya tiene plan. */}
+          {esEditor && plan.length > 0 && (
+            <PanelSection id="work-plan" titulo={t("planDeTrabajo.titulo")}>
+              <PlanDeTrabajo
+                caseId={caseRow.id}
+                pasos={plan.map((p) => {
+                  const clave = claveDeTituloDeFabrica(p);
+                  return clave ? { ...p, titulo: t(clave as TranslationKey) } : p;
+                })}
+                puedeCambiarEstado={puedeCambiarEstadoCaso}
+              />
+            </PanelSection>
+          )}
 
           {/* Datos del asegurado */}
           <PanelSection id="insured-data" titulo={t("case.detail.insuredData")}>
@@ -440,6 +543,85 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               mensajes, y sin ellos la tarjeta no tiene que existir. */}
           <MessagesThread caseId={caseRow.id} />
 
+          {/*
+            * Análisis de fraude, para todos los canales: los indicios que salen
+            * de cruzar los adjuntos valen igual para un caso de WhatsApp.
+            */}
+          {(nivelDeFraude || indicios.length > 0) && (
+            <PanelSection
+              id="fraud-analysis"
+              tono={
+                caseRow.fraud_risk_level === "high"
+                  ? "peligro"
+                  : caseRow.fraud_risk_level === "medium"
+                    ? "precaucion"
+                    : "atencion"
+              }
+              titulo={t("case.detail.fraudAnalysis")}
+              accesorio={nivelDeFraude ? <FraudRiskBadge level={nivelDeFraude} /> : null}
+            >
+              <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
+                {t("case.detail.fraudDisclaimer")}
+              </p>
+              {indicios.length > 0 ? (
+                <ul className="space-y-2">
+                  {indicios.map(
+                    (indicator, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm">
+                        <span className={`mt-0.5 shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 font-mono text-[11px] ${
+                          caseRow.fraud_risk_level === "high"
+                            ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
+                        }`}>
+                          {TIPOS.has(indicator.type)
+                            ? t(`fraude.indicio.${indicator.type}` as TranslationKey)
+                            : indicator.type.replace(/_/g, " ")}
+                        </span>
+                        <span className="text-slate-700 dark:text-slate-300">{textoDeIndicio(indicator, t)}</span>
+                      </li>
+                    )
+                  )}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500">{t("case.detail.fraudNoDetails")}</p>
+              )}
+            </PanelSection>
+          )}
+
+          {/* Cobertura y monto orientativo (B6, B23): sólo para el equipo. */}
+          {cobertura && (
+            <PanelSection
+              id="coverage"
+              titulo={t("cobertura.titulo")}
+              accesorio={<VeredictoDeCobertura cobertura={cobertura} t={t} />}
+            >
+              <CoberturaPanel cobertura={cobertura} t={t} />
+            </PanelSection>
+          )}
+
+          {/* Responsabilidad orientativa en un choque (B18): sólo para el equipo, nunca para el asegurado. */}
+          {esEditor && responsabilidad && (
+            <PanelSection
+              id="liability"
+              titulo={t("responsabilidad.titulo")}
+              accesorio={<VeredictoDeResponsabilidad responsabilidad={responsabilidad} t={t} />}
+            >
+              <ResponsabilidadPanel responsabilidad={responsabilidad} t={t} />
+            </PanelSection>
+          )}
+
+          {/* Carta de reclamo de un tercero (B24): sólo para el equipo, nunca para el asegurado. */}
+          {esEditor && cartas.length > 0 && (
+            <PanelSection id="third-party-claim" titulo={t("reclamo.titulo")}>
+              <ReclamoTerceroPanel
+                cartas={cartas}
+                t={t}
+                locale={locale}
+                puedeVerReclamante={(CUSTOMER_PII_ROLES as string[]).includes(me.role)}
+              />
+            </PanelSection>
+          )}
+
           {/* Email-specific sections — only shown for email channel cases */}
           {isEmailCase && (
             <>
@@ -489,46 +671,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 </FieldGrid>
               </PanelSection>
 
-              {/* Análisis de fraude — solo cuando hay indicadores */}
-              {caseRow.fraud_risk_level && caseRow.fraud_risk_level !== "none" && (
-                <PanelSection
-                  id="fraud-analysis"
-                  tono={
-                    caseRow.fraud_risk_level === "high"
-                      ? "peligro"
-                      : caseRow.fraud_risk_level === "medium"
-                        ? "precaucion"
-                        : "atencion"
-                  }
-                  titulo={t("case.detail.fraudAnalysis")}
-                  accesorio={<FraudRiskBadge level={caseRow.fraud_risk_level} />}
-                >
-                  <p className="mb-3 text-[12px] text-slate-500 dark:text-slate-400">
-                    {t("case.detail.fraudDisclaimer")}
-                  </p>
-                  {Array.isArray(caseRow.fraud_indicators) && caseRow.fraud_indicators.length > 0 ? (
-                    <ul className="space-y-2">
-                      {(caseRow.fraud_indicators as Array<{ type: string; description: string }>).map(
-                        (indicator, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm">
-                            <span className={`mt-0.5 shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 font-mono text-[11px] ${
-                              caseRow.fraud_risk_level === "high"
-                                ? "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
-                            }`}>
-                              {indicator.type.replace(/_/g, " ")}
-                            </span>
-                            <span className="text-slate-700 dark:text-slate-300">{indicator.description}</span>
-                          </li>
-                        )
-                      )}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-slate-500">{t("case.detail.fraudNoDetails")}</p>
-                  )}
-                </PanelSection>
-              )}
-
               {/* Section B: Field confirmations panel (AC21) */}
               {/*
                 * El contador de pendientes pasa de estar DENTRO del título a ser
@@ -558,39 +700,65 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                   hoy={hoy}
                 />
               </PanelSection>
-
-              {/*
-                * Section D: el envío al sistema del asegurador (AC17).
-                *
-                * El botón sale sólo si hay a quién mandarle. Sin integración
-                * configurada aparece el mismo panel, en gris y sin botón,
-                * diciendo que el caso está listo pero que el canal no existe.
-                *
-                * Antes el botón salía siempre y la ruta contestaba que sí:
-                * guardaba un `core_external_id` inventado y dejaba el caso en
-                * `enviado_a_core`. Esconder el botón es la mitad del arreglo;
-                * la otra mitad está en `getCoreSyncClient`, que ahora tira en
-                * vez de devolver el simulador.
-                */}
-              {caseRow.status === "listo_para_core" &&
-                (modoDeCoreSync() === "sin_configurar" ? (
-                  <PanelSection id="core-sync" titulo={t("case.detail.coreSyncAction")}>
-                    <p className="text-[13.5px] text-slate-500">
-                      {t("case.detail.coreSyncSinConfigurar")}
-                    </p>
-                  </PanelSection>
-                ) : (
-                  <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
-                    <p className="mb-4 text-[13.5px] text-emerald-700">
-                      {t("case.detail.coreReadyDescription")}
-                    </p>
-                    <CoreSyncButton
-                      caseId={caseRow.id}
-                      currentStatus={caseRow.status}
-                    />
-                  </PanelSection>
-                ))}
             </>
+          )}
+
+          {/*
+            * Section D: el envío al sistema del asegurador (AC17), para todos
+            * los canales: vivía en el bloque de correo y un caso de WhatsApp no
+            * lo veía.
+            *
+            * El botón sale sólo si hay a quién mandarle. Si no, aparece el
+            * mismo panel, en gris y sin botón: la integración no está
+            * configurada y desde acá no se envía. Quien puede cambiar el
+            * estado ve además la pista a «Entregado por fuera».
+            *
+            * Antes el botón salía siempre y la ruta contestaba que sí:
+            * guardaba un `core_external_id` inventado y dejaba el caso en
+            * `enviado_a_core`. Esconder el botón es la mitad del arreglo;
+            * la otra mitad está en `getCoreSyncClient`, que ahora tira en
+            * vez de devolver el simulador.
+            */}
+          {/* En `error_core` el mismo botón reintenta (force), si hay a quién mandarle. */}
+          {(caseRow.status === "listo_para_core" || (caseRow.status === "error_core" && acciones.hayCore)) &&
+            (!acciones.hayCore ? (
+              <PanelSection id="core-sync" titulo={t("case.detail.coreSyncAction")}>
+                <p className="text-[13.5px] text-slate-500">
+                  {t(acciones.casoDePrueba ? "case.detail.coreSyncCasoDePrueba" : "case.detail.coreSyncSinConfigurar")}
+                  {/* El botón sólo lo ve quien puede cambiar el estado. */}
+                  {puedeCambiarEstadoCaso && ` ${t("case.detail.coreSyncEntregadoPorFuera")}`}
+                </p>
+              </PanelSection>
+            ) : (
+              <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
+                <p className="mb-4 text-[13.5px] text-emerald-700">
+                  {t(caseRow.status === "error_core" ? "case.detail.coreSyncReintentar" : "case.detail.coreReadyDescription")}
+                  {caseRow.status === "error_core" && ` ${textoDelMotivo(t, caseRow.core_error_message)}`}
+                </p>
+                {/* La ruta admite CORE_SYNC_ROLES: a otro rol el botón le daría 403. */}
+                {puedeEnviarAlCore && (
+                  <CoreSyncButton
+                    caseId={caseRow.id}
+                    currentStatus={caseRow.status}
+                  />
+                )}
+              </PanelSection>
+            ))}
+          {/* Lo que devolvió el Core queda a la vista: el botón desaparece al refrescar la ficha. */}
+          {caseRow.status === "enviado_a_core" && (
+            <PanelSection id="core-sync" tono="exito" titulo={t("case.detail.coreSyncAction")}>
+              <p className="mb-4 text-[13.5px] text-emerald-700">{t("case.detail.coreSyncSuccess")}</p>
+              <FieldGrid>
+                {caseRow.core_sent_at && (
+                  <Field label={t("case.detail.coreSentAt")}>{formatDate(caseRow.core_sent_at, locale)}</Field>
+                )}
+                {caseRow.core_external_id && (
+                  <Field label={t("case.detail.coreExternalId")}>
+                    <span className="font-mono">{caseRow.core_external_id}</span>
+                  </Field>
+                )}
+              </FieldGrid>
+            </PanelSection>
           )}
         </div>
 
@@ -612,9 +780,10 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             */}
           <PanelSection id="attachments" titulo={t("case.detail.attachments")}>
             <AttachmentsPanel
-              attachments={attachments}
+              attachments={attachments.map((a) => ({ ...a, resumen: resumenDeLaIA(a.resumen, locale) }))}
               caseId={caseRow.id}
               puedeAbrir={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
+              puedeLeerPresupuesto={puedeCambiarEstadoCaso}
             />
           </PanelSection>
 

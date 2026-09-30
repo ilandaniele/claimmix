@@ -3,9 +3,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { t, getT, esAR } from "@/lib/i18n/index";
-import { enUS } from "@/lib/i18n/en-US";
+import { t, getT, esAR, enUS } from "@/lib/i18n/index";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locale-shared";
+import { RESULTADOS_SSO } from "@/app/(app)/configuracion/sso-resultados";
+import { enUS as enUSCliente } from "@/lib/i18n/en-US";
+import { enUSServidor } from "@/lib/i18n/en-US.servidor";
+import { esAR as esARCliente } from "@/lib/i18n/es-AR";
+import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 
 describe("t() translation helper", () => {
   it("returns the correct string for 'nav.bandeja'", () => {
@@ -278,5 +282,50 @@ describe("las cinco pantallas nuevas están traducidas de verdad", () => {
         `${clave} ya está traducida: sacala de IGUALES_A_PROPOSITO`
       ).toBe(enUS[clave as keyof typeof enUS]);
     }
+  });
+});
+
+/**
+ * El panel de SSO (B19) es de servidor a propósito: cada clave de cliente viaja al
+ * navegador en los dos idiomas y `pnpm peso` no tiene lugar. Si alguien mueve una
+ * de estas claves a `es-AR.ts`, el peso se pasa sin que ningún otro test lo note.
+ */
+describe("las claves del SSO", () => {
+  const claves = Object.keys(esARServidor).filter((k) => k.startsWith("configuracion.sso."));
+  const marcas = (texto: string) => (texto.match(/\{\w+\}/g) ?? []).sort();
+  // «Client ID» y «Client secret» son los nombres de los campos en la consola de todo proveedor, en cualquier idioma.
+  const IGUALES_A_PROPOSITO = new Set(["configuracion.sso.clientId", "configuracion.sso.clientSecret"]);
+
+  it("hay claves, y las mismas en los dos idiomas", () => {
+    expect(claves.length).toBeGreaterThan(40);
+    const eninglish = Object.keys(enUSServidor).filter((k) => k.startsWith("configuracion.sso."));
+    expect(eninglish.sort()).toEqual([...claves].sort());
+  });
+
+  it("ninguna quedó vacía, ninguna es el castellano copiado y las marcas coinciden", () => {
+    for (const clave of claves) {
+      const es = (esARServidor as Record<string, string>)[clave]!;
+      const en = (enUSServidor as Record<string, string>)[clave]!;
+      expect(es, clave).toBeTruthy();
+      expect(en, clave).toBeTruthy();
+      if (!IGUALES_A_PROPOSITO.has(clave)) expect(en, `${clave}: el inglés es el castellano copiado`).not.toBe(es);
+      expect(marcas(en), clave).toEqual(marcas(es));
+    }
+  });
+
+  it("la lista de iguales a propósito no junta polvo", () => {
+    for (const clave of IGUALES_A_PROPOSITO) {
+      expect((esARServidor as Record<string, string>)[clave], clave).toBe((enUSServidor as Record<string, string>)[clave]);
+    }
+  });
+
+  it("no viajan al navegador: ninguna está en los diccionarios de cliente", () => {
+    expect(Object.keys(esARCliente).filter((k) => k.startsWith("configuracion.sso."))).toEqual([]);
+    expect(Object.keys(enUSCliente).filter((k) => k.startsWith("configuracion.sso."))).toEqual([]);
+  });
+
+  it("todo resultado que la página puede pintar tiene su texto, y nada sobra", () => {
+    const deResultados = claves.filter((k) => k.startsWith("configuracion.sso.r.")).map((k) => k.slice("configuracion.sso.r.".length));
+    expect([...deResultados].sort()).toEqual([...RESULTADOS_SSO].sort());
   });
 });

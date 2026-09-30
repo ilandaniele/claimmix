@@ -12,16 +12,15 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { ClaveDeRamoSchema } from "@/lib/schemas/cases";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
 
 const FieldTypeSchema = z.enum(["text", "number", "date", "boolean", "enum", "email", "phone"]);
-const ClaimTypeSchema = z.enum([
-  "choque", "robo", "granizo", "incendio", "other",
-  "cristales", "rc", "robo_contenido", "accidente_personal",
-]);
+// Una clave de ramo cualquiera: nativa o propia del inquilino (`tenant_claim_types`).
+const ClaimTypeSchema = ClaveDeRamoSchema;
 
 const CreateCustomFieldSchema = z.object({
   key: z.string().trim().regex(/^[a-z][a-z0-9_]{1,63}$/),

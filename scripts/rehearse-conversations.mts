@@ -42,8 +42,12 @@ import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { diceCuidado } from "@/core/mensajes/derivacion";
 import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
+import { policyTypeDeRamo } from "@/core/case/ramos";
+import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
 import type { PatchActor } from "@/server/cases/patch";
+import type { TipoMensajeTardio } from "@/core/case/mensaje-tardio";
 import { proponeSinHeridos } from "./lib/propone-sin-heridos.mjs";
 import { pideAlgo } from "./lib/pide-algo.mjs";
 import { confirmaLoDicho, formaDePedirLaHora } from "./lib/ensayo-confirmaciones.mjs";
@@ -61,6 +65,7 @@ if (!process.env.DATABASE_URL || !TENANT_ID) {
 const { createWhatsAppIntakeAndRunAgent } = await import("@/server/agents/intake-agent");
 const { ingestInboundEmail } = await import("@/server/email/inbound-email");
 const { runIntakeAgent } = await import("@/server/agents/intake-agent");
+const { recordarCaso } = await import("@/server/confirmations/recordatorios");
 const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
 const { db } = await import("@/lib/db");
 const { CONTACT_DOC_KEYS } = await import("@/server/cases/documents");
@@ -68,6 +73,7 @@ const {
   cases,
   claimAttachments,
   claimFieldConfirmations,
+  claimMessages,
   customers,
   insuredAssets,
   missingDocs,
@@ -77,7 +83,7 @@ const {
   users,
   tenants,
 } = await import("@/lib/db/schema");
-const { and, eq, asc, inArray, isNotNull, like, lt, or, sql } = await import("drizzle-orm");
+const { and, eq, asc, inArray, isNotNull, isNull, like, lt, or, sql } = await import("drizzle-orm");
 
 // ── What a rehearsal looks like ──────────────────────────────────────────────
 
@@ -107,6 +113,14 @@ interface TurnDicho {
    * behaviour for an image nobody can identify.
    */
   photo?: string | boolean;
+  /**
+   * Un archivo que no es foto: una nota de voz o un PDF, por WhatsApp.
+   *
+   * `fixture` es el nombre en `tests/fixtures/`, con extensión. Si no está en
+   * disco se manda `reemplazo`, que sí está en el repositorio: ejercita el
+   * guardado, la firma y la llamada al modelo, pero no lo que el archivo dice.
+   */
+  adjunto?: { fixture: string; tipo: string; reemplazo?: string };
   /**
    * El asunto, cuando el que inventa el ensayo no sirve.
    *
@@ -174,6 +188,12 @@ interface TurnDicho {
      */
     paraResponder?: boolean;
     /**
+     * Qué pide el mensaje que quedó «Para responder» (B3), como lo clasificó el
+     * worker. `sin_clasificar` es un mensaje reservado sin clase: el modelo
+     * falló o no se llamó.
+     */
+    tardio?: Tardio;
+    /**
      * Claves que el mensaje NO tiene que haber pedido.
      *
      * Sobre `outbound_messages.asked_keys`, que es la lista que el propio
@@ -204,8 +224,15 @@ interface TurnDicho {
      * que lo que muerde es `pideAlgo`, más ancho que la guarda del redactor.
      */
     sinPedido?: boolean;
+    /**
+     * Que la nota de voz de este turno haya quedado escrita en el mensaje.
+     * Sólo con una nota de verdad en disco: el reemplazo es mudo.
+     */
+    transcribe?: boolean;
   };
 }
+
+type Tardio = TipoMensajeTardio | "sin_clasificar";
 
 /**
  * Lo hace una persona desde la pantalla, vía `patchCase`, no por WhatsApp: E24
@@ -216,7 +243,18 @@ interface TurnAccion {
   expect?: { status?: string; paraResponder?: boolean };
 }
 
-type Turn = TurnDicho | TurnAccion;
+/**
+ * El recordatorio de lo que falta (B4), como si hubieran pasado `horasDespues`
+ * horas. Sólo `recordarCaso` sobre el caso del escenario, con horas propias:
+ * nunca el barrido global ni `recordatorio_horas` del tenant.
+ */
+interface TurnRecordatorio {
+  accion: "recordatorio";
+  horasDespues: number;
+  expect?: { replies?: number; status?: string; recordatorio?: "enviado" | "salteado" | null };
+}
+
+type Turn = TurnDicho | TurnAccion | TurnRecordatorio;
 
 interface Scenario {
   id: string;
@@ -240,7 +278,14 @@ interface Scenario {
    * has none loaded yet. Seeded and deleted per scenario so a rehearsal never
    * leaves an invented customer sitting in the real Clientes screen.
    */
-  policy?: { numero: string; dni: string; nombre: string; vencida?: boolean };
+  policy?: {
+    numero: string;
+    dni: string;
+    nombre: string;
+    vencida?: boolean;
+    /** Ramo de la póliza sembrada; sin él es un auto, con su vehículo. */
+    ramo?: string;
+  };
   /**
    * Que no le devuelva como «¿…, correcto?» lo que la persona acaba de
    * escribir, y que pida la hora siempre de la misma forma (goteo, 23/09).
@@ -257,6 +302,18 @@ interface Scenario {
     docsDeclined?: string[];
     /** Field keys that must have survived to the end with a value. */
     knows?: string[];
+    /** Tipos de indicio que tienen que estar en `cases.fraud_indicators`. */
+    indicios?: string[];
+    /** Cuántos adjuntos tienen que haber quedado leídos (`resumen` escrito). */
+    leidos?: number;
+    /**
+     * Quién es el responsable preliminar en `cases.responsabilidad` (B18):
+     * `asegurado`, `tercero`, `compartida` o `no_determinable`. Sin opinión
+     * escrita se informa `sin_leer`.
+     */
+    responsabilidad?: string;
+    /** Ramo con el que quedó clasificado el caso (`cases.claim_type`), B26. */
+    ramo?: string;
   };
 }
 
@@ -300,6 +357,24 @@ const SCENARIOS: Scenario[] = [
   },
 
   {
+    id: "alcance-responsabilidad-clara",
+    what: "Un choque por alcance con la responsabilidad clara: el agente sigue pidiendo lo de siempre, no le adelanta la culpa y la opinión queda para el equipo",
+    turns: [
+      {
+        say: "Hola, me chocaron de atrás ayer a las 19 en Bahía Blanca, Av. Alem al 2300, yo estaba parado y el otro auto no frenó. Soy Martín Sosa, patente AB 123 CD, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
+        expect: {
+          replies: 1,
+          // La opinión es orientativa y del equipo: al asegurado no se le dice quién tuvo la culpa ni se le cita la ley.
+          avoids: ["culpa", "24.449", "24449", "art. 48", "artículo 48", "cubierto", "aprobado"],
+          // Ni por ser un choque claro se le piden papeles del otro conductor.
+          noAsked: ["party_b_plate", "party_b_name", "party_b_insurer"],
+        },
+      },
+    ],
+    finally: { responsabilidad: "tercero" },
+  },
+
+  {
     id: "incendio-grave",
     what: "Un incendio con heridos: se deriva y no se le pide nada más",
     turns: [
@@ -331,6 +406,58 @@ const SCENARIOS: Scenario[] = [
       {
         say: "¿Me pueden llamar?",
         expect: { replies: 0, status: "requiere_especialista", paraResponder: true },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "escribe-tarde-pregunta-como-va",
+    what: "Derivado, pregunta cómo va: el agente calla, queda «Para responder» y el mensaje se clasifica como consulta de estado (B3)",
+    turns: [
+      {
+        say: "Se prendió fuego el auto en la ruta 3, mi esposo está internado con quemaduras. Soy Clara Méndez, póliza POL-5520-B.",
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "¿Cómo va mi denuncia?",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "consulta_estado" },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "tardio-siniestro-nuevo",
+    what: "Derivado, cuenta otro choque en otra fecha: no abre otro caso, queda «Para responder» como siniestro nuevo (B3)",
+    turns: [
+      {
+        say: "Se incendió la moto en la ruta 22, mi hermano está internado con quemaduras. Soy Pablo Ortiz, póliza POL-6610-E.",
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "Otra cosa: el sábado 12 de septiembre me chocaron de atrás con el Corsa en Punta Alta. Es otro choque, no tiene nada que ver con el incendio.",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "siniestro_nuevo" },
+      },
+    ],
+    finally: { status: "requiere_especialista" },
+  },
+
+  {
+    id: "mail-tardio-pregunta-como-va",
+    channel: "email",
+    what: "Por mail, derivado, contesta en el hilo cómo va: el agente calla, queda «Para responder» y se clasifica (B3)",
+    turns: [
+      {
+        say: [
+          "Se incendió la camioneta en la ruta 51 y mi padre está internado con quemaduras.",
+          "Soy Nora Vidal, póliza POL-3390-G.",
+        ].join("\n"),
+        expect: { replies: 1, status: "requiere_especialista" },
+      },
+      {
+        say: "Hola, ¿cómo va mi denuncia? No tuve novedades.",
+        expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "consulta_estado" },
       },
     ],
     finally: { status: "requiere_especialista" },
@@ -389,7 +516,17 @@ const SCENARIOS: Scenario[] = [
     turns: [
       {
         say: "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114.",
-        expect: { replies: 1 },
+        // El tipo ya está dicho: pedirlo era el efecto de un bloque del prompt
+        // que hacía caer el choque contra un poste en `other`.
+        //
+        // Y la provincia se pide, no se afirma: «Alem al 500» no dice cuál, y el
+        // 30/09 la respuesta decía «Entendemos que fue en CABA» y a la vez la
+        // pedía. `avoids` mira eso; no dice «caba» solo porque está en «acabamos».
+        expect: {
+          replies: 1,
+          noAsked: ["claim_type"],
+          avoids: ["en CABA", "Capital Federal", "Buenos Aires"],
+        },
       },
       // The three-messages-in-ninety-seconds bug: each round was individually
       // correct, and nobody was reading.
@@ -528,6 +665,32 @@ const SCENARIOS: Scenario[] = [
     ],
   },
 
+  {
+    id: "nota-de-voz-y-pdf",
+    what: "Una nota de voz y un PDF se leen, y la fecha del PDF que no coincide queda para el analista",
+    policy: { numero: "POL-6100-D", dni: "27.300.400", nombre: "Lucía Paz" },
+    turns: [
+      {
+        say: "Hola, soy Lucía Paz, DNI 27.300.400, póliza POL-6100-D. Choqué el 12 de septiembre de 2026 en Bahía Blanca.",
+        expect: { replies: 1 },
+      },
+      {
+        // Como lo deja el webhook: un audio sin texto entra con el marcador.
+        say: PLACEHOLDER_AUDIO,
+        adjunto: { fixture: "nota-de-voz.ogg", tipo: "audio/ogg; codecs=opus", reemplazo: "placeholder.ogg" },
+        expect: { attachments: 1, transcribe: true },
+      },
+      {
+        // La constancia dice 15/09/2026: tres días después de lo que contó.
+        say: "Te mando la constancia de la denuncia",
+        adjunto: { fixture: "sintetico-constancia.pdf", tipo: "application/pdf" },
+        // Lo que no coincide no se le dice a la persona.
+        expect: { attachments: 2, avoids: ["no coincide", "inconsisten", "fraude"] },
+      },
+    ],
+    finally: { indicios: ["timeline_inconsistency"], leidos: 2 },
+  },
+
   // ── Email ─────────────────────────────────────────────────────────────────
   //
   // Genuinely different code from here down: threading by subject, a prefilter
@@ -571,6 +734,57 @@ const SCENARIOS: Scenario[] = [
       docsDeclined: ["parte_amistoso"],
       knows: ["policy_number", "full_name"],
     },
+  },
+
+  {
+    id: "consorcio-por-mail",
+    channel: "email",
+    what: "Un administrador denuncia daños en las partes comunes de un edificio: es un consorcio y no se le pide patente",
+    /*
+     * El ramo nuevo de punta a punta, por el canal que usa un administrador.
+     * Sin fotos: con el marcador no hay nada que reconocer, y el estado final
+     * depende de ellas. Lo que se afirma no depende de cómo redacte el modelo:
+     * que conteste una vez, que no pida la patente de un auto que no existe y
+     * que los datos del mensaje sobrevivan.
+     */
+    policy: { numero: "POL-8810-C", dni: "20.111.222", nombre: "Roberto Acosta", ramo: "consorcio" },
+    turns: [
+      {
+        say: [
+          "Buenas tardes,",
+          "",
+          "Soy Roberto Acosta, administrador del consorcio de Av. Alem 2300, en Bahía Blanca, provincia de Buenos Aires.",
+          "Ayer se rompió una cañería del tanque de agua, se inundó el hall de entrada y el ascensor quedó fuera de servicio.",
+          "La póliza del consorcio es POL-8810-C.",
+          "",
+          "Saludos,",
+          "Roberto",
+        ].join("\n"),
+        expect: { replies: 1, noAsked: ["patente_vehiculo"] },
+      },
+    ],
+    finally: { knows: ["policy_number", "full_name"], ramo: "consorcio" },
+  },
+
+  {
+    id: "recordatorio-por-mail",
+    channel: "email",
+    what: "Queda esperando datos y no contesta: a las 48 h y a los 5 días se le repite el pedido, una sola vez cada uno (B4)",
+    /*
+     * El reloj se adelanta pasándole `ahora` a `recordarCaso` sobre este caso
+     * solo, con horas propias: el ensayo nunca llama al barrido global ni
+     * prende los recordatorios del tenant.
+     */
+    turns: [
+      {
+        say: "Buenas, ayer me chocaron de atrás en Bahía Blanca. ¿Qué tengo que mandarles?",
+        expect: { replies: 1, status: "info_faltante" },
+      },
+      { accion: "recordatorio", horasDespues: 49, expect: { replies: 1, status: "info_faltante", recordatorio: "enviado" } },
+      { accion: "recordatorio", horasDespues: 49, expect: { replies: 0, status: "info_faltante", recordatorio: null } },
+      { accion: "recordatorio", horasDespues: 121, expect: { replies: 1, status: "info_faltante", recordatorio: "enviado" } },
+    ],
+    finally: { status: "info_faltante" },
   },
 
   {
@@ -770,11 +984,18 @@ const RUN = Date.now().toString().slice(-8);
  */
 /** Is there a real photograph for this fixture name? */
 function haveRealPhoto(photo: string | boolean): boolean {
-  return typeof photo === "string" && fs.existsSync(fixturePath(photo));
+  return typeof photo === "string" && fs.existsSync(fixturePath(`${photo}.jpg`));
 }
 
-function fixturePath(name: string): string {
-  return path.resolve("tests/fixtures", `${name}.jpg`);
+function fixturePath(archivo: string): string {
+  return path.resolve("tests/fixtures", archivo);
+}
+
+/** El archivo que se manda de verdad: el pedido si está en disco, si no el reemplazo. */
+function archivoDe(adjunto: NonNullable<TurnDicho["adjunto"]>): string {
+  return fs.existsSync(fixturePath(adjunto.fixture)) || !adjunto.reemplazo
+    ? adjunto.fixture
+    : adjunto.reemplazo;
 }
 
 /**
@@ -793,8 +1014,8 @@ function fixturePath(name: string): string {
  * See docs/TESTING.md for which files to drop in.
  */
 function imageFor(photo: string | boolean): Buffer {
-  if (haveRealPhoto(photo)) return fs.readFileSync(fixturePath(photo as string));
-  return fs.readFileSync(path.resolve("tests/fixtures/placeholder.jpg"));
+  if (haveRealPhoto(photo)) return fs.readFileSync(fixturePath(`${photo as string}.jpg`));
+  return fs.readFileSync(fixturePath("placeholder.jpg"));
 }
 
 /**
@@ -882,11 +1103,14 @@ async function seedPolicyFor(
       tenant_id: TENANT_ID!,
       customer_id: customerId,
       policy_number: policy.numero,
-      policy_type: "auto",
+      policy_type: policyTypeDeRamo(policy.ramo),
       status: "active",
       end_date: policy.vencida ? "2020-03-01" : "2099-01-01",
     })
     .returning({ id: policies.id });
+
+  // Un consorcio o una ART no tienen vehículo: sembrarle uno le haría preguntar por él.
+  if (policy.ramo && policyTypeDeRamo(policy.ramo) !== "auto") return;
 
   await db.insert(insuredAssets).values({
     tenant_id: TENANT_ID!,
@@ -924,7 +1148,16 @@ async function deliverWhatsApp(
             data: imageFor(turn.photo),
           },
         ]
-      : undefined,
+      : turn.adjunto
+        ? [
+            {
+              id: `rehearsal-${RUN}-${i}`,
+              mimeType: turn.adjunto.tipo,
+              filename: archivoDe(turn.adjunto),
+              data: fs.readFileSync(fixturePath(archivoDe(turn.adjunto))),
+            },
+          ]
+        : undefined,
   });
   return result.caseId;
 }
@@ -1009,6 +1242,21 @@ async function extraccionPendiente(caseId: string): Promise<boolean> {
   return row?.pending === true;
 }
 
+/**
+ * Tras un timeout el worker deja el archivo esperando una hora (`plazoAgotado`),
+ * y la retoma de producción, dos minutos después, lo saltea igual. La del ensayo
+ * tiene que leerlo: con la espera puesta, un timeout sobre la nota de voz o el
+ * PDF los dejaba afuera de la retoma y el escenario cerraba con «1 adjunto(s)
+ * leído(s), esperaba 2» por una caída de Vertex. Si el modelo vuelve a fallar,
+ * la retoma vuelve a marcarlos y el rojo sigue siendo rojo.
+ */
+async function levantarPlazos(caseId: string): Promise<void> {
+  await db
+    .update(claimAttachments)
+    .set({ metadatos: sql`${claimAttachments.metadatos} - 'plazoAgotado'` })
+    .where(and(eq(claimAttachments.case_id, caseId), eq(claimAttachments.tenant_id, TENANT_ID!)));
+}
+
 /** Lo que salió, y qué claves pidió. La misma consulta, una columna más. */
 async function repliesSince(
   caseId: string,
@@ -1040,16 +1288,21 @@ async function actorParaAcciones(): Promise<PatchActor | null> {
   return row ?? null;
 }
 
-/** Estado y «Para responder» después de un turno o de un turno de acción: el mismo chequeo. */
+/** Estado, «Para responder» y el mensaje tardío después de un turno o de un turno de acción: el mismo chequeo. */
 async function checkStatusYParaResponder(
   scenarioId: string,
   turn: number,
   caseId: string,
-  want: { status?: string; paraResponder?: boolean } | undefined
+  want: { status?: string; paraResponder?: boolean; tardio?: Tardio } | undefined
 ): Promise<void> {
-  if (!want || (!want.status && want.paraResponder === undefined)) return;
+  if (!want || (!want.status && want.paraResponder === undefined && !want.tardio)) return;
   const row = await db
-    .select({ status: cases.status, paraResponderDesde: cases.para_responder_desde })
+    .select({
+      status: cases.status,
+      paraResponderDesde: cases.para_responder_desde,
+      tardioDe: cases.mensaje_tardio_de,
+      tardioTipo: cases.mensaje_tardio_tipo,
+    })
     .from(cases)
     .where(eq(cases.id, caseId));
   if (want.status && row[0]?.status !== want.status) {
@@ -1065,6 +1318,12 @@ async function checkStatusYParaResponder(
       want.paraResponder ? "no quedó «Para responder»" : "quedó «Para responder» y no debía",
       "para-responder"
     );
+  }
+  if (want.tardio) {
+    const tardio = row[0]?.tardioDe == null ? null : (row[0].tardioTipo ?? "sin_clasificar");
+    if (tardio !== want.tardio) {
+      note(scenarioId, turn, `mensaje tardío ${tardio ?? "sin reservar"}, esperaba ${want.tardio}`, "tardio");
+    }
   }
 }
 
@@ -1106,6 +1365,56 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
   try {
 
     for (const [i, turn] of scenario.turns.entries()) {
+      if ("horasDespues" in turn) {
+        console.log(`\n   [${i + 1}] ⏰ recordatorio a +${turn.horasDespues} h`);
+        if (!caseId) {
+          note(scenario.id, i + 1, "recordatorio sin caso previo: ningún turno anterior lo creó", "recordatorio");
+          continue;
+        }
+        const caso: string = caseId;
+        const updatedAt = async () =>
+          (await db.select({ u: cases.updated_at }).from(cases).where(eq(cases.id, caso)))[0]?.u;
+        const antes = await updatedAt();
+        let resultado: Awaited<ReturnType<typeof recordarCaso>>;
+        try {
+          resultado = await recordarCaso(caso, {
+            tenantId: TENANT_ID!,
+            ahora: new Date(Date.now() + turn.horasDespues * 3_600_000),
+            horas: [48, 120],
+          });
+        } catch (err) {
+          // 42703/42P01: falta aplicar la 0039 en esta base, no es un defecto.
+          const code = errorCode((err as { cause?: unknown }).cause ?? err);
+          note(scenario.id, i + 1, `recordarCaso falló (${code})`, "recordatorio");
+          continue;
+        }
+        const said = await repliesSince(caso, seen);
+        seen += said.length;
+        if (said.length > 0) ultimo = readable(said[said.length - 1].body);
+        if (said.length === 0) console.log("       🤖 (silencio)");
+        for (const reply of said) {
+          console.log(`       🤖 ${readable(reply.body).replace(/\n/g, "\n          ")}`);
+        }
+
+        const want = turn.expect;
+        if (want?.replies !== undefined && said.length !== want.replies) {
+          note(scenario.id, i + 1, `esperaba ${want.replies} respuesta(s), hubo ${said.length}`, "cantidad-de-respuestas");
+        }
+        if (want?.recordatorio !== undefined && resultado !== want.recordatorio) {
+          note(scenario.id, i + 1, `recordatorio ${resultado}, esperaba ${want.recordatorio}`, "recordatorio");
+        }
+        // Repite el pedido: las mismas claves que el último.
+        const mismas = (claves: string[]) =>
+          claves.length === pedidoAnterior.length && claves.every((k) => pedidoAnterior.includes(k));
+        if (said.some((r) => !mismas(r.askedKeys))) {
+          note(scenario.id, i + 1, "el recordatorio no repite las claves del último pedido", "recordatorio-claves");
+        }
+        if ((await updatedAt()) !== antes) {
+          note(scenario.id, i + 1, "el recordatorio tocó updated_at del caso", "recordatorio-updated-at");
+        }
+        await checkStatusYParaResponder(scenario.id, i + 1, caso, want);
+        continue;
+      }
       if ("accion" in turn) {
         console.log(`\n   [${i + 1}] 🧑‍💼 ${turn.accion}`);
         if (!caseId) {
@@ -1173,6 +1482,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
       let said = await repliesSince(active, seen);
       if (said.length === 0 && turn.expect?.replies !== 0 && (await extraccionPendiente(active))) {
         console.log("       ⟳ el modelo no llegó en treinta segundos; se retoma el caso una vez");
+        await levantarPlazos(active);
         await runIntakeAgent({ caseId: active, tenantId: TENANT_ID!, userId: null, source: "worker" });
         said = await repliesSince(active, seen);
       }
@@ -1308,6 +1618,23 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
           );
         }
       }
+      if (want.transcribe && turn.adjunto) {
+        if (archivoDe(turn.adjunto) !== turn.adjunto.fixture) {
+          unrehearsed.add(turn.adjunto.fixture);
+        } else {
+          const [transcripto] = await db
+            .select({ id: claimMessages.id })
+            .from(claimMessages)
+            .where(
+              and(
+                eq(claimMessages.case_id, active),
+                sql`${claimMessages.raw_payload}->>'transcripcion' = 'true'`
+              )
+            )
+            .limit(1);
+          if (!transcripto) note(scenario.id, i + 1, "la nota de voz no quedó escrita", "transcribe");
+        }
+      }
       await checkStatusYParaResponder(scenario.id, i + 1, active, want);
 
       /*
@@ -1381,7 +1708,10 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
 
     if (caseId && scenario.finally) {
       const want = scenario.finally;
-      const [row] = await db.select({ status: cases.status }).from(cases).where(eq(cases.id, caseId));
+      const [row] = await db
+        .select({ status: cases.status, indicios: cases.fraud_indicators, ramo: cases.claim_type })
+        .from(cases)
+        .where(eq(cases.id, caseId));
       if (want.status && !fotosSinEnsayar && row?.status !== want.status) {
         note(
           scenario.id,
@@ -1430,6 +1760,35 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         const keys = new Set(known.map((k) => k.key));
         for (const key of want.knows) {
           if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`, `perdio-dato:${key}`);
+        }
+      }
+
+      const tipos = new Set(
+        (Array.isArray(row?.indicios) ? row.indicios : []).map((x) => (x as { type?: unknown })?.type)
+      );
+      for (const tipo of want.indicios ?? []) {
+        if (!tipos.has(tipo)) note(scenario.id, 0, `no marcó el indicio ${tipo}`, `indicio:${tipo}`);
+      }
+
+      if (want.ramo !== undefined && row?.ramo !== want.ramo) {
+        note(scenario.id, 0, `ramo ${row?.ramo ?? "sin clasificar"}, esperaba ${want.ramo}`, "ramo");
+      }
+
+      if (want.responsabilidad !== undefined) {
+        const [opinion] = await db.select({ responsabilidad: cases.responsabilidad }).from(cases).where(eq(cases.id, caseId));
+        const responsable = (opinion?.responsabilidad as { responsable?: string } | null)?.responsable ?? "sin_leer";
+        if (responsable !== want.responsabilidad) {
+          note(scenario.id, 0, `responsabilidad ${responsable}, esperaba ${want.responsabilidad}`, "responsabilidad");
+        }
+      }
+
+      if (want.leidos !== undefined) {
+        const leidos = await db
+          .select({ id: claimAttachments.id })
+          .from(claimAttachments)
+          .where(and(eq(claimAttachments.case_id, caseId), isNotNull(claimAttachments.resumen)));
+        if (leidos.length !== want.leidos) {
+          note(scenario.id, 0, `${leidos.length} adjunto(s) leído(s), esperaba ${want.leidos}`, "leidos");
         }
       }
 
@@ -1563,6 +1922,9 @@ async function sweepOldRehearsalCases(): Promise<void> {
  * A seed is identified by the exact name, DNI and policy number of a
  * scenario's `policy` block, and only when it is older than an hour, like the
  * case sweep. A seed lives for one scenario, so an hour-old seed is not in use.
+ * A run killed between the two inserts leaves the customer without a policy,
+ * so a customer with no policy at all counts too: on 28/09 one blocked every
+ * later seed through the unique DNI.
  */
 async function sweepOldSeeds(): Promise<void> {
   const semillas = SCENARIOS.flatMap((s) => (s.policy ? [s.policy] : []));
@@ -1571,7 +1933,7 @@ async function sweepOldSeeds(): Promise<void> {
     const stale = await db
       .select({ id: customers.id })
       .from(customers)
-      .innerJoin(policies, eq(policies.customer_id, customers.id))
+      .leftJoin(policies, eq(policies.customer_id, customers.id))
       .where(
         and(
           eq(customers.tenant_id, TENANT_ID!),
@@ -1581,7 +1943,7 @@ async function sweepOldSeeds(): Promise<void> {
               and(
                 eq(customers.full_name, p.nombre),
                 eq(customers.dni, p.dni.replace(/\D/g, "")),
-                eq(policies.policy_number, p.numero)
+                or(eq(policies.policy_number, p.numero), isNull(policies.id))
               )
             )
           )
@@ -1738,7 +2100,7 @@ await sweepOldRehearsalCases();
 
 // Los turnos de acción los ejecuta una persona de verdad (owner/admin, Plan
 // Pro): sin uno, el escenario se reporta sin ensayar en vez de fallar rojo.
-const requiereActor = (s: Scenario) => s.turns.some((t) => "accion" in t);
+const requiereActor = (s: Scenario) => s.turns.some((t) => "accion" in t && t.accion !== "recordatorio");
 const actor = chosen.some(requiereActor) ? await actorParaAcciones() : null;
 const actorValido = actor !== null && esPlanPro(actor.plan);
 if (chosen.some(requiereActor)) {
@@ -1792,8 +2154,8 @@ if (unrehearsed.size > 0) {
     .map((n) => n.slice("actor:".length));
   if (fotos.length > 0) {
     console.log(
-      "\n⋯ Reconocimiento de documentos NO ensayado: faltan " +
-        fotos.map((n) => `tests/fixtures/${n}.jpg`).join(", ")
+      "\n⋯ Reconocimiento de documentos o notas de voz NO ensayado: faltan " +
+        fotos.map((n) => `tests/fixtures/${n.includes(".") ? n : `${n}.jpg`}`).join(", ")
     );
   }
   if (sinActor.length > 0) {

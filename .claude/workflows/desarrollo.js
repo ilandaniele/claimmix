@@ -33,6 +33,8 @@ const modo = entrada.modo ?? 'completo'
 const RONDAS = entrada.rondas ?? 2
 const rama = entrada.rama ?? 'wf/' + tarea.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-|-$/g, '')
+// Quien edita va en Sonnet 5.5, como orch-builder; `editar` en los args pide otro modelo.
+const EDITOR = { model: entrada.editar ?? 'sonnet' }
 
 const REGLAS = `
 
@@ -202,7 +204,7 @@ Plan acordado: ${JSON.stringify(plan)}
 Mapas del terreno: ${JSON.stringify(mapas)}
 
 Sos el ÚNICO que toca código. Creá la rama "${rama}" desde qa actualizada (git fetch, git checkout -b ${rama} origin/qa) y seguí el plan paso a paso. Escribí los tests del plan; cuando la tarea es un bug tienen que fallar antes del arreglo y pasar después. Corré los tests que tocaste, "pnpm tsc --noEmit" y eslint sobre los archivos tocados hasta que todo quede limpio. No hagas commit todavía. Si algo del plan no cierra con lo que ves en el código, resolvelo con el criterio de las reglas y anotalo en dudas.${REGLAS}`,
-  { label: 'implementar', schema: IMPL },
+  { label: 'implementar', schema: IMPL, ...EDITOR },
 )
 if (!impl) throw new Error('El implementador no devolvió nada')
 log(`Tocados: ${impl.archivos_tocados.join(', ')}`)
@@ -274,7 +276,7 @@ Sos el refutador ${i + 1} de ${votos(h)}. Tu trabajo es DEMOSTRAR que el hallazg
 Rama: ${rama}. Hallazgos confirmados por revisión y refutación: ${JSON.stringify(sobrevivientes)}
 
 Sos el único que toca código. Corregí cada uno con el cambio más chico que lo resuelve de verdad, agregá o ajustá el test que lo hubiera atrapado, y dejá tests, "pnpm tsc --noEmit" y eslint limpios. No hagas commit.${REGLAS}`,
-    { label: `corregir:ronda${ronda}`, phase: 'Revisar', schema: IMPL },
+    { label: `corregir:ronda${ronda}`, phase: 'Revisar', schema: IMPL, ...EDITOR },
   )
 }
 
@@ -289,7 +291,7 @@ if (comprobacion && (comprobacion.capas.some((c) => !c.ok) || !comprobacion.tran
 Rama: ${rama}. Resultado del check: ${JSON.stringify(comprobacion)}
 
 Sos el único que toca código. Diagnosticá y corregí lo que falló (si es el transcripto, el problema está en cómo suena el agente: prompts, redactor u orquestador). Cambio mínimo, con su test cuando aplique. No hagas commit.${REGLAS}`,
-    { label: 'corregir:check', phase: 'Comprobar', schema: IMPL },
+    { label: 'corregir:check', phase: 'Comprobar', schema: IMPL, ...EDITOR },
   )
   comprobacion = await agent(PEDIDO_CHECK, { label: 'check:2', phase: 'Comprobar', schema: COMPROBACION, model: 'sonnet' })
 }

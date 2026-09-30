@@ -23,8 +23,9 @@ import { getTenantKpis, type ResumenDeAyer } from "@/server/metrics/kpis";
 
 const CTX = { tenantId: "10000000-0000-0000-0000-000000000001" };
 const SIN_USO = { calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
+const SIN_CICLO = { reclamos: 0, con_listo: 0, mediana_horas_listo: null, con_cierre: 0, mediana_horas_cierre: null, sin_intervencion: 0, mensajes_por_caso: null };
 
-/** Las nueve filas fijas del lote, más lo que cada test agregue al final. */
+/** Las once filas fijas del lote, más lo que cada test agregue al final. */
 function filasDelLote(extra: unknown[] = []) {
   return [
     [{ total: 0, listo: 0, respondidos: 0, minutos: 0 }],
@@ -35,6 +36,8 @@ function filasDelLote(extra: unknown[] = []) {
     [SIN_USO],
     [SIN_USO],
     [],
+    [],
+    [SIN_CICLO],
     [],
     ...extra,
   ];
@@ -55,15 +58,15 @@ const consultasDelLote = () =>
 beforeEach(() => mockVarias.mockReset());
 
 describe("getTenantKpis — el resumen de ayer, según lo que se pida", () => {
-  it("con serie y ayer, el lote lleva once consultas", async () => {
+  it("con serie y ayer, el lote lleva trece consultas", async () => {
     mockVarias.mockResolvedValue(filasDelLote([[], []]));
 
     await getTenantKpis(CTX, { serie: "dia", ayer: true });
 
-    expect(consultasDelLote()).toBe(11);
+    expect(consultasDelLote()).toBe(13);
   });
 
-  it("pedido solo, va como décima consulta y llega en `ayer`", async () => {
+  it("pedido solo, va como consulta doce y llega en `ayer`", async () => {
     const sentinela: ResumenDeAyer = {
       reclamos: 1,
       whatsapps: 2,
@@ -77,16 +80,16 @@ describe("getTenantKpis — el resumen de ayer, según lo que se pida", () => {
 
     const result = await getTenantKpis(CTX, { ayer: true });
 
-    expect(consultasDelLote()).toBe(10);
+    expect(consultasDelLote()).toBe(12);
     expect(result.ayer).toEqual(sentinela);
   });
 
-  it("sin pedirlo, el lote sigue en nueve y la clave no aparece", async () => {
+  it("sin pedirlo, el lote sigue en once y la clave no aparece", async () => {
     mockVarias.mockResolvedValue(filasDelLote());
 
     const result = await getTenantKpis(CTX);
 
-    expect(consultasDelLote()).toBe(9);
+    expect(consultasDelLote()).toBe(11);
     expect("ayer" in result).toBe(false);
   });
 });
@@ -112,5 +115,30 @@ describe("consultaDeAyer, a través del lote — la ventana y el SQL que arma", 
     expect(sql).toContain(`"para_responder_desde" is not null`);
     expect(sql).not.toMatch(/_sim/);
     expect(params.filter((p) => String(p).endsWith("_sim"))).toEqual([]);
+  });
+});
+
+// Un cierre también es `pagado` o `rechazado` (B25), que guardan su fecha en
+// `closed_at`: contar sólo `cerrado` los dejaba afuera de «Cerrados ayer» y
+// del ranking de analistas.
+describe("los cierres cuentan pagado y rechazado", () => {
+  function sqlDelLote(i: number) {
+    const armador = mockVarias.mock.calls.at(-1)![1] as (
+      db: unknown
+    ) => { toSQL(): { sql: string; params: unknown[] } }[];
+    return armador(new QueryBuilder() as never).at(i)!.toSQL();
+  }
+
+  it.each([
+    ["el resumen de ayer", -1],
+    ["los cinco analistas del mes", 4],
+  ])("%s", async (_, i) => {
+    mockVarias.mockResolvedValue(filasDelLote([[]]));
+
+    await getTenantKpis(CTX, { ayer: true });
+
+    const { sql, params } = sqlDelLote(i);
+    expect(params).toEqual(expect.arrayContaining(["cerrado", "pagado", "rechazado"]));
+    expect(sql).toContain(`"cases"."closed_at" >= $`);
   });
 });

@@ -3,6 +3,8 @@
 // No list → nobody. Admins bypass via `enAltaDeAdmin`.
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import { dominioDelMail } from "@/core/sso";
+
 export type Permiso =
   | { tipo: "dominio"; valor: string }
   | { tipo: "direccion"; valor: string };
@@ -53,7 +55,29 @@ export function esAltaDeAdmin(): boolean {
   return altaDeAdmin.getStore() === true;
 }
 
+/**
+ * Un ingreso por el SSO de un inquilino, en curso. Lo abre el callback del SSO
+ * (`src/lib/auth/sso-inquilino.ts`) sólo después de verificar el token del IdP,
+ * y dura lo que dura `handleOAuthUserInfo`: adentro corren los ganchos de alta
+ * y de sesión, que así saben de qué inquilino se trata sin leerlo de ninguna
+ * entrada del pedido.
+ */
+export type IngresoPorSso = { tenantId: string; dominio: string };
+
+const ingresoSso = new AsyncLocalStorage<IngresoPorSso>();
+
+export function enIngresoPorSso<T>(ingreso: IngresoPorSso, fn: () => Promise<T>): Promise<T> {
+  return ingresoSso.run(ingreso, fn);
+}
+
+export function ingresoPorSso(): IngresoPorSso | undefined {
+  return ingresoSso.getStore();
+}
+
 export function altaHabilitada(email: string): boolean {
   if (esAltaDeAdmin()) return true;
+  // El dominio verificado del inquilino hace de allowlist, y nada más que esa.
+  const sso = ingresoPorSso();
+  if (sso) return dominioDelMail(email) === sso.dominio;
   return puedeRegistrarse(email, permitidosConfigurados());
 }

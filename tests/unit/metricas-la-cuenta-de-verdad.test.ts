@@ -31,13 +31,25 @@ import { consultaDeActividad, getTenantKpis } from "@/server/metrics/kpis";
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { PuntoSerie } from "@/core/metricas/serie";
+import type { FilaDeCiclo, FilaDeCuello } from "@/core/metricas/ciclo";
+import { SITUACION_EN_CERO } from "../mocks/metricas-datos";
 
 const CTX = { tenantId: "10000000-0000-0000-0000-000000000001" };
 
 const SIN_USO = { calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
 
+const SIN_CICLO: FilaDeCiclo = {
+  reclamos: 0,
+  con_listo: 0,
+  mediana_horas_listo: null,
+  con_cierre: 0,
+  mediana_horas_cierre: null,
+  sin_intervencion: 0,
+  mensajes_por_caso: null,
+};
+
 /**
- * Las nueve consultas del lote, en el orden en que `getTenantKpis` las arma.
+ * Las once consultas fijas del lote, en el orden en que `getTenantKpis` las arma.
  *
  * Lo que NO se prueba acá es el SQL: el armador no se ejecuta, así que una
  * consulta mal construida no se cae en este archivo. Eso lo cubren los tests
@@ -54,6 +66,8 @@ function baseCon(over: Partial<{
   usoHistorico: typeof SIN_USO;
   porPersona: Array<Record<string, unknown>>;
   porModelo: Array<Record<string, unknown>>;
+  ciclo: Partial<FilaDeCiclo>;
+  cuellos: Array<Omit<FilaDeCuello, "horas_promedio"> & { horas_promedio: number }>;
   serie: PuntoSerie[];
 }> = {}) {
   mockVarias.mockImplementation(async () => [
@@ -66,7 +80,10 @@ function baseCon(over: Partial<{
     [over.usoHistorico ?? SIN_USO],
     over.porPersona ?? [],
     over.porModelo ?? [],
-    // La décima va sólo cuando se pidió la serie, como en el lote de verdad.
+    // Lo que la base devuelve para una agregación sin filas es UNA fila de nulos.
+    [{ ...SIN_CICLO, ...over.ciclo }],
+    over.cuellos ?? [],
+    // Va después, y sólo cuando se pidió, como en el lote de verdad.
     ...(over.serie ? [over.serie] : []),
   ]);
 }
@@ -80,7 +97,7 @@ describe("getTenantKpis — la tasa de completitud", () => {
     const { summary } = await getTenantKpis(CTX);
 
     expect(summary.total_cases_month).toBe(455);
-    expect(summary.auto_completion_rate).toBe(6);
+    expect(summary.completado_confirmado_rate).toBe(6);
   });
 
   it("sin casos en el mes es 0 y no NaN", async () => {
@@ -89,7 +106,107 @@ describe("getTenantKpis — la tasa de completitud", () => {
 
     const { summary } = await getTenantKpis(CTX);
 
-    expect(summary.auto_completion_rate).toBe(0);
+    expect(summary.completado_confirmado_rate).toBe(0);
+  });
+
+  it("ya no se publica con el nombre viejo, que prometía lo que no medía", async () => {
+    baseCon({ resumen: { total: 10, listo: 5, respondidos: 0, minutos: 0 } });
+
+    const { summary } = await getTenantKpis(CTX);
+
+    expect(summary).not.toHaveProperty("auto_completion_rate");
+  });
+});
+
+describe("getTenantKpis — el ciclo y lo que se resuelve sin personas", () => {
+  it("sin_intervencion_rate es el porcentaje de los reclamos del período", async () => {
+    baseCon({ ciclo: { reclamos: 8, sin_intervencion: 3 } });
+
+    const { summary } = await getTenantKpis(CTX);
+
+    expect(summary.sin_intervencion_rate).toBe(38);
+  });
+
+  it("sin reclamos es null y no 0 %: no hubo sobre qué medir", async () => {
+    baseCon({ ciclo: { reclamos: 0, sin_intervencion: 0 } });
+
+    const { summary } = await getTenantKpis(CTX);
+
+    expect(summary.sin_intervencion_rate).toBeNull();
+  });
+
+  it("las medianas y los mensajes llevan un decimal, y null se queda null", async () => {
+    baseCon({
+      ciclo: {
+        mediana_horas_listo: 3.4567,
+        con_listo: 5,
+        mediana_horas_cierre: null,
+        con_cierre: 0,
+        mensajes_por_caso: 7.25,
+      },
+    });
+
+    const { summary } = await getTenantKpis(CTX);
+
+    expect(summary.ciclo).toEqual({
+      mediana_horas_listo: 3.5,
+      casos_listo: 5,
+      mediana_horas_cierre: null,
+      casos_cierre: 0,
+    });
+    expect(summary.mensajes_por_caso).toBe(7.3);
+  });
+
+  it("una mediana de cero horas se conserva: es distinta de no tener dato", async () => {
+    baseCon({ ciclo: { mediana_horas_listo: 0, con_listo: 2 } });
+
+    const { summary } = await getTenantKpis(CTX);
+
+    expect(summary.ciclo.mediana_horas_listo).toBe(0);
+  });
+
+  it("los cuellos salen redondeados y sólo con estados que el esquema conoce", async () => {
+    // El nombre del estado sale de un payload de auditoría: un valor viejo o
+    // ajeno no tiene que llegar a la pantalla.
+    baseCon({
+      cuellos: [
+        { estado: "requiere_especialista", horas_promedio: 30.04, estancias: 4 },
+        { estado: "inventado", horas_promedio: 99, estancias: 1 },
+        { estado: "__proto__", horas_promedio: 99, estancias: 1 },
+      ],
+    });
+
+    const { summary } = await getTenantKpis(CTX);
+
+    expect(summary.cuellos).toEqual([
+      { estado: "requiere_especialista", horas_promedio: 30, estancias: 4 },
+    ]);
+  });
+});
+
+describe("getTenantKpis — el período elegido", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("por omisión es el mes en curso, y el rango devuelto es el de ese mes argentino", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
+    baseCon();
+
+    const { periodo, period } = await getTenantKpis(CTX);
+
+    expect(periodo).toBe("este_mes");
+    expect(period).toEqual({ start: "2026-09-01T03:00:00.000Z", end: "2026-10-01T03:00:00.000Z" });
+  });
+
+  it("con mes_pasado el rango es el del mes anterior", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
+    baseCon();
+
+    const { periodo, period } = await getTenantKpis(CTX, { periodo: "mes_pasado" });
+
+    expect(periodo).toBe("mes_pasado");
+    expect(period).toEqual({ start: "2026-08-01T03:00:00.000Z", end: "2026-09-01T03:00:00.000Z" });
   });
 });
 
@@ -213,8 +330,8 @@ describe("getTenantKpis — el consumo de IA", () => {
 
 describe("getTenantKpis — los escalados", () => {
   it("salen de su propia consulta, no del conteo por estado", async () => {
-    // El conteo por estado NO está acotado al mes; el de escalados sí. Leer uno
-    // por el otro es cómo la tarjeta empieza a contar historia vieja.
+    // Son dos consultas: si la tarjeta leyera el conteo por estado, dejaría de
+    // coincidir con los escalados en cuanto cambie un solo filtro de una de las dos.
     baseCon({
       escalados: 43,
       porEstado: [{ status: "requiere_especialista", n: 260 }],
@@ -234,7 +351,7 @@ describe("getTenantKpis — la serie de actividad", () => {
    * Un cliente que acepta cualquier cadena y se devuelve a sí mismo: alcanza
    * para ejecutar el armador y contar cuántas consultas mete en el lote, sin
    * base. Lo que se afirma es que la serie viaja en el MISMO lote y que
-   * /api/metricas, que no la pide, sigue en nueve.
+   * /api/metricas, que no la pide, sigue en las once fijas.
    */
   const cadena: unknown = new Proxy(() => cadena, {
     get: () => cadena,
@@ -243,23 +360,36 @@ describe("getTenantKpis — la serie de actividad", () => {
   const consultasDelLote = () =>
     (mockVarias.mock.calls[0]![1] as (db: unknown) => unknown[])(cadena).length;
 
-  it("sin pedirla vuelve null y el lote sigue en nueve consultas", async () => {
+  it("sin pedirla vuelve null y el lote sigue en once consultas", async () => {
     baseCon();
 
     const { serie } = await getTenantKpis(CTX);
 
     expect(serie).toBeNull();
     expect(mockVarias).toHaveBeenCalledTimes(1);
-    expect(consultasDelLote()).toBe(9);
+    expect(consultasDelLote()).toBe(11);
   });
 
-  it("pedida, va como décima consulta del mismo viaje", async () => {
+  it("pedida, va como consulta doce del mismo viaje", async () => {
     baseCon({ serie: [] });
 
     await getTenantKpis(CTX, { serie: "dia" });
 
     expect(mockVarias).toHaveBeenCalledTimes(1);
-    expect(consultasDelLote()).toBe(10);
+    expect(consultasDelLote()).toBe(12);
+  });
+
+  it("el resumen de ayer también viaja en el mismo lote", async () => {
+    baseCon({ serie: [] });
+
+    await getTenantKpis(CTX, { serie: "dia", ayer: true });
+    expect(mockVarias).toHaveBeenCalledTimes(1);
+    expect(consultasDelLote()).toBe(13);
+
+    mockVarias.mockClear();
+    baseCon();
+    await getTenantKpis(CTX, { ayer: true });
+    expect(consultasDelLote()).toBe(12);
   });
 
   it("pone las filas en su mes y rellena los doce con cero", async () => {
@@ -272,6 +402,7 @@ describe("getTenantKpis — la serie de actividad", () => {
       mails: 2,
       reclamos_whatsapp: 3,
       reclamos_mail: 2,
+      ...SITUACION_EN_CERO,
     };
     baseCon({ serie: [septiembre] });
 
@@ -304,9 +435,9 @@ describe("consultaDeActividad — el SQL que arma", () => {
     expect(params).toEqual(expect.arrayContaining(["day", "YYYY-MM-DD"]));
   });
 
-  it("las cinco series cuentan sólo WhatsApp y mail reales, sin simulaciones", () => {
-    expect(sql).toMatch(/"cases"\."channel" in \(\$\d+, \$\d+\)/);
-    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email"]));
+  it("las seis series cuentan sólo los canales reales (WhatsApp, mail y web), sin simulaciones", () => {
+    expect(sql).toMatch(/"cases"\."channel" in \(\$\d+, \$\d+, \$\d+\)/);
+    expect(params).toEqual(expect.arrayContaining(["whatsapp", "email", "web"]));
     expect(params.filter((p) => String(p).endsWith("_sim"))).toEqual([]);
   });
 
@@ -328,6 +459,24 @@ describe("consultaDeActividad — el SQL que arma", () => {
     expect(columna("reclamos_mail")).toMatch(
       /filter \(where "cases"\."is_claim" is true and "cases"\."channel" = 'email'\)/
     );
+  });
+
+  it("las tres de situación cuentan por el estado de hoy del caso, no por la auditoría", () => {
+    const campos = consulta._.selectedFields as unknown as Record<keyof PuntoSerie, SQL>;
+    const dialecto = new PgDialect();
+    const columna = (campo: keyof PuntoSerie) => dialecto.sqlToQuery(campos[campo]);
+
+    for (const campo of ["escalados", "listos", "cerrados"] as const) {
+      expect(columna(campo).sql).toMatch(/filter \(where "cases"\."status" in \(/);
+    }
+    expect(columna("escalados").params).toEqual(
+      expect.arrayContaining(["requiere_especialista", "escalado"])
+    );
+    expect(columna("listos").params).toEqual(expect.arrayContaining(["listo_para_core"]));
+    expect(columna("cerrados").params).toEqual(
+      expect.arrayContaining(["cerrado", "pagado", "rechazado"])
+    );
+    expect(sql).not.toContain("audit_log");
   });
 
   it("devuelve filas con la forma de PuntoSerie", () => {

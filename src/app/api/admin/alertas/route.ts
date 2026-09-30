@@ -1,5 +1,6 @@
 /**
- * PATCH /api/admin/alertas — la lista de direcciones que avisa a un especialista.
+ * PATCH /api/admin/alertas — la lista de direcciones que avisa a un especialista
+ * y, opcional, cuándo se le recuerda al denunciante lo que falta (B4).
  *
  * Sin GET: la lista inicial llega a /configuracion como prop del servidor
  * (`listaDelTenant`), así que no hace falta pedirla por acá.
@@ -15,11 +16,13 @@ import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { vedadaParaAlertas } from "@/lib/email/reserved";
+import { horasDeRecordatorio } from "@/core/case/recordatorios";
 
 export const dynamic = "force-dynamic";
 
 const PatchSchema = z.object({
   emails: z.array(z.string().trim().toLowerCase().email().max(254)).max(10),
+  recordatorio_horas: horasDeRecordatorio.optional(),
 });
 
 export async function PATCH(request: NextRequest) {
@@ -34,17 +37,23 @@ export async function PATCH(request: NextRequest) {
       throw new AppError("VALIDATION_FAILED", "Esa dirección no puede recibir avisos.");
     }
 
+    const horas = parsed.data.recordatorio_horas;
     const tenantId = userRow.tenant_id; // nunca del body
     try {
       await enTenant({ tenantId }, (db) =>
         db.update(tenants)
-          .set({ specialist_alert_emails: lista })
+          .set({ specialist_alert_emails: lista, ...(horas ? { recordatorio_horas: horas } : {}) })
           .where(eq(tenants.id, tenantId))
       );
     } catch (e) {
       const code = (e as { code?: string })?.code;
       if (code === "42703" || code === "42P01") {
-        throw new AppError("VALIDATION_FAILED", "Falta aplicar la migración 0034 (avisos por aseguradora).");
+        throw new AppError(
+          "VALIDATION_FAILED",
+          horas
+            ? "Falta aplicar la migración 0039 (recordatorios)."
+            : "Falta aplicar la migración 0034 (avisos por aseguradora)."
+        );
       }
       throw e;
     }
@@ -55,10 +64,11 @@ export async function PATCH(request: NextRequest) {
       event_type: AuditEvent.SPECIALIST_ALERT_RECIPIENTS_CHANGED,
       target_type: "tenant",
       target_id: tenantId,
-      payload: { count: lista.length }, // conteo, nunca las direcciones
+      // conteo, nunca las direcciones
+      payload: { count: lista.length, ...(horas ? { recordatorio_horas: horas } : {}) },
     });
 
-    return ok({ emails: lista });
+    return ok({ emails: lista, ...(horas ? { recordatorio_horas: horas } : {}) });
   } catch (e) {
     return err(e);
   }

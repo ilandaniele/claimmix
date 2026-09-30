@@ -30,6 +30,14 @@ const PREFIJOS_EXCLUIDOS = [
   "training.prompt_rule_",
   "training.custom_field_",
   "training.finetune_",
+  // Del padrón y de la configuración del inquilino: no cuelgan de un caso, no salen en su historial.
+  "padron.",
+  "customer.",
+  "policy.",
+  // Del SSO, la retención y la purga de adjuntos (B19): son del inquilino o de sistema, no de un caso.
+  "sso.",
+  "retencion.",
+  "adjuntos.",
 ];
 const VALORES_EXCLUIDOS = new Set([
   "agent.memory_config_exported",
@@ -39,6 +47,9 @@ const VALORES_EXCLUIDOS = new Set([
   "email.deduplicated",
   "case.deleted",
   "tenant.specialist_alert_recipients_changed",
+  "tenant.ramo_guardado",
+  "tenant.ramo_borrado",
+  "tenant.formulario_web_cambiado",
 ]);
 
 const ADJUNTO_RECHAZADO = {
@@ -131,6 +142,11 @@ describe("AuditTimeline", () => {
     ["tomar_el_control", "Tomar el control"],
     ["tope_por_remitente", "Más de 20 mensajes en 10 minutos del mismo número: se guardó y no se leyó."],
     ["devolver_al_agente", "Devolver al agente"],
+    // Los salteos del recordatorio (B4) guardan el motivo de `decidirReenvio` tal cual.
+    ["plantilla_sin_aprobar", "La plantilla para escribirle después de 24 h todavía no está aprobada por Meta"],
+    ["ventana_cerrada", "Pasaron más de 24 h desde su último mensaje de WhatsApp"],
+    ["sin_destinatario", "No sabemos a quién escribirle"],
+    ["nada_pendiente", "No queda nada por pedir"],
   ])("el motivo %s se traduce", (reason, esperado) => {
     render(
       <AuditTimeline

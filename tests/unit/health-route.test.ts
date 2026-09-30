@@ -58,6 +58,60 @@ const CONFIGURED: Record<string, string> = {
   GMAIL_TOKEN_ENCRYPTION_KEY: "una-clave-de-prueba-para-los-tests-largos",
 };
 
+/** Todo aplicado menos lo que se saca. */
+function esquemaSin(...faltan: string[]) {
+  return [
+    { table_name: "missing_docs", column_name: "declined_at" },
+    { table_name: "outbound_messages", column_name: "asked_keys" },
+    { table_name: "cases", column_name: "extraction_lease_at" },
+    { table_name: "tenants", column_name: "plan" },
+    { table_name: "tenants", column_name: "monthly_fee_usd" },
+    { table_name: "billing_invoices", column_name: "id" },
+    { table_name: "rate_limit_counters", column_name: "key" },
+    // 0037.
+    { table_name: "cases", column_name: "resumen" },
+    { table_name: "claim_attachments", column_name: "resumen" },
+    { table_name: "claim_attachments", column_name: "util" },
+    { table_name: "claim_attachments", column_name: "datos" },
+    { table_name: "claim_attachments", column_name: "metadatos" },
+    // 0038 y 0039.
+    { table_name: "cases", column_name: "mensaje_tardio_de" },
+    { table_name: "cases", column_name: "mensaje_tardio_tipo" },
+    { table_name: "cases", column_name: "mensaje_tardio_resumen" },
+    { table_name: "cases", column_name: "mensaje_tardio_reservado_en" },
+    { table_name: "tenants", column_name: "recordatorio_horas" },
+    { table_name: "case_recordatorios", column_name: "case_id" },
+    // 0040.
+    { table_name: "policies", column_name: "coberturas" },
+    { table_name: "policies", column_name: "ambito_territorial" },
+    { table_name: "policies", column_name: "condiciones_path" },
+    { table_name: "policies", column_name: "condiciones_leidas_en" },
+    { table_name: "cases", column_name: "monto_estimado" },
+    { table_name: "tenants", column_name: "rangos_de_monto" },
+    { table_name: "claim_attachments", column_name: "lectura_presupuesto" },
+    // 0041.
+    { table_name: "cases", column_name: "responsabilidad" },
+    // 0042.
+    { table_name: "cases", column_name: "puntaje_complejidad" },
+    { table_name: "cases", column_name: "vence_en" },
+    { table_name: "cases", column_name: "vence_plazo" },
+    { table_name: "tenants", column_name: "reglas_asignacion" },
+    { table_name: "tenants", column_name: "plazos" },
+    { table_name: "tenants", column_name: "plan_por_tipo" },
+    { table_name: "tenants", column_name: "pesos_puntaje" },
+    { table_name: "case_plan_pasos", column_name: "case_id" },
+    // 0043.
+    { table_name: "asistente_turnos", column_name: "id" },
+    { table_name: "case_desvios", column_name: "case_id" },
+    // 0044.
+    { table_name: "formulario_web", column_name: "tenant_id" },
+    { table_name: "tenant_claim_types", column_name: "tenant_id" },
+    { table_name: "cases", column_name: "canal_web" },
+    // 0045.
+    { table_name: "adjuntos_por_purgar", column_name: "id" },
+  ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   for (const [k, v] of Object.entries(CONFIGURED)) process.env[k] = v;
@@ -72,17 +126,7 @@ beforeEach(() => {
     if (JSON.stringify(q).includes("ai_usage")) {
       return Promise.resolve({ rows: [{ total: gastadoUsd }] });
     }
-    return Promise.resolve({
-    rows: [
-      { table_name: "missing_docs", column_name: "declined_at" },
-      { table_name: "outbound_messages", column_name: "asked_keys" },
-      { table_name: "cases", column_name: "extraction_lease_at" },
-      { table_name: "tenants", column_name: "plan" },
-      { table_name: "tenants", column_name: "monthly_fee_usd" },
-      { table_name: "billing_invoices", column_name: "id" },
-      { table_name: "rate_limit_counters", column_name: "key" },
-    ],
-    });
+    return Promise.resolve({ rows: esquemaSin() });
   });
   mockSelect.mockReturnValue({
     from: () => ({
@@ -194,6 +238,46 @@ describe("GET /api/health — what it reports", () => {
     expect(schema.detail).toContain("missing_docs.declined_at");
   });
 
+  it("la 0044 sin aplicar da degradado con el motivo, no caído", async () => {
+    for (const falta of [["formulario_web"], ["tenant_claim_types"], ["cases.canal_web"]]) {
+      mockExecute.mockImplementation((q: unknown) =>
+        Promise.resolve(
+          JSON.stringify(q).includes("ai_usage")
+            ? { rows: [{ total: 0 }] }
+            : { rows: esquemaSin(...falta) }
+        )
+      );
+
+      const res = await GET(request(`Bearer ${SECRET}`));
+      const body = await res.json();
+
+      const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
+      expect(schema.status, falta[0]).toBe("degraded");
+      expect(schema.detail).toContain("migración 0044 pendiente");
+    }
+  });
+
+  it("sin la cola de purga (0045) cae, porque borrar un caso dejaría de andar; sso_settings no cuenta", async () => {
+    const schemaCon = async (...falta: string[]) => {
+      mockExecute.mockImplementation((q: unknown) =>
+        Promise.resolve(
+          JSON.stringify(q).includes("ai_usage")
+            ? { rows: [{ total: 0 }] }
+            : { rows: esquemaSin(...falta) }
+        )
+      );
+      const body = await (await GET(request(`Bearer ${SECRET}`))).json();
+      return body.checks.find((c: { name: string }) => c.name === "migraciones");
+    };
+
+    const sinCola = await schemaCon("adjuntos_por_purgar");
+    expect(sinCola.status).toBe("down");
+    expect(sinCola.detail).toContain("adjuntos_por_purgar");
+
+    // El SSO tolera la tabla ausente (queda apagado) y el esquema no la pide.
+    expect((await schemaCon("sso_settings")).status).toBe("ok");
+  });
+
   it("nota que falta lo comercial, no sólo lo del camino caliente", async () => {
     // Es la falla que pasó: la 0010 figuraba aplicada en el registro y no lo
     // estaba. Nadie lo vio durante dos días porque la facturación no es lo que
@@ -214,6 +298,101 @@ describe("GET /api/health — what it reports", () => {
     const schema = body.checks.find((c: { name: string }) => c.name === "migraciones");
     expect(schema.status).toBe("down");
     expect(schema.detail).toContain("tenants.plan");
+  });
+
+  it("nota que falta la 0037, la de lo que se leyó de los adjuntos", async () => {
+    // Sin estas columnas el worker falla al guardar el resumen y los datos de
+    // cada archivo, y la ficha no tiene qué mostrar.
+    const faltan = ["cases.resumen", "claim_attachments.resumen", "claim_attachments.util", "claim_attachments.datos", "claim_attachments.metadatos"];
+    mockExecute.mockResolvedValue({ rows: esquemaSin(...faltan) });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    for (const col of faltan) expect(schema.detail).toContain(col);
+  });
+
+  it("nota que falta la 0038: sin ella el worker no reserva el mensaje tardío", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("cases.mensaje_tardio_de", "cases.mensaje_tardio_tipo", "cases.mensaje_tardio_resumen") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("cases.mensaje_tardio_de");
+    expect(schema.detail).toContain("cases.mensaje_tardio_resumen");
+  });
+
+  it("nota que falta la 0039: la columna del inquilino y la tabla de recordatorios", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("tenants.recordatorio_horas", "case_recordatorios") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("tenants.recordatorio_horas");
+    expect(schema.detail).toContain("case_recordatorios");
+  });
+
+  it("nota que falta la 0040: el monto estimado, la cobertura y el presupuesto", async () => {
+    const faltan = [
+      "policies.coberturas",
+      "policies.ambito_territorial",
+      "policies.condiciones_path",
+      "policies.condiciones_leidas_en",
+      "cases.monto_estimado",
+      "tenants.rangos_de_monto",
+      "claim_attachments.lectura_presupuesto",
+    ];
+    mockExecute.mockResolvedValue({ rows: esquemaSin(...faltan) });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    for (const col of faltan) expect(schema.detail).toContain(col);
+  });
+
+  it("nota que falta la 0041: la opinión de responsabilidad", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("cases.responsabilidad") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("cases.responsabilidad");
+  });
+
+  it("nota que falta la 0042: vencimientos, puntaje, reglas del inquilino y el plan de trabajo", async () => {
+    const faltan = [
+      "cases.puntaje_complejidad",
+      "cases.vence_en",
+      "cases.vence_plazo",
+      "tenants.reglas_asignacion",
+      "tenants.plazos",
+      "tenants.plan_por_tipo",
+      "tenants.pesos_puntaje",
+      "case_plan_pasos",
+    ];
+    mockExecute.mockResolvedValue({ rows: esquemaSin(...faltan) });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    for (const col of faltan) expect(schema.detail).toContain(col);
+  });
+
+  it("nota que falta la 0043: la conversación del asistente y los desvíos de la revisión nocturna", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("asistente_turnos", "case_desvios") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("asistente_turnos");
+    expect(schema.detail).toContain("case_desvios");
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

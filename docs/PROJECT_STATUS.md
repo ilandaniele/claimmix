@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-28. This file is the single source of truth for "where things stand."
+_Last updated: 2026-09-30. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -2550,7 +2550,7 @@ tanto como la otra.
 - ~~**`page` sin tope superior** (OFFSET ilimitado) y **`q` sin largo mínimo**~~ ✅
   **HECHO**: `page` acotado en la API (#135) y en la pantalla de clientes (16/09);
   `q` exige tres caracteres en `/api/cases`.
-- **`audit_log` crece 142 filas por caso** y no tiene retención: a 100 k casos son
+- **`audit_log` crece 142 filas por caso** y sigue sin retención (B19 agregó la de los casos y la purga de adjuntos, y a propósito no tocó la auditoría): a 100 k casos son
   14,2 M filas y ~5,9 GB. Y **`claim_messages` pesa 31 kB por fila** porque guarda
   el payload entero del proveedor: ~24 GB a la misma escala.
 - **El agregado sin ventana de `/metricas` y el tope mensual del presupuesto** son
@@ -3902,6 +3902,48 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
   el token en el mensaje de error, que quedó en la salida de la sesión local;
   no salió a ningún otro servicio. Por decisión del dueño el token no se
   rota; el script ahora tapa el token en toda salida.
+- `feat/listo-para-core-y-post-intake` (B25, sin mergear): sin conector de Core
+  un caso quedaba para siempre en `listo_para_core`; ahora una persona lo pasa
+  a mano a `en_liquidacion` («Entregado por fuera») o lo cierra, y de ahí a
+  `pagado`, `rechazado` o `cerrado` (`SALIDAS_A_MANO`, ADR 0003). La migración
+  0035 sólo cambia el CHECK de `cases.status` (sin columnas: pagado/rechazado
+  usan `closed_at`, la fecha de `en_liquidacion` queda en la auditoría); hay
+  que aplicarla a mano en staging, QA y producción antes del merge. Sin ella la
+  ingesta sigue andando y marcar un estado nuevo da 500 (23514).
+- `feat/entrega-al-core-b5` (B5, en PR a qa, sin mergear): el caso llega a un
+  sistema de verdad. «Enviar al sistema central» manda un webhook firmado
+  (HMAC-SHA256 sobre `t.body`, `Idempotency-Key` = caseId) a la URL que carga
+  un admin en Configuración, y `/api/v1/cases` deja que el Core lea con una
+  clave `cmk_<tenant>_<azar>` (sha256 en la base, 120/min por IP). `/api/v1`
+  pagina por cursor, no por OFFSET, da fechas ISO en UTC, sólo casos reales
+  (sin `_sim` ni remitentes reservados) y con dos minutos de margen tras el
+  último cambio. Envían owner, admin y specialist (`CORE_SYNC_ROLES`). El destino
+  se valida contra SSRF (https, 443, sin IP literal, DNS sólo a direcciones
+  públicas, conexión a la IP validada, sin redirecciones). El secreto va
+  cifrado con la misma clave que los tokens de Gmail. Contrato del receptor en
+  `docs/entrega-al-core/README.md`. La migración 0036 crea
+  `core_sync_settings` con RLS; hay que aplicarla a mano en staging, QA y
+  producción antes del merge, como la 0035. Sin ella el envío queda
+  `sin_configurar` (501, sin botón), `/api/v1` da 401 y Configuración avisa;
+  `--exigir-al-dia` y «Migraciones aplicadas» dan rojo hasta aplicarla.
+- `feat/documentos-y-voz-b1-b7-b8` (B1, B7 y B8 del informe de Clive, sin
+  commitear ni mergear). B1: la IA lee PDFs y notas de voz (ogg, opus, mpeg,
+  mp3, mp4, x-m4a, aac, wav, x-wav; sin AMR/3GPP), con firma y topes de
+  siempre; el audio se transcribe en el worker, nunca en el webhook, y queda en
+  `body_text` en el lugar del marcador, con `raw_payload.transcripcion`. B7: la
+  misma extracción copia los datos de cada documento y `cruzarDocumentos`
+  (src/core/case/contradicciones.ts) los cruza, junto con la fecha y el GPS del
+  EXIF de las fotos, contra el reclamo y la póliza; los indicios van a
+  `fraud_indicators` y al panel del analista, nunca a la persona. B8:
+  `cases.resumen` sale del resumen de la extracción, sin otra llamada, y cada
+  adjunto tiene su línea; la ficha marca duplicados (mismo hash) y los que no
+  sirven. **La migración 0037 (`cases.resumen` y `claim_attachments.resumen`,
+  `util`, `datos`, `metadatos`) se aplica a mano en staging, QA y producción
+  ANTES del deploy**: la ficha lee todas las columnas de `cases`, y sin ella
+  cada caso da 404; `/api/health` mira las cinco. El ensayo suma
+  `nota-de-voz-y-pdf`: la constancia es un PDF inventado que está en el repo, y
+  la nota de voz es un audio mudo hasta que el dueño deje una de verdad,
+  sintética y sin datos de nadie, como `tests/fixtures/nota-de-voz.ogg`.
 
 **Para decidir.**
 - ~~`src/server/confirmations/messenger.ts` manda el WhatsApp antes de
@@ -3938,7 +3980,476 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
   streaming.~~ Resuelto en #341: `adjunto-de-8mb.spec.ts` lo prueba en CI,
   por streaming, contra el balde de QA.
 
+### ⏰ Mensajes tardíos y recordatorios de lo que falta (B3 y B4, 2026-09-29)
+
+Dos huecos del informe de Clive del 28/09, en la rama
+`feat/tardios-y-recordatorios-b3-b4`. Van en una sola rama y no en los dos PR
+que pedía el plan.
+
+**B3: qué pide el mensaje que llega tarde.** Cuando alguien escribe a un caso
+que ya terminó, el worker clasifica el mensaje (`novedad_mismo_siniestro`,
+`siniestro_nuevo`, `consulta_estado`, `otro`) y guarda un resumen seguro, sin
+el texto crudo (`src/core/case/mensaje-tardio.ts`,
+`src/server/cases/mensaje-tardio.ts`). La bandeja y el detalle muestran la
+clase. Los especialistas reciben el aviso por el mismo canal y con los mismos
+destinatarios que `alertSpecialists`. Un siniestro nuevo **no abre otro caso**:
+lo decide una persona desde la bandeja. Esto se aparta del plan y lo tiene
+que confirmar el dueño. Migración `0038_mensaje_tardio.sql`, con
+`mensaje_tardio_reservado_en`: dos corridas sobre el mismo mensaje no lo
+clasifican ni avisan dos veces, y una que murió se retoma a los 5 minutos.
+
+**B4: recordatorios.** Si la aseguradora los prende en `/configuracion`
+(apagados, 48 h, o 48 h y 5 días), el barrido nocturno de `reap-stuck` repite
+el pedido de lo que falta a un caso en `info_faltante` que no contestó
+(`src/server/confirmations/recordatorios.ts`). Cada etapa se reserva en
+`case_recordatorios` antes de mandar, así que sale una sola vez aunque el
+barrido corra dos veces. Nunca toca `cases`: el reloj del abandono sigue
+igual. Por WhatsApp, pasadas las 24 h, sólo sale con la plantilla
+`reabrir_denuncia` aprobada. Hoy está PENDING, así que esos recordatorios se
+saltean con `plantilla_sin_aprobar`. Al cerrar un abandonado de un inquilino
+con recordatorios, se manda un aviso de cierre por mail. Por WhatsApp se
+saltea (`ventana_cerrada`). Si contestan ese aviso, el caso cerrado por
+silencio vuelve a «Para responder» y el mensaje se clasifica como en B3. Sin
+aviso (recordatorios apagados, o un cierre de antes de B4) la respuesta queda
+sólo en la auditoría, como antes. Un cierre a mano sigue siendo la última
+palabra. Migración `0039_recordatorios.sql`, con
+`recordatorio_horas` en `'{}'` por defecto.
+
+**Antes del deploy.** La 0038 y la 0039 se aplican a mano en staging, QA y
+producción, en ese orden. Sin ellas, `/api/health` queda en rojo y la bandeja
+falla con 42703. Sin la 0038 además no entra **ningún** caso: Drizzle lista
+todas las columnas del esquema en el INSERT a `cases`, como en la caída de
+0006-0009. El 29/09 ninguna de las dos estaba en la base del ensayo, y el
+check cayó 21 de 22 escenarios en el primer mensaje por eso, no por el código.
+
+### 🧾 Cobertura, monto estimado y presupuesto del taller (B6, B23 y B21, 2026-09-29)
+
+Tres huecos del informe de Clive del 28/09, en la rama
+`feat/cobertura-monto-presupuesto-b6-b23-b21`, que sale de la de B3 y B4. Todo
+es para el equipo. Nada sale al asegurado: ni la respuesta del agente, ni su
+prompt, ni sus herramientas, ni las plantillas, ni el aviso por mail al
+especialista. `la-cobertura-no-sale-al-asegurado.test.ts` lo fija recorriendo
+los imports.
+
+**B6: cobertura contra la póliza.** En `/clientes/[id]` se sube el PDF de
+condiciones de cada póliza (`POST /api/policies/[id]/condiciones`, sólo owner,
+admin y specialist). Gemini lo lee una vez y guarda en `policies` las
+coberturas (código, suma asegurada, franquicia) y el ámbito territorial.
+`src/core/case/cobertura.ts` devuelve cubre, no cubre o dudoso, con motivos
+codificados. Compara la fecha del siniestro, nunca la de hoy. El veredicto se
+ve sólo en la ficha del caso. Una póliza que hoy no está activa da «dudoso»,
+porque pudo estarlo el día del siniestro.
+
+**B23: monto estimado.** Es un rango orientativo por tipo y gravedad
+(`src/core/case/monto-estimado.ts`). Hay una tabla por defecto, en pesos de
+septiembre de 2026, que cada aseguradora puede reemplazar en `/configuracion`
+(`PATCH /api/admin/montos`). El worker guarda el rango en
+`cases.monto_estimado` en cada extracción, con `origen: "tabla"`. El tipo
+«otro» no tiene rango.
+
+**B21: presupuesto del taller.** En los adjuntos del caso, un PDF o una foto
+que parece un presupuesto muestra «Leer presupuesto»
+(`POST /api/cases/[id]/attachments/[attachmentId]/presupuesto`). Gemini lee
+los ítems y los importes, y los coteja con las fotos y el relato. La ficha
+marca los ítems sin daño visible, los importes fuera de rango y un total que
+no suma. El monto estimado pasa a `origen: "presupuesto"`.
+
+**Las lecturas del modelo** pasan todas por `src/server/ai/leer-documento.ts`:
+`checkBudget`, `registrarConsumoDelModelo` y un cupo propio por póliza o por
+caso (5 cada 24 h). Sin cupo, sin presupuesto de IA o con una respuesta que no
+valida, la pantalla dice «sin leer» y no se escribe nada. El texto va entre
+centinelas. Lo que vuelve pasa por zod, y el texto libre, por el filtro de
+resumen seguro.
+
+**Antes del deploy.** La 0040 (`0040_cobertura_monto_presupuesto.sql`, siete
+columnas que admiten NULL) se aplica a mano en staging, QA y producción, en ese
+orden, después de la 0038 y la 0039. Sin ella no entra **ningún** caso: Drizzle
+lista todas las columnas del esquema en el INSERT a `cases` y a
+`claim_attachments`. Además la ficha de cada caso da «no existe», `/clientes/[id]`
+falla con 42703 y `/api/health` queda en rojo.
+
+**Para revisar.** Un viewer ve el panel de cobertura y la lectura del
+presupuesto. `GET /api/cases/:id` devuelve `monto_estimado` a todos los roles
+del equipo. Los montos por defecto son una estimación que tiene que validar el
+dueño. Un PDF de condiciones de más de 10 páginas se rechaza.
+
+### ⚖️ Responsabilidad en choques y reclamo de un tercero (B18 y B24, 2026-09-29)
+
+Dos huecos del informe de Clive del 28/09, en la rama
+`feat/responsabilidad-y-terceros-b18-b24`, que sale de la de B6, B23 y B21.
+Todo es para el equipo que edita el caso (owner, admin, specialist, analyst).
+Nada sale al asegurado: ni la respuesta del agente, ni su prompt, ni las
+plantillas, ni el aviso por mail al especialista, ni `GET /api/cases/:id` para
+un viewer. El agente nunca le dice a la persona quién tuvo la culpa.
+
+**B18: responsabilidad.** La mecánica del choque (semáforos, quién embistió de
+atrás, si venía por una vía con prioridad, un vehículo detenido) se saca del
+relato, del parte amistoso y de la exposición policial en la misma llamada de
+la extracción, sin llamada nueva al modelo. `src/core/case/responsabilidad.ts`
+es una función pura que devuelve una opinión PRELIMINAR (asegurado, tercero,
+compartida o no determinable) con la regla y el motivo. Cita la Ley 24.449:
+art. 48 inc. g para el choque desde atrás, art. 44 para el semáforo, sólo si
+quien lo enfrentaba venía en marcha (un vehículo detenido no se culpa), y art.
+41 sólo cuando consta que no hubo excepción de prioridad. Con datos
+insuficientes dice «no determinable» y lista lo que falta. Se calcula en los
+choques (`choque` y `rc`) y se guarda en `cases.responsabilidad`; al
+reclasificar el caso a otro tipo se borra, y la ficha nunca la muestra fuera de
+un choque. La ficha la muestra con la marca «orientativa». Si dos documentos se
+contradicen, `difiere` lo avisa.
+
+**B24: reclamo de un tercero.** Una carta documento o un reclamo (PDF o foto)
+se reconoce al leer el adjunto: reclamante, rubros, montos y plazos. Si llega
+una historia clínica, `cruzarConHistoria` marca lo que no coincide o falta. La
+ficha muestra la carta, el cruce y lo que falta. Las lesiones siguen derivando
+al especialista como antes. Lo que se lee de los adjuntos y la mecánica no
+llegan al log del agente ni al orquestador: el worker los saca antes.
+La carta se lee con `after()` de Next, cuando la corrida ya soltó la reserva y
+el worker ya contestó (si `after()` no está disponible, en el momento; se
+importa de `next/server` de forma dinámica porque el bundle de pasos de
+`pnpm flujos` arrastra `extract.ts` y Node no resuelve ese import estático), y sólo
+si a la invocación le quedan tres plazos del modelo; si no, vuelve en la
+próxima corrida. Así el re-despacho no espera la lectura y no vuelve el caso a
+la cola. Una carta que llega a un caso que el agente ya no lee (derivado,
+cerrado) también se lee para el equipo: los archivos del último mensaje que
+nadie miró se reconocen en esa misma lectura. Una sola corrida a la vez lee
+cada carta: la toma con una marca en `metadatos.leyendoCarta` (vence a los
+3 minutos). Se leen todas las pendientes, una por contenido. Lo que ningún
+reintento arregla (archivo, páginas, respuesta inusable) queda anotado en
+`datos.sin_leer` y la ficha lo dice; lo pasajero (sin cupo, sin presupuesto,
+modelo caído) se reintenta.
+
+**Las lecturas del modelo** de este lote pasan por `leer-documento.ts`
+(`checkBudget`, `registrarConsumoDelModelo`, cupo por caso con
+`claveDeCupo` y su entrada propia en `RATE_LIMIT_CONFIGS`). El contenido del
+documento va al modelo como archivo, con el sistema diciéndole que es dato, y
+lo que vuelve pasa por zod y por `esResumenSeguro`. Sin cupo o sin presupuesto la ficha dice «sin leer» y no se
+inventa nada.
+
+**Antes del deploy.** La 0041 (`0041_responsabilidad_en_choques.sql`, una
+columna `responsabilidad jsonb` que admite NULL) se aplica a mano en staging, QA
+y producción, en ese orden, después de la 0040. Sin ella no entra **ningún**
+caso: Drizzle lista todas las columnas del esquema en el INSERT a `cases`. El paso «Migraciones aplicadas» de `deploy-checks.yml` y `/api/health` quedan
+en rojo hasta que se aplique. El ensayo `alcance-responsabilidad-clara` también la necesita en la
+base del ensayo.
+
+**Para revisar.** Un abogado tiene que revisar las citas de la Ley 24.449 (la
+regla de vehículo detenido no cita nada porque el art. 39 inc. b no está
+verificado). Los paneles nuevos son sólo para los roles que editan el caso: un
+viewer no los ve, a diferencia del panel de cobertura. El aviso por mail al
+especialista omite la línea «Resumen» entera si el resumen nombra la culpa o la
+ley.
+
+### Asignación, vencimientos, plan de trabajo y puntaje (B9, B10, B11 y B13, 2026-09-29)
+
+Cuatro huecos del informe de Clive del 28/09, en la rama
+`feat/asignacion-vencimientos-plan-puntaje-b9-b10-b11-b13`, que sale de la de
+B18 y B24. Todo es para el equipo que edita el caso. Nada sale al asegurado: ni
+la respuesta del agente, ni su prompt, ni las plantillas, ni `AgentMessage.data`,
+ni lo que se sincroniza al Core, ni las columnas del CSV.
+`tests/unit/analista-no-sale-al-asegurado.test.ts` recorre los imports a mano y
+falla si alguno de esos caminos llega a un módulo nuevo o nombra una columna nueva.
+
+**B9: asignación automática.** `src/core/case/asignacion.ts` elige el pool según
+las reglas de la aseguradora (tipo de siniestro y/o turno, en hora argentina; gana
+la primera que coincide y tiene a alguien que edite casos). El reparto por menor
+carga de casos abiertos y el chequeo de que la persona exista y edite los decide
+la base en la misma sentencia que asigna (`efectos-de-transicion.ts`). Sólo se
+asigna sola cuando es el agente quien lleva el caso a `listo_para_core` o a
+`requiere_especialista`, nunca en un cambio de estado manual; sin reglas, el caso
+queda sin asignar. La asignación manual y la reasignación (`PATCH /api/cases/:id`) quedan
+auditadas con quién las hizo, y `guarda-de-asignacion.ts` decide quién puede
+tomar o soltar un caso.
+
+**B10: vencimientos.** `src/core/case/plazos.ts`. El art. 56 de la Ley 17.418
+(el asegurador se pronuncia dentro de los 30 días de recibida la información
+completa) se ancla a `listo_para_core` y se rotula como orientativo; el art. 46
+(el asegurado denuncia dentro de los 3 días) sólo informa en la ficha si la
+denuncia llegó en término, no vence nada del analista. Además cada aseguradora
+puede definir plazos propios (`tenants.plazos`). Los días son corridos y el
+vencimiento cae al final del día argentino. La bandeja ordena y filtra por
+vencimiento (`vence_en`), la agenda agrupa los casos con plazo, y las insignias
+del navegador viven en `vencimiento-y-banda.ts`, sin zod, para no subir el
+bundle. Re-analizar un caso que ya corría su plazo no lo reinicia (el plazo
+vigente se reconoce por su clave, porque el worker lo deja en `listo` antes de
+volver a `listo_para_core`), y la ficha muestra el título configurado del plazo
+propio, no su clave.
+
+**B11: plan de trabajo.** `src/core/case/plan-de-trabajo.ts` y
+`case_plan_pasos`. Al llegar el caso a `listo_para_core` (o a `en_liquidacion`
+si no lo tenía) se crea el checklist del tipo de siniestro, una fila por paso; el
+título se copia al crear y no se regenera si la plantilla cambia. Algunos pasos
+se tildan solos al entrar a `en_liquidacion` o `pagado`; los demás los tilda una
+persona desde la ficha (`PATCH /api/cases/:id/plan`, auditado). `claimmix_app` no
+borra pasos.
+
+**B13: puntaje de complejidad.** `src/core/case/puntaje-complejidad.ts`. De 0 a
+100, promedio ponderado de gravedad, fraude, lesiones y el monto estimado
+(reusa `MontoEstimado`, B23), más campos propios de la aseguradora. Se recalcula
+en la extracción, al confirmar un campo ponderado y al leer un presupuesto. Los
+tres caminos cuentan los campos propios con lo guardado en `extracted_fields`,
+no con lo que leyó el modelo, así una extracción nueva no deshace lo que confirmó
+el analista ni cuenta un campo de baja confianza que nunca se guardó. La
+bandeja lo muestra como banda (baja, media, alta) y se puede ordenar y filtrar.
+
+**Configuración por aseguradora.** Pestaña «Trabajo del equipo» de `/agente`
+(sólo admin): `GET` y `PATCH /api/admin/trabajo` para las reglas de asignación,
+los plazos propios, el plan por tipo y los pesos del puntaje, más la carga de
+cada persona. Cada sección se edita como JSON, el servidor lo valida con los
+mismos esquemas del núcleo, y `valor: null` vuelve a los valores por defecto.
+Cada cambio queda auditado con quién lo hizo y el valor de antes y de después.
+Lo nuevo rige desde el próximo evento de cada caso: cambiar la configuración no
+recalcula ni reasigna nada.
+
+**Antes del deploy.** La 0042 (`0042_asignacion_plazos_plan_puntaje.sql`: tres
+columnas nuevas en `cases`, cuatro en `tenants` y la tabla `case_plan_pasos` con
+RLS forzada) se aplica a mano, en este orden y después de la 0040 y la 0041:
+`ep-proud-resonance` (la viva, que es también la de los secretos `DATABASE_URL`
+del CI), la rama `production` de Veltra (`STAGING_DATABASE_URL`) y
+`ep-wispy-flower` (QA). Identificar cada base por su canal de casos, no por su
+nombre. Es aditiva e idempotente y no siembra nada. Sin ella no entra **ningún**
+caso ni abre ninguna ficha (Drizzle lista todas las columnas), y `/api/health` da
+503 hasta que se aplique; además `pnpm permisos` y `pnpm tenancy` necesitan la
+tabla nueva.
+
+**Peso del bundle.** Esta tanda suma unos 6 kB al JavaScript del navegador
+(los cuatro componentes nuevos y las cadenas de los dos diccionarios). Medido
+con `pnpm build && pnpm peso` en Windows: 312 kB antes y 318 kB después,
+contra un tope de 310. El primer intento traía zod al cliente (330 kB) y se
+separó `vencimiento-y-banda.ts` para sacarlo. Bajar de 310 obliga a sacar código
+o a que cada sesión baje sólo el diccionario de su idioma, como ya se anotó en el
+commit que subió el tope de 300 a 310; subir el tope es decisión de quien mergea.
+
+### Pregunta por caso, tablero de cartera, métricas del equipo y revisión de calidad (B12, B14, B15 y B22, 2026-09-30)
+
+Cuatro huecos más del informe de Clive del 28/09, en la rama
+`feat/chat-tablero-metricas-revision-b12-b14-b15-b22`, que sale de la de B9, B10,
+B11 y B13. La migración es la `0043_asistente_y_desvios.sql`: la 0042 ya la usó
+B9 a B13 (el plan de esta tanda daba por libre ese número, y no lo estaba).
+
+**B12: preguntar por un caso al asistente Pro.** `src/server/asistente/pregunta-caso.ts`.
+`POST /api/asistente` con `caseId` contesta sobre ese caso sin pasar por el
+clasificador de intención; sin `caseId` todo sigue como estaba.
+`GET /api/asistente?caseId=` devuelve el hilo guardado. El contexto se arma con
+`cargarDetalleDeCaso` (el mismo que la ficha), y la respuesta se valida con
+`resumenValido` contra los números que constan en el caso antes de mostrarse. El
+hilo vive en `asistente_turnos`: un renglón es de un inquilino Y de una persona
+(RLS forzada por los dos), así que un colega no lee lo que uno le preguntó. Un
+viewer no recibe resúmenes de documentos ni cobertura, y su hilo se vuelve a
+enmascarar con `redactString` al leerlo. El cupo es de 30 preguntas por día, por
+persona y por caso (`ASISTENTE_CASO`); pasado el cupo o el presupuesto de IA
+contesta 200 con `sinLeer` y no guarda nada. Si guardar el turno falla, la
+respuesta igual sale. `sin-centinelas.ts` suma el historial del hilo a lo que
+se trata como dato y no como instrucción. Los ataques están en
+`pnpm pentest` (ver `docs/TESTING.md`).
+
+**B14: tablero de cartera.** `/metricas` elige el período con `?periodo=` (el mes
+en curso por defecto) y las tarjetas y las distribuciones —por situación, por tipo
+y los analistas con más casos— lo siguen; antes eran de todo el histórico. La
+serie de actividad cuenta los casos abiertos cada día por su situación **actual**.
+`?vista=historial` muestra los últimos doce meses mes a mes, y
+`GET /api/metricas/export.csv` los baja, sin datos de personas ni de casos. Las
+consultas leen la auditoría con literales de evento para que use el índice parcial
+`idx_audit_log_trayecto`, y `getTenantKpis` sigue siendo un solo viaje.
+
+**B15: métricas del equipo.** Mediana de horas de recibido a listo y a cierre
+(`ciclo.mediana_horas_listo`), mensajes por caso (los del asegurado más los
+WhatsApp que salieron), completado confirmado por una persona (la tarjeta
+`completitudAuto` pasó a `completadoConfirmado`) y «dónde se quedan los casos»,
+las estadías por situación. La tasa «sin intervención» es una cota inferior: el
+denominador son los reclamos de canal real del período y una intervención cuenta
+si ocurrió antes de `listo`. La primera estadía y las que siguen abiertas no
+entran a las estadísticas, ni el `listo` intermedio de una extracción completa ni
+los cambios de situación que no se aplicaron.
+
+**B22: revisión nocturna de calidad.** `src/core/desvios/reglas.ts` y
+`src/server/desvios/revision-nocturna.ts`. Cuelga del cron de `reap-stuck`, con
+una guarda de 60 s para no comerse la purga y un cupo de una vez por día
+(`REVISION_DE_DESVIOS`: GitHub Actions llama a esa ruta cada 15 min y la revisión
+son cinco `INSERT ... SELECT` sobre toda la auditoría), y cada regla corre aislada: si una
+falla se registra (`desvios.regla_fallo`) y las demás siguen. Cinco reglas, todas
+sobre casos de canal real: **(a)** un documento pedido hace más de 72 h y sin
+recibir en un caso que espera al denunciante; **(b)** un caso cerrado en los
+últimos 30 días que nunca pasó por un estado de completado (salvo el cierre por
+abandono); **(c)** una derivación al equipo de más de 24 h que ninguna persona
+tomó; **(d)** un plazo (`vence_en`, B10) vencido en un caso abierto; **(e)** un
+caso cerrado en los últimos 30 días con pasos manuales del plan (B11) sin hacer.
+Cada hallazgo se guarda en `case_desvios`, con clave (caso, regla, ancla): el
+ancla es el instante del hecho, así que correr dos veces no duplica y un plazo
+recalculado es otro desvío. Un desvío es historia y no se resuelve solo cuando el
+caso se arregla. `/desvios` lista los hallazgos, del más nuevo al más viejo, con
+un enlace al caso por fila; es para `REVISION_ROLES` (owner, admin y specialist,
+porque no existe un rol supervisor) y el resto vuelve a la bandeja. El titular
+sale tapado para quien no ve el padrón (`titularParaElRol`, compartida con la
+agenda). No llama al modelo.
+
+**Antes del deploy.** La 0043 crea `asistente_turnos` y `case_desvios` (las dos con
+RLS forzada, y `case_desvios` de sólo lectura para `claimmix_app`; la escribe el
+barrido con el rol dueño) y el índice parcial `idx_audit_log_trayecto`. Se aplica
+a mano, en este orden y después de la 0042: `ep-proud-resonance` (la viva, que
+es también la de los secretos `DATABASE_URL` del CI), la rama `production` de
+Veltra (`STAGING_DATABASE_URL`) y `ep-wispy-flower` (QA). Identificar cada base
+por su canal de casos, no por su nombre. El índice se crea sin `CONCURRENTLY`
+porque `migrate.mjs` corre cada archivo en una transacción; en una base con mucha
+auditoría conviene crearlo antes a mano, con `CONCURRENTLY`. Es aditiva e
+idempotente. Sin ella `/api/health` da 503 y `pnpm permisos`, `pnpm tenancy` y
+`pnpm capa-datos` necesitan las dos tablas.
+
+**Lo que no se probó.** El SQL de la revisión nocturna nunca corrió contra un
+Postgres (no hay uno local y la migración no está aplicada): se probó su forma.
+Tampoco se midió el p95 del tablero contra una base con meses de auditoría. El
+primer barrido puede marcar hasta 30 días de casos ya cerrados. `cierre_sin_listo`
+sólo mira casos abiertos después de la primera auditoría de un cambio de estado
+del agente (`AUDITORIA_DEL_AGENTE_DESDE`): antes de eso el agente no dejaba rastro
+y un caso viejo saldría como desvío sin serlo.
+
+**Peso del bundle.** Sin cambios: 307 kB contra el tope de 310, medido con
+`pnpm build && pnpm peso`. Los textos nuevos que sólo pinta el servidor viven en
+`es-AR.servidor.ts` y `en-US.servidor.ts`; al navegador sólo llegaron `nav.desvios` y
+las cadenas de la caja del asistente.
+
+### Padrón por CSV, formulario web público y ramos nuevos (B16, B17 y B26, 2026-09-30)
+
+Tres huecos más del informe de Clive del 28/09, en la rama
+`feat/padron-formulario-ramos-b16-b17-b26`, que sale de la de B12, B14, B15 y B22.
+La migración es la `0044_formulario_web_y_ramos.sql`. Es el único cambio de base.
+
+**B16: padrón.** `src/core/padron/` (puro) y `src/server/padron/`. El CSV de
+clientes y pólizas se sube a `POST /api/padron/vista-previa`, que dice qué filas
+entran, cuáles se actualizan y cuáles traen error, sin escribir nada;
+`POST /api/padron/importar` las aplica de a 500 filas con `enTenantVarias`.
+También hay alta y edición a mano de clientes y pólizas
+(`/api/customers/[id]`, `/api/policies/[id]`). Es cosa de admin y editor.
+
+**B17: formulario web.** `/denuncia/[slug]` es público y lleva al inquilino por su
+`slug`, nunca por el id interno. Nace apagado y se enciende desde `/agente`
+(`FormularioWebPanel`). La página firma un token HMAC derivado por HKDF de
+`BETTER_AUTH_SECRET`; además hay un campo trampa y límites por IP, por slug y por
+correo en el limitador de Postgres. La denuncia entra como canal `web`, pasa por
+el mismo despachador de extracción (`despachar-extraccion.ts`) y el seguimiento
+sigue por correo.
+
+**B26: ramos.** `src/core/case/ramos.ts` suma ART, vida, integral de comercio y
+consorcio a los nativos. Cada aseguradora puede crear tipos propios, con nombre en
+las dos lenguas y sus documentos y datos (`/agente`, pestaña «Tipos de siniestro»;
+tabla `tenant_claim_types`). `cases.claim_type` deja de ser lista cerrada: el
+CHECK sólo exige el formato de la clave.
+
+**Peso del bundle.** 309,8 kB contra el tope de 310, medido con
+`pnpm build && pnpm peso`. Esta tanda traía 310,5: las oraciones de
+`FIELD_LABELS` que sólo lee el servidor pasaron a
+`src/lib/labels/instruccion-de-campo.ts` y dejaron de viajar al navegador.
+
+### Seguridad demostrable para vender a una aseguradora (B19, 2026-09-30)
+
+Un hueco más del informe de Clive del 28/09, en la rama
+`feat/seguridad-demostrable-b19`, que sale de la de B16, B17 y B26. La migración
+es la `0045_sso_y_purga_de_adjuntos.sql`, aplicada a mano el 30/09 en producción
+(`ep-proud-resonance`), staging y QA y verificada en vivo: RLS y `FORCE`, las dos
+políticas, los cuatro índices y `claimmix_app` con sólo `SELECT` e `INSERT` en la
+cola. PR #363.
+
+**SSO OIDC por inquilino.** Plugin propio de Better Auth (`sso-inquilino`,
+`src/lib/auth/sso-inquilino.ts`) con el núcleo puro en `src/core/sso.ts` y la red
+en `src/server/sso/`. Un IdP por aseguradora, en `/configuracion`
+(`SsoPanel`, servidor) y `/api/admin/sso` (GET, PUT, POST para verificar el dominio, PATCH para activar o exigir). El dominio del mail
+sólo vale si se prueba con un TXT; la coincidencia es exacta y los proveedores
+de correo abierto no entran. El callback valida firma (`jose`), `iss`, `aud`,
+`nonce` y dominio. «Exigir SSO» apaga la contraseña y Google para ese dominio y
+cierra sus sesiones; pide que el propio admin ya tenga su cuenta `sso:<inquilino>`
+(no la de cualquiera), niega el alta por contraseña de ese dominio antes de crear
+la cuenta, y deja pasar el alta hecha por un admin y el cambio de contraseña. Las
+cuentas `sso:*` no están en `trustedProviders`, pero quien ya existía en el mismo
+inquilino con ese mail se vincula por su id (las cuentas locales nacen con el mail
+sin verificar; sin esto «exigir» dejaba afuera al admin). Cambiar issuer, dominio
+o `client_id` apaga `activo` y `exigir`, y el secreto viejo no sobrevive a otro
+issuer ni a otro `client_id`. Tabla nueva `sso_settings`, con RLS `FORCE` y el
+secreto cifrado `aes-256-gcm`.
+
+**Borrado diferido y recuperable de adjuntos.** Borrar un caso (`deleteCases`)
+anota sus adjuntos en `adjuntos_por_purgar` en el mismo lote. El cron
+`reap-stuck` los borra de R2 pasada la gracia (`PURGA_GRACIA_DIAS`, 30), de a 50
+y uno por uno (`src/server/storage/purgar-adjuntos.ts`). `claimmix_app` sólo lee
+e inserta en la cola, que sólo se agrega: sin `UNIQUE` ni `ON CONFLICT`, manda la
+fila más nueva por `storage_path` y una purga lograda cierra las viejas del mismo
+objeto. La purga y la retención corren UNA vez por día (cupo de 24 h pedido dentro
+de la ventana de las 04 UTC): sin él, las cinco llamadas de esa hora gastaban los
+cinco intentos de la purga. `PURGA_ADJUNTOS_MODO` nace en `apagado`.
+
+**Retención de casos.** `src/server/cases/retencion.ts` y `src/core/retencion.ts`:
+casos cerrados (`cerrado`, `pagado`, `rechazado`) con `closed_at` anterior a
+`RETENCION_ANIOS` (5). Sólo dentro de la hora 04 UTC del cron y una vez por día,
+hasta 200 por inquilino por corrida, y el `DELETE` vuelve a comprobar estado y
+`closed_at` con el mismo predicado (`cerradoAntesDe`) que usa el listado.
+`RETENCION_MODO` nace en `apagado`; `simular` sólo cuenta. No toca clientes,
+pólizas, `audit_log` ni `no_relevante`. No hay cron nuevo.
+
+**Pen test más ancho.** `pnpm pentest` suma `attackSso` (las rutas del plugin y
+`/api/admin/sso` sin sesión, y un dominio privado desconocido) y tres sondas de
+`cualesBorra` en la pared entre inquilinos. Sigue siendo de sólo lectura en
+producción. `scripts/prove-data-layer.mts` suma la sección 5 (borrar el caso del
+inquilino de al lado), que escribe y por eso sólo corre en CI o con `--escribe`.
+
+**Documento de respuestas.** `docs/SEGURIDAD.md`, en formato CAIQ-lite: regiones,
+cifrado, aislamiento, roles, SSO, retención, subprocesadores, backups y las
+deudas dichas tal cual. Lo que no se pudo verificar dice «a verificar». La
+política de privacidad pública no se tocó: el texto propuesto está en el
+documento.
+
+**Peso del bundle.** 309,87 kB contra el tope de 310, medido con `pnpm build && pnpm peso` (`pnpm peso` imprime 310 redondeado): B19 no sumó nada al navegador. El panel del SSO es un componente de servidor montado desde `configuracion/page.tsx`, y el margen que había era de 0,13 kB.
+
 ### 🙋 Waiting on you (not code)
+
+- **B19: la 0045 ya está aplicada** (30/09, en producción, staging y QA). Falta
+  probar en QA lo que sólo se comprobó con SQL dibujado: el `CASE` del PUT y el `EXISTS`
+  del PATCH de `/api/admin/sso`, la cola de purga (incluido borrar dos veces el
+  mismo objeto) y una pasada de la retención en `simular`. Además:
+  - Confirmar la separación de buckets de R2: QA tiene el suyo
+    (`claimmix-qa-attachments`); falta confirmar el de staging contra el de
+    producción.
+  - Decidir cuándo pasar `RETENCION_MODO` y `PURGA_ADJUNTOS_MODO` de `apagado` a
+    `simular` y después a `borrar`. No se encendieron en ningún ambiente.
+  - Verificar la ventana de PITR de Neon en el plan vigente y probar una
+    restauración. Verificar la región de la base de producción y la ubicación del
+    balde de R2.
+  - SOC 2, ISO 27001 y un pen test externo: no son código, están en
+    `docs/SEGURIDAD.md` como pendientes del dueño.
+  - **Cancelar una purga:** el dueño hace
+    `UPDATE adjuntos_por_purgar SET purgar_despues = NULL` (con `WHERE` por
+    inquilino o caso). Un `NULL` es una purga cancelada, salvo que después se
+    borre otro caso que comparta el objeto: la fila nueva manda.
+  - **Apagar «exigir SSO»** si alguien se queda afuera: el dueño hace
+    `UPDATE sso_settings SET exigir = false WHERE tenant_id = '<id>'`.
+  - Que alguien revise el texto de privacidad propuesto en `docs/SEGURIDAD.md`
+    (bcrypt por scrypt, cinco roles, regiones reales, retención apagada por
+    defecto) y, si lo aprueba, lo pase a `src/app/privacy/page.tsx`.
+
+- **B16, B17 y B26: la 0044 ya está aplicada** (30/09, en producción, staging y
+  QA). Falta encender el formulario de un inquilino de prueba y mandar una denuncia real por
+  la web: el ensayo no tiene escenario del canal `web`.
+
+- **B12, B14, B15 y B22: la 0043 ya está aplicada** (30/09, en las tres bases).
+  Falta mirar
+  el primer barrido de `/desvios` (puede traer hasta 30 días de cierres viejos) y
+  decidir si hace falta un rol supervisor: hoy la pantalla es de owner, admin y
+  specialist.
+
+- **B3 y B4: la 0038 y la 0039 ya están aplicadas** (29/09, en las tres bases).
+  Falta confirmar que un mensaje tardío que cuenta otro
+  siniestro no abra un caso nuevo solo.
+
+- **B6, B21 y B23: la 0040 ya está aplicada** (29/09, en las tres bases). Falta
+  validar la tabla de montos por defecto y decidir si un viewer puede ver
+  cobertura, monto y presupuesto.
+
+- **B18 y B24: la 0041 ya está aplicada** (30/09, en las tres bases). Falta que
+  un abogado revise las citas de la Ley 24.449 (art. 41, 44 y 48 inc. g) y
+  confirme el art. 39 inc. b para la regla de vehículo detenido.
+
+- **B9, B10, B11 y B13: la 0042 ya está aplicada** (30/09, en las tres bases).
+  El tope de `pnpm peso` no subió: se recortó código hasta entrar en 310 kB.
+  Falta que alguien defina las reglas de
+  asignación y los plazos propios de cada aseguradora en la pestaña «Trabajo del
+  equipo».
 
 - ~~**Qué hacer con la respuesta a un caso ya derivado.**~~ ✅ **RESUELTO
   25/09 en #293 (P6).** `findExistingWhatsAppCase` suma el mensaje al caso en

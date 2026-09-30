@@ -41,6 +41,15 @@ describe("«Para responder»", () => {
     }
   });
 
+  // El traspaso promete que si escribe la lee una persona (`SI_VOLVES_A_ESCRIBIR`),
+  // y una salida a mano no la rompe.
+  it("en_liquidacion, pagado y rechazado suman el WhatsApp y van a «Para responder»", () => {
+    for (const s of ["en_liquidacion", "pagado", "rechazado"]) {
+      expect(sumaWhatsApp(s)).toBe(true);
+      expect(terminado(s)).toBe(true);
+    }
+  });
+
   it("cerrado, no_relevante y esperando no suman el WhatsApp ni van a «Para responder»", () => {
     for (const s of ["cerrado", "no_relevante", "esperando"]) {
       expect(sumaWhatsApp(s)).toBe(false);

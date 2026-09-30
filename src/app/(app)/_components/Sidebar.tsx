@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 
-import { ADMIN_ROLES, CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
+import { ADMIN_ROLES, CUSTOMER_PII_ROLES, REVISION_ROLES } from "@/lib/auth/roles";
 import { usePathname, useSearchParams } from "next/navigation";
 import { hrefActivo } from "./nav-activo";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import {
   Inbox,
   AlertTriangle,
@@ -24,6 +24,7 @@ import {
   Sparkles,
   ListTodo,
   CalendarClock,
+  ClipboardCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -47,7 +48,7 @@ export interface NavItemDef {
 export function conCandadoPro(
   items: NavItemDef[],
   esPro: boolean,
-  t: (k: TranslationKey) => string
+  t: (k: ClaveDelCliente) => string
 ): NavItemDef[] {
   if (esPro) return items;
   return items.map((item) =>
@@ -158,6 +159,7 @@ export function Sidebar({
   const searchParams = useSearchParams();
   const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const puedeVerClientes = (CUSTOMER_PII_ROLES as string[]).includes(role);
+  const puedeRevisar = (REVISION_ROLES as string[]).includes(role);
 
   const operacionItems: NavItemDef[] = conCandadoPro([
     { label: t("nav.miCola"), href: "/bandeja?cola=mia", icon: ListTodo },
@@ -196,6 +198,8 @@ export function Sidebar({
 
   const analisisItems: NavItemDef[] = conCandadoPro([
     { label: t("nav.metricas"), href: "/metricas", icon: BarChart2 },
+    // Sólo para quien maneja al equipo: se esconde por lo mismo que «Clientes».
+    ...(puedeRevisar ? [{ label: t("nav.desvios"), href: "/desvios", icon: ClipboardCheck }] : []),
     { label: t("nav.asistente"), href: "/asistente", icon: Sparkles, pro: true },
     { label: t("nav.demo"), href: "/demo", icon: Play },
     {

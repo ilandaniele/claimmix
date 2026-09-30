@@ -216,6 +216,24 @@ describe("runIntakeAgent", () => {
     });
   });
 
+  it("chooses email extraction for web form cases", async () => {
+    setupSelectResults([
+      [{ id: "case-web-001", tenant_id: "tenant-001", channel: "web", status: "recibido" }],
+    ]);
+
+    const result = await runIntakeAgent({
+      caseId: "case-web-001",
+      tenantId: "tenant-001",
+      source: "worker",
+    });
+
+    expect(result.action).toBe("extract_email");
+    expect(result.ok).toBe(true);
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-web-001", "tenant-001", null, {
+      retoma: false,
+    });
+  });
+
   it("chooses email extraction for email_sim cases", async () => {
     setupSelectResults([
       [{ id: "case-sim-001", tenant_id: "tenant-001", channel: "email_sim", status: "procesando" }],
@@ -252,6 +270,24 @@ describe("runIntakeAgent", () => {
 
     expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-003", "tenant-001", null, {
       retoma: true,
+    });
+  });
+
+  it("hasta, cuando mata Vercel la invocación, llega al worker", async () => {
+    setupSelectResults([
+      [{ id: "case-004", tenant_id: "tenant-001", channel: "whatsapp", status: "procesando" }],
+    ]);
+
+    await runIntakeAgent({
+      caseId: "case-004",
+      tenantId: "tenant-001",
+      source: "whatsapp",
+      hasta: 1_800_000_000_000,
+    });
+
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-004", "tenant-001", null, {
+      retoma: false,
+      hasta: 1_800_000_000_000,
     });
   });
 

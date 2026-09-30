@@ -7,13 +7,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import {
-  IntencionSchema,
-  PERIODOS,
-  rangoDelPeriodo,
-  textoDelConteo,
-  type Periodo,
-} from "@/core/asistente/intencion";
+import { IntencionSchema, textoDelConteo } from "@/core/asistente/intencion";
+import { PERIODOS, rangoDelPeriodo, type Periodo } from "@/core/metricas/periodo";
 
 describe("IntencionSchema", () => {
   it("rechaza una herramienta que no está en la lista", () => {

@@ -31,6 +31,7 @@ const CENTINELAS = [
   "email_subject",
   "email_body",
   "claim_text",
+  "mensaje_tardio",
   "memory_hints",
   "approved_examples",
   "agent_rules",
@@ -40,6 +41,16 @@ const CENTINELAS = [
   "tenant_prompt",
   "pregunta_del_usuario",
   "datos_del_caso",
+  // Envuelve cada archivo (foto, PDF, audio) que va al modelo como dato.
+  "adjunto",
+  // Las notas que acompañan a las condiciones de una póliza y a un presupuesto.
+  "condiciones_poliza",
+  "presupuesto_taller",
+  // Los turnos anteriores de la conversación del asistente sobre un caso: lo
+  // escribió la persona y lo contestó el modelo, y los dos son datos.
+  "historial_del_hilo",
+  // Los tipos de siniestro que creó la aseguradora: nombres escritos por una persona.
+  "tipos_del_inquilino",
 ] as const;
 
 /** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */

@@ -31,6 +31,15 @@ describe("safeCsvCell — formula injection guard", () => {
     });
   }
 
+  it("prefixes a value that starts with a tab or a carriage return", () => {
+    expect(safeCsvCell("\t=1+1")).toBe("'\t=1+1");
+    expect(safeCsvCell("\r=1+1")).toBe("\"'\r=1+1\"");
+  });
+
+  it("does not prefix a tab or a carriage return that is not first", () => {
+    expect(safeCsvCell("a\tb")).toBe("a\tb");
+  });
+
   it("does not modify safe strings", () => {
     expect(safeCsvCell("Lucía Ramallo")).toBe("Lucía Ramallo");
     expect(safeCsvCell("12345")).toBe("12345");

@@ -20,33 +20,13 @@ import {
   EMAIL_INITIAL_STATUS,
   AI_ALLOWED_STATUSES,
 } from "@/core/case/fsm";
-import type { CaseStatus } from "@/lib/schemas/cases";
+import { CaseStatusSchema, type CaseStatus } from "@/lib/schemas/cases";
 
 // ── All statuses present in FSM map ──────────────────────────────────────────
 
 describe("FSM_TRANSITIONS — completeness", () => {
-  const allStatuses: CaseStatus[] = [
-    // Legacy
-    "procesando",
-    "listo",
-    "esperando",
-    "escalado",
-    "cerrado",
-    // Email-intake
-    "recibido",
-    "info_faltante",
-    "confirmacion_pendiente",
-    "requiere_especialista",
-    "listo_para_core",
-    "enviado_a_core",
-    "error_core",
-    "no_relevante",
-  ];
-
-  it("has entries for all 13 statuses", () => {
-    for (const s of allStatuses) {
-      expect(FSM_TRANSITIONS).toHaveProperty(s);
-    }
+  it("has an entry for every status", () => {
+    expect(Object.keys(FSM_TRANSITIONS).sort()).toEqual([...CaseStatusSchema.options].sort());
   });
 
   it("legacy statuses still have the same transitions as before", () => {

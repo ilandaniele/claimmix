@@ -27,6 +27,7 @@ import { isInternalRequest } from "@/lib/security/internal-auth";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 
 import { db, tables } from "@/lib/db";
+import { filasDe } from "@/lib/db/filas";
 import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
@@ -137,19 +138,10 @@ function why(err: unknown): string {
   return err instanceof Error ? err.message.slice(0, 120) : "error desconocido";
 }
 
-/**
- * The rows from a raw query.
- *
- * `db.execute` hands back the driver's result object, not an array — and code
- * that assumed an array got an empty list, which here meant reporting every
- * migration as missing on a database where all of them were applied.
- */
+/** Las filas de una consulta cruda; `filasDe` explica por qué no alcanza con suponer un arreglo. */
 async function rowsOf<T>(query: SQL): Promise<T[]> {
   // sin-inquilino: Idem: el resultado crudo del driver, no filas de una tabla.
-  const result = (await db.execute(query)) as unknown;
-  if (Array.isArray(result)) return result as T[];
-  const rows = (result as { rows?: unknown })?.rows;
-  return Array.isArray(rows) ? (rows as T[]) : [];
+  return filasDe<T>(await db.execute(query));
 }
 
 // ── The checks ───────────────────────────────────────────────────────────────
@@ -231,20 +223,68 @@ async function checkSchema(): Promise<Check> {
     // 0010: sin esto no se puede dar de alta un cliente ni emitir una factura.
     ["tenants", "plan"],
     ["tenants", "monthly_fee_usd"],
+    // 0037: sin estas el worker no puede guardar lo que leyó de los adjuntos.
+    ["cases", "resumen"],
+    ["claim_attachments", "resumen"],
+    ["claim_attachments", "util"],
+    ["claim_attachments", "datos"],
+    ["claim_attachments", "metadatos"],
+    // 0038: sin esto el worker no puede reservar el mensaje tardío ni la bandeja listarlo.
+    ["cases", "mensaje_tardio_de"],
+    ["cases", "mensaje_tardio_tipo"],
+    ["cases", "mensaje_tardio_resumen"],
+    ["cases", "mensaje_tardio_reservado_en"],
+    // 0039: sin esto el cron de recordatorios y la configuración de alertas fallan.
+    ["tenants", "recordatorio_horas"],
+    // 0040: sin esto el worker no procesa ningún caso y la ficha no abre.
+    ["policies", "coberturas"],
+    ["policies", "ambito_territorial"],
+    ["policies", "condiciones_path"],
+    ["policies", "condiciones_leidas_en"],
+    ["cases", "monto_estimado"],
+    ["tenants", "rangos_de_monto"],
+    ["claim_attachments", "lectura_presupuesto"],
+    // 0041: sin esto el worker no procesa ningún caso y la ficha no abre.
+    ["cases", "responsabilidad"],
+    // 0042: sin esto el worker no procesa ningún caso y ni la ficha ni la bandeja abren.
+    ["cases", "puntaje_complejidad"],
+    ["cases", "vence_en"],
+    ["cases", "vence_plazo"],
+    ["tenants", "reglas_asignacion"],
+    ["tenants", "plazos"],
+    ["tenants", "plan_por_tipo"],
+    ["tenants", "pesos_puntaje"],
   ];
 
   try {
+    // La segunda mitad del union es la 0044: si el CHECK de canal ya nombra
+    // 'web' aparece una fila 'cases.canal_web', y sin ella el formulario público
+    // no puede crear ningún caso. Va en la misma consulta para no pagar otra.
     const rows = await rowsOf<{ table_name: string; column_name: string }>(sql`
       select table_name, column_name
         from information_schema.columns
        where table_schema = 'public'
+      union all
+      select 'cases', 'canal_web'
+        from pg_constraint
+       where conrelid = 'public.cases'::regclass and contype = 'c'
+         and pg_get_constraintdef(oid) ilike '%''web''%'
     `);
 
     const present = new Set(rows.map((r) => `${r.table_name}.${r.column_name}`));
 
     // 0017 crea una tabla entera; sin ella una factura cerrada se recalcula en
     // cada consulta, que es justo lo que la 0017 existe para impedir.
-    const requiredTables = ["billing_invoices", "rate_limit_counters"];
+    const requiredTables = [
+      "billing_invoices",
+      "rate_limit_counters",
+      "case_recordatorios",
+      "case_plan_pasos",
+      "asistente_turnos",
+      "case_desvios",
+      // 0045: borrar un caso encola acá en el mismo lote; sin la tabla no se borra nada.
+      "adjuntos_por_purgar",
+    ];
     const tablesPresent = new Set(rows.map((r) => r.table_name));
     const missingTables = requiredTables.filter((t) => !tablesPresent.has(t));
     const missing = required
@@ -253,9 +293,17 @@ async function checkSchema(): Promise<Check> {
 
     const gaps = [...missing, ...missingTables];
 
-    return gaps.length === 0
-      ? ok("migraciones", "el esquema tiene lo que el código espera")
-      : down("migraciones", `faltan: ${gaps.join(", ")}`);
+    // La 0044 es aditiva y el resto del producto no la toca: el formulario
+    // público, los tipos propios y el canal 'web' quedan apagados, nada más. Por
+    // eso es degradado con el motivo a la vista y no caído.
+    const pendiente0044 =
+      ["formulario_web", "tenant_claim_types"].some((t) => !tablesPresent.has(t)) ||
+      !present.has("cases.canal_web");
+
+    if (gaps.length > 0) return down("migraciones", `faltan: ${gaps.join(", ")}`);
+    return pendiente0044
+      ? degraded("migraciones", "migración 0044 pendiente (formulario web, tipos propios, canal web)")
+      : ok("migraciones", "el esquema tiene lo que el código espera");
   } catch (err) {
     return degraded("migraciones", `no se pudo verificar: ${why(err)}`);
   }

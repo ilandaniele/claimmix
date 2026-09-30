@@ -11,7 +11,7 @@
 import { useState, useCallback } from "react";
 import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import { claveDeTipo } from "@/lib/i18n/tipos-de-siniestro";
 import { useDialogoModal } from "../../_components/dialogo-modal";
 
 interface SimulateModalProps {
@@ -22,23 +22,6 @@ interface SimulateModalProps {
 }
 
 type InputMode = "scenario" | "custom";
-
-/*
- * El escenario muestra su tipo capitalizado a mano. Si el tipo esta en el
- * vocabulario del producto se dice como en todas las demas pantallas; si no,
- * se sigue capitalizando el valor crudo antes que no mostrarlo.
- */
-export const TIPO: Record<string, TranslationKey> = {
-  choque: "type.choque",
-  robo: "type.robo",
-  granizo: "type.granizo",
-  incendio: "type.incendio",
-  cristales: "type.cristales",
-  rc: "type.rc",
-  robo_contenido: "type.robo_contenido",
-  accidente_personal: "type.accidente_personal",
-  other: "type.other",
-};
 
 export function SimulateModal({
   scenarios,
@@ -182,14 +165,16 @@ export function SimulateModal({
               onChange={(e) => setSelectedScenarioId(e.target.value)}
               className="w-full rounded-md border border-control bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
             >
-              {scenarios.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {TIPO[s.case_type]
-                    ? t(TIPO[s.case_type])
-                    : s.case_type.charAt(0).toUpperCase() + s.case_type.slice(1)}{" "}
-                  — {s.policyholder_name}: {s.preview}
-                </option>
-              ))}
+              {scenarios.map((s) => {
+                // Si el tipo está en el vocabulario del producto se dice como en las demás pantallas; si no, se capitaliza el valor crudo antes que no mostrarlo.
+                const clave = claveDeTipo(s.case_type);
+                return (
+                  <option key={s.id} value={s.id}>
+                    {clave ? t(clave) : s.case_type.charAt(0).toUpperCase() + s.case_type.slice(1)} —{" "}
+                    {s.policyholder_name}: {s.preview}
+                  </option>
+                );
+              })}
             </select>
           </div>
         )}

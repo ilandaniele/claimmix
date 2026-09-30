@@ -29,13 +29,20 @@
  * renderiza, que es el único que tiene el `useT()`.
  */
 
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
+import { RAMOS_NATIVOS } from "@/core/case/ramos";
 
 export interface OpcionDeFiltro {
   /** Lo que va al parámetro de la URL. */
   clave: string;
   /** Clave de i18n de lo que se lee en el chip. */
-  etiqueta: TranslationKey;
+  etiqueta: ClaveDelCliente;
+  /**
+   * Sólo los tipos propios del inquilino: su nombre, ya en el idioma de la
+   * cuenta. Manda sobre `etiqueta`, que en esas opciones es sólo el respaldo
+   * que pide el tipo.
+   */
+  texto?: string;
   /**
    * Sólo la severidad lo usa: el color de su nivel. Pinta el chip cuando está
    * elegido y el puntito de la marca cuando está puesto, porque el color ES lo
@@ -49,7 +56,7 @@ export interface GrupoDeFiltro {
   /** El parámetro de búsqueda que este grupo escribe. */
   param: string;
   /** Clave de i18n del título del grupo. */
-  rotulo: TranslationKey;
+  rotulo: ClaveDelCliente;
   opciones: OpcionDeFiltro[];
   /**
    * El resto de los grupos son multi-selección: se puede marcar «choque» y
@@ -102,17 +109,7 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
   {
     param: "type",
     rotulo: "filter.tipo",
-    opciones: [
-      { clave: "choque", etiqueta: "type.choque" },
-      { clave: "robo", etiqueta: "type.robo" },
-      { clave: "granizo", etiqueta: "type.granizo" },
-      { clave: "incendio", etiqueta: "type.incendio" },
-      { clave: "cristales", etiqueta: "type.cristales" },
-      { clave: "rc", etiqueta: "type.rc" },
-      { clave: "robo_contenido", etiqueta: "type.robo_contenido" },
-      { clave: "accidente_personal", etiqueta: "type.accidente_personal" },
-      { clave: "other", etiqueta: "type.other" },
-    ],
+    opciones: RAMOS_NATIVOS.map((clave) => ({ clave, etiqueta: `type.${clave}` as const })),
   },
   {
     param: "severity",
@@ -139,8 +136,31 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
     opciones: [
       { clave: "email", etiqueta: "channel.email" },
       { clave: "whatsapp", etiqueta: "channel.whatsapp" },
+      { clave: "web", etiqueta: "channel.web" },
       { clave: "email_sim", etiqueta: "channel.email_sim" },
       { clave: "whatsapp_sim", etiqueta: "channel.whatsapp_sim" },
+    ],
+  },
+  /*
+   * B10 y B13, sólo para el equipo. Los valores son los de `CaseQuerySchema`.
+   * Como en el resto de los grupos, dos opciones marcadas son «cualquiera de las
+   * dos» y ninguna es «todos».
+   */
+  {
+    param: "vencimiento",
+    rotulo: "filter.vencimiento",
+    opciones: [
+      { clave: "vencidos", etiqueta: "vencimiento.vencidos", color: "bg-red-600" },
+      { clave: "por_vencer", etiqueta: "vencimiento.por_vencer", color: "bg-amber-500" },
+    ],
+  },
+  {
+    param: "complejidad",
+    rotulo: "filter.complejidad",
+    opciones: [
+      { clave: "baja", etiqueta: "complejidad.baja" },
+      { clave: "media", etiqueta: "complejidad.media" },
+      { clave: "alta", etiqueta: "complejidad.alta" },
     ],
   },
   {
@@ -154,6 +174,38 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
     ],
   },
 ];
+
+/** Un tipo de siniestro propio del inquilino, con el nombre en el idioma de la cuenta. */
+export interface TipoPropio {
+  clave: string;
+  nombre: string;
+}
+
+/**
+ * Los grupos de arriba, con los tipos propios de la aseguradora sumados al de
+ * «tipo». Sin tipos propios devuelve la misma lista, sin copiar.
+ */
+export function gruposConTipos(tipos: readonly TipoPropio[] = []): GrupoDeFiltro[] {
+  if (tipos.length === 0) return GRUPOS_DE_FILTRO;
+  return GRUPOS_DE_FILTRO.map((g) =>
+    g.param !== "type"
+      ? g
+      : {
+          ...g,
+          opciones: [
+            ...g.opciones.filter((o) => o.clave !== "other"),
+            ...tipos.map((x) => ({ clave: x.clave, etiqueta: "type.other" as const, texto: x.nombre })),
+            ...g.opciones.filter((o) => o.clave === "other"),
+          ],
+        }
+  );
+}
+
+/** Lo que se lee en un chip o en una marca: el texto propio, o la clave de i18n traducida. */
+export const textoDeFiltro = (
+  t: (k: ClaveDelCliente) => string,
+  o: { etiqueta: ClaveDelCliente; texto?: string }
+): string => o.texto ?? t(o.etiqueta);
 
 /** Los parámetros que maneja el panel. Los usa «Limpiar» para borrarlos todos. */
 export const PARAMS_DE_FILTRO = GRUPOS_DE_FILTRO.map((g) => g.param);
@@ -177,8 +229,9 @@ export interface FiltroPuesto {
   /** El valor puesto, para poder sacarlo con `alternar` sin releer la URL. */
   valor: string;
   /** Clave de i18n del grupo, para leer «Severidad: Crítico» y no sólo «Crítico». */
-  rotulo: TranslationKey;
-  etiqueta: TranslationKey;
+  rotulo: ClaveDelCliente;
+  etiqueta: ClaveDelCliente;
+  texto?: string;
   color?: string;
 }
 
@@ -201,11 +254,12 @@ export interface FiltroPuesto {
  * esta función se queda pura y se puede probar sin montar un router.
  */
 export function filtrosPuestos(
-  leer: (param: string) => string[]
+  leer: (param: string) => string[],
+  tipos: readonly TipoPropio[] = []
 ): FiltroPuesto[] {
   const puestos: FiltroPuesto[] = [];
 
-  for (const grupo of GRUPOS_DE_FILTRO) {
+  for (const grupo of gruposConTipos(tipos)) {
     for (const valor of leer(grupo.param)) {
       const opcion = grupo.opciones.find((o) => o.clave === valor);
       if (!opcion) continue;
@@ -215,6 +269,7 @@ export function filtrosPuestos(
         valor,
         rotulo: grupo.rotulo,
         etiqueta: opcion.etiqueta,
+        texto: opcion.texto,
         color: opcion.color,
       });
     }

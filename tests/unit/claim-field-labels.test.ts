@@ -19,6 +19,27 @@ import {
   isDerivable,
   labelForField,
 } from "@/lib/labels/claim-fields";
+import { instruccionDeCampo } from "@/lib/labels/instruccion-de-campo";
+
+describe("instruccionDeCampo", () => {
+  it("uses the written sentence for a known key, even with the tenant's name", () => {
+    expect(instruccionDeCampo("fotos_danos")).toBe("Mandanos fotos de los daños.");
+    expect(instruccionDeCampo("fotos_danos", "Fotografías de los daños")).toBe(
+      "Mandanos fotos de los daños."
+    );
+  });
+
+  it("builds the sentence from the tenant's name when the key is unknown", () => {
+    expect(instruccionDeCampo("frente_del_local", "Foto del frente del local")).toBe(
+      "Mandanos foto del frente del local."
+    );
+  });
+
+  it("asks for a file or a fact by the kind of the key when nobody named it", () => {
+    expect(instruccionDeCampo("foto_del_paragolpes")).toBe("Mandanos foto del paragolpes.");
+    expect(instruccionDeCampo("marca_del_auto")).toBe("Decinos marca del auto.");
+  });
+});
 
 describe("labelForField", () => {
   it("names the keys from the real WhatsApp reply in Spanish", () => {
@@ -41,9 +62,9 @@ describe("labelForField", () => {
     ];
 
     for (const key of keys) {
-      const { label, instruction } = labelForField(key);
+      const { label } = labelForField(key);
       expect(label, key).not.toContain("_");
-      expect(instruction, key).not.toContain("_");
+      expect(instruccionDeCampo(key), key).not.toContain("_");
       expect(label.charAt(0), key).toBe(label.charAt(0).toUpperCase());
     }
   });

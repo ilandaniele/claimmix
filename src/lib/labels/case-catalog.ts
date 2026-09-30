@@ -17,7 +17,7 @@
  */
 
 import { t, type Locale } from "@/lib/i18n";
-import type { TranslationKey } from "@/lib/i18n/es-AR";
+import type { TranslationKey } from "@/lib/i18n";
 import {
   CaseStatusSchema,
   ClaimTypeSchema,

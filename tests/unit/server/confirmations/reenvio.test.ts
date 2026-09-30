@@ -298,6 +298,16 @@ describe("reenviarPedido — WhatsApp fuera de la ventana", () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
+  it("si Meta no contesta, el motivo es plantilla_sin_respuesta, no ventana_cerrada", async () => {
+    mockEstadoDePlantilla.mockResolvedValue("sin_respuesta");
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: false, motivo: "plantilla_sin_respuesta" });
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
   it("con la ventana abierta, no consulta la plantilla y manda sin porPlantilla", async () => {
     configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: new Date().toISOString() }));
     configurarEscritura([{ id: CASE_ID }]);

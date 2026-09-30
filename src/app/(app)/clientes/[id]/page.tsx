@@ -14,7 +14,7 @@ import { getUserRow } from "@/lib/auth/user-row";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { eq, desc, count } from "drizzle-orm";
 import { cases, customers, policies } from "@/lib/db/schema";
-import { CUSTOMER_PII_ROLES } from "@/lib/auth/require-role";
+import { CUSTOMER_PII_ROLES, PADRON_EDITOR_ROLES } from "@/lib/auth/require-role";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
@@ -22,7 +22,12 @@ import { SeverityBadge } from "@/app/(app)/bandeja/components/SeverityBadge";
 import { formatDate, formatDateOnly, formatAge } from "@/lib/utils";
 import { formatCaseNumber } from "@/core/case/numero";
 import Link from "next/link";
-import type { CaseStatus, ClaimType } from "@/lib/schemas/cases";
+import { SubirCondiciones } from "./_components/SubirCondiciones";
+import { FormularioDeCliente, FormularioDePoliza } from "../_components/PanelesDelPadron";
+import type { CaseStatus } from "@/lib/schemas/cases";
+import { esRamoNativo } from "@/core/case/ramos";
+import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
+import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 
 interface CustomerDetailPageProps {
   params: Promise<{ id: string }>;
@@ -35,6 +40,9 @@ interface Policy {
   status: string;
   start_date: string | null;
   end_date: string | null;
+  premium_amount: string | null;
+  condiciones_path: string | null;
+  condiciones_leidas_en: string | null;
 }
 
 interface CustomerCase {
@@ -93,26 +101,6 @@ export default async function CustomerDetailPage({
     cancelled: t("clientes.policyStatus.cancelled"),
   };
 
-  /*
-   * Los tipos de siniestro traducidos, como en todas las demás pantallas.
-   *
-   * Acá la celda era `{c.claim_type}` con `capitalize`: el mismo caso que en la
-   * bandeja dice «Resp. Civil» decía «Rc», y el que dice «Robo de contenido»
-   * decía «Robo_contenido». Alguien que abre la ficha de un cliente para ver su
-   * historial leía claves de base de datos.
-   */
-  const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
-    choque: t("type.choque"),
-    robo: t("type.robo"),
-    granizo: t("type.granizo"),
-    incendio: t("type.incendio"),
-    cristales: t("type.cristales"),
-    rc: t("type.rc"),
-    robo_contenido: t("type.robo_contenido"),
-    accidente_personal: t("type.accidente_personal"),
-    other: t("type.other"),
-  };
-
   const session = await getSessionContext();
   if (!session?.user) notFound();
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
@@ -132,6 +120,7 @@ export default async function CustomerDetailPage({
   if (!(CUSTOMER_PII_ROLES as string[]).includes(userRow.role)) redirect("/bandeja");
 
   const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
+  const puedeEditar = (PADRON_EDITOR_ROLES as string[]).includes(userRow.role);
 
   /*
    * El id de la URL contra una columna `uuid`, sin creerle a la URL.
@@ -148,7 +137,7 @@ export default async function CustomerDetailPage({
    */
   const customer = await enTenant(tenantCtx, (db) =>
     db
-      .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, created_at: customers.created_at })
+      .select({ id: customers.id, full_name: customers.full_name, dni: customers.dni, email: customers.email, phone: customers.phone, birth_date: customers.birth_date, address: customers.address, created_at: customers.created_at })
       .from(customers)
       .where(eq(customers.id, id))
       .limit(1)
@@ -162,7 +151,7 @@ export default async function CustomerDetailPage({
   const [policiesData, casesData, [casesCountRow]] = await Promise.all([
     enTenant(tenantCtx, (db) =>
       db
-        .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date })
+        .select({ id: policies.id, policy_number: policies.policy_number, policy_type: policies.policy_type, status: policies.status, start_date: policies.start_date, end_date: policies.end_date, premium_amount: policies.premium_amount, condiciones_path: policies.condiciones_path, condiciones_leidas_en: policies.condiciones_leidas_en })
         .from(policies)
         .where(eq(policies.customer_id, id))
         .orderBy(desc(policies.created_at))
@@ -190,6 +179,10 @@ export default async function CustomerDetailPage({
 
   const customerPolicies: Policy[] = policiesData;
   const customerCases: CustomerCase[] = casesData;
+  // Los ramos del inquilino se leen sólo si algún siniestro es de un tipo que el código no trae.
+  const ramosPropios = customerCases.some((c) => c.claim_type && !esRamoNativo(c.claim_type))
+    ? await cargarRamosDelInquilino(tenantCtx.tenantId)
+    : [];
   const totalCasos = casesCountRow?.n ?? customerCases.length;
   const casosRecortados = totalCasos > customerCases.length;
 
@@ -246,6 +239,14 @@ export default async function CustomerDetailPage({
             </dd>
           </div>
         </dl>
+        {puedeEditar && (
+          <details className="mt-4 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+            <summary className="cursor-pointer text-sm font-medium">{t("padron.cliente.editar")}</summary>
+            <div className="mt-3">
+              <FormularioDeCliente t={t} cliente={customer} />
+            </div>
+          </details>
+        )}
       </div>
 
       {/* Two-section layout */}
@@ -282,6 +283,7 @@ export default async function CustomerDetailPage({
                       t("clientes.detail.policyStatus"),
                       t("clientes.detail.validFrom"),
                       t("clientes.detail.validTo"),
+                      t("condiciones.titulo"),
                     ].map((col) => (
                       <th
                         key={col}
@@ -325,10 +327,41 @@ export default async function CustomerDetailPage({
                       <td className="py-2.5 px-3 text-sm text-slate-600 whitespace-nowrap last:pr-0">
                         {policy.end_date ? formatDateOnly(policy.end_date, locale) : "—"}
                       </td>
+                      <td className="py-2.5 px-3 text-xs text-slate-600 last:pr-0">
+                        <p className="mb-1">
+                          {policy.condiciones_leidas_en
+                            ? t("condiciones.leidas").replace(
+                                "{fecha}",
+                                formatDate(policy.condiciones_leidas_en, locale, { hour: undefined, minute: undefined })
+                              )
+                            : t(policy.condiciones_path ? "condiciones.sinLeer" : "condiciones.sinSubir")}
+                        </p>
+                        <SubirCondiciones policyId={policy.id} subido={policy.condiciones_path !== null} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {puedeEditar && (
+            <div className="mt-4 space-y-3">
+              {customerPolicies.map((policy) => (
+                <details key={policy.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    {t("padron.poliza.editar")} <span className="font-mono text-xs text-slate-500">{policy.policy_number}</span>
+                  </summary>
+                  <div className="mt-3">
+                    <FormularioDePoliza t={t} poliza={policy} />
+                  </div>
+                </details>
+              ))}
+              <details className="rounded-lg border border-dashed border-slate-300 p-3 dark:border-slate-700">
+                <summary className="cursor-pointer text-sm font-medium">{t("padron.poliza.nueva")}</summary>
+                <div className="mt-3">
+                  <FormularioDePoliza t={t} clienteId={customer.id} />
+                </div>
+              </details>
             </div>
           )}
         </section>
@@ -422,8 +455,7 @@ export default async function CustomerDetailPage({
                       </td>
                       <td className="py-2.5 px-3 text-sm text-slate-700 last:pr-0">
                         {c.claim_type ? (
-                          CLAIM_TYPE_LABELS[c.claim_type as ClaimType] ??
-                          c.claim_type
+                          nombreDeTipo(c.claim_type, t, ramosPropios, locale)
                         ) : (
                           <span className="text-slate-300 text-xs">—</span>
                         )}

@@ -41,6 +41,21 @@ describe("camposRequeridosDelRamo", () => {
   it("un ramo que no existe, tampoco", () => {
     expect(camposRequeridosDelRamo("x")).toEqual([]);
   });
+
+  it("un ramo propio pide lo que su inquilino le configuró", () => {
+    const ramos = [{ clave: "caucion", datos: ["testigos", "numero_denuncia"] }];
+    expect(camposRequeridosDelRamo("caucion", ramos)).toEqual(["testigos", "numero_denuncia"]);
+  });
+
+  it("un dato que ya no está en el catálogo (tipo_vehiculo) no se pide: el modelo nunca lo trae", () => {
+    const ramos = [{ clave: "caucion", datos: ["tipo_vehiculo", "testigos"] }];
+    expect(camposRequeridosDelRamo("caucion", ramos)).toEqual(["testigos"]);
+  });
+
+  it("los datos del inquilino se suman a los de un ramo del código, no los reemplazan", () => {
+    const ramos = [{ clave: "robo", datos: ["testigos"] }];
+    expect(camposRequeridosDelRamo("robo", ramos)).toEqual(["patente_vehiculo", "provincia_siniestro", "testigos"]);
+  });
 });
 
 describe("clavesQueSatisfacen", () => {

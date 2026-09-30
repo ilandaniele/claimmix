@@ -41,6 +41,13 @@ describe("claveDeCupo", () => {
     expect(claveDeCupo("batch-simulate", "u-1")).toBe("batch-simulate:u-1");
   });
 
+  it("las lecturas y subidas de documentos (B6, B21) cuentan por póliza y por caso, no por usuario", () => {
+    expect(claveDeCupo("condiciones-poliza", "T-1", "P-1")).toBe("condiciones-poliza:t-1:p-1");
+    expect(claveDeCupo("lectura-presupuesto", "t-1", "c-1")).toBe("lectura-presupuesto:t-1:c-1");
+    expect(claveDeCupo("subida-condiciones", "T-1", "P-1")).toBe("subida-condiciones:t-1:p-1");
+    expect(claveDeCupo("lectura-reclamo", "T-1", "C-1")).toBe("lectura-reclamo:t-1:c-1");
+  });
+
   it("re-analyze es re-analyze:<caseId>:<userId>", () => {
     expect(claveDeCupo("re-analyze", "c-1", "u-1")).toBe("re-analyze:c-1:u-1");
   });
@@ -98,6 +105,11 @@ vi.mock("@/lib/auth/session", () => ({ getSessionContext: vi.fn() }));
 vi.mock("@/lib/auth/provision", () => ({ resolveDefaultTenantId: () => null }));
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/db/schema", () => ({ users: {} }));
+// Las preguntas al SSO van a la base: acá sólo importa con qué clave se pide el cupo.
+vi.mock("@/server/sso/exigir", () => ({
+  CODIGO_SSO_REQUERIDO: "sso_requerido",
+  altaBloqueadaPorSso: async () => false,
+}));
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn(),
   AuditEvent: { AUTH_RATE_LIMITED: "auth.rate_limited", AUTH_SIGN_UP: "auth.sign_up" },

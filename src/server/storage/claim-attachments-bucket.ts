@@ -61,6 +61,23 @@ export function createStorageClient(): S3Client {
   return client;
 }
 
+/** Writes a new object; a key that already exists fails with 412. */
+async function put(key: string, contentType: string, data: Buffer): Promise<void> {
+  await createStorageClient().send(
+    new PutObjectCommand({
+      Bucket: bucketName(),
+      Key: key,
+      Body: data,
+      ContentType: contentType,
+      // Fail when the key already exists (replicates Neon upsert: false).
+      IfNoneMatch: "*",
+    })
+  );
+}
+
+const statusDe = (error: unknown) =>
+  (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode ?? "unknown";
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface UploadAttachmentOpts {
@@ -97,28 +114,34 @@ export async function uploadAttachment(
   const storagePath = `${tenantId}/${caseId}/${messageId}/${sanitizedName}`;
 
   try {
-    const s3 = createStorageClient();
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: bucketName(),
-        Key: storagePath,
-        Body: data,
-        ContentType: contentType,
-        // Fail when the key already exists (replicates Neon upsert: false).
-        IfNoneMatch: "*",
-      })
-    );
+    await put(storagePath, contentType, data);
   } catch (error) {
     // Log status code only — path may contain tenant/case IDs but not PII.
     // 412 PreconditionFailed = key already exists (duplicate upload).
-    const statusCode =
-      (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
-        ?.httpStatusCode ?? "unknown";
-    logger.error({ status_code: statusCode }, "claim_attachments_bucket.upload_failed");
+    logger.error({ status_code: statusDe(error) }, "claim_attachments_bucket.upload_failed");
     return { error: "STORAGE_UPLOAD_FAILED" };
   }
 
   return { storagePath };
+}
+
+/**
+ * Guarda el PDF de condiciones de una póliza, con el hash como nombre.
+ *
+ * El mismo archivo subido dos veces cae en la misma clave: el 412 dice que ya
+ * está, y eso es éxito. Devuelve la ruta, o null si no se pudo guardar.
+ */
+export async function subirCondiciones(tenantId: string, policyId: string, data: Buffer): Promise<string | null> {
+  const ruta = `${tenantId}/policies/${policyId}/${computeContentHash(data)}.pdf`;
+  try {
+    await put(ruta, "application/pdf", data);
+  } catch (error) {
+    const status = statusDe(error);
+    if (status === 412) return ruta;
+    logger.error({ status_code: status }, "claim_attachments_bucket.upload_failed");
+    return null;
+  }
+  return ruta;
 }
 
 /**
@@ -186,9 +209,11 @@ export async function abrirAdjunto(
  * belongs to a claim file and deleting one is a decision for a person with a
  * retention policy, not for code reacting to a message.
  *
- * It exists for the health check, which proves the bucket really works by
- * writing to it — and would otherwise leave a scrap of test data behind on
- * every run, forever.
+ * Two callers, and only those: the health check, which proves the bucket really
+ * works by writing to it — and would otherwise leave a scrap of test data behind
+ * on every run — and the deferred purge (`purgar-adjuntos.ts`), which deletes
+ * the objects of cases that were already deleted, after a grace period and from
+ * a queue, never at the moment a person deletes a case.
  */
 export async function deleteAttachment(storagePath: string): Promise<boolean> {
   try {

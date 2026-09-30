@@ -34,6 +34,26 @@ export const TRAINING_APPROVER_ROLES: UserRole[] = ["owner", "admin", "specialis
  */
 export const CUSTOMER_PII_ROLES: UserRole[] = ["owner", "admin", "specialist"];
 
+/**
+ * Quién da de alta y cambia clientes y pólizas: a mano y por importación (B16).
+ * El pedido habla de «admin/editor»; no existe un rol `editor` y no se crea uno:
+ * `specialist` es quien edita en esta aplicación. Constante propia, no
+ * `CUSTOMER_PII_ROLES`: leer el padrón y escribirlo cambian por razones
+ * distintas, y el día que un analista pueda ver datos no debería poder pisarlos.
+ */
+export const PADRON_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist"];
+
+/** Quién entrega un caso al Core. La ruta y el botón leen esta lista: si difieren, el botón da 403. */
+export const CORE_SYNC_ROLES: UserRole[] = ["owner", "admin", "specialist"];
+
+/**
+ * Quién ve los desvíos de la revisión nocturna (B22): quien maneja al equipo.
+ * No hay rol `supervisor`; owner, admin y specialist son los que gestionan.
+ * Constante propia por lo mismo que arriba: leer el padrón y revisar la
+ * calidad del trabajo cambian por razones distintas.
+ */
+export const REVISION_ROLES: UserRole[] = ["owner", "admin", "specialist"];
+
 /** Roles with admin-level configuration access. */
 export const ADMIN_ROLES: UserRole[] = ["owner", "admin"];
 
@@ -52,4 +72,26 @@ export const CASE_EDITOR_ROLES: UserRole[] = ["owner", "admin", "specialist", "a
 export function puedeCambiarEstado(actor: { role: string; id: string }, assignedTo: string | null): boolean {
   return (CASE_EDITOR_ROLES as readonly string[]).includes(actor.role)
     && (actor.role !== "analyst" || assignedTo === null || assignedTo === actor.id);
+}
+
+/** Quién le pasa un caso a otra persona: todo el que edita menos el analista, que sólo maneja los suyos. */
+export function asignaATerceros(role: string): boolean {
+  return (CASE_EDITOR_ROLES as readonly string[]).includes(role) && role !== "analyst";
+}
+
+/**
+ * Quién puede pasar un caso de `actual` a `destino` (null = sin asignar).
+ *
+ * Owner, admin y specialist mueven cualquier caso a cualquiera. Un analista sólo
+ * toma un caso libre, se queda con el suyo o lo suelta: no se lo pasa a otro ni
+ * le toca uno ajeno. Que el destino exista, sea del mismo inquilino y edite lo
+ * decide la base dentro del UPDATE (`guardaDeAsignacion`), no esta función.
+ */
+export function puedeAsignar(
+  actor: { role: string; id: string },
+  actual: string | null,
+  destino: string | null
+): boolean {
+  if (asignaATerceros(actor.role)) return true;
+  return actor.role === "analyst" && (actual === null || actual === actor.id) && (destino === null || destino === actor.id);
 }

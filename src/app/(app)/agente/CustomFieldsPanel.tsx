@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import { RAMOS_NATIVOS } from "@/core/case/ramos";
+import { claveDeTipo } from "@/lib/i18n/tipos-de-siniestro";
 
 type CustomField = {
   id: string;
@@ -26,23 +27,11 @@ const FIELD_TYPES = ["text", "number", "date", "boolean", "enum", "email", "phon
  * Los mismos `type.*` que la bandeja y el lote. `""` es «todos los
  * siniestros», que en la base se guarda como `null`.
  *
- * `TIPO_SINIESTRO` tambien traduce lo que VUELVE de la base en la tabla de
+ * `nombreDeTipo` tambien traduce lo que VUELVE de la base en la tabla de
  * abajo, con caida al valor crudo: `claim_type` es `text` y un tipo que el
  * producto todavia no conozca tiene que verse, no desaparecer.
  */
-const TIPO_SINIESTRO: Record<string, TranslationKey> = {
-  "": "type.todos",
-  choque: "type.choque",
-  robo: "type.robo",
-  granizo: "type.granizo",
-  incendio: "type.incendio",
-  other: "type.other",
-  cristales: "type.cristales",
-  rc: "type.rc",
-  robo_contenido: "type.robo_contenido",
-  accidente_personal: "type.accidente_personal",
-};
-const CLAIM_TYPES = Object.keys(TIPO_SINIESTRO);
+const CLAIM_TYPES = ["", ...RAMOS_NATIVOS];
 
 async function fetchFields(): Promise<CustomField[]> {
   const res = await fetch("/api/admin/custom-fields", { cache: "no-store" });
@@ -57,6 +46,10 @@ export function CustomFieldsPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const t = useT();
+  const nombreDeTipo = (tipo: string | null) => {
+    const clave = tipo ? claveDeTipo(tipo) : "type.todos";
+    return clave ? t(clave) : tipo;
+  };
   const [form, setForm] = useState({
     key: "",
     label: "",
@@ -197,7 +190,7 @@ export function CustomFieldsPanel() {
         >
           {CLAIM_TYPES.map((type) => (
             <option key={type || "all"} value={type}>
-              {t(TIPO_SINIESTRO[type])}
+              {nombreDeTipo(type)}
             </option>
           ))}
         </select>
@@ -259,9 +252,7 @@ export function CustomFieldsPanel() {
                 <td className="px-3 py-2">{field.label}</td>
                 <td className="px-3 py-2 text-slate-500">{field.field_type}</td>
                 <td className="px-3 py-2 text-slate-500">
-                  {TIPO_SINIESTRO[field.claim_type ?? ""]
-                    ? t(TIPO_SINIESTRO[field.claim_type ?? ""])
-                    : field.claim_type}
+                  {nombreDeTipo(field.claim_type)}
                 </td>
                 <td className="px-3 py-2">
                   {field.active ? t("campos.activo") : t("campos.inactivo")}

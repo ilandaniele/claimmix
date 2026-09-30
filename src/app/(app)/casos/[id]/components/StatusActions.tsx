@@ -8,18 +8,26 @@
  *   escalado (legado):         «Resolver escalado → Listo» + «Cerrar»
  *   procesando:                sin botones — spinner
  *   listo_para_core:           «Confirmar y dejar listo» (sin confirmar, con permiso),
- *                              o «Confirmado por …» ya confirmado
+ *                              o «Confirmado por …» ya confirmado; «Entregado por fuera» + «Cerrar»
+ *   error_core:                «Entregado por fuera» + «Cerrar» + re-analizar
+ *   enviado_a_core:            «Pasar a liquidación» + «Cerrar»
+ *   en_liquidacion:            «Marcar pagado» + «Marcar rechazado» + «Cerrar»
+ *   pagado / rechazado:        banner de sólo lectura
  *   requiere_especialista:     «Revisado: pasar a Listo para Core» + «Cerrar» + «Devolver al agente» (E24)
  *   info_faltante /
  *   confirmacion_pendiente:    reenviar el pedido (P8), «Tomar el control» (D-F2)
  *   cerrado:                   banner de sólo lectura, o «Reabrir y reenviar» (P8)
+ *
+ * Las salidas a mano (`SALIDAS_A_MANO`) piden `puedeCambiarEstado` y un segundo
+ * clic: ninguna se deshace.
  */
 
 "use client";
 
+import { useState } from "react";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { ExportToCorePanel } from "./ExportToCorePanel";
 import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
@@ -57,7 +65,7 @@ function ReAnalyzeButton({
 }: {
   onReAnalyze: () => void;
   reAnalyzing: boolean;
-  t: (key: TranslationKey) => string;
+  t: (key: ClaveDelCliente) => string;
 }) {
   return (
     <button
@@ -99,6 +107,101 @@ function ReAnalyzeButton({
   );
 }
 
+const CLASE_SECUNDARIO =
+  "rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors";
+const CLASE_SALIDA =
+  "rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors";
+
+function BannerCerrado({ etiqueta }: { etiqueta: string }) {
+  return (
+    <div
+      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600"
+      role="status"
+      aria-label={etiqueta}
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        className="w-4 h-4 text-slate-400"
+        aria-hidden="true"
+      >
+        <path
+          fillRule="evenodd"
+          d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z"
+          clipRule="evenodd"
+        />
+      </svg>
+      {etiqueta}
+    </div>
+  );
+}
+
+type Salida = readonly [hacia: CaseStatus, etiqueta: ClaveDelCliente, testId: string];
+
+/**
+ * Las salidas a mano de un estado: el primer clic pregunta, el segundo manda
+ * el PATCH. Una sola armada a la vez y con su rótulo a la vista: pagado y
+ * rechazado van lado a lado y ninguna se deshace.
+ */
+function SalidasAMano({
+  salidas,
+  onTransition,
+  dialogOpen,
+  t,
+}: {
+  salidas: readonly Salida[];
+  onTransition: (toStatus: CaseStatus) => void;
+  dialogOpen: boolean;
+  t: (key: ClaveDelCliente) => string;
+}) {
+  const [armada, setArmada] = useState<CaseStatus | null>(null);
+
+  return (
+    <>
+      {salidas.map(([hacia, etiqueta, testId]) =>
+        armada !== hacia ? (
+          <button
+            key={hacia}
+            type="button"
+            onClick={() => setArmada(hacia)}
+            disabled={dialogOpen}
+            data-testid={testId}
+            className={CLASE_SALIDA}
+          >
+            {t(etiqueta)}
+          </button>
+        ) : (
+          <span
+            key={hacia}
+            role="group"
+            aria-label={t(etiqueta)}
+            className="inline-flex flex-wrap items-center gap-2"
+          >
+            <span className="text-sm font-medium text-slate-800">{t(etiqueta)}</span>
+            <span className="text-sm text-slate-600">{t("case.detail.salidaConfirmar")}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setArmada(null);
+                onTransition(hacia);
+              }}
+              disabled={dialogOpen}
+              data-testid={`${testId}-confirmar`}
+              className={CLASE_SALIDA}
+            >
+              {t("case.detail.salidaSi")}
+            </button>
+            <button type="button" onClick={() => setArmada(null)} className={CLASE_SECUNDARIO}>
+              {t("case.detail.salidaNo")}
+            </button>
+          </span>
+        )
+      )}
+    </>
+  );
+}
+
 export function StatusActions({
   caseId,
   status,
@@ -123,28 +226,7 @@ export function StatusActions({
   const t = useT();
   // ── cerrado — read-only banner, o «Reabrir y reenviar» (P8) ────────────────
   if (status === "cerrado") {
-    const banner = (
-      <div
-        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600"
-        role="status"
-        aria-label={t("case.detail.closedBanner")}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          className="w-4 h-4 text-slate-400"
-          aria-hidden="true"
-        >
-          <path
-            fillRule="evenodd"
-            d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z"
-            clipRule="evenodd"
-          />
-        </svg>
-        {t("case.detail.closedBanner")}
-      </div>
-    );
+    const banner = <BannerCerrado etiqueta={t("case.detail.closedBanner")} />;
 
     if (!(acciones.reabrible && puedeCambiarEstado && onReenviar)) {
       return banner;
@@ -168,6 +250,75 @@ export function StatusActions({
             {t(`reenvio.motivo.${acciones.motivoSinReenvio}`)}
           </p>
         )}
+      </div>
+    );
+  }
+
+  // ── pagado / rechazado — la liquidación terminó; sólo lectura ─────────────
+  if (status === "pagado" || status === "rechazado") {
+    return (
+      <BannerCerrado
+        etiqueta={t(status === "pagado" ? "case.detail.pagadoBanner" : "case.detail.rechazadoBanner")}
+      />
+    );
+  }
+
+  const botonCerrar = (
+    <button
+      type="button"
+      onClick={onClose}
+      disabled={dialogOpen}
+      data-testid="action-cerrar"
+      className={CLASE_SECUNDARIO}
+    >
+      {t("case.detail.close")}
+    </button>
+  );
+
+  // La key con el estado: si el caso cambia, una confirmación armada no pasa a
+  // la salida que quedó en el mismo lugar.
+  const salidas = (...lista: Salida[]) => (
+    <SalidasAMano key={status} salidas={lista} onTransition={onTransition} dialogOpen={dialogOpen} t={t} />
+  );
+
+  // ── en_liquidacion — pagado / rechazado / cerrar ──────────────────────────
+  // Sin re-analizar: no tiene arista en el grafo y la ruta contesta 409.
+  if (status === "en_liquidacion") {
+    if (!puedeCambiarEstado) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {salidas(
+          ["pagado", "case.detail.marcarPagado", "action-pagado"],
+          ["rechazado", "case.detail.marcarRechazado", "action-rechazado"]
+        )}
+        {botonCerrar}
+      </div>
+    );
+  }
+
+  // ── enviado_a_core — liquidación + cerrar ─────────────────────────────────
+  // Sin re-analizar: la ruta no desengancha un caso ya enviado.
+  if (status === "enviado_a_core") {
+    if (!puedeCambiarEstado) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {salidas(["en_liquidacion", "case.detail.pasarALiquidacion", "action-liquidacion"])}
+        {botonCerrar}
+      </div>
+    );
+  }
+
+  // ── error_core — entregado por fuera + cerrar + re-analizar ───────────────
+  if (status === "error_core") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {puedeCambiarEstado && (
+          <>
+            {salidas(["en_liquidacion", "case.detail.entregadoPorFuera", "action-liquidacion"])}
+            {botonCerrar}
+          </>
+        )}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
       </div>
     );
   }
@@ -342,8 +493,8 @@ export function StatusActions({
     );
   }
 
-  // ── listo_para_core — confirmar (persona) + re-analizar ────────────────────
-  // Sin «Cerrar»: la FSM no tiene el borde listo_para_core -> cerrado.
+  // ── listo_para_core — confirmar + entregado por fuera + cerrar + re-analizar ─
+  // Sin conector de Core el caso no sale solo: lo saca una persona.
   if (status === "listo_para_core") {
     return (
       <div className="flex flex-wrap items-center gap-2">
@@ -369,6 +520,12 @@ export function StatusActions({
                 : t("case.detail.confirmadoAnonimo")}
             </span>
           ))}
+        {puedeCambiarEstado && (
+          <>
+            {salidas(["en_liquidacion", "case.detail.entregadoPorFuera", "action-liquidacion"])}
+            {botonCerrar}
+          </>
+        )}
         <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
       </div>
     );

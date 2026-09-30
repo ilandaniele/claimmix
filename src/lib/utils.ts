@@ -3,7 +3,7 @@
  */
 
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
-import type { TranslationKey } from "@/lib/i18n/es-AR";
+import type { ClaveDelCliente } from "@/lib/i18n/es-AR";
 import type { Locale } from "@/lib/i18n";
 
 /**
@@ -93,7 +93,7 @@ export function formatDateOnly(date: string, locale: Locale): string {
  */
 export function formatAge(
   createdAt: string,
-  t: (key: TranslationKey) => string
+  t: (key: ClaveDelCliente) => string
 ): string {
   const created = new Date(createdAt);
   const now = new Date();
@@ -107,7 +107,7 @@ export function formatAge(
    * («3d ago») y en castellano atrás («Hace 3d»). Concatenar un prefijo
    * traducido funciona en un idioma y se rompe en el otro.
    */
-  const con = (key: TranslationKey, n: number) => t(key).replace("{n}", String(n));
+  const con = (key: ClaveDelCliente, n: number) => t(key).replace("{n}", String(n));
 
   if (diffMinutes < 1) return t("age.now");
   if (diffMinutes < 60) return con("age.minutes", diffMinutes);
@@ -146,4 +146,9 @@ export function formatUsd(value: number, precision: 2 | 4 = 2): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: precision,
   }).format(value);
+}
+
+/** Pesos sin centavos: los montos orientativos de un siniestro (B23). */
+export function formatArs(value: number): string {
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }

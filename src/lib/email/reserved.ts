@@ -35,15 +35,14 @@ export function bareAddress(value: string | null | undefined): string {
   return (angled?.[1] ?? value).trim().toLowerCase();
 }
 
-/**
- * ¿Es una dirección reservada, a la que no se le entrega nunca?
- *
- * `example.com`, `example.org`, `example.net` y cualquier subdominio suyo.
- */
+/** `example.com`, `example.org`, `example.net` y cualquier subdominio suyo, sobre la dirección pelada. */
+export const DOMINIO_RESERVADO = /@(?:[a-z0-9-]+\.)*example\.(com|org|net)$/;
+
+/** ¿Es una dirección reservada, a la que no se le entrega nunca? */
 export function isReservedTestAddress(value: string | null | undefined): boolean {
   const address = bareAddress(value);
   if (!address) return false;
-  return /@(?:[a-z0-9-]+\.)*example\.(com|org|net)$/.test(address);
+  return DOMINIO_RESERVADO.test(address);
 }
 
 /** La dirección que nunca recibe avisos, en cualquier escritura de Gmail. */

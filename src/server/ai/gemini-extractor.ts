@@ -286,6 +286,25 @@ async function fetchGemini(url: string, init: RequestInit): Promise<Response> {
 interface GeminiUsage {
   promptTokens: number;
   completionTokens: number;
+  /** Part of promptTokens that came in as audio; present only when > 0. */
+  audioTokens?: number;
+}
+
+type UsageMetadata = {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  promptTokensDetails?: Array<{ modality?: string; tokenCount?: number }>;
+};
+
+function usoDe(meta: UsageMetadata | undefined): GeminiUsage {
+  const audio = (meta?.promptTokensDetails ?? [])
+    .filter((d) => d.modality === "AUDIO")
+    .reduce((s, d) => s + (d.tokenCount ?? 0), 0);
+  return {
+    promptTokens: meta?.promptTokenCount ?? 0,
+    completionTokens: meta?.candidatesTokenCount ?? 0,
+    ...(audio > 0 ? { audioTokens: audio } : {}),
+  };
 }
 
 // ── Transport: AI Studio (API key) vs Vertex AI (service account) ─────────────
@@ -344,21 +363,15 @@ export interface InlineMedia {
   data: string;
 }
 
-export async function callGemini(
-  systemPrompt: string,
-  userMessage: string,
+async function destinoGemini(
+  metodo: "generateContent" | "countTokens",
   apiKey?: string | null,
-  modelOverride?: string,
-  /** Images or documents to look at alongside the text. */
-  media?: InlineMedia[]
-): Promise<{ text: string | null; usage: GeminiUsage; model: string }> {
+  modelOverride?: string
+): Promise<{ endpoint: string; authHeaders: Record<string, string>; model: string }> {
   const vertex = isVertexTransport();
   // Vertex has its own model catalog (no *-latest aliases) — never forward the
   // AI-Studio-flavoured model name to it, it would 404.
   const model = vertex ? getVertexModel() : (modelOverride ?? getGeminiModel());
-
-  let endpoint: string;
-  let authHeaders: Record<string, string>;
 
   if (vertex) {
     const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
@@ -368,18 +381,56 @@ export async function callGemini(
         "GEMINI_TRANSPORT=vertex requires GOOGLE_CLOUD_PROJECT to be set."
       );
     }
-    endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`;
-    authHeaders = { Authorization: `Bearer ${await getVertexToken()}` };
-  } else {
-    const key = apiKey ?? process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new GeminiExtractionError(
-        "GEMINI_API_KEY is not set. Configure it in Configuración."
-      );
-    }
-    endpoint = `${GEMINI_API_BASE}/${model}:generateContent`;
-    authHeaders = { "x-goog-api-key": key };
+    return {
+      endpoint: `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:${metodo}`,
+      authHeaders: { Authorization: `Bearer ${await getVertexToken()}` },
+      model,
+    };
   }
+  const key = apiKey ?? process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new GeminiExtractionError(
+      "GEMINI_API_KEY is not set. Configure it in Configuración."
+    );
+  }
+  return { endpoint: `${GEMINI_API_BASE}/${model}:${metodo}`, authHeaders: { "x-goog-api-key": key }, model };
+}
+
+/**
+ * Los tokens que el modelo cobraría por leer este archivo, sin mandárselo:
+ * `countTokens` no cobra ni interpreta nada nuestro. "plazo" si no contestó a
+ * tiempo, "rechazo" si no pudo leer el archivo (400) y null ante cualquier
+ * otra falla.
+ */
+export async function contarTokens(
+  media: InlineMedia,
+  plazoMs: number
+): Promise<number | "plazo" | "rechazo" | null> {
+  try {
+    const { endpoint, authHeaders } = await destinoGemini("countTokens");
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ inlineData: media }] }] }),
+      signal: AbortSignal.timeout(plazoMs),
+    });
+    if (res.status === 400) return "rechazo";
+    const total = res.ok ? ((await res.json()) as { totalTokens?: unknown }).totalTokens : null;
+    return typeof total === "number" ? total : null;
+  } catch (err) {
+    return (err as { name?: string })?.name === "TimeoutError" ? "plazo" : null;
+  }
+}
+
+export async function callGemini(
+  systemPrompt: string,
+  userMessage: string,
+  apiKey?: string | null,
+  modelOverride?: string,
+  /** Images or documents to look at alongside the text. */
+  media?: InlineMedia[]
+): Promise<{ text: string | null; usage: GeminiUsage; model: string }> {
+  const { endpoint, authHeaders, model } = await destinoGemini("generateContent", apiKey, modelOverride);
 
   // Modern Gemini models (2.5+, 3.x, and the *-latest aliases) THINK by default.
   // Thinking tokens are billed (often 10-50× the visible output) and add latency
@@ -395,9 +446,14 @@ export async function callGemini(
         role: "user",
         parts: [
           { text: userMessage },
-          ...(media ?? []).map((m) => ({
-            inlineData: { mimeType: m.mimeType, data: m.data },
-          })),
+          // Cada archivo va entre centinelas, como el cuerpo del mensaje: un
+          // PDF o una nota de voz son texto ajeno y pueden traer órdenes. El
+          // índice es el que el modelo devuelve en `adjuntos[].indice`.
+          ...(media ?? []).flatMap((m, i) => [
+            { text: `<adjunto indice=${i + 1} mime=${m.mimeType.replace(/[^\w.+/-]/g, "")}>` },
+            { inlineData: { mimeType: m.mimeType, data: m.data } },
+            { text: "</adjunto>" },
+          ]),
         ],
       },
     ],
@@ -435,7 +491,7 @@ export async function callGemini(
       content?: { parts?: Array<{ text?: string }> };
       finishReason?: string;
     }>;
-    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+    usageMetadata?: UsageMetadata;
   };
 
   /*
@@ -468,10 +524,7 @@ export async function callGemini(
       {
         status: 200,
         code: "MAX_TOKENS",
-        usage: {
-          promptTokens: data.usageMetadata?.promptTokenCount ?? 0,
-          completionTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
-        },
+        usage: usoDe(data.usageMetadata),
       }
     );
   }
@@ -494,10 +547,7 @@ export async function callGemini(
    */
   return {
     text: text && text.trim() ? text : null,
-    usage: {
-      promptTokens: data.usageMetadata?.promptTokenCount ?? 0,
-      completionTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
-    },
+    usage: usoDe(data.usageMetadata),
     model,
   };
 }
@@ -580,11 +630,15 @@ export async function extractEmailClaimGemini(
   // Last attempt's error status/code — propagated on the final throw so the
   // worker can persist the real cause (429/RESOURCE_EXHAUSTED, 401, ...).
   let lastErrMeta: { name: string; status: number | null; code: string | null } | null = null;
+  // La primera falla pasajera gana sobre la del segundo intento: si el 2.º
+  // termina en MAX_TOKENS o un 400, pisa al 429 y el caso se escalaba con
+  // `provider_error` en vez de volver a la cola.
+  let pasajero: { status: number | null; code: string | null; red: boolean } | null = null;
 
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   const t1 = Date.now();
   try {
-    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey, model);
+    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey, model, payload.media);
     const latency1 = Date.now() - t1;
     totalPromptTokens = usage.promptTokens;
     totalCompletionTokens = usage.completionTokens;
@@ -619,6 +673,13 @@ export async function extractEmailClaimGemini(
     const latency1 = Date.now() - t1;
     const meta = errMeta(e);
     lastErrMeta = meta;
+    if (!pasajero && esPasajero(e)) {
+      pasajero = {
+        status: meta.status,
+        code: meta.code,
+        red: ((e as GeminiExtractionError).cause as { red?: unknown } | undefined)?.red === true,
+      };
+    }
     // `timeout` ya estaba previsto en la columna desde el día uno y nunca se
     // escribió, porque no había nada que cortara por tiempo.
     const errStatus =
@@ -684,8 +745,15 @@ export async function extractEmailClaimGemini(
         timeout_ms: DEFAULT_GEMINI_TIMEOUT_MS,
       }, "ai.email_extraction.timeout_sin_reintento");
   } else if (!result) {
-    const correccion =
-      lastErrMeta?.code === "MAX_TOKENS"
+    // Un 400 con archivos es casi siempre uno que Vertex no abre (un PDF con
+    // contraseña, un JPEG cortado). Reenviarlo da el mismo 400 en cada corrida:
+    // el reintento va sin ellos y el worker los da por leídos sin texto.
+    const sinArchivos = lastErrMeta?.status === 400 && !!payload.media?.length;
+    // Tras una falla pasajera el modelo no llegó a contestar: no hay respuesta
+    // que corregir, así que el reintento va con el prompt limpio.
+    const correccion = sinArchivos || pasajero
+      ? ""
+      : lastErrMeta?.code === "MAX_TOKENS"
         ? "\n\nIMPORTANT: Your previous response was cut off because it exceeded the length limit. Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema."
         : "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
@@ -693,12 +761,15 @@ export async function extractEmailClaimGemini(
 
     const t2 = Date.now();
     try {
-      const { text, usage } = await callGemini(stricterSystem, userMessage, tenantKey, model);
+      const { text, usage } = await callGemini(
+        stricterSystem, userMessage, tenantKey, model, sinArchivos ? undefined : payload.media
+      );
       const latency2 = Date.now() - t2;
       totalPromptTokens += usage.promptTokens;
       totalCompletionTokens += usage.completionTokens;
 
       result = parseEmailResponse(text, model);
+      if (result && sinArchivos) result.adjuntos = [];
 
       const status2 = result ? "success" : "invalid_json";
       if (tenantId) {
@@ -728,6 +799,13 @@ export async function extractEmailClaimGemini(
       const latency2 = Date.now() - t2;
       const meta = errMeta(e);
       lastErrMeta = meta;
+      if (!pasajero && esPasajero(e)) {
+        pasajero = {
+          status: meta.status,
+          code: meta.code,
+          red: ((e as GeminiExtractionError).cause as { red?: unknown } | undefined)?.red === true,
+        };
+      }
       // Idem el primer intento: un corte por tiempo se registra como tal.
       const errStatus2 =
         meta.code === "TIMEOUT"
@@ -795,19 +873,21 @@ export async function extractEmailClaimGemini(
   // no_relevante due to a provider/network/quota error, not a genuine classification.
   // The caller (runEmailExtractionWorker) catches GeminiExtractionError and sets
   // the case to 'escalado' so it can be re-analyzed once the provider recovers.
+  const causa = pasajero ?? lastErrMeta;
   logger.error({
         provider: "gemini",
         case_id: logCaseId,
-        status: lastErrMeta?.status ?? null,
-        code: lastErrMeta?.code ?? null,
+        status: causa?.status ?? null,
+        code: causa?.code ?? null,
       }, "ai.email_extraction.both_attempts_failed.provider_error");
   throw new GeminiExtractionError(
     `Gemini extraction technical failure after 2 attempts for case ${logCaseId}`,
     {
       provider_error: true,
       case_id: logCaseId,
-      status: lastErrMeta?.status ?? undefined,
-      code: lastErrMeta?.code ?? undefined,
+      status: causa?.status ?? undefined,
+      code: causa?.code ?? undefined,
+      ...(pasajero?.red ? { red: true } : {}),
     }
   );
 }

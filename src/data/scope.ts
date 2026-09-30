@@ -314,16 +314,60 @@ export async function enTenant<T>(
  * por WebSocket y se agrega cuando aparezca el primer caso que la necesite —
  * no antes.
  */
-export async function enTenantVarias<T extends readonly unknown[]>(
+export function enTenantVarias<T extends readonly unknown[]>(
   ctx: TenantContext,
-  armar: (db: ClienteDatos) => { [K in keyof T]: Promise<T[K]> } | readonly unknown[]
+  armar: ArmarVarias<T>
+): Promise<T> {
+  return correrLote((db) => [ponerContexto(db, ctx.tenantId)], armar);
+}
+
+type ArmarVarias<T extends readonly unknown[]> = (
+  db: ClienteDatos
+) => { [K in keyof T]: Promise<T[K]> } | readonly unknown[];
+
+/**
+ * El cuerpo de `enTenantVarias` y de `enTenantDeUsuarioVarias`: las sentencias
+ * de contexto van primero y su resultado no vuelve. Los guardias viven acá
+ * para que las dos capas los tengan siempre iguales.
+ */
+async function correrLote<T extends readonly unknown[]>(
+  armarContexto: (db: ClienteDatos) => readonly unknown[],
+  armar: ArmarVarias<T>
 ): Promise<T> {
   const db = cliente();
   await exigirRolSinBypass(db);
   const consultas = armar(db) as readonly unknown[];
   for (const c of consultas) exigirConsulta(c);
+  const contexto = armarContexto(db);
   const res = (await (
     db as unknown as { batch: (q: unknown[]) => Promise<unknown[]> }
-  ).batch([ponerContexto(db, ctx.tenantId), ...consultas])) as unknown[];
-  return res.slice(1) as unknown as T;
+  ).batch([...contexto, ...consultas])) as unknown[];
+  return res.slice(contexto.length) as unknown as T;
+}
+
+/**
+ * Además del inquilino, quién pregunta.
+ *
+ * Es aparte de `TenantContext` a propósito: el contexto de inquilino no lleva
+ * usuario (ver arriba), y agregárselo obligaría a los scripts de aislamiento a
+ * inventar uno. Sólo lo usan las tablas privadas de una persona, hoy
+ * `asistente_turnos`, cuya política de RLS pide `claimmix.user_id` además del
+ * inquilino. Sale de la sesión, nunca de un pedido.
+ */
+export type UsuarioContext = TenantContext & { readonly userId: string };
+
+/** La sentencia que pone el usuario. Va después del inquilino en el mismo lote. */
+function ponerUsuario(db: ClienteDatos, userId: string) {
+  return db.execute(sql`SELECT set_config('claimmix.user_id', ${userId}, true)`);
+}
+
+/**
+ * `enTenantVarias` con el usuario puesto: todo el lote ve sólo lo del inquilino
+ * y lo de esa persona. Un viaje. Sin `userId` la política no devuelve nada.
+ */
+export function enTenantDeUsuarioVarias<T extends readonly unknown[]>(
+  ctx: UsuarioContext,
+  armar: ArmarVarias<T>
+): Promise<T> {
+  return correrLote((db) => [ponerContexto(db, ctx.tenantId), ponerUsuario(db, ctx.userId)], armar);
 }

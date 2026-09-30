@@ -15,12 +15,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
-import { SimulateModal, TIPO } from "../../src/app/(app)/bandeja/components/SimulateModal";
+import { SimulateModal } from "../../src/app/(app)/bandeja/components/SimulateModal";
+import { claveDeTipo } from "../../src/lib/i18n/tipos-de-siniestro";
 import {
   OPCIONES_DE_ESCENARIO,
   SCENARIOS,
 } from "../../src/server/intake/scenarios";
-import { esAR } from "../../src/lib/i18n/es-AR";
+import { esAR } from "../../src/lib/i18n/index";
 
 /*
  * Los textos salen del diccionario, no escritos a mano.
@@ -98,7 +99,7 @@ describe("SimulateModal", () => {
       str.length <= max ? str : str.slice(0, max) + "...";
 
     for (const [i, escenario] of SCENARIOS.entries()) {
-      const clave = TIPO[escenario.case_type];
+      const clave = claveDeTipo(escenario.case_type);
       const tipo = clave
         ? esAR[clave]
         : escenario.case_type.charAt(0).toUpperCase() + escenario.case_type.slice(1);

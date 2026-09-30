@@ -57,9 +57,9 @@ describe("el filtro de estado consulta la unión de los grupos elegidos", () => 
   it("dos chips de estado consultan la unión de sus grupos, sin repetidos", () => {
     /*
      * `escalado` es el grupo {escalado, requiere_especialista} y `listo` es
-     * {listo, listo_para_core, enviado_a_core} — los dos según
+     * {listo, listo_para_core, enviado_a_core, en_liquidacion} — los dos según
      * `ESTADOS_DE_LA_OPCION` en `filtro-de-estado.ts`, no un estado por chip.
-     * La unión son los cinco, sin ninguno de más ni de menos.
+     * La unión son los seis, sin ninguno de más ni de menos.
      */
     const { params } = sqlDe({ status: ["escalado", "listo"] });
 
@@ -69,6 +69,7 @@ describe("el filtro de estado consulta la unión de los grupos elegidos", () => 
       "listo",
       "listo_para_core",
       "enviado_a_core",
+      "en_liquidacion",
     ]);
   });
 

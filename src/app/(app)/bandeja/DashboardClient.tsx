@@ -11,6 +11,7 @@ import { BotonDeFiltros, MarcasDeFiltros } from "./components/PanelDeFiltros";
 import { CampoDeBusqueda } from "./components/CampoDeBusqueda";
 import { SelectorDePeriodo } from "./components/SelectorDePeriodo";
 import { CasesTable } from "./components/CasesTable";
+import type { TipoPropio } from "./components/grupos-de-filtro";
 import { Tablero } from "./components/Tablero";
 import { claseChip } from "./components/chip";
 import { SimulateModal } from "./components/SimulateModal";
@@ -276,6 +277,8 @@ interface DashboardClientProps {
    * ausente es "lista" — la pantalla de siempre, sin cambios.
    */
   vista?: "lista" | "tablero";
+  /** Los tipos de siniestro propios de la aseguradora, con el nombre en el idioma de la cuenta. */
+  tiposPropios?: readonly TipoPropio[];
 }
 
 function DashboardClientInterno({
@@ -283,6 +286,7 @@ function DashboardClientInterno({
   scenarios,
   allStatusCounts,
   vista = "lista",
+  tiposPropios = [],
 }: DashboardClientProps) {
   const t = useT();
   const searchParams = useSearchParams();
@@ -635,7 +639,7 @@ function DashboardClientInterno({
               </div>
               <CampoDeBusqueda />
               <SelectorDePeriodo />
-              <BotonDeFiltros cuentas={cuentasDeEstado} />
+              <BotonDeFiltros cuentas={cuentasDeEstado} tipos={tiposPropios} />
             </div>
           }
         >
@@ -699,7 +703,7 @@ function DashboardClientInterno({
           * viven en un panel, con lo que está puesto a la vista al lado del
           * botón. El porqué largo está en `PanelDeFiltros`.
           */}
-        <MarcasDeFiltros />
+        <MarcasDeFiltros tipos={tiposPropios} />
 
         {/*
           * `min-h-0` en este hijo y en el flex de arriba: sin eso un hijo de
@@ -745,6 +749,7 @@ function DashboardClientInterno({
                 onDeleteMany={handleDeleteMany}
                 seleccionando={seleccionando}
                 desde={paraResponder ? "para_responder" : undefined}
+                tiposPropios={tiposPropios}
               />
             </div>
           )}

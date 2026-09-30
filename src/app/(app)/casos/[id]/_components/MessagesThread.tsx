@@ -21,10 +21,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
-import type { Locale, TranslationKey } from "@/lib/i18n";
+import type { Locale, ClaveDelCliente } from "@/lib/i18n";
 import type { MensajeDeLaConversacion as Message } from "@/server/cases/conversacion";
 import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 import { BloqueoPlanPro } from "@/app/(app)/_components/BloqueoPlanPro";
+import { ENCABEZADO_TRANSCRIPCION } from "@/core/adjuntos/transcripcion";
 
 /** Lo que contesta `GET /api/cases/:id/messages`. */
 interface RespuestaDeMensajes {
@@ -50,7 +51,7 @@ const TIMEZONE = "America/Argentina/Buenos_Aires";
  * mail que no terminó de salir: el envío se cortó o no se pudo anotar cómo
  * terminó.
  */
-const ESTADOS: Record<string, { clave: TranslationKey; clase: string }> = {
+const ESTADOS: Record<string, { clave: ClaveDelCliente; clase: string }> = {
   failed: { clave: "messages.thread.no_enviado", clase: "bg-red-50 text-red-700" },
   queued: { clave: "messages.thread.sin_confirmar", clase: "bg-amber-50 text-amber-800" },
   skipped_simulated: { clave: "messages.thread.simulado", clase: "bg-amber-50 text-amber-800" },
@@ -143,7 +144,7 @@ interface MessageCardProps {
 }
 
 /** Por quién firma cada tarjeta saliente: el agente o una persona del equipo (P8). */
-const AUTOR_CLAVE: Record<Message["autor"], TranslationKey> = {
+const AUTOR_CLAVE: Record<Message["autor"], ClaveDelCliente> = {
   denunciante: "messages.thread.denunciante",
   agente: "messages.thread.agente",
   equipo: "messages.thread.equipo",
@@ -177,7 +178,10 @@ function MessageCard({ message, locale }: MessageCardProps) {
       : t("messages.thread.no_subject");
 
   // Body preview: collapsed = first 300 chars; expanded = full body_text (≤2000 from API).
-  const bodyText = message.body_text ?? "";
+  // El encabezado de la transcripción se guarda en castellano dentro del texto.
+  const bodyText = (message.body_text ?? "")
+    .split(ENCABEZADO_TRANSCRIPCION)
+    .join(t("messages.thread.encabezadoTranscripcion"));
   const isLong = bodyText.length > PREVIEW_MAX_CHARS;
   const previewText = isLong && !expanded
     ? `${bodyText.slice(0, PREVIEW_MAX_CHARS)}…`
@@ -232,6 +236,11 @@ function MessageCard({ message, locale }: MessageCardProps) {
                     className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${estado.clase}`}
                   >
                     {t(estado.clave)}
+                  </span>
+                )}
+                {message.transcripcion && (
+                  <span className="flex-shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
+                    {t("messages.thread.transcripcion")}
                   </span>
                 )}
               </div>

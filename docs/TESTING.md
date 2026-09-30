@@ -55,7 +55,7 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Dieciocho denuncias enteras, de punta a punta, contra el mismo código, la misma base
+Veinticuatro denuncias enteras, de punta a punta, contra el mismo código, la misma base
 y el mismo modelo que producción. Por los canales simulados: en los dos el
 mensajero redacta la respuesta exactamente como lo haría; WhatsApp la guarda en
 vez de enviarla, y mail hace lo mismo con cualquier dirección `@example.com`.
@@ -80,6 +80,14 @@ datos no coinciden con el padrón — y `tomar-el-control`/`devolver-al-agente`
 Ese último está porque no estaba: es el único mensaje del producto cuyo piso ES
 un dato —dice cuáles son los dos valores que no coinciden— y se rompió sin que
 nadie lo viera, porque no había un ensayo que lo imprimiera.
+
+`alcance-responsabilidad-clara` (B18) cuenta un choque por alcance con la
+responsabilidad a la vista y mira tres cosas: que la respuesta no diga quién
+tuvo la culpa ni cite la ley de tránsito (`avoids`), que no pida datos del otro
+conductor (`noAsked` sobre `party_b_*`) y que `cases.responsabilidad` quede con
+el tercero como responsable (`finally.responsabilidad`, que informa `sin_leer`
+si no se escribió opinión). Necesita la migración 0041 aplicada en la base del
+ensayo.
 
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.
@@ -111,6 +119,43 @@ devuelven. Con el caso tomado, `traspaso` no corre: no hubo mensaje de
 traspaso porque no escribió el agente, escribió una persona. Necesitan un
 actor de verdad: un owner o, si no hay, un admin, con Plan Pro. Sin uno esos
 dos escenarios se reportan sin ensayar, no en rojo.
+
+`escribe-tarde-pregunta-como-va` y `tardio-siniestro-nuevo` (B3) derivan el
+caso en el primer turno y después escriben otra vez: una pregunta por el estado
+y otro choque con otra fecha. El agente no contesta, el caso queda «Para
+responder» y la comprobación `tardio` lee `mensaje_tardio_tipo` en la misma
+consulta que el estado: `consulta_estado` y `siniestro_nuevo`. Un mensaje
+reservado sin clase se lee como `sin_clasificar`. El siniestro nuevo no abre
+otro caso; eso lo decide una persona desde la bandeja.
+`mail-tardio-pregunta-como-va` es la misma pregunta por mail, contestando en el
+hilo: el ingreso marca el caso y el worker lo clasifica. Los contactos son los
+inventados del ensayo (`5490000…` y las direcciones reservadas), como en el
+resto. Sin la 0038 en esa base no caen sólo éstos: Drizzle arma todo INSERT
+a `cases` con cada columna del esquema, así que el ensayo entero muere con
+42703 en el primer mensaje (el 29/09, 21 de 22; sólo sobrevivió
+`mail-no-es-reclamo`, que no crea caso). `node scripts/migrate.mjs` sin
+`--apply` dice qué falta.
+
+`recordatorio-por-mail` (B4) deja el caso en `info_faltante` con un pedido y
+adelanta el reloj con un turno `{ accion: "recordatorio", horasDespues }`, que
+llama a `recordarCaso` sobre ese caso solo, con `ahora` corrido y horas
+`[48, 120]`. A +49 h espera un mensaje con las mismas claves del último pedido
+(`recordatorio-claves`), el estado sin cambiar y `updated_at` intacto
+(`recordatorio-updated-at`); otra vez a +49 h, silencio: la etapa ya se gastó;
+a +121 h, la segunda etapa. No necesita actor. El ensayo nunca llama al barrido
+global (`recordarPendientes`) ni prende `recordatorio_horas` en el tenant, y la
+limpieza borra el caso y, en cascada, sus filas de `case_recordatorios`. Si
+falla con 42703 o 42P01, falta aplicar la 0039 en esa base.
+
+`consorcio-por-mail` (B26) es el ramo nuevo de punta a punta: un administrador
+denuncia una cañería rota en las partes comunes de un edificio, por mail y sin
+fotos. Siembra su póliza de consorcio (sin vehículo) y la borra al terminar.
+Afirma sólo lo que no depende de cómo redacte el modelo: una respuesta, que no
+pida `patente_vehiculo` (`noAsked`), que el número de póliza y el nombre
+sobrevivan (`knows`) y que el caso quede clasificado como `consorcio`
+(`finally.ramo`, lo que hay en `cases.claim_type`). No fija el estado final: el
+consorcio pide fotos y presupuesto, y sin fotos de verdad no hay con qué
+cerrarlos.
 
 También en todas se corre `propone-sin-heridos`: una respuesta que propone «no
 hubo personas lastimadas» (en la lista, en prosa o en un piso) cuando ningún
@@ -160,6 +205,15 @@ Viven en la máquina de quien corre el ensayo, en `tests/fixtures/`:
 | `danos.jpg` | Un auto chocado | Que lo reconozca como las fotos de los daños |
 | `licencia.jpg` | Una licencia de conducir | El caso difícil: dos documentos de papel pendientes, tiene que elegir el correcto |
 | `irrelevante.jpg` | Cualquier foto que no sea un documento | El caso negativo: no tiene que cerrar ningún pedido |
+| `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo |
+
+Dos sí están en el repositorio porque no son de nadie: `placeholder.ogg` (dos
+segundos de silencio en Opus, hecho con ffmpeg) y `sintetico-constancia.pdf`
+(una constancia inventada, escrita a mano, con la patente de la póliza sembrada
+y una fecha tres días después de la que cuenta la persona). Con ellas
+`nota-de-voz-y-pdf` prueba siempre que los dos archivos se guardan y se leen
+(`leidos`), y que la fecha que no coincide queda como indicio para el analista
+(`indicios`) sin que la respuesta lo mencione.
 
 Sin ellas la suite corre igual, avisa cuáles faltan, y no da por probado lo que
 no probó. El caso negativo sí se verifica siempre: una imagen que no
@@ -271,6 +325,12 @@ Y mide lo que cuesta **abrir la bandeja**, no la mitad: el listado con LIMIT 25
 más los contadores por estado, que son un agregado sin límite sobre toda la
 tabla del inquilino. El agregado es justamente lo que se degrada linealmente; el
 listado con LIMIT no.
+
+Desde B14 y B15 mide también **el tablero de métricas** (`getTenantKpis`), en dos
+escenarios: el mes en curso, y el peor caso, el año con el historial de doce
+meses y la serie por día. Leen la auditoría con un cruce lateral por caso, que se
+rompe si no se usa el índice parcial `idx_audit_log_trayecto`, y por eso están
+en la carga y no sólo en los tests de forma.
 
 Sobre esa mitad hay **cuatro formas**, y cada una contesta una pregunta
 distinta. Que sean cuatro y no una repetida con otro nombre es el punto: si las
@@ -524,6 +584,29 @@ ataques dieron verde: una respuesta vacía no filtra la patente ni el prompt, as
 que "no filtró nada" era literalmente cierto y completamente vacío. Un pen test
 que aprueba porque el sistema estaba apagado es peor que no correrlo.
 
+**El asistente sobre un caso (B12)** suma dos cosas a las fases de arriba.
+
+- En la pared entre tenants, sin llamar al modelo: preguntar por el caso de otro
+  inquilino vuelve `NOT_FOUND` antes de gastar nada, y el hilo guardado de un
+  caso ajeno vuelve vacío. Además, con un hilo real de TENANT_A como control,
+  quien lo escribió lo lee y otra persona del mismo inquilino no: el hilo es de
+  una persona, no del inquilino. Si TENANT_A no tiene ningún hilo, la sonda por
+  persona se salta y lo dice, porque sin control no encontrar nada no prueba nada.
+- Con `--agent`, tres ataques más: cerrar el bloque de la pregunta para pedir
+  datos de otra póliza, hacerle escribir un enlace para el asegurado, y que el
+  contenido del caso —que escribió el denunciante— mande más que la pregunta. Una
+  respuesta que la guarda de formato descartó cuenta como defensa; cualquier otro
+  motivo para no contestar es rojo.
+
+Sin modelo y sin base corren `tests/unit/server/asistente/pregunta-caso.test.ts`
+(lo que se le manda al modelo, la validación de lo que contesta, el hilo y el
+enmascarado del viewer) y `tests/integration/asistente-caso.test.ts`, que corre
+la ruta entera con el modelo simulado y una tabla en memoria que aplica lo que
+aplica la RLS de `asistente_turnos` (un renglón es de un inquilino Y de una
+persona). Esa tabla prueba que la ruta arma el contexto con la sesión y nunca
+con el pedido; que la política de la base rechaza al resto lo prueban
+`pnpm tenancy` y las sondas de arriba.
+
 ---
 
 ### 8. `pnpm test:e2e` — la pantalla, con un navegador de verdad
@@ -615,6 +698,70 @@ Esto prueba que la ruta hace streaming desde `next start`; el lado de Vercel
 —que la función responda igual en producción— es una comprobación aparte, de
 una sola vez, que sigue anotada en `docs/PROJECT_STATUS.md`.
 
+#### La entrega al sistema central (B5)
+
+`api-v1.spec.ts` rota la clave de `/api/v1` desde /configuracion con la sesión admin, lee
+`/api/v1/cases` desde un cliente sin cookies, comprueba que la clave con un
+carácter cambiado da 401 y al final la revoca. Nunca prende el webhook. Si la
+base de ENSAYO no tiene la 0036, se saltea y lo dice.
+
+El resto de B5 vive en `pnpm verify`, sin red ni base:
+
+| test | qué cubre |
+| --- | --- |
+| `tests/unit/core-sync-firma.test.ts` | el vector fijo de la firma y que `verificar-firma.mjs` rechace sin tirar |
+| `tests/unit/core-sync-destino.test.ts` | la guarda SSRF: forma de la URL, IPs literales y cada rango privado detrás de un DNS |
+| `tests/unit/core-sync-real.test.ts` | el webhook contra un servidor local: encabezados, firma, id externo, 3xx, 5xx y plazo |
+| `tests/unit/core-sync-hay-cliente.test.ts` | qué cliente sale de cada fila de `core_sync_settings` |
+| `tests/unit/core-sync-config.test.ts` | que la vista de /configuracion no lea el secreto ni el hash, y el código de Postgres envuelto |
+| `tests/unit/motivo-de-core.test.ts` | cada código de fallo (`timeout`, `http_502`…) en palabras, en los dos idiomas |
+| `tests/unit/components/CoreSyncPanel.test.tsx` | rotar o revocar la clave no borra el secreto recién generado; cada aviso dice qué muestra; el rechazo del servidor se lee en el idioma de la cuenta |
+| `tests/unit/components/CoreSyncButton.test.tsx` | el fallo en palabras y en el idioma de la cuenta; el éxito refresca la ficha; la sección se ve en todos los canales |
+| `tests/unit/configuracion-para-admin.test.ts` | /configuracion lee avisos y entrega en un lote y no se cae si la base falla |
+| `tests/unit/migracion-0036.test.ts` | RLS, CHECKs y permisos de la 0036, leídos del SQL |
+| `tests/integration/api-v1-cases.test.ts` | la clave: 401 sin tocar la base, cupo, 404 ajeno y comparación de tiempo constante; fechas ISO, cursor, sin simulados ni pruebas |
+| `tests/integration/sync-to-core.test.ts` | el envío; la ruta admite los mismos roles que ven el botón (`CORE_SYNC_ROLES`); `updatedAt` en ISO; un caso simulado no sale al webhook real; el 2xx gana sobre `error_core` |
+| `tests/integration/export-to-core.test.ts` | el JSON a mano: la forma entera, fechas ISO, un lote, 404 ajeno |
+| `tests/integration/admin/core-sync.test.ts` | la ruta admin: rol y cupo por `entrar`, URL, CHECK, `motivo` de cada rechazo, clave una sola vez y con el formato que lee `/api/v1`, auditoría sin secretos |
+
+`pnpm pentest` suma sondas sin credenciales: `/api/v1` con Bearer basura y con
+una clave forjada, y `/api/admin/core-sync` sin sesión.
+
+#### Seguridad demostrable: SSO, purga de adjuntos y retención (B19)
+
+Todo corre en `pnpm verify`, sin red, sin base real y sin gastar tokens. **Con la
+migración 0045 sin aplicar**, `pnpm check` completo queda rojo (`/api/health` da
+degradado por `adjuntos_por_purgar`) y `pnpm tenancy`, `pnpm permisos` y
+`pnpm capa-datos` no se pueden correr: la aplica el dueño a mano en las tres
+bases antes del check.
+
+| test | qué cubre |
+| --- | --- |
+| `tests/unit/migracion-0045.test.ts` | RLS `FORCE` y política de `sso_settings` y `adjuntos_por_purgar`, los permisos de `claimmix_app` (sólo leer e insertar en la cola), los CHECKs y el índice parcial del dominio, leídos del SQL |
+| `tests/unit/core/sso.test.ts`, `tests/unit/sso-dominio.test.ts` | el dominio: coincidencia exacta, sin subdominios ni proveedores abiertos, y el token del TXT |
+| `tests/unit/sso-inquilino.test.ts`, `sso-inquilino-flujo.test.ts`, `sso-ingreso.test.ts` | el plugin: el arranque, el callback (firma, `iss`, `aud`, `nonce`, dominio), el alta por primer ingreso , que quien ya estaba en el inquilino (mail local sin verificar, admin incluido) entre por su id y siga entrando sólo por SSO con «exigir», y que una rechazada sin `errorCallbackURL` vuelva a `/login` con su código |
+| `tests/unit/sso-exigir.test.ts`, `tests/unit/login-sso-requerido.test.ts` | «exigir»: corta contraseña y Google para el dominio, no niega el alta de un admin ni el cambio de contraseña, niega el alta abierta antes de crear la cuenta, y el login manda a `/login?error=sso_requerido` sin contar un fallo de credenciales |
+| `tests/unit/https-fijado.test.ts` | la llamada al IdP: IP fijada, tope de tamaño y de tiempo, sin cuerpo si no es 2xx |
+| `tests/integration/admin/sso.test.ts` | `/api/admin/sso` entera, con el IdP, el DNS y el cierre de sesiones simulados. El secreto nunca vuelve en una respuesta. El `CASE` del PUT (issuer, dominio y `client_id`) y el `EXISTS` del PATCH (la cuenta SSO del propio admin) se verifican sólo dibujando el SQL: se confirman en QA después de la 0045 |
+| `tests/unit/sso-panel*.test.ts*`, `sso-acciones.test.ts`, `configuracion-sso-pagina.test.tsx` | el panel de /configuracion y las acciones del servidor |
+| `tests/unit/cases-bulk-delete.test.ts`, `borrar-deja-rastro.test.ts` | borrar un caso anota los adjuntos en la cola en el mismo lote, y deja rastro en la auditoría |
+| `tests/unit/purgar-adjuntos.test.ts` | la purga: gracia, `purgar_despues` nulo = cancelada, de a 50, idempotente, el error queda como texto fijo, manda la fila más nueva por objeto y una purga lograda cierra las viejas |
+| `tests/unit/core/retencion.test.ts`, `tests/unit/server/retencion.test.ts` | los modos, la fecha de corte, el tope por inquilino, el `DELETE` que vuelve a comprobar `closed_at` y que no se toquen clientes, pólizas ni la auditoría |
+| `tests/unit/server/api/cron-reap-stuck-route.test.ts` | la purga y la retención corren sólo dentro de la hora 04 UTC y UNA vez por día (cupo de 24 h, que fuera de la ventana no se gasta), una no frena a la otra ni al barrido del limitador |
+
+**El IdP falso.** No hay un IdP real en ninguna capa de ensayo. `tests/integration/admin/sso.test.ts`
+simula el descubrimiento OIDC, la verificación del TXT y el cierre de sesiones, y
+lo que prueba es la ruta, no la red. El flujo completo contra Entra ID, Okta o
+Google Workspace de una aseguradora lo prueba el piloto.
+
+`pnpm pentest` suma `attackSso` (las rutas del plugin y `/api/admin/sso` sin
+sesión, y la respuesta uniforme para un dominio desconocido; la sonda del
+dominio privado se saltea con `--solo-superficie` porque necesita la base) y tres
+sondas de `cualesBorra` en la pared entre inquilinos. No escribe ni abre sesiones:
+en producción es de sólo lectura. La sección 5 de `scripts/prove-data-layer.mts`
+(borrar el caso del inquilino de al lado) sí escribe, y por eso sólo corre en CI
+o con `--escribe`.
+
 ---
 
 ## Cuándo correr qué
@@ -686,7 +833,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
-2. `pnpm rehearse`: las quince conversaciones enteras contra el agente real.
+2. `pnpm rehearse`: las veinticinco conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa
@@ -699,11 +846,10 @@ chequeos: el smoke primero, y colgando de él los otros seis.
    extracciones, y borra los casos al terminar.
 5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
-6. `pnpm docs-config`: el código y la base tienen que decir lo mismo sobre qué
-   papeles pide cada tipo de siniestro. Sólo le pregunta al catálogo. Antes,
-   que no haya una migración del repo sin registrar en `schema_migrations`
-   (`migrate.mjs --exigir-al-dia`, sólo SELECT); si ésa falla, la paridad
-   corre igual.
+6. Migraciones al día: que no haya una migración del repo sin registrar en
+   `schema_migrations` (`migrate.mjs --exigir-al-dia`, sólo SELECT). La
+   comparación de documentos contra `required_docs_config` se retiró con 0044:
+   la tabla ya no se lee.
 7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
    hacer lo que la capa de datos le pide — y en `audit_log`, que es sólo de
    alta desde 0032, comprueba que NO tenga UPDATE ni DELETE. Sólo lee.
@@ -850,6 +996,16 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   ráfaga de un minuto, que es la forma en que llegan las denuncias. Ocho horas
   seguidas de llamadas al modelo no es una prueba, es una factura, y esa
   pregunta se contesta mirándola.
+- **La revisión nocturna de calidad (B22)** contra datos reales. Son cinco
+  sentencias `INSERT … SELECT … ON CONFLICT DO NOTHING` que cuelgan del cron de
+  `reap-stuck`. Sus tests renderizan el SQL con el dialecto de verdad y comprueban
+  su forma —qué tabla llena, qué deja afuera, con qué plazos—, pero no hay
+  Postgres local que las ejecute. La primera vez que corren contra datos reales es
+  el primer cron después de aplicar la migración 0043, y ahí conviene mirar
+  `desvios_nuevos` en la respuesta del cron y la pantalla `/desvios`.
+- **El tablero de métricas contra el volumen real.** Los escenarios de `pnpm load`
+  existen, pero no se corrieron contra una base con meses de auditoría, así que
+  el p95 del tablero del año sigue sin medirse.
 - **La búsqueda por texto del tablero**, que recorre la tabla entera: `ilike
   '%texto%'` no puede usar un índice común. Con los casos de hoy tarda 100ms y
   no vale la pena arreglarlo — un índice trigram cuesta escritura en cada

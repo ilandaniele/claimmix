@@ -41,6 +41,26 @@ export interface AuditLogEntry {
 }
 
 /**
+ * La fila de `audit_log` que corresponde a una entrada. Aparte de
+ * `writeAuditLog` para que quien escribe dentro de una transacción propia (el
+ * padrón importa cientos de filas de un solo viaje) pueda meterla en el mismo
+ * lote en vez de auditar por fuera, donde un fallo dejaría la importación sin
+ * rastro.
+ */
+export function filaDeAuditoria(entry: AuditLogEntry): AuditLogInsert {
+  return {
+    tenant_id: entry.tenant_id,
+    actor_id: entry.actor_id ?? null,
+    event_type: entry.event_type,
+    target_type: entry.target_type ?? null,
+    target_id: entry.target_id ?? null,
+    payload: entry.payload ?? {},
+    ip: ipValida(entry.ip),
+    ua: entry.ua ?? null,
+  };
+}
+
+/**
  * Write an audit log entry.
  *
  * Uses the shared db handle so the write succeeds regardless of
@@ -51,16 +71,7 @@ export interface AuditLogEntry {
  */
 export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
-    const insertRow: AuditLogInsert = {
-      tenant_id: entry.tenant_id,
-      actor_id: entry.actor_id ?? null,
-      event_type: entry.event_type,
-      target_type: entry.target_type ?? null,
-      target_id: entry.target_id ?? null,
-      payload: entry.payload ?? {},
-      ip: ipValida(entry.ip),
-      ua: entry.ua ?? null,
-    };
+    const insertRow = filaDeAuditoria(entry);
 
     await enTenant({ tenantId: insertRow.tenant_id }, (db) =>
       db.insert(auditLog).values(insertRow)
@@ -198,10 +209,10 @@ export const AuditEvent = {
    * MESSAGE_NOT_READ: llegó un mensaje a un caso del que el worker no vuelve a
    * arrancar, así que no se leyó. Payload: { status, motivo }.
    *
-   * `no_relevante` y `listo_para_core` son terminales en la máquina de estados
-   * —`no_relevante` a propósito, bajo LLM08: la IA no saca un caso de un estado
-   * terminal— y el worker tiene una lista de estados desde los que puede
-   * empezar. Cuando llega un mensaje a un caso que quedó afuera de esa lista, el
+   * `no_relevante` y `listo_para_core` no son estados de arranque del worker
+   * —`no_relevante` a propósito, bajo LLM08: la IA no saca un caso de ahí; de
+   * `listo_para_core` lo saca sync-to-core o una persona (`SALIDAS_A_MANO`)— y
+   * el worker tiene una lista de estados desde los que puede empezar. Cuando llega un mensaje a un caso que quedó afuera de esa lista, el
    * mensaje se guarda y NO se lee.
    *
    * Alguien escribe «hola», el clasificador dice que no es una denuncia, y
@@ -239,12 +250,80 @@ export const AuditEvent = {
   SPECIALIST_ALERTED: "claim.specialist_alerted",
 
   /**
+   * LATE_MESSAGE_CLASSIFIED: el worker clasificó un mensaje que llegó después
+   * de que el agente terminó. Payload: { message_id, tipo } — nunca el texto;
+   * tipo null es «sin clasificar».
+   */
+  LATE_MESSAGE_CLASSIFIED: "claim.late_message_classified",
+
+  /**
+   * LATE_MESSAGE_ALERTED: se avisó a los especialistas de ese mensaje.
+   * Payload: { message_id, recipients, delivered }. Propio y no
+   * SPECIALIST_ALERTED: el aviso de la derivación es uno por caso, éste uno por
+   * mensaje.
+   */
+  LATE_MESSAGE_ALERTED: "claim.late_message_alerted",
+
+  /**
+   * WORKSHOP_ESTIMATE_READ: alguien del equipo pidió leer el presupuesto de
+   * taller de un adjunto (B21). Payload: { attachment_id, leido, motivo,
+   * alertas } — nunca los ítems ni los importes.
+   */
+  WORKSHOP_ESTIMATE_READ: "claim.workshop_estimate_read",
+
+  /**
+   * POLICY_CONDITIONS_UPLOADED: alguien subió las condiciones de una póliza
+   * (B6). Payload: { policy_id, leido, motivo } — nunca lo que dice el PDF.
+   */
+  POLICY_CONDITIONS_UPLOADED: "policy.conditions_uploaded",
+
+  /**
+   * AMOUNT_RANGES_CHANGED: un admin cambió la tabla de montos orientativos
+   * desde /configuracion (B23). Payload: { por_defecto } — nunca los montos.
+   */
+  AMOUNT_RANGES_CHANGED: "tenant.amount_ranges_changed",
+
+  /**
+   * CASE_PLAN_CREATED: el caso recibió su plan de trabajo (B11). Payload:
+   * { pasos, origen } — nunca los títulos.
+   */
+  CASE_PLAN_CREATED: "case.plan_created",
+
+  /**
+   * CASE_PLAN_STEP: un paso del plan se tildó o se destildó (B11). Payload:
+   * { clave, hecho, auto: true } si lo tildó el paso de estado, o
+   * { clave, hecho, origen: "manual" } si lo hizo una persona (el actor va aparte).
+   */
+  CASE_PLAN_STEP: "case.plan_step",
+
+  /**
+   * TENANT_WORK_SETTINGS_UPDATED: un admin cambió cómo trabaja el equipo
+   * (reglas de asignación, plazos, plan o pesos del puntaje) desde /agente.
+   * Payload: { campo, antes, despues }: las configuraciones, no datos de casos.
+   */
+  TENANT_WORK_SETTINGS_UPDATED: "tenant.work_settings_updated",
+
+  /**
    * SPECIALIST_ALERT_RECIPIENTS_CHANGED: an admin edited the tenant's list of
    * addresses for urgent-case alerts, from /configuracion.
    * Payload: { count }. Never the addresses themselves.
    * Targets a tenant, not a case: it needs no `audit.*` key.
    */
   SPECIALIST_ALERT_RECIPIENTS_CHANGED: "tenant.specialist_alert_recipients_changed",
+
+  /**
+   * CORE_SETTINGS_CHANGED: an admin changed the delivery to the insurer's core
+   * system from /configuracion (B5). Payload: booleans only — url_cambiada,
+   * enabled, secreto_generado, clave_rotada, clave_revocada. Never the URL, the
+   * secret or the key.
+   */
+  CORE_SETTINGS_CHANGED: "tenant.core_settings_changed",
+
+  /**
+   * CORE_WEBHOOK_TESTED: an admin sent the synthetic test payload to the
+   * webhook. Payload: { ok, motivo }. No case is involved.
+   */
+  CORE_WEBHOOK_TESTED: "tenant.core_webhook_tested",
 
   /**
    * CASE_CLOSED_ABANDONED: the claimant never answered and the conversation
@@ -258,6 +337,24 @@ export const AuditEvent = {
 
   /** CLAIM_REQUEST_RESENT: una persona volvió a pedirle al asegurado lo que falta. */
   CLAIM_REQUEST_RESENT: "claim.request_resent",
+
+  /**
+   * CLAIM_REMINDER_SENT / SKIPPED / FAILED: el recordatorio automático del
+   * pedido. Payload: { etapa, horas, canal, via } al mandarlo; { etapa, reason }
+   * al saltearlo; { etapa, canal } si falla. La etapa queda gastada en los tres.
+   */
+  CLAIM_REMINDER_SENT: "claim.reminder_sent",
+  CLAIM_REMINDER_SKIPPED: "claim.reminder_skipped",
+  CLAIM_REMINDER_FAILED: "claim.reminder_failed",
+
+  /**
+   * CASE_CLOSURE_NOTICE_SENT / SKIPPED / FAILED: el aviso al asegurado de que
+   * su caso se cerró por falta de respuesta. Payload: { canal }, { reason } o
+   * { code }. Sale una vez: la etapa 9 queda gastada en los tres.
+   */
+  CASE_CLOSURE_NOTICE_SENT: "claim.closure_notice_sent",
+  CASE_CLOSURE_NOTICE_SKIPPED: "claim.closure_notice_skipped",
+  CASE_CLOSURE_NOTICE_FAILED: "claim.closure_notice_failed",
 
   /**
    * DOCUMENTS_RECEIVED: a file the claimant sent was recognised as one of the
@@ -430,6 +527,82 @@ export const AuditEvent = {
    * respuesta: son texto libre de quien pregunta y del modelo.
    */
   ASSISTANT_QUERY: "assistant.query",
+
+  /**
+   * RAMO_PROPIO_GUARDADO / RAMO_PROPIO_BORRADO: un admin creó, cambió o borró un
+   * tipo de siniestro propio (B26). Payload: { clave } — nunca los nombres.
+   */
+  RAMO_PROPIO_GUARDADO: "tenant.ramo_guardado",
+  RAMO_PROPIO_BORRADO: "tenant.ramo_borrado",
+
+  /**
+   * FORMULARIO_WEB_CAMBIADO: un admin creó el formulario público o lo encendió
+   * o apagó (B17). El enlace se fija al crearlo y no cambia después. Payload:
+   * { activo } — nunca el enlace.
+   */
+  FORMULARIO_WEB_CAMBIADO: "tenant.formulario_web_cambiado",
+
+  /**
+   * DENUNCIA_WEB_RECIBIDA: llegó una denuncia por el formulario público (B17).
+   * Va sin actor: quien la manda no tiene cuenta. Payload: { canal } — nada de
+   * lo que escribió la persona.
+   */
+  DENUNCIA_WEB_RECIBIDA: "case.web_recibida",
+
+  /**
+   * PADRON_IMPORTADO: alguien confirmó una importación del padrón (B16).
+   * Payload: { clientes: { altas, cambios }, polizas: { altas, cambios } } —
+   * sólo cuántos, nunca una fila.
+   */
+  PADRON_IMPORTADO: "padron.importado",
+  /**
+   * CLIENTE_ALTA / CLIENTE_CAMBIO / POLIZA_ALTA / POLIZA_CAMBIO: alta o edición
+   * manual desde /clientes (B16). Payload: { campos } — los nombres de lo que
+   * cambió, nunca los valores.
+   */
+  CLIENTE_ALTA: "customer.created",
+  CLIENTE_CAMBIO: "customer.updated",
+  POLIZA_ALTA: "policy.created",
+  POLIZA_CAMBIO: "policy.updated",
+
+  /**
+   * SSO_CONFIGURADO: un admin guardó el IdP de su aseguradora (B19).
+   * Payload: { campos, secreto_cambiado } — los nombres de lo que cambió, nunca
+   * el secreto ni el cifrado.
+   */
+  SSO_CONFIGURADO: "sso.configurado",
+  /** SSO_DOMINIO_VERIFICADO: el TXT `_claimmix.<dominio>` apareció. Payload: { dominio }. */
+  SSO_DOMINIO_VERIFICADO: "sso.dominio_verificado",
+  /**
+   * SSO_EXIGIDO: se prendió o se apagó «exigir SSO», o se prendió o apagó el
+   * SSO. Payload: { activo, exigir, sesiones_cerradas }.
+   */
+  SSO_EXIGIDO: "sso.exigido",
+  /**
+   * SSO_INGRESO_JIT: alguien entró por SSO por primera vez y se le creó la
+   * cuenta como viewer. Payload: {} — ni mail ni reclamos del IdP.
+   */
+  SSO_INGRESO_JIT: "sso.ingreso_jit",
+  /**
+   * SSO_RECHAZADO: el IdP devolvió a alguien y no se lo dejó entrar. Payload:
+   * { motivo } — un código, nunca el token, el mail ni los reclamos.
+   */
+  SSO_RECHAZADO: "sso.rechazado",
+
+  /**
+   * ADJUNTOS_PURGADOS: la purga diferida borró de R2 los adjuntos de un caso
+   * que ya no existe (B19). Va sin actor, sólo al borrar de verdad (el modo
+   * simular no deja rastro). Payload: { purgados, fallidos } — sólo conteos,
+   * sin paths.
+   */
+  ADJUNTOS_PURGADOS: "adjuntos.purgados",
+  /**
+   * RETENCION_APLICADA: la retención borró casos cerrados hace más de N años
+   * (B19). Va sin actor, una por inquilino, sólo al borrar de verdad (el modo
+   * simular no deja rastro). Payload: { anios, corte, candidatos, borrados } —
+   * sólo conteos y la fecha de corte.
+   */
+  RETENCION_APLICADA: "retencion.aplicada",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

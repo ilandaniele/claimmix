@@ -153,16 +153,9 @@ vi.mock("@/server/ai/hydrate-fields", () => ({
 vi.mock("@/lib/email/claim-parser", () => ({
   mergeExtractedFields: vi.fn().mockImplementation((a: unknown[], _b: unknown[]) => a),
   parseEmailClaimFields: vi.fn().mockReturnValue([]),
+  anclarPolizaAlTexto: vi.fn().mockImplementation((claim: unknown) => claim),
   sanearContacto: vi.fn().mockImplementation((fields: unknown[]) => fields),
 }));
-
-vi.mock("@/lib/schemas/cases", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/schemas/cases")>();
-  return {
-    ...actual,
-    ClaimTypeSchema: { safeParse: vi.fn().mockReturnValue({ success: false }) },
-  };
-});
 
 /**
  * Mock the mock-extractor module. extractEmailClaimMock is replaced with a

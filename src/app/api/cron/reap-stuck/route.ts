@@ -21,7 +21,15 @@ import { isInternalRequest } from "@/lib/security/internal-auth";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
+import { revisarDesvios } from "@/server/desvios/revision-nocturna";
+import { aplicarRetencion, type ResultadoRetencion } from "@/server/cases/retencion";
+import { purgarAdjuntos, type ResultadoPurga } from "@/server/storage/purgar-adjuntos";
+import { ventanaDiaria } from "@/core/retencion";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -72,10 +80,79 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
    */
   const retomados = await retomarExtraccionesPendientes({ hasta });
 
+  // Los recordatorios (B4) van antes del cierre, con a lo sumo un minuto: un
+  // caso que hoy cumple las 48 h no tiene que esperar a que se cierren los
+  // viejos. Si fallan, el cierre corre igual.
+  let recordatorios = { enviados: 0, salteados: 0 };
+  try {
+    recordatorios = await recordarPendientes({ hasta: Math.min(hasta - 60_000, Date.now() + 60_000) });
+  } catch (err) {
+    logger.error({ code: errorCode(err) }, "cron_reap_stuck.recordatorios_fallaron");
+  }
+
   // Same nightly pass, second sweep: conversations the claimant abandoned.
   // Piggybacking rather than adding a cron because the Hobby plan allows one
   // run a day and both jobs want exactly that cadence.
   const abandoned = await closeAbandonedConversations();
+
+  // El aviso de cierre (B4) busca los cierres recientes sin avisar, así que el
+  // que hoy no entra sale mañana. Deja un minuto para la purga y la respuesta.
+  let avisosDeCierre = 0;
+  try {
+    avisosDeCierre = await avisarCierres({ hasta: hasta - 60_000 });
+  } catch (err) {
+    logger.error({ code: errorCode(err) }, "cron_reap_stuck.avisos_de_cierre_fallaron");
+  }
+
+  // La revisión de calidad (B22) mira lo que quedó después de los barridos de
+  // arriba, así que va después. Es idempotente: lo que hoy no entra, entra
+  // mañana. Con un minuto de margen para la purga, y si falla la purga corre igual.
+  //
+  // Esta ruta la llama GitHub Actions cada quince minutos, pero la revisión es
+  // una por día: un cupo de 24 h la deja pasar sólo a la primera llamada del día.
+  let desviosNuevos = 0;
+  if (Date.now() < hasta - 60_000) {
+    try {
+      const cupo = await rateLimit(claveDeCupo("revision-de-desvios"), RATE_LIMIT_CONFIGS.REVISION_DE_DESVIOS);
+      if (cupo.allowed) desviosNuevos = (await revisarDesvios()).nuevos;
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "cron_reap_stuck.desvios_fallaron");
+    }
+  }
+
+  // La purga de adjuntos y la retención (B19) son UNA por día. La ruta la llama
+  // GitHub cada quince minutos y Vercel a las 04:07, así que la ventana de las 04
+  // UTC sola deja pasar cinco corridas en esa hora: los cinco intentos de la purga se
+  // gastarían de una vez y dos corridas encimadas contarían el mismo fallo dos veces.
+  // El cupo de 24 h deja pasar sólo a la primera de la ventana, y se pide DENTRO de
+  // ella para que la llamada de las 00 UTC no lo gaste. Las dos nacen apagadas y van
+  // detrás de todo lo demás, con el mismo minuto de margen. Primero la purga y después
+  // la retención: lo que la retención borra hoy queda encolado para la purga de dentro
+  // de la gracia. Si una falla, la otra corre.
+  let purga: ResultadoPurga | null = null;
+  let retencion: ResultadoRetencion | null = null;
+  if (ventanaDiaria(new Date()) && Date.now() < hasta - 60_000) {
+    let cupoDelDia = false;
+    try {
+      const cupo = await rateLimit(claveDeCupo("purga-y-retencion"), RATE_LIMIT_CONFIGS.PURGA_Y_RETENCION);
+      cupoDelDia = cupo.allowed;
+    } catch (err) {
+      // Ante la duda no se borra: lo que hoy no entra, entra mañana.
+      logger.error({ code: errorCode(err) }, "cron_reap_stuck.cupo_de_borrado_fallo");
+    }
+    if (cupoDelDia) {
+      try {
+        purga = await purgarAdjuntos({ hasta: hasta - 60_000 });
+      } catch (err) {
+        logger.error({ code: errorCode(err) }, "cron_reap_stuck.purga_de_adjuntos_fallo");
+      }
+      try {
+        retencion = await aplicarRetencion({ hasta: hasta - 60_000 });
+      } catch (err) {
+        logger.error({ code: errorCode(err) }, "cron_reap_stuck.retencion_fallo");
+      }
+    }
+  }
 
   // Third sweep, same reason: the rate limiter writes a row per key per window
   // and none of them mean anything once the window has passed.
@@ -87,6 +164,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ...result,
     retomados: retomados.retomados,
     abandoned_closed: abandoned.closed,
+    recordatorios_enviados: recordatorios.enviados,
+    recordatorios_salteados: recordatorios.salteados,
+    avisos_de_cierre: avisosDeCierre,
+    desvios_nuevos: desviosNuevos,
+    purga,
+    retencion,
     rate_limit_rows_purged: purged,
   });
 }

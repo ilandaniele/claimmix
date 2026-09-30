@@ -28,6 +28,7 @@ import {
   esClaveDeEstado,
   estadosAConsultar,
 } from "@/core/case/filtro-de-estado";
+import { CaseStatusSchema } from "@/lib/schemas/cases";
 
 /** Lo que había en producción el 10/09, tal cual salió del GROUP BY. */
 const PRODUCCION = [
@@ -72,7 +73,11 @@ describe("lo que el filtro consulta", () => {
       ["escalado", "requiere_especialista"].sort()
     );
     expect(estadosAConsultar("listo").sort()).toEqual(
-      ["enviado_a_core", "listo", "listo_para_core"].sort()
+      ["en_liquidacion", "enviado_a_core", "listo", "listo_para_core"].sort()
+    );
+    // B25: pagado y rechazado son un cierre con resultado.
+    expect(estadosAConsultar("cerrado").sort()).toEqual(
+      ["cerrado", "pagado", "rechazado"].sort()
     );
   });
 
@@ -120,6 +125,16 @@ describe("los cinco grupos no se pisan", () => {
         vistos.set(estado, clave);
       }
     }
+  });
+
+  it("las cinco opciones más error_core y no_relevante cubren todos los estados", () => {
+    // Un estado nuevo que no cae en ninguna opción no se ve en la bandeja
+    // filtrada: esto obliga a decidir dónde va.
+    const cubiertos = new Set<string>(["error_core", "no_relevante"]);
+    for (const clave of CLAVES_DE_ESTADO) {
+      for (const estado of ESTADOS_DE_LA_OPCION[clave]) cubiertos.add(estado);
+    }
+    expect([...cubiertos].sort()).toEqual([...CaseStatusSchema.options].sort());
   });
 
   it("y la suma de los cinco no pasa el total", () => {

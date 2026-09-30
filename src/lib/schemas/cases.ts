@@ -6,20 +6,14 @@
 
 import { z } from "zod";
 
+import { FORMATO_DE_CLAVE_DE_RAMO, RAMOS_NATIVOS } from "@/core/case/ramos";
 import { camposDePagina } from "@/lib/schemas/paginacion";
 
-/** Allowed claim types */
-export const ClaimTypeSchema = z.enum([
-  "choque",
-  "robo",
-  "granizo",
-  "incendio",
-  "cristales",        // windshield / glass damage
-  "rc",               // responsabilidad civil — third-party liability
-  "robo_contenido",   // theft of belongings from inside the vehicle
-  "accidente_personal", // personal injury (occupant, pedestrian)
-  "other",
-]);
+/** Una clave de ramo, nativo o del inquilino: sólo se exige el formato (el mismo del CHECK de la 0044). */
+export const ClaveDeRamoSchema = z.string().regex(FORMATO_DE_CLAVE_DE_RAMO);
+
+/** Los ramos nativos: la lista vive en `core/case/ramos.ts`. */
+export const ClaimTypeSchema = z.enum(RAMOS_NATIVOS);
 export type ClaimType = z.infer<typeof ClaimTypeSchema>;
 
 /**
@@ -52,6 +46,10 @@ export const CaseStatusSchema = z.enum([
   "enviado_a_core",
   "error_core",
   "no_relevante",
+  // Después de la entrega a la aseguradora; los marca una persona (B25)
+  "en_liquidacion",
+  "pagado",
+  "rechazado",
 ]);
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 
@@ -72,12 +70,31 @@ export const FraudRiskLevelSchema = z.enum(["low", "medium", "high"]);
 export type FraudRiskLevel = z.infer<typeof FraudRiskLevelSchema>;
 
 /** Canales de ingreso de un caso. */
-export const ChannelSchema = z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp"]);
+export const ChannelSchema = z.enum(["email_sim", "email", "whatsapp_sim", "whatsapp", "web"]);
 export type Channel = z.infer<typeof ChannelSchema>;
 
+/** Los canales por los que entra una persona de verdad: los `_sim` son simulaciones y no miden nada. */
+export const CANALES_REALES = ["whatsapp", "email", "web"] as const;
+
 /** Allowed sort columns — whitelist prevents SQL injection via sort param */
-export const SortColumnSchema = z.enum(["created_at", "confidence_min", "status"]);
+export const SortColumnSchema = z.enum([
+  "created_at",
+  "confidence_min",
+  "status",
+  "puntaje_complejidad",
+  "vence_en",
+]);
 export type SortColumn = z.infer<typeof SortColumnSchema>;
+
+/**
+ * Los recortes de la bandeja por plazo y por complejidad (B10, B13). Los valores
+ * son los de `limitesDelFiltro` y `RANGOS`, y `buildCaseFilters` no compila si
+ * alguno deja de coincidir.
+ */
+export const VencimientoFiltroSchema = z.enum(["vencidos", "por_vencer"]);
+export type VencimientoFiltro = z.infer<typeof VencimientoFiltroSchema>;
+export const ComplejidadFiltroSchema = z.enum(["baja", "media", "alta"]);
+export type ComplejidadFiltro = z.infer<typeof ComplejidadFiltroSchema>;
 
 /** Ventanas del selector de período de la bandeja. Sin valor es «todo el tiempo». */
 export const PeriodoSchema = z.enum(["hoy", "7d", "30d", "90d"]);
@@ -103,7 +120,8 @@ const listaDe = <T extends z.ZodTypeAny>(v: T) =>
 /** GET /api/cases query parameters (extended with email-intake filters) */
 export const CaseQuerySchema = z.object({
   status: listaDe(CaseStatusSchema),
-  type: listaDe(ClaimTypeSchema),
+  // Nativo o de un inquilino: la clave sólo tiene que tener formato de clave.
+  type: listaDe(ClaveDeRamoSchema),
   /*
    * Tres caracteres es lo que el índice necesita para servir de algo.
    *
@@ -134,6 +152,9 @@ export const CaseQuerySchema = z.object({
   customer_id: z.string().uuid().optional(),
   policy_id: z.string().uuid().optional(),
   channel: listaDe(ChannelSchema),
+  // Varios a la vez se leen «cualquiera de estos», como el resto de los grupos.
+  vencimiento: listaDe(VencimientoFiltroSchema),
+  complejidad: listaDe(ComplejidadFiltroSchema),
   is_claim: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
   // Sólo `true` filtra: «los que no están para responder» no es una sección.
   // Cualquier otro valor se ignora, como en `bandeja/page.tsx`: un 400 acá
@@ -181,7 +202,8 @@ export type ConfirmField = z.infer<typeof ConfirmFieldSchema>;
 /**
  * POST /api/cases/:id/sync-to-core request body (AC17).
  * Triggers CoreSyncService for a case that is listo_para_core.
- * force=true bypasses the status precondition check (admin only).
+ * `force` sólo suma el reintento desde `error_core`; no saltea ninguna otra
+ * precondición ni pide otro rol.
  */
 export const SyncToCoreSchema = z.object({
   force: z.boolean().optional().default(false),
@@ -203,7 +225,7 @@ export interface EmailCase {
   status: CaseStatus;
   confidence_min: number | null;
   assigned_to: string | null;
-  channel: "email_sim" | "email" | "whatsapp_sim" | "whatsapp";
+  channel: "email_sim" | "email" | "whatsapp_sim" | "whatsapp" | "web";
   created_at: string;
   updated_at: string | null;
   closed_at: string | null;

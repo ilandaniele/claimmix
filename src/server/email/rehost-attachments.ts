@@ -28,6 +28,7 @@ import { claimAttachments } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { computeContentHash, uploadAttachment } from "@/server/storage/claim-attachments-bucket";
 import { validateAttachment, MAX_AGGREGATE_SIZE_BYTES } from "@/server/email/attachment-validator";
+import { revisarAdjunto, type Metadatos } from "@/core/adjuntos/firma";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
@@ -58,7 +59,7 @@ export interface EmailAttachment {
 }
 
 export type RehostResult =
-  | { stored: true; storagePath: string; contentHash: string }
+  | { stored: true; storagePath: string; contentHash: string; metadatos: Metadatos | null }
   | { stored: false; reason: string };
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -212,6 +213,12 @@ export async function rehostAttachments(
       continue;
     }
 
+    // Lo que va al modelo tiene que ser lo que dice ser, y de un tamaño que
+    // valga la pena leer. Lo que no pasa se guarda igual, sin `firma`: el
+    // analista lo abre y puede cerrar un pedido; sólo no se le manda al modelo.
+    const revision = revisarAdjunto(data, attachment.ContentType);
+    const metadatos = revision.ok ? revision.metadatos : { descarte: revision.reason };
+
     // ── Compute content hash ───────────────────────────────────────────────────
     const contentHash = computeContentHash(data);
 
@@ -219,7 +226,7 @@ export async function rehostAttachments(
     const existingPath = await findExistingByHash(tenantId, caseId, contentHash);
     if (existingPath !== null) {
       // File already uploaded for this case — reuse the existing storage path.
-      results.push({ stored: true, storagePath: existingPath, contentHash });
+      results.push({ stored: true, storagePath: existingPath, contentHash, metadatos });
       continue;
     }
 
@@ -258,6 +265,7 @@ export async function rehostAttachments(
       stored: true,
       storagePath: uploadResult.storagePath,
       contentHash,
+      metadatos,
     });
   }
 
@@ -313,6 +321,7 @@ export async function rehostAndRecordAttachments(
           storage_path: result.stored ? result.storagePath : null,
           content_hash: result.stored ? result.contentHash : null,
           rejected_reason: result.stored ? null : result.reason,
+          metadatos: result.stored ? result.metadatos : null,
         })
       );
     } catch (err) {

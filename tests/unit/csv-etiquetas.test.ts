@@ -7,8 +7,9 @@
  * afuera: se abre en Excel, se manda por correo, se archiva. Se leía peor que
  * la pantalla, que sí traducía las trece.
  *
- * Los mapas del route son `Record<ClaimType, …>` y `Record<CaseStatus, …>`, así
- * que agregar un estado al esquema sin agregarlo ahí no compila. Estos tests
+ * El mapa de estados del route es `Record<CaseStatus, …>`, así que agregar un
+ * estado al esquema sin agregarlo ahí no compila; los tipos salen de
+ * `nombreDeTipo`, cuya clave `type.*` sí se chequea al compilar. Estos tests
  * cubren lo que el tipo no puede: que la etiqueta exista de verdad en el
  * diccionario y no sea la clave disfrazada.
  */
@@ -17,23 +18,20 @@ import { describe, it, expect } from "vitest";
 
 import { getT } from "@/lib/i18n";
 import { CaseStatusSchema, ClaimTypeSchema } from "@/lib/schemas/cases";
-import {
-  etiquetasDeEstado,
-  etiquetasDeTipo,
-} from "@/app/api/cases/export.csv/route";
+import { etiquetasDeEstado } from "@/app/api/cases/export.csv/route";
+import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
 
 const t = getT("es-AR");
+const tipoEnEs = (tipo: string) => nombreDeTipo(tipo, t, [], "es-AR");
 
 describe("las etiquetas del CSV", () => {
-  it("tiene un nombre para los nueve tipos de siniestro", () => {
-    const etiquetas = etiquetasDeTipo(t);
+  it("tiene un nombre para cada tipo de siniestro", () => {
     for (const tipo of ClaimTypeSchema.options) {
-      expect(etiquetas[tipo], `falta el tipo ${tipo}`).toBeTruthy();
+      expect(tipoEnEs(tipo), `falta el tipo ${tipo}`).toBeTruthy();
     }
-    expect(Object.keys(etiquetas)).toHaveLength(ClaimTypeSchema.options.length);
   });
 
-  it("tiene un nombre para los trece estados", () => {
+  it("tiene un nombre para cada estado", () => {
     const etiquetas = etiquetasDeEstado(t);
     for (const estado of CaseStatusSchema.options) {
       expect(etiquetas[estado], `falta el estado ${estado}`).toBeTruthy();
@@ -47,10 +45,9 @@ describe("las etiquetas del CSV", () => {
      * la clave, así que un mapa completo puede seguir escribiendo `rc` en el
      * archivo sin que falte nada a la vista.
      */
-    const tipos = etiquetasDeTipo(t);
     for (const tipo of ClaimTypeSchema.options) {
-      expect(tipos[tipo], `«${tipo}» sale crudo`).not.toBe(`type.${tipo}`);
-      expect(tipos[tipo]).not.toBe(tipo);
+      expect(tipoEnEs(tipo), `«${tipo}» sale crudo`).not.toBe(`type.${tipo}`);
+      expect(tipoEnEs(tipo)).not.toBe(tipo);
     }
 
     const estados = etiquetasDeEstado(t);
@@ -62,8 +59,8 @@ describe("las etiquetas del CSV", () => {
 
   it("los que faltaban ahora dicen algo que se puede leer", () => {
     // Los cuatro que citaba el informe, por nombre.
-    expect(etiquetasDeTipo(t).rc).toBe("Resp. Civil");
-    expect(etiquetasDeTipo(t).robo_contenido).toBe("Robo de contenido");
+    expect(tipoEnEs("rc")).toBe("Resp. Civil");
+    expect(tipoEnEs("robo_contenido")).toBe("Robo de contenido");
     expect(etiquetasDeEstado(t).listo_para_core).toBe("Listo para Core");
     expect(etiquetasDeEstado(t).requiere_especialista).toBe("Requiere especialista");
   });

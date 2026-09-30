@@ -5,8 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { esAR } from "@/lib/i18n/es-AR";
-import { enUS } from "@/lib/i18n/en-US";
+import { esAR, enUS } from "@/lib/i18n/index";
 
 describe("i18n del panel de fraude", () => {
   it("es-AR conserva el texto de hoy", () => {

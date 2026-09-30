@@ -52,6 +52,9 @@ const PUBLIC_PREFIXES = [
   // casilla venza a los siete días. Una política de privacidad que redirige al
   // login no es una política de privacidad publicada.
   "/demo",
+  // El formulario web de denuncias (B17): quien denuncia no tiene cuenta. La
+  // ruta que lo recibe está en /api, que este archivo no ve, y se defiende sola.
+  "/denuncia/",
   "/privacy",
   "/terms",
   "/_next",

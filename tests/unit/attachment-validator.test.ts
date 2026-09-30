@@ -140,6 +140,29 @@ describe("validateContentType", () => {
     expect(result.allowed).toBe(false);
     expect(result.reason).toBe("content_type_not_allowed");
   });
+
+  // Las notas de voz entran con nombre exacto; las llamadas (AMR, 3GPP) no.
+  it.each([
+    "audio/ogg",
+    "audio/ogg; codecs=opus",
+    "audio/opus",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/x-m4a",
+    "audio/aac",
+    "audio/wav",
+    "audio/x-wav",
+  ])("allows %s", (tipo) => {
+    expect(validateContentType(tipo).allowed).toBe(true);
+  });
+
+  it.each(["audio/amr", "audio/3gpp", "audio/webm", "audio/flac", "audio/x-custom"])(
+    "rejects %s (no audio/* glob)",
+    (tipo) => {
+      expect(validateContentType(tipo)).toEqual({ allowed: false, reason: "content_type_not_allowed" });
+    }
+  );
 });
 
 // ── validateSize ─────────────────────────────────────────────────────────────

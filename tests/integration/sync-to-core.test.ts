@@ -11,6 +11,8 @@
  * These tests mock @/lib/db (Drizzle) and @/lib/auth/require-role directly.
  */
 
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -52,6 +54,20 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: {
     CORE_SYNC_SUCCESS: "core.sync_success",
     CORE_SYNC_FAILED: "core.sync_failed",
+  },
+}));
+
+/*
+ * El cliente real, sin red: lo que se prueba acá es qué hace la ruta con cada
+ * resultado. La firma, el destino y el socket tienen sus propios tests.
+ */
+const real = vi.hoisted(() => ({ syncCase: vi.fn(), configs: [] as unknown[] }));
+vi.mock("@/server/core-sync/real", () => ({
+  RealCoreSyncClient: class {
+    syncCase = real.syncCase;
+    constructor(config: unknown) {
+      real.configs.push(config);
+    }
   },
 }));
 
@@ -106,14 +122,17 @@ const DEFAULT_EXTRACTED_FIELDS = [
 ];
 
 /**
- * Las dos lecturas que hace la ruta antes de llamar al cliente: el caso y sus
- * campos extraidos. Usa un contador (`n`) que arranca de nuevo en cada llamada
- * a `db.select.mockImplementation`, asi que la segunda lectura nunca devuelve
- * las filas.
+ * Las lecturas que hace la ruta antes de llamar al cliente, en el orden del
+ * lote: el caso, sus campos extraidos y —fuera del mock— la fila de
+ * `core_sync_settings`. Usa un contador (`n`) que arranca de nuevo en cada
+ * llamada a `db.select.mockImplementation`.
+ *
+ * `config` es la fila de la aseguradora (vacía = sin fila), o un error para
+ * simular la 0036 sin aplicar.
  *
  * Devuelve el espia de `update` para poder afirmar que NO se llamo.
  */
-function montarLecturaDelCaso(db: any) {
+function montarLecturaDelCaso(db: any, caseRow: unknown = DEFAULT_CASE_ROW, config: unknown[] | Error = []) {
   let n = 0;
   db.select.mockImplementation(() => {
     n += 1;
@@ -121,9 +140,14 @@ function montarLecturaDelCaso(db: any) {
       return {
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([DEFAULT_CASE_ROW]),
+            limit: vi.fn().mockResolvedValue([caseRow]),
           }),
         }),
+      };
+    }
+    if (n === 3) {
+      return {
+        from: config instanceof Error ? vi.fn().mockRejectedValue(config) : vi.fn().mockResolvedValue(config),
       };
     }
     return {
@@ -322,7 +346,7 @@ describe("POST /api/cases/:id/sync-to-core", () => {
 
     expect(response.status).toBe(200);
     expect(body.synced).toBe(false);
-    expect(body.errorMessage).toBe("Core timeout");
+    expect(body.errorMessage).toBe("timeout");
   });
 
   it("AC17: logs CORE_SYNC_FAILED on mock failure", async () => {
@@ -446,6 +470,19 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     expect(body.error.code).toBe("FORBIDDEN_ROLE");
   });
 
+  it("admite los mismos roles que ven el botón del caso", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { AppError } = await import("@/lib/errors");
+    const { CORE_SYNC_ROLES } = await import("@/lib/auth/roles");
+    vi.mocked(requireRole).mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    await POST(makeRequest(), makeContext(VALID_CASE_ID));
+
+    expect(requireRole).toHaveBeenCalledWith(...CORE_SYNC_ROLES);
+    expect(CORE_SYNC_ROLES).toContain("owner");
+  });
+
   it("AC19: returns 404 for non-existent / wrong-tenant case", async () => {
     const { requireRole } = await import("@/lib/auth/require-role");
     const { db } = await import("@/lib/db");
@@ -531,7 +568,7 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("CORE_SYNC_MODE=real tampoco inventa: todavía no hay cliente real", async () => {
+  it("CORE_SYNC_MODE=real ya no significa nada: con la fila apagada, 501", async () => {
     const { requireRole } = await import("@/lib/auth/require-role");
     const { db } = await import("@/lib/db");
 
@@ -542,13 +579,234 @@ describe("POST /api/cases/:id/sync-to-core", () => {
       userRow: DEFAULT_USER_ROW,
     } as never);
 
-    const update = montarLecturaDelCaso(db);
+    const update = montarLecturaDelCaso(db, DEFAULT_CASE_ROW, [
+      { enabled: false, webhook_url: "https://core.example.com/hook", signing_secret_enc: "x.y.z" },
+    ]);
 
     const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
     const response = await POST(makeRequest(), makeContext(VALID_CASE_ID));
 
     expect(response.status).toBe(501);
     expect(update).not.toHaveBeenCalled();
+    expect(real.syncCase).not.toHaveBeenCalled();
+  });
+
+  /*
+   * La 0036 se aplica a mano y el código puede llegar antes. Sin la tabla, el
+   * lote entero falla: es lo mismo que no tener fila, no un 500.
+   */
+  it.each([
+    ["42P01 directo", Object.assign(new Error("relation does not exist"), { code: "42P01" })],
+    ["42703 en cause", Object.assign(new Error("query failed"), { cause: { code: "42703" } })],
+  ])("sin la 0036 (%s): 501 sin escribir", async (_nombre, falla) => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+    const { writeAuditLog } = await import("@/lib/audit/log");
+
+    vi.stubEnv("CORE_SYNC_MODE", "");
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+    const update = montarLecturaDelCaso(db, DEFAULT_CASE_ROW, falla);
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    const response = await POST(makeRequest(), makeContext(VALID_CASE_ID));
+
+    expect(response.status).toBe(501);
+    expect(update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("otro error de la base no se disfraza de 501", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.stubEnv("CORE_SYNC_MODE", "");
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+    montarLecturaDelCaso(db, DEFAULT_CASE_ROW, Object.assign(new Error("boom"), { code: "57P01" }));
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    await expect(POST(makeRequest(), makeContext(VALID_CASE_ID))).rejects.toThrow("boom");
+  });
+
+  it("con el mock no se lee la config: dos lecturas, no tres", async () => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+    montarLecturaDelCaso(db);
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    const response = await POST(makeRequest(), makeContext(VALID_CASE_ID));
+
+    expect(response.status).toBe(200);
+    expect(db.select).toHaveBeenCalledTimes(2);
+    expect(real.syncCase).not.toHaveBeenCalled();
+  });
+
+  describe("con el webhook real de la aseguradora", () => {
+    const WEBHOOK = "https://core.example.com/hook";
+
+    async function filaActiva() {
+      const { cifrar } = await import("@/lib/security/cifrado");
+      return { enabled: true, webhook_url: WEBHOOK, signing_secret_enc: cifrar("test-signing-secret") };
+    }
+
+    beforeEach(() => {
+      vi.stubEnv("CORE_SYNC_MODE", "");
+      vi.stubEnv("GMAIL_TOKEN_ENCRYPTION_KEY", "test-encryption-key");
+      real.configs.length = 0;
+    });
+
+    async function enviar(caseRow: unknown, config: unknown[], body: unknown = {}) {
+      const { requireRole } = await import("@/lib/auth/require-role");
+      const { db } = await import("@/lib/db");
+      vi.mocked(requireRole).mockResolvedValue({
+        user: { id: "user-1" },
+        userRow: DEFAULT_USER_ROW,
+      } as never);
+      // `real` es la columna `esCasoReal`: por defecto, un caso de una persona.
+      const update = montarLecturaDelCaso(db, { real: true, ...(caseRow as object) }, config);
+      const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+      const response = await POST(makeRequest(body), makeContext(VALID_CASE_ID));
+      const set = update.mock.results[0]?.value.set as ReturnType<typeof vi.fn> | undefined;
+      const where = set?.mock.results[0]?.value.where as ReturnType<typeof vi.fn> | undefined;
+      return { response, body: await response.json(), update, set, where, seleccion: vi.mocked(db.select).mock.calls[0]?.[0] as Record<string, SQL> };
+    }
+
+    const dialecto = new PgDialect();
+
+    it.each([
+      ["el id que devolvió el Core", "CRM-778"],
+      ["null si el Core no devolvió id", null],
+    ])("2xx: enviado_a_core con %s, nunca uno inventado", async (_nombre, externalId) => {
+      const { writeAuditLog } = await import("@/lib/audit/log");
+      real.syncCase.mockResolvedValueOnce({ ok: true, externalId });
+
+      const { response, body, set, seleccion } = await enviar(
+        { ...DEFAULT_CASE_ROW, updated_at: "2026-09-28T12:00:00.123456Z" },
+        [await filaActiva()]
+      );
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual({ synced: true, externalId });
+      expect(set).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "enviado_a_core", core_external_id: externalId })
+      );
+      expect(JSON.stringify(set?.mock.calls)).not.toContain("CORE-");
+      expect(writeAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event_type: "core.sync_success",
+          payload: expect.objectContaining({ core_external_id: externalId }),
+        })
+      );
+      // El secreto le llega descifrado al cliente, y el payload lleva updatedAt.
+      expect(real.configs).toEqual([{ url: WEBHOOK, secreto: "test-signing-secret" }]);
+      expect(real.syncCase).toHaveBeenCalledWith(
+        expect.objectContaining({ caseId: VALID_CASE_ID, updatedAt: "2026-09-28T12:00:00.123456Z" })
+      );
+      // updatedAt sale en ISO de la base, como en /api/v1, no en el texto de
+      // Postgres («2026-09-28 12:00:00.123+00»): viaja también en X-ClaimMix-Event-Id.
+      const { columnasDelCaso } = await import("@/server/core-sync/lectura");
+      const leido = dialecto.sqlToQuery(seleccion.updated_at).sql;
+      expect(leido).toBe(dialecto.sqlToQuery(columnasDelCaso.updated_at).sql);
+      expect(leido).toContain("to_char");
+    });
+
+    it("un caso simulado o de prueba no se manda: 501 sin llamar al cliente ni escribir", async () => {
+      const { writeAuditLog } = await import("@/lib/audit/log");
+
+      const { response, body, update, seleccion } = await enviar(
+        { ...DEFAULT_CASE_ROW, real: false },
+        [await filaActiva()]
+      );
+
+      expect(response.status).toBe(501);
+      expect(body.error.message).toMatch(/simulados o de prueba/);
+      expect(real.syncCase).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+      expect(writeAuditLog).not.toHaveBeenCalled();
+      // El mismo criterio que /api/v1.
+      const { esCasoReal } = await import("@/server/core-sync/lectura");
+      expect(dialecto.sqlToQuery(seleccion.real).sql).toBe(dialecto.sqlToQuery(esCasoReal).sql);
+    });
+
+    it("el 2xx gana aunque otro envío haya dejado el caso en error_core", async () => {
+      real.syncCase.mockResolvedValueOnce({ ok: true, externalId: "CRM-780" });
+
+      const { where } = await enviar(DEFAULT_CASE_ROW, [await filaActiva()]);
+
+      const { params } = dialecto.sqlToQuery(where?.mock.calls[0]?.[0]);
+      expect(params).toEqual(expect.arrayContaining(["listo_para_core", "error_core"]));
+    });
+
+    it("el fallo sólo se escribe sobre el estado que se leyó", async () => {
+      real.syncCase.mockResolvedValueOnce({ ok: false, motivo: "timeout" });
+
+      const { where } = await enviar(DEFAULT_CASE_ROW, [await filaActiva()]);
+
+      const { params } = dialecto.sqlToQuery(where?.mock.calls[0]?.[0]);
+      expect(params).toContain("listo_para_core");
+      expect(params).not.toContain("error_core");
+    });
+
+    it("falla: error_core con el motivo, en el caso, la respuesta y la auditoría", async () => {
+      const { writeAuditLog } = await import("@/lib/audit/log");
+      real.syncCase.mockResolvedValueOnce({ ok: false, motivo: "http_502" });
+
+      const { response, body, set } = await enviar(DEFAULT_CASE_ROW, [await filaActiva()]);
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual({ synced: false, errorMessage: "http_502" });
+      expect(set).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "error_core", core_error_message: "http_502" })
+      );
+      expect(writeAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event_type: "core.sync_failed",
+          payload: expect.objectContaining({ error_code: "CORE_SYNC_FAILED", motivo: "http_502" }),
+        })
+      );
+    });
+
+    it("force desde error_core reintenta con el cliente real", async () => {
+      real.syncCase.mockResolvedValueOnce({ ok: true, externalId: "CRM-779" });
+
+      const { response, body, set } = await enviar(
+        { ...DEFAULT_CASE_ROW, status: "error_core" },
+        [await filaActiva()],
+        { force: true }
+      );
+
+      expect(response.status).toBe(200);
+      expect(body.synced).toBe(true);
+      expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "enviado_a_core" }));
+    });
+
+    it("un secreto que no se descifra es 501 sin escribir", async () => {
+      const { response, update } = await enviar(DEFAULT_CASE_ROW, [
+        { enabled: true, webhook_url: WEBHOOK, signing_secret_enc: "no.es.un-sobre" },
+      ]);
+
+      expect(response.status).toBe(501);
+      expect(update).not.toHaveBeenCalled();
+      expect(real.syncCase).not.toHaveBeenCalled();
+    });
+
+    it("activa pero sin URL es 501 sin escribir", async () => {
+      const fila = { ...(await filaActiva()), webhook_url: null };
+      const { response, update } = await enviar(DEFAULT_CASE_ROW, [fila]);
+
+      expect(response.status).toBe(501);
+      expect(update).not.toHaveBeenCalled();
+    });
   });
 
   /*
@@ -716,5 +974,49 @@ describe("POST /api/cases/:id/sync-to-core", () => {
     expect(body.error.code).toBe("FSM_INVALID_TRANSITION");
     expect(espiaCliente).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["cerrado", "en_liquidacion", "pagado", "rechazado", "enviado_a_core", "listo"])(
+    "force desde %s — 409, no llama al cliente del Core",
+    async (status) => {
+      const { requireRole } = await import("@/lib/auth/require-role");
+      const { db } = await import("@/lib/db");
+      const coreSyncClient = await import("@/server/core-sync/client");
+
+      vi.mocked(requireRole).mockResolvedValue({
+        user: { id: "user-1" },
+        userRow: DEFAULT_USER_ROW,
+      } as never);
+      const update = montarLecturaDelCaso(db, { ...DEFAULT_CASE_ROW, status });
+      const espiaCliente = vi.spyOn(coreSyncClient, "getCoreSyncClient");
+
+      const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+      const response = await POST(makeRequest({ force: true }), makeContext(VALID_CASE_ID));
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.error.code).toBe("FSM_INVALID_TRANSITION");
+      expect(espiaCliente).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["error_core", "listo_para_core"])("force desde %s sigue enviando", async (status) => {
+    const { requireRole } = await import("@/lib/auth/require-role");
+    const { db } = await import("@/lib/db");
+
+    vi.mocked(requireRole).mockResolvedValue({
+      user: { id: "user-1" },
+      userRow: DEFAULT_USER_ROW,
+    } as never);
+    const update = montarLecturaDelCaso(db, { ...DEFAULT_CASE_ROW, status });
+
+    const { POST } = await import("@/app/api/cases/[id]/sync-to-core/route");
+    const response = await POST(makeRequest({ force: true }), makeContext(VALID_CASE_ID));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.synced).toBe(true);
+    expect(update).toHaveBeenCalled();
   });
 });

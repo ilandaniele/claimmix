@@ -9,10 +9,14 @@ import { SeverityBadge } from "./SeverityBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
 import { Vacio } from "./Vacio";
+import { InsigniaDeComplejidad, InsigniaDeVencimiento } from "../../_components/plazo-y-complejidad";
+import { ClaseDelTardio } from "./ClaseDelTardio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import { formatAge, formatDate } from "@/lib/utils";
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
-import type { CaseStatus, ClaimType, Severity } from "@/lib/schemas/cases";
+import type { CaseStatus, Severity } from "@/lib/schemas/cases";
+import { claveDeTipo } from "@/lib/i18n/tipos-de-siniestro";
+import type { TipoPropio } from "./grupos-de-filtro";
 
 function formatCaseId(id: string): string {
   const suffix = id.replace(/-/g, "").slice(-8).toUpperCase();
@@ -35,6 +39,8 @@ interface CasesTableProps {
   onDeleteMany?: (ids: string[]) => void;
   /** La sección desde la que se abre el caso, para que «Volver» vuelva a ella. */
   desde?: "para_responder";
+  /** Los tipos de siniestro propios de la aseguradora: su nombre en vez de la clave. */
+  tiposPropios?: readonly TipoPropio[];
 }
 
 export function CasesTable({
@@ -42,6 +48,7 @@ export function CasesTable({
   onDeleteMany,
   seleccionando = false,
   desde,
+  tiposPropios = [],
 }: CasesTableProps) {
   const { t, locale } = useLocale();
   const router = useRouter();
@@ -77,18 +84,6 @@ export function CasesTable({
       return next;
     });
   }, []);
-
-  const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
-    choque: t("type.choque"),
-    robo: t("type.robo"),
-    granizo: t("type.granizo"),
-    incendio: t("type.incendio"),
-    cristales: t("type.cristales"),
-    rc: t("type.rc"),
-    robo_contenido: t("type.robo_contenido"),
-    accidente_personal: t("type.accidente_personal"),
-    other: t("type.other"),
-  };
 
   const columns = useMemo<Columna[]>(
     () => [
@@ -263,10 +258,11 @@ export function CasesTable({
         id: "claim_type",
         header: t("table.col.type"),
         cell: (row: CaseRow) => {
-          const type = row.claim_type as ClaimType;
+          const type = row.claim_type ?? "";
+          const clave = claveDeTipo(type);
           return (
             <span className="whitespace-nowrap text-[13.5px] text-slate-700">
-              {CLAIM_TYPE_LABELS[type] ?? type}
+              {clave ? t(clave) : (tiposPropios.find((x) => x.clave === type)?.nombre ?? type)}
             </span>
           );
         },
@@ -304,8 +300,13 @@ export function CasesTable({
 
           if (paraResponder || !at) {
             return (
-              <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-700">
-                {t(paraResponder ? "bandeja.paraResponder" : "table.replied.pending")}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-700">
+                  {t(paraResponder ? "bandeja.paraResponder" : "table.replied.pending")}
+                </span>
+                {paraResponder && row.mensaje_tardio_tipo && (
+                  <ClaseDelTardio tipo={row.mensaje_tardio_tipo} resumen={row.mensaje_tardio_resumen} />
+                )}
               </span>
             );
           }
@@ -362,6 +363,16 @@ export function CasesTable({
           const severity = row.severity as Severity | null;
           return severity ? <SeverityBadge severity={severity} /> : <Vacio />;
         },
+      },
+      {
+        id: "vence_en",
+        header: t("table.col.vencimiento"),
+        cell: (row: CaseRow) => <InsigniaDeVencimiento vence={row.vence_en} />,
+      },
+      {
+        id: "puntaje_complejidad",
+        header: t("table.col.complejidad"),
+        cell: (row: CaseRow) => <InsigniaDeComplejidad puntaje={row.puntaje_complejidad} />,
       },
       {
         id: "assigned_to",
@@ -426,7 +437,7 @@ export function CasesTable({
         : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, onDeleteMany, seleccionando, toggleOne, desde]
+    [t, onDeleteMany, seleccionando, toggleOne, desde, tiposPropios]
   );
 
   if (cases.length === 0) {
@@ -493,16 +504,16 @@ export function CasesTable({
         */}
       <div role="region" aria-label={t("bandeja.tableLabel")}>
         {/*
-          * `min-w-[1080px]`: sin un piso, `table-auto` reparte lo que haya y
+          * `min-w-[1260px]`: sin un piso, `table-auto` reparte lo que haya y
           * con la ventana angosta las últimas columnas —severidad, asignación—
           * se estrujaban hasta quedar ilegibles, sin nada que permitiera
           * llegar a ellas. Con el piso, el contenedor de arriba (que ya es
           * `overflow-auto`) muestra una barra para correr la tabla al costado.
-          * El número es la suma de los anchos mínimos de las once columnas; por
+          * El número es la suma de los anchos mínimos de las columnas; por
           * encima de eso manda `w-full` y nada cambia.
           */}
         <table
-          className="w-full min-w-[1080px] table-auto text-left"
+          className="w-full min-w-[1260px] table-auto text-left"
           aria-label={t("bandeja.tableLabel")}
         >
           <thead className="sticky top-0 z-10 bg-slate-50">

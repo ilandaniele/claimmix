@@ -17,10 +17,13 @@ import {
   jsonb,
   numeric,
   pgTable,
+  smallint,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { LecturaGuardada } from "@/core/case/presupuesto-taller";
+
 import { cases, tenants, users } from "./core";
 
 export const claimMessages = pgTable("claim_messages", {
@@ -97,6 +100,32 @@ export const claimAttachments = pgTable("claim_attachments", {
   intentos_de_identificacion: integer("intentos_de_identificacion")
     .notNull()
     .default(0),
+  // Migración 0037: lo que el modelo leyó del archivo y lo que medimos al recibirlo.
+  resumen: text("resumen"),
+  util: boolean("util"),
+  datos: jsonb("datos"),
+  metadatos: jsonb("metadatos"),
+  // Migración 0040: el presupuesto del taller leído y sus alertas.
+  lectura_presupuesto: jsonb("lectura_presupuesto").$type<LecturaGuardada>(),
+});
+
+/**
+ * Adjuntos de casos borrados que todavía están en R2 (0045). Sin FK a propósito:
+ * el caso ya no existe y la cola tiene que sobrevivir al inquilino. La app sólo
+ * encola; la vacía el barrido diario con el rol dueño.
+ */
+export const adjuntosPorPurgar = pgTable("adjuntos_por_purgar", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenant_id: uuid("tenant_id").notNull(),
+  case_id: uuid("case_id").notNull(),
+  storage_path: text("storage_path").notNull(),
+  encolado_en: timestamp("encolado_en", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+  purgar_despues: timestamp("purgar_despues", { withTimezone: true, mode: "string" }),
+  purgado_en: timestamp("purgado_en", { withTimezone: true, mode: "string" }),
+  intentos: smallint("intentos").notNull().default(0),
+  ultimo_error: text("ultimo_error"),
 });
 
 export const claimFieldConfirmations = pgTable("claim_field_confirmations", {

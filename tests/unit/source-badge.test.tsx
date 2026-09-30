@@ -15,24 +15,10 @@ import { describe, it, expect } from "vitest";
 import { SourceBadge } from "../../src/app/(app)/bandeja/components/SourceBadge";
 import { StatusBadge } from "../../src/app/(app)/bandeja/components/StatusBadge";
 import { SeverityBadge } from "../../src/app/(app)/bandeja/components/SeverityBadge";
-import type { CaseStatus, Severity } from "../../src/lib/schemas/cases";
+import { CaseStatusSchema, type Severity } from "../../src/lib/schemas/cases";
 
-/** Los trece estados y las cuatro severidades: todas las variantes, no una muestra. */
-const STATUS_VALUES: CaseStatus[] = [
-  "procesando",
-  "listo",
-  "esperando",
-  "escalado",
-  "cerrado",
-  "recibido",
-  "info_faltante",
-  "confirmacion_pendiente",
-  "requiere_especialista",
-  "listo_para_core",
-  "enviado_a_core",
-  "error_core",
-  "no_relevante",
-];
+/** Todos los estados y las cuatro severidades: todas las variantes, no una muestra. */
+const STATUS_VALUES = CaseStatusSchema.options;
 
 const SEVERITY_VALUES: Severity[] = ["low", "medium", "high", "critical"];
 import { CasesTable } from "../../src/app/(app)/bandeja/components/CasesTable";
@@ -138,7 +124,7 @@ describe("SourceBadge", () => {
       )
     );
     const fuente = pinturasDe(
-      (["email", "email_sim"] as const).map(
+      (["email", "email_sim", "web"] as const).map(
         (v) => render(<SourceBadge channel={v} />).container.firstElementChild
       )
     );
@@ -162,6 +148,14 @@ describe("SourceBadge", () => {
         `${nombreA} y ${nombreB} pintan igual: ${chocan.join(" | ")}`
       ).toEqual([]);
     }
+  });
+
+  it("renders the web form badge for channel='web'", () => {
+    const { container } = render(<SourceBadge channel="web" />);
+    const badge = container.firstElementChild as HTMLElement;
+    expect(badge.getAttribute("data-source")).toBe("web");
+    expect(badge.textContent).toBe("Formulario web");
+    expect(badge.getAttribute("aria-label")).toBe("Formulario web");
   });
 
   // Null/undefined → "—" dash

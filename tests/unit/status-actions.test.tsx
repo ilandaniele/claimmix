@@ -255,3 +255,128 @@ describe("StatusActions — requiere_especialista", () => {
     expect(screen.queryByTestId("action-devolver-al-agente")).not.toBeInTheDocument();
   });
 });
+
+// ── SALIDAS_A_MANO (B25) — una persona saca el caso de la entrega al Core ──
+
+describe("StatusActions — salidas a mano", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("listo_para_core con permiso: «Entregado por fuera» pide confirmación y recién ahí pasa a liquidación", () => {
+    renderStatus("listo_para_core");
+    fireEvent.click(screen.getByTestId("action-liquidacion"));
+    expect(defaultProps.onTransition).not.toHaveBeenCalled();
+    expect(screen.getByText("No se puede deshacer. ¿Confirmás?")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("action-liquidacion-confirmar"));
+    expect(defaultProps.onTransition).toHaveBeenCalledExactlyOnceWith("en_liquidacion");
+    expect(screen.getByTestId("action-liquidacion")).toBeInTheDocument();
+  });
+
+  it("«Cancelar» vuelve al botón sin mandar nada", () => {
+    renderStatus("listo_para_core");
+    fireEvent.click(screen.getByTestId("action-liquidacion"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(defaultProps.onTransition).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("action-liquidacion-confirmar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("action-liquidacion")).toBeInTheDocument();
+  });
+
+  it("listo_para_core con permiso: «Cerrar» abre el diálogo de cierre y re-analizar sigue", () => {
+    renderStatus("listo_para_core");
+    fireEvent.click(screen.getByTestId("action-cerrar"));
+    expect(defaultProps.onClose).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("action-re-analizar")).toBeInTheDocument();
+  });
+
+  it("con el diálogo abierto, la salida queda deshabilitada", () => {
+    renderStatus("listo_para_core", { dialogOpen: true });
+    expect(screen.getByTestId("action-liquidacion")).toBeDisabled();
+    expect(screen.getByTestId("action-cerrar")).toBeDisabled();
+  });
+
+  it.each(["listo_para_core", "error_core", "enviado_a_core", "en_liquidacion"] as CaseStatus[])(
+    "%s sin puedeCambiarEstado: ninguna salida a mano",
+    (status) => {
+      renderStatus(status, { puedeCambiarEstado: false });
+      for (const id of ["action-liquidacion", "action-pagado", "action-rechazado", "action-cerrar"]) {
+        expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+      }
+    }
+  );
+
+  it("error_core con permiso: liquidación, cerrar y re-analizar", () => {
+    renderStatus("error_core");
+    expect(screen.getByText("Entregado por fuera: pasar a liquidación")).toBeInTheDocument();
+    expect(screen.getByTestId("action-cerrar")).toBeInTheDocument();
+    expect(screen.getByTestId("action-re-analizar")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("action-liquidacion"));
+    fireEvent.click(screen.getByTestId("action-liquidacion-confirmar"));
+    expect(defaultProps.onTransition).toHaveBeenCalledExactlyOnceWith("en_liquidacion");
+  });
+
+  it("enviado_a_core con permiso: pasar a liquidación y cerrar, sin re-analizar", () => {
+    renderStatus("enviado_a_core");
+    expect(screen.getByText("Pasar a liquidación")).toBeInTheDocument();
+    expect(screen.getByTestId("action-cerrar")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-re-analizar")).not.toBeInTheDocument();
+  });
+
+  it("en_liquidacion con permiso: pagado, rechazado y cerrar, sin re-analizar", () => {
+    renderStatus("en_liquidacion");
+    expect(screen.queryByTestId("action-re-analizar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-liquidacion")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("action-pagado"));
+    fireEvent.click(screen.getByTestId("action-pagado-confirmar"));
+    expect(defaultProps.onTransition).toHaveBeenLastCalledWith("pagado");
+
+    fireEvent.click(screen.getByTestId("action-rechazado"));
+    fireEvent.click(screen.getByTestId("action-rechazado-confirmar"));
+    expect(defaultProps.onTransition).toHaveBeenLastCalledWith("rechazado");
+
+    fireEvent.click(screen.getByTestId("action-cerrar"));
+    expect(defaultProps.onClose).toHaveBeenCalledOnce();
+  });
+
+  // Con dos «Sí, confirmar» iguales a la vista se podía marcar rechazado
+  // queriendo pagado, y ninguno se deshace.
+  it("en_liquidacion: armar rechazado desarma pagado y la confirmación dice cuál es", () => {
+    renderStatus("en_liquidacion");
+    fireEvent.click(screen.getByTestId("action-pagado"));
+    fireEvent.click(screen.getByTestId("action-rechazado"));
+
+    expect(screen.queryByTestId("action-pagado-confirmar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("action-pagado")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Sí, confirmar" })).toHaveLength(1);
+    expect(screen.getByRole("group", { name: "Marcar rechazado" })).toHaveTextContent(
+      "Marcar rechazado"
+    );
+
+    fireEvent.click(screen.getByTestId("action-rechazado-confirmar"));
+    expect(defaultProps.onTransition).toHaveBeenCalledExactlyOnceWith("rechazado");
+  });
+
+  // Otro analista lo pasó a liquidación con la confirmación armada acá: sin
+  // la key, quedaba armado «Marcar pagado», que está en el mismo lugar.
+  it("si el estado cambia con una confirmación armada, la siguiente salida arranca sin armar", () => {
+    const { rerender } = renderStatus("enviado_a_core");
+    fireEvent.click(screen.getByTestId("action-liquidacion"));
+    expect(screen.getByTestId("action-liquidacion-confirmar")).toBeInTheDocument();
+
+    rerender(<StatusActions {...defaultProps} status="en_liquidacion" />);
+
+    expect(screen.queryByTestId("action-pagado-confirmar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("action-pagado")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["pagado", "Siniestro pagado"],
+    ["rechazado", "Siniestro rechazado"],
+  ] as [CaseStatus, string][])("%s: sólo el banner, sin botones", (status, banner) => {
+    renderStatus(status);
+    expect(screen.getByRole("status")).toHaveTextContent(banner);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+});

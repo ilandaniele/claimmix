@@ -38,15 +38,39 @@ import {
   knownClaimPatterns,
   missingDocs,
   rawMessages,
+  tenants,
 } from "@/lib/db/schema";
 import type { CaseInsert, CaseRow } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { checkBudget } from "@/server/ai/budget";
 import { runEmailClaimAgent } from "@/server/ai/claim-agent";
+import { resolveExtractionEngine } from "@/server/ai/provider";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { errMeta, esPasajero, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
+import { esResumenSeguro } from "@/core/ai/resumen-seguro";
+import { fusionarIndicadores } from "@/core/case/contradicciones";
+import { estimarMonto } from "@/core/case/monto-estimado";
+import { vencimientoDeRecibido } from "@/core/case/plazos";
+import { camposDelPuntaje, clavesPonderadas, puntajeDelCaso } from "@/core/case/puntaje-complejidad";
+import { columnasDeTrabajo, criteriosDeTrabajo } from "@/server/cases/efectos-de-transicion";
+import { responsabilidadDelCaso } from "@/core/case/responsabilidad";
+import { atenderCartas, atenderCartasDeUnTardio } from "@/server/cases/lectura-reclamo";
+import {
+  adjuntosDelCaso,
+  anotarLecturas,
+  conLecturasDeEstaCorrida,
+  consultaAdjuntos,
+  deAdjuntos,
+  indiciosDeAdjuntos,
+  marcarPlazoAgotado,
+  mecanicasDeAdjuntos,
+  paraElModelo,
+  type AdjuntoDelCaso,
+  type ParaElModelo,
+} from "@/server/worker/adjuntos";
+import { transcribirNotasDeVoz } from "@/server/worker/transcribir";
 import { findCustomerMatches, MATCH_QUE_VINCULA } from "@/server/matching/customer-matcher";
 import { findPolicyMatches } from "@/server/matching/policy-matcher";
 import { isValidTransition } from "@/core/case/fsm";
@@ -64,6 +88,7 @@ import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { ESTADOS_DE_ARRANQUE, puedeArrancar } from "@/core/case/estados-de-arranque";
 import { marcarParaResponder } from "@/server/cases/para-responder";
+import { atenderMensajeTardio } from "@/server/cases/mensaje-tardio";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders } from "@/lib/security/internal-auth";
@@ -105,9 +130,11 @@ import { assessTrainability } from "@/server/training/trainability";
 import { logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
 import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
-import { ClaimTypeSchema } from "@/lib/schemas/cases";
+import { esRamoAdmitido, type RamoDelInquilino } from "@/core/case/ramos";
+import { ClaveDeRamoSchema } from "@/lib/schemas/cases";
+import { cargarRamosDelInquilino, consultaRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
-import { mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
+import { anclarPolizaAlTexto, mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
 import { autenticacionFallida } from "@/core/email/autenticacion";
@@ -169,6 +196,13 @@ const EXTRACTION_LEASE_MS = RESERVA_DE_EXTRACCION_MS;
  * a mitad de una escritura.
  */
 const PRESUPUESTO_DE_CORRIDA_MS = 40_000;
+
+/**
+ * Cuánto dura la más corta de las funciones que corren esta extracción
+ * (`/api/intake/simulate`, 180 s). Es el corte que se supone cuando quien llama
+ * no dice cuál es el suyo: pasarse de ese número mata la invocación donde esté.
+ */
+const FUNCION_MAS_CORTA_MS = 180_000;
 
 /**
  * Lo que la llamada al modelo necesita para siquiera intentar.
@@ -549,7 +583,11 @@ export async function runEmailExtractionWorker(
   caseId: string,
   tenantId: string,
   userId: string | null,
-  opts?: { retoma?: boolean }
+  opts?: {
+    retoma?: boolean;
+    /** Cuándo mata Vercel esta invocación (epoch ms): puede haber empezado antes que esta corrida. */
+    hasta?: number;
+  }
 ): Promise<void> {
   // El contexto se arma una vez, acá, a partir del inquilino que llega en la
   // firma. Todo lo que consulte o escriba abajo lo recibe: esa es la única
@@ -558,6 +596,7 @@ export async function runEmailExtractionWorker(
   // El reloj de esta corrida. Ver PRESUPUESTO_DE_CORRIDA_MS.
   const arrancó = Date.now();
   const restanteMs = () => PRESUPUESTO_DE_CORRIDA_MS - (Date.now() - arrancó);
+  const hasta = opts?.hasta ?? arrancó + FUNCION_MAS_CORTA_MS;
   // Declared before try so the catch block can log them if Gemini fails mid-extraction.
   let emailBody = "";
   let emailSubject = "";
@@ -576,6 +615,10 @@ export async function runEmailExtractionWorker(
   let diferida: "sin_tiempo" | "reintento" | null = null;
   // Los entrantes que esta corrida leyó. Lo que entre después no lo contesta.
   let leidos: string[] | null = null;
+  // Los archivos que van al modelo; el catch los marca si la llamada agota el plazo.
+  let vistos: ParaElModelo = { hashes: [], media: [] };
+  // Las cartas de un tercero que esta corrida dejó para leer cuando ya no tenga la reserva (B24).
+  let cartasPorLeer: { adjuntos: AdjuntoDelCaso[]; vistos: ParaElModelo } | null = null;
 
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
@@ -594,6 +637,13 @@ export async function runEmailExtractionWorker(
             policyholder_name: cases.policyholder_name,
             policy_number: cases.policy_number,
             created_at: cases.created_at,
+            fraud_risk_level: cases.fraud_risk_level,
+            fraud_indicators: cases.fraud_indicators,
+            rangos_de_monto: sql<unknown>`(select ${tenants.rangos_de_monto} from ${tenants} where ${tenants.id} = ${cases.tenant_id})`,
+            ...columnasDeTrabajo,
+            severity: cases.severity,
+            injury_severity: cases.injury_severity,
+            monto_estimado: cases.monto_estimado,
           })
           .from(cases)
           // Buscar por id sin contexto sería peor que antes: el id de un
@@ -647,6 +697,11 @@ export async function runEmailExtractionWorker(
         target_id: caseId,
         payload: { status: caseRow.status, motivo: "estado_no_reanudable" },
       });
+      // No lo contesta el agente: sólo se clasifica para quien lo atiende.
+      await atenderMensajeTardio({ tenantId, caseId });
+      // Y si trae la carta de un tercero (B24), se la lee para el equipo, aunque
+      // el caso no admita «Para responder»: un caso cerrado o derivado también la recibe.
+      await leerCartasDespues(() => atenderCartasDeUnTardio({ tenantId, caseId, hasta }));
       return;
     }
 
@@ -732,7 +787,7 @@ export async function runEmailExtractionWorker(
       )
     );
 
-    const conversation = await loadInboundConversation(caseId, tenantCtx);
+    let conversation = await loadInboundConversation(caseId, tenantCtx);
     leidos = conversation?.entrantes.map((m) => m.id) ?? null;
 
     if (conversation) {
@@ -765,14 +820,15 @@ export async function runEmailExtractionWorker(
     const memoryApplied = memoryHints.length > 0;
 
     // ── c) Todo lo que arma el prompt, en un solo viaje ──────────────────────
-    const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields } =
-      await cargarLoDelPrompt(tenantId, tenantCtx, caseRow.claim_type);
+    const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino } =
+      await cargarLoDelPrompt(tenantId, tenantCtx, caseId, caseRow.claim_type);
 
     const learning = {
       rules: formatPromptRules(promptRules),
       approvedExamples: formatApprovedExamples(approvedExamples),
       tenantSystemPrompt: promptVersion.systemPrompt ?? undefined,
       customFields: formatCustomFields(customFields),
+      ramosDelInquilino,
     };
 
     // ── d) Budget check ───────────────────────────────────────────────────────
@@ -799,6 +855,31 @@ export async function runEmailExtractionWorker(
       );
       return;
     }
+
+    // ── d1) Notas de voz a texto; fotos y PDF para la extracción ─────────────
+    // Después del presupuesto, porque transcribir también es modelo. El texto
+    // queda en el mensaje: la conversación se rearma sin volver a la base.
+    // Con el mock no se transcribe ni se mandan archivos: quedarían dados por
+    // leídos sin que ningún modelo los haya mirado.
+    const engine = await resolveExtractionEngine(tenantId, userId);
+    if (conversation && engine !== "mock") {
+      const nuevos = await transcribirNotasDeVoz({
+        caseId,
+        tenantId,
+        tenantCtx,
+        adjuntos,
+        cuerpos: new Map(conversation.filas.map((f) => [f.id, f.body_text])),
+        restanteMs,
+      });
+      if (nuevos.size > 0) {
+        conversation = armarConversacion(
+          conversation.filas.map((f) => ({ ...f, body_text: nuevos.get(f.id) ?? f.body_text }))
+        );
+        emailBody = conversation?.body ?? emailBody;
+        latestInboundText = conversation?.latestText ?? latestInboundText;
+      }
+    }
+    if (engine !== "mock") vistos = await paraElModelo(adjuntos, caseId, tenantCtx);
 
     // ── d2) ¿Queda tiempo para lo caro? ──────────────────────────────────────
     //
@@ -850,18 +931,30 @@ export async function runEmailExtractionWorker(
       agentTraining,
       learning,
       channel: caseRow.channel,
+      ...(vistos.media.length > 0 ? { media: vistos.media } : {}),
     };
     extractedClaim = await runEmailClaimAgent({
       payload: emailPayload,
       tenantId,
       caseId,
       userId,
+      engine,
     });
+
+    // Lo que leyó de cada archivo va a su fila y no sigue: ni al registro de la
+    // corrida, que alimenta el entrenamiento, ni al orquestador.
+    // La mecánica del relato sigue el mismo camino: sólo alimenta la opinión de
+    // responsabilidad del equipo (B18), nunca los campos ni el resumen.
+    const lecturas = extractedClaim.adjuntos ?? [];
+    const mecanicaDelRelato = extractedClaim.mecanica ?? null;
+    extractedClaim = { ...extractedClaim, adjuntos: [], mecanica: null };
+    const lecturasAnotadas = extractedClaim.parse_failed === true || (await anotarLecturas(caseId, tenantCtx, vistos, lecturas));
 
     // ── e2) Defensive hydration: mirror typed extracted_fields into fields[] + scrub PII ──
     // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).
     // Ensures fields[] is always the source of truth for DB writes, even if the model
     // populates only one of the two shapes.
+    extractedClaim = anclarPolizaAlTexto(extractedClaim, `${emailSubject} ${emailBody}`);
     const fallbackFields = parseEmailClaimFields({
       subject: emailSubject,
       body: emailBody,
@@ -1237,8 +1330,8 @@ export async function runEmailExtractionWorker(
     const rawClaimType = aiClaimType;
 
     if (rawClaimType !== null && rawClaimType !== undefined && typeof rawClaimType === "string" && rawClaimType.trim() !== "") {
-      const claimTypeParsed = ClaimTypeSchema.safeParse(rawClaimType.trim());
-      if (claimTypeParsed.success) {
+      const claimTypeParsed = ClaveDeRamoSchema.safeParse(rawClaimType.trim());
+      if (claimTypeParsed.success && esRamoAdmitido(claimTypeParsed.data, ramosDelInquilino)) {
         // AC1: write valid claim_type; AC2: "other" works; AC4: same value is idempotent
         caseUpdate.claim_type = claimTypeParsed.data;
       } else {
@@ -1253,16 +1346,90 @@ export async function runEmailExtractionWorker(
     // → existing cases.claim_type is preserved (no overwrite).
 
     // ── Fraud risk assessment ─────────────────────────────────────────────────
-    if (extractedClaim.fraud_risk_level && extractedClaim.fraud_risk_level !== "none") {
-      (caseUpdate as Record<string, unknown>).fraud_risk_level = extractedClaim.fraud_risk_level;
+    // Lo del modelo, lo que ya tenía el caso y lo que sale de cruzar los
+    // adjuntos. Nada de esto llega a la persona: va a la ficha, no a
+    // `extractedClaim`, que es lo que lee el orquestador.
+    const fraude = fusionarIndicadores({
+      modelo: {
+        nivel: extractedClaim.fraud_risk_level ?? "none",
+        indicios: extractedClaim.fraud_indicators ?? [],
+      },
+      existentes: { nivel: caseRow.fraud_risk_level, indicios: caseRow.fraud_indicators },
+      derivados: indiciosDeAdjuntos({
+        adjuntos,
+        vistos,
+        lecturas,
+        campos: extractedClaimFields,
+        poliza: policyMatches[0],
+        ahora: new Date(),
+      }),
+    });
+    if (fraude) {
+      caseUpdate.fraud_risk_level = fraude.nivel;
+      caseUpdate.fraud_indicators = fraude.indicios;
     }
-    if (Array.isArray(extractedClaim.fraud_indicators) && extractedClaim.fraud_indicators.length > 0) {
-      (caseUpdate as Record<string, unknown>).fraud_indicators = extractedClaim.fraud_indicators;
-    }
+
+    // El resumen de la ficha sale de la misma extracción, sin otra llamada.
+    // Uno que no pasa borra el anterior: el viejo ya no describe el caso.
+    const resumen = extractedClaim.summary?.trim() ?? "";
+    caseUpdate.resumen = resumen && esResumenSeguro(resumen, Object.values(extractedClaimFields)) ? resumen : null;
 
     // ── Granular injury severity ──────────────────────────────────────────────
     if (extractedClaim.injury_severity != null) {
       (caseUpdate as Record<string, unknown>).injury_severity = extractedClaim.injury_severity;
+    }
+
+    // El monto orientativo va a la ficha y a nada más. Uno que salió de un
+    // presupuesto leído vale más que la tabla, pero sólo mientras el caso siga
+    // con el tipo y la gravedad contra cuyo rango se aceptó: el SET ve la fila
+    // de antes, así que si este UPDATE los cambia, vuelve la tabla.
+    const tipo = caseUpdate.claim_type ?? caseRow.claim_type;
+    const responsabilidad = responsabilidadDelCaso(
+      tipo,
+      mecanicaDelRelato,
+      mecanicasDeAdjuntos(adjuntos, vistos, lecturas)
+    );
+    if (responsabilidad !== undefined) caseUpdate.responsabilidad = responsabilidad;
+    const monto = estimarMonto(tipo, finalSeverity, caseRow.rangos_de_monto);
+    const presupuestoVigente =
+      caseRow.monto_estimado?.origen === "presupuesto" && caseRow.claim_type === tipo && caseRow.severity === finalSeverity;
+    const presupuestoVigenteEnBase = sql`${cases.monto_estimado}->>'origen' = 'presupuesto' AND ${cases.claim_type} IS NOT DISTINCT FROM ${tipo} AND ${cases.severity} IS NOT DISTINCT FROM ${finalSeverity}`;
+    (caseUpdate as Record<string, unknown>).monto_estimado = sql`CASE WHEN ${presupuestoVigenteEnBase} THEN ${cases.monto_estimado} ELSE ${monto ? JSON.stringify(monto) : null}::jsonb END`;
+
+    // Cuán complicado es, para el equipo. Los campos propios cuentan con lo que
+    // quedó GUARDADO, no con lo que leyó el modelo: el upsert de arriba no pisa
+    // lo que confirmó una persona ni guarda lo de baja confianza, y puntuar con
+    // la lectura deshacía la corrección del analista (confirmar y después recibir
+    // un mensaje). Es lo mismo que cuenta una confirmación. El monto es el que
+    // decide el SET de arriba: el del presupuesto mientras siga valiendo. Si
+    // mientras tanto entró o salió un presupuesto y la base ya no ve lo que se
+    // leyó, el puntaje calculado no corresponde al monto que queda: se conserva
+    // el guardado, que la próxima extracción recalcula. Igual si no se pudieron
+    // leer los campos guardados.
+    const guardados = await camposGuardadosDelPuntaje(tenantCtx, caseId, caseRow.pesos_puntaje);
+    if (guardados) {
+      const puntaje = puntajeDelCaso(
+        {
+          severity: finalSeverity,
+          fraud_risk_level: fraude?.nivel ?? caseRow.fraud_risk_level,
+          injury_severity: extractedClaim.injury_severity ?? caseRow.injury_severity,
+          monto_estimado: presupuestoVigente ? caseRow.monto_estimado : monto,
+        },
+        camposDelPuntaje(caseRow.pesos_puntaje, guardados),
+        caseRow.pesos_puntaje
+      );
+      (caseUpdate as Record<string, unknown>).puntaje_complejidad =
+        sql`CASE WHEN coalesce(${presupuestoVigenteEnBase}, false) = ${presupuestoVigente}::boolean THEN ${puntaje}::smallint ELSE ${cases.puntaje_complejidad} END`;
+    }
+
+    // Los plazos propios que corren desde que el caso entró. El vencimiento que
+    // ya tenía el caso se respeta: esto sólo lo fija si no había ninguno.
+    const criterios = criteriosDeTrabajo(caseRow, tipo);
+    const recibido = vencimientoDeRecibido({ creadoEn: new Date(caseRow.created_at), tipo, plazos: criterios.plazos });
+    if (recibido) {
+      const cambios = caseUpdate as Record<string, unknown>;
+      cambios.vence_en = sql`CASE WHEN ${cases.vence_en} IS NULL THEN ${recibido.vence}::timestamptz ELSE ${cases.vence_en} END`;
+      cambios.vence_plazo = sql`CASE WHEN ${cases.vence_en} IS NULL THEN ${recibido.plazo}::text ELSE ${cases.vence_plazo} END`;
     }
 
     try {
@@ -1310,7 +1477,8 @@ export async function runEmailExtractionWorker(
       caseRow.channel === "email" ||
       caseRow.channel === "email_sim" ||
       caseRow.channel === "whatsapp" ||
-      caseRow.channel === "whatsapp_sim"
+      caseRow.channel === "whatsapp_sim" ||
+      caseRow.channel === "web"
     ) {
       await orchestratePostExtraction(
         caseId,
@@ -1331,7 +1499,8 @@ export async function runEmailExtractionWorker(
           preguntadas,
         },
         customerMatches,
-        messengerFor(caseRow.channel)
+        messengerFor(caseRow.channel),
+        criterios
       );
     }
 
@@ -1366,6 +1535,15 @@ export async function runEmailExtractionWorker(
         missing_fields_count: missingFieldKeys.length,
         model: extractedClaim.extraction_model,
       }, "email_worker.extraction_complete");
+
+    // La carta con que un tercero reclama (B24) se lee cuando la corrida ya no
+    // tiene la reserva: leerla acá demoraría la respuesta de lo que entre
+    // mientras tanto. Sin las lecturas de esta corrida anotadas no se las usa:
+    // la próxima corrida vuelve a leer esos archivos y pisaría la carta.
+    cartasPorLeer = {
+      adjuntos: lecturasAnotadas ? conLecturasDeEstaCorrida(adjuntos, vistos, lecturas) : adjuntos,
+      vistos,
+    };
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
 
@@ -1376,6 +1554,7 @@ export async function runEmailExtractionWorker(
       // The error carries the real provider status/code (e.g. 429 /
       // RESOURCE_EXHAUSTED) on its cause — surface it instead of a generic label.
       const { status: errStatus, code: errCode } = errMeta(err);
+      if (errCode === "TIMEOUT") await marcarPlazoAgotado(caseId, tenantCtx, vistos.hashes);
 
       /*
        * Un TIMEOUT no es una escalada. Es «probá de nuevo».
@@ -1474,6 +1653,38 @@ export async function runEmailExtractionWorker(
       }
     }
   }
+
+  // Sólo se llega acá si la corrida terminó: no tira, y lo que falle no toca
+  // ni la respuesta ni el estado del caso.
+  if (cartasPorLeer) {
+    const porLeer = cartasPorLeer;
+    await leerCartasDespues(() => atenderCartas({ tenantId, caseId, hasta, ...porLeer }));
+  }
+}
+
+/**
+ * La lectura de una carta (B24) va después de contestar el pedido, no antes.
+ *
+ * Son hasta tres lecturas de varios segundos. Dentro de la corrida, el pedido
+ * a `/api/worker/extract` no contestaba hasta terminarlas: el re-despacho que
+ * lo esperaba con su plazo lo cortaba y devolvía el caso a la cola sin que
+ * nada hubiera fallado, y el webhook de WhatsApp, que atiende los casos de a
+ * uno, hacía esperar al siguiente. `after()` mantiene viva la invocación sin
+ * esperar la lectura.
+ *
+ * Fuera de un pedido —una prueba, un script— `after()` tira, y ahí se espera.
+ *
+ * El import es dinámico a propósito: el bundle de pasos del flujo durable
+ * arrastra este módulo y Node no resuelve `next/server` sin extensión. Así
+ * sólo se carga al leer una carta, y si no carga también se espera.
+ */
+async function leerCartasDespues(leer: () => Promise<void>): Promise<void> {
+  try {
+    const { after } = await import("next/server");
+    after(leer);
+  } catch {
+    await leer();
+  }
 }
 
 // ── Helper: load memory hints ─────────────────────────────────────────────────
@@ -1509,9 +1720,9 @@ function toPromptMemoryHints(
 /**
  * Todo lo que arma el prompt, en un viaje.
  *
- * Eran seis llamadas dentro de un `Promise.all` —y siete consultas, porque los
+ * Eran siete llamadas dentro de un `Promise.all` —y ocho consultas, porque los
  * ejemplos hacen dos—. En paralelo, sí, pero NO juntas: cada una abría su
- * propia transacción HTTP con su `set_config` adelante. Siete idas a Neon, y la
+ * propia transacción HTTP con su `set_config` adelante. Ocho idas a Neon, y la
  * ida es lo que se paga: las consultas se ejecutan en milisegundos y el viaje
  * son unos 65 ms cada uno.
  *
@@ -1524,16 +1735,20 @@ function toPromptMemoryHints(
  * varios de esos `catch` nombran— dejaría de degradar y pasaría a apagar la
  * carga completa.
  *
- * Así que si el lote se cae, se vuelve por el camino de antes. Siete viajes,
+ * Así que si el lote se cae, se vuelve por el camino de antes. Nueve viajes,
  * pero cada uno con su red. El rápido es el normal; el lento es el raro.
+ *
+ * Con los ramos propios del inquilino (B26) las consultas del lote son nueve;
+ * sin la 0044 esa es la que hace caer el lote y se vuelve por el camino de a uno.
  */
 async function cargarLoDelPrompt(
   tenantId: string,
   tenantCtx: TenantContext,
+  caseId: string,
   claimType: string | null
 ): Promise<LoDelPrompt> {
   try {
-    const [patrones, entrenamiento, reglas, ejemploDelTipo, ejemploRelleno, version, campos] =
+    const [patrones, entrenamiento, reglas, ejemploDelTipo, ejemploRelleno, version, campos, adjuntos, ramos] =
       await enTenantVarias<[
         Parameters<typeof deKnownPatterns>[0],
         FilaDeEntrenamiento[],
@@ -1542,6 +1757,8 @@ async function cargarLoDelPrompt(
         FilaDeEjemplo[],
         Parameters<typeof dePromptVersion>[0],
         AgentCustomField[],
+        unknown,
+        RamoDelInquilino[],
       ]>(tenantCtx, (db) => {
         const ejemplos = consultasDeEjemplos(db, claimType);
         return [
@@ -1552,6 +1769,8 @@ async function cargarLoDelPrompt(
           ejemplos.relleno,
           consultaPromptVersion(db),
           consultaCustomFields(db, claimType),
+          consultaAdjuntos(db, caseId),
+          consultaRamosDelInquilino(db),
         ];
       });
 
@@ -1562,6 +1781,8 @@ async function cargarLoDelPrompt(
       approvedExamples: deEjemplos(claimType ? ejemploDelTipo : [], ejemploRelleno),
       promptVersion: dePromptVersion(version),
       customFields: campos,
+      adjuntos: deAdjuntos(adjuntos),
+      ramosDelInquilino: ramos,
     };
   } catch (err) {
     logger.error({
@@ -1569,7 +1790,7 @@ async function cargarLoDelPrompt(
         nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
       }, "email_worker.lote_del_prompt_fallo");
 
-    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields] =
+    const [knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino] =
       await Promise.all([
         loadKnownPatterns(tenantCtx),
         loadAgentTraining(tenantId),
@@ -1577,9 +1798,11 @@ async function cargarLoDelPrompt(
         loadApprovedExamples(tenantId, claimType),
         getActivePromptVersion(tenantId),
         loadActiveCustomFields(tenantId, claimType),
+        adjuntosDelCaso(caseId, tenantCtx),
+        cargarRamosDelInquilino(tenantId),
       ]);
 
-    return { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields };
+    return { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino };
   }
 }
 
@@ -1590,6 +1813,8 @@ interface LoDelPrompt {
   approvedExamples: ApprovedExample[];
   promptVersion: ActivePromptVersion;
   customFields: AgentCustomField[];
+  adjuntos: AdjuntoDelCaso[];
+  ramosDelInquilino: RamoDelInquilino[];
 }
 /** La consulta sola, para poder mandarla en un lote. Ver `cargarLoDelPrompt`. */
 function consultaKnownPatterns(db: ClienteDatos) {
@@ -1639,6 +1864,30 @@ async function loadKnownPatterns(tenantCtx: TenantContext): Promise<KnownPattern
  * Upsert extracted_fields rows on the (case_id, field_key) unique constraint
  * (uq_extracted_field in 0001_init.sql). Throws on DB error — callers wrap.
  */
+/**
+ * Los valores guardados de los campos que los pesos del puntaje cuentan. Sin
+ * campos ponderados no consulta y devuelve `[]`; `null` es que la lectura falló.
+ */
+async function camposGuardadosDelPuntaje(
+  tenantCtx: TenantContext,
+  caseId: string,
+  pesos: unknown
+): Promise<{ field_key: string; field_value: string | null }[] | null> {
+  const claves = clavesPonderadas(pesos).map(canonicalFieldKey);
+  if (claves.length === 0) return [];
+  try {
+    return await enTenant(tenantCtx, (db) =>
+      db
+        .select({ field_key: extractedFields.field_key, field_value: extractedFields.field_value })
+        .from(extractedFields)
+        .where(and(eq(extractedFields.case_id, caseId), inArray(extractedFields.field_key, claves)))
+    );
+  } catch (err) {
+    logger.warn({ code: errorCode(err), case_id: caseId }, "email_worker.puntaje_fields_read_error");
+    return null;
+  }
+}
+
 async function upsertExtractedFields(
   caseId: string,
   tenantCtx: TenantContext,
@@ -1924,7 +2173,20 @@ interface LoadedConversation {
   providerMessageId: string | null;
   /** Falso cuando el último entrante falló SPF/DKIM (E17). */
   remitenteAutenticado: boolean;
+  /** Las filas tal cual: la transcripción rearma la conversación con ellas. */
+  filas: FilaEntrante[];
 }
+
+type FilaEntrante = {
+  id: string;
+  provider_message_id: string | null;
+  body_text: string | null;
+  subject: string | null;
+  from_addr: string | null;
+  profile_name: string | null;
+  received_at: string;
+  headers: unknown;
+};
 
 /**
  * Every inbound message on the case, oldest first, as one document.
@@ -1961,7 +2223,10 @@ export async function loadInboundConversation(
   // Defensive: anything other than a row list means we cannot read the
   // conversation, and the raw-message path is the honest fallback.
   if (!Array.isArray(inbound)) return null;
+  return armarConversacion(inbound as FilaEntrante[]);
+}
 
+export function armarConversacion(inbound: FilaEntrante[]): LoadedConversation | null {
   const latest = inbound[inbound.length - 1];
   if (!latest) return null;
 
@@ -1981,6 +2246,7 @@ export async function loadInboundConversation(
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,
     remitenteAutenticado: !autenticacionFallida(latest.headers),
+    filas: inbound,
   };
 }
 

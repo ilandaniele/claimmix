@@ -508,7 +508,15 @@ const SCENARIOS: Scenario[] = [
         say: "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114.",
         // El tipo ya está dicho: pedirlo era el efecto de un bloque del prompt
         // que hacía caer el choque contra un poste en `other`.
-        expect: { replies: 1, noAsked: ["claim_type"] },
+        //
+        // Y la provincia se pide, no se afirma: «Alem al 500» no dice cuál, y el
+        // 30/09 la respuesta decía «Entendemos que fue en CABA» y a la vez la
+        // pedía. `avoids` mira eso; no dice «caba» solo porque está en «acabamos».
+        expect: {
+          replies: 1,
+          noAsked: ["claim_type"],
+          avoids: ["en CABA", "Capital Federal", "Buenos Aires"],
+        },
       },
       // The three-messages-in-ninety-seconds bug: each round was individually
       // correct, and nobody was reading.

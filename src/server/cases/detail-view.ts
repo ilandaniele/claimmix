@@ -51,8 +51,9 @@ import {
 } from "@/core/case/reclamo-tercero";
 import { esChoque, leerResponsabilidad, type Responsabilidad } from "@/core/case/responsabilidad";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
-import { enTenant, type TenantContext } from "@/data/scope";
-import { claimAttachments, claimFieldConfirmations, policies, users } from "@/lib/db/schema";
+import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import { asignaATerceros, CASE_EDITOR_ROLES } from "@/lib/auth/roles";
+import { casePlanPasos, claimAttachments, claimFieldConfirmations, policies, tenants, users } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import type { CaseRow, ExtractedFieldRow, MissingDocRow } from "@/lib/db/types";
 import { errorCode } from "@/lib/observability/error-code";
@@ -69,6 +70,7 @@ import {
   ultimoMensajeEntrante,
   type MensajeEntrante,
 } from "@/server/cases/inbound-messages";
+import { consultaDeCarga, criteriosDeTrabajo, type PersonaConCarga } from "@/server/cases/efectos-de-transicion";
 import { patentesDe } from "@/server/matching/policy-matcher";
 
 /** Cuántos mensajes muestra el acordeón del original. */
@@ -144,6 +146,16 @@ export interface CartaEnPantalla {
   total: number | null;
 }
 
+/** Un paso del plan de trabajo, tal como lo pinta la ficha (B11). */
+export interface PasoEnPantalla {
+  clave: string;
+  titulo: string;
+  orden: number;
+  /** El estado que lo tilda solo, o `null` si lo tilda una persona. */
+  auto: string | null;
+  hecho: boolean;
+}
+
 export interface DetalleDeCaso {
   case: CaseRow;
   extracted_fields: ExtractedFieldRow[];
@@ -157,6 +169,16 @@ export interface DetalleDeCaso {
   hayMasMensajes: boolean;
   /** El nombre de quien tiene asignado el caso, o `null` si nadie o no se pudo leer. */
   asignado_nombre: string | null;
+  /** El checklist del caso, en orden; vacío para quien no edita, si aún no hay plan o si no se pudo leer. */
+  plan: PasoEnPantalla[];
+  /** La carga de cada persona; sólo la piden quienes le asignan casos a otros, para el resto va vacía. */
+  carga: PersonaConCarga[];
+  /**
+   * El título con que la aseguradora nombró el plazo propio que corre en el caso,
+   * o `null` si el plazo es el legal, ya no está configurado, no se pudo leer o
+   * quien mira no edita. La ficha cae a la clave.
+   */
+  plazo_titulo: string | null;
   /** `null` si la póliza no se pudo leer: mejor sin panel que con un veredicto falso. */
   cobertura: CoberturaEnPantalla | null;
   /** La opinión orientativa de responsabilidad (B18), o `null` si no hay o no tiene la forma. */
@@ -395,16 +417,75 @@ function coberturaDelCaso(
   return { resultado, condiciones, monto };
 }
 
-/** El nombre de quien tiene asignado el caso, o `null` si no hay o falla la consulta. */
-async function fetchNombreAsignado(
+type PlanYAsignacion = Pick<DetalleDeCaso, "plan" | "carga" | "asignado_nombre" | "plazo_titulo">;
+
+const SIN_PLAN_NI_CARGA: PlanYAsignacion = { plan: [], carga: [], asignado_nombre: null, plazo_titulo: null };
+
+/**
+ * El plan de trabajo, la carga del equipo y el nombre de quien tiene el caso,
+ * en un solo lote y con su propio `.catch`: si falla, la ficha abre sin ellos.
+ *
+ * Cada rol pide lo justo. El plan sólo lo lee quien edita y la carga sólo la
+ * pide quien asigna a terceros. El nombre del asignado se pide aparte para
+ * todos, si el caso tiene asignado: la carga sólo trae a quienes editan hoy, y
+ * quien tiene el caso puede haber dejado de hacerlo (cambio de rol, baja).
+ *
+ * El título de un plazo propio sale de la configuración del inquilino y sólo lo
+ * muestra la ficha a quien edita: se pide con el plan y sólo si el caso corre
+ * uno propio (el legal tiene su texto).
+ */
+async function leerPlanYAsignacion(
   ctx: TenantContext,
-  userId: string
-): Promise<string | null> {
-  return enTenant(ctx, (db) =>
-    db.select({ n: users.full_name }).from(users).where(eq(users.id, userId)).limit(1)
-  )
-    .then((filas) => firstRow(filas)?.n ?? null)
-    .catch(() => null);
+  caseId: string,
+  rol: string,
+  { assigned_to: asignadoA, vence_plazo: vencePlazo }: Pick<CaseRow, "assigned_to" | "vence_plazo">
+): Promise<PlanYAsignacion> {
+  const conPlan = (CASE_EDITOR_ROLES as readonly string[]).includes(rol);
+  const conCarga = asignaATerceros(rol);
+  const conNombre = asignadoA !== null;
+  const conPlazo = conPlan && vencePlazo !== null && vencePlazo !== "art56";
+  if (!conPlan && !conCarga && !conNombre) return SIN_PLAN_NI_CARGA;
+
+  try {
+    const filas = await enTenantVarias<unknown[]>(ctx, (db) => [
+      ...(conPlan
+        ? [
+            db
+              .select({
+                clave: casePlanPasos.clave,
+                titulo: casePlanPasos.titulo,
+                orden: casePlanPasos.orden,
+                auto: casePlanPasos.auto,
+                hecho_en: casePlanPasos.hecho_en,
+              })
+              .from(casePlanPasos)
+              .where(eq(casePlanPasos.case_id, caseId))
+              .orderBy(asc(casePlanPasos.orden), asc(casePlanPasos.clave)),
+          ]
+        : []),
+      ...(conCarga ? [consultaDeCarga(db)] : []),
+      ...(conNombre && asignadoA
+        ? [db.select({ n: users.full_name }).from(users).where(eq(users.id, asignadoA)).limit(1)]
+        : []),
+      ...(conPlazo ? [db.select({ p: tenants.plazos }).from(tenants).where(eq(tenants.id, ctx.tenantId)).limit(1)] : []),
+    ]);
+
+    let i = 0;
+    const pasos = conPlan ? (filas[i++] as Array<Omit<PasoEnPantalla, "hecho"> & { hecho_en: string | null }>) : [];
+    const carga = conCarga ? (filas[i++] as PersonaConCarga[]) : [];
+    const nombre = conNombre ? (firstRow(filas[i++] as Array<{ n: string }>)?.n ?? null) : null;
+    const propios = conPlazo ? criteriosDeTrabajo({ plazos_propios: firstRow(filas[i++] as Array<{ p: unknown }>)?.p }, null).plazos : [];
+
+    return {
+      plan: pasos.map(({ hecho_en, ...paso }) => ({ ...paso, hecho: hecho_en !== null })),
+      carga,
+      asignado_nombre: nombre,
+      plazo_titulo: propios.find((p) => p.clave === vencePlazo)?.titulo ?? null,
+    };
+  } catch (err) {
+    logger.error({ error_code: errorCode(err) }, "cases.detail_view.query_failed");
+    return SIN_PLAN_NI_CARGA;
+  }
 }
 
 /**
@@ -416,7 +497,8 @@ async function fetchNombreAsignado(
  */
 export async function cargarDetalleDeCaso(
   ctx: TenantContext,
-  caseId: string
+  caseId: string,
+  rol: string
 ): Promise<DetalleDeCaso | null> {
   const caseRow = await fetchCaseRow(ctx, caseId);
   if (!caseRow) return null;
@@ -440,7 +522,7 @@ export async function cargarDetalleDeCaso(
    */
   const esDeCorreo = caseRow.channel === "email" || caseRow.channel === "email_sim";
 
-  const [extracted_fields, missing_docs, audit_log, confirmations, { adjuntos: attachments, cartas }, messages, asignado_nombre, poliza] =
+  const [extracted_fields, missing_docs, audit_log, confirmations, { adjuntos: attachments, cartas }, messages, trabajo, poliza] =
     await Promise.all([
       fetchExtractedFields(ctx, caseId),
       fetchMissingDocs(ctx, caseId),
@@ -448,7 +530,7 @@ export async function cargarDetalleDeCaso(
       esDeCorreo ? fetchConfirmaciones(ctx, caseId) : Promise.resolve([]),
       fetchAdjuntos(ctx, caseId),
       mensajesEntrantes(ctx, caseId, { orden: "viejos", tope: MENSAJES_A_MOSTRAR }),
-      caseRow.assigned_to ? fetchNombreAsignado(ctx, caseRow.assigned_to) : Promise.resolve(null),
+      leerPlanYAsignacion(ctx, caseId, rol, caseRow),
       caseRow.policy_id ? fetchPoliza(ctx, caseRow.policy_id) : Promise.resolve(null),
     ]);
 
@@ -461,7 +543,7 @@ export async function cargarDetalleDeCaso(
     attachments,
     messages,
     hayMasMensajes: messages.length >= MENSAJES_A_MOSTRAR,
-    asignado_nombre,
+    ...trabajo,
     cobertura: coberturaDelCaso(caseRow, extracted_fields, poliza),
     // Una opinión que quedó de antes de que el caso se reclasificara no se muestra.
     responsabilidad: esChoque(caseRow.claim_type) ? leerResponsabilidad(caseRow.responsabilidad) : null,

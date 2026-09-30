@@ -44,6 +44,7 @@ import {
   listCases,
   listCasesForExport,
 } from "@/server/cases/list";
+import { ESTADOS_CERRADOS } from "@/core/case/fsm";
 import { db } from "@/lib/db";
 import { enTenant, enTenantVarias } from "@/data/scope";
 import { puenteDeAlcance } from "../mocks/puente-de-alcance";
@@ -442,5 +443,130 @@ describe("buildCaseFilters — «Mi cola»", () => {
     expect(where).toBeDefined();
     const compilado = new PgDialect().sqlToQuery(where!).sql;
     expect(compilado).toContain("false");
+  });
+});
+
+describe("bandeja por plazo y por complejidad (B10, B13)", () => {
+  const ahora = new Date("2026-09-29T15:00:00.000Z");
+  const CERRADOS = [...ESTADOS_CERRADOS];
+  const cinco = new Date(ahora.getTime() + 5 * 86_400_000).toISOString();
+
+  async function compilar(query: Parameters<typeof buildCaseFilters>[0]) {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    const where = buildCaseFilters(query, undefined, ahora);
+    expect(where).toBeDefined();
+    return new PgDialect().sqlToQuery(where!);
+  }
+
+  async function ordenDe(sort: "puntaje_complejidad" | "vence_en" | "created_at", order: "asc" | "desc") {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    return consultaListado(datos as never, { ...baseQuery, sort, order }, "yo-1", ahora)
+      .toSQL()
+      .sql.split(" order by ")[1];
+  }
+
+  it("vencidos: vence_en menor que el ahora que se le pasa, y nada de tenant_id", async () => {
+    const { sql: compilado, params } = await compilar({ vencimiento: ["vencidos"] });
+    expect(compilado).toContain('"vence_en" <');
+    expect(compilado).not.toContain('"vence_en" >=');
+    expect(compilado).not.toContain("tenant_id");
+    expect(params).toEqual([...CERRADOS, ahora.toISOString()]);
+  });
+
+  it("un caso cerrado no entra a ningún filtro de plazo aunque conserve el vencimiento", async () => {
+    for (const filtro of ["vencidos", "por_vencer"] as const) {
+      const { sql: compilado, params } = await compilar({ vencimiento: [filtro] });
+      expect(compilado).toMatch(/"cases"\."status" not in \(\$1, \$2, \$3\) and /);
+      expect(params.slice(0, CERRADOS.length)).toEqual(CERRADOS);
+    }
+  });
+
+  it("por vencer: desde ahora, hasta cinco días después, sin incluir el borde de arriba", async () => {
+    const { sql: compilado, params } = await compilar({ vencimiento: ["por_vencer"] });
+    expect(compilado).toContain('"vence_en" >=');
+    expect(compilado).toContain('"vence_en" <');
+    expect(params).toEqual([...CERRADOS, ahora.toISOString(), cinco]);
+  });
+
+  it("los dos plazos a la vez son la unión de los rangos", async () => {
+    const { sql: compilado } = await compilar({ vencimiento: ["vencidos", "por_vencer"] });
+    expect(compilado).toContain(" or ");
+  });
+
+  it.each([
+    ["baja", 0, 33],
+    ["media", 34, 66],
+    ["alta", 67, 100],
+  ] as const)("complejidad %s es el rango cerrado %d a %d", async (banda, desde, hasta) => {
+    const { sql: compilado, params } = await compilar({ complejidad: [banda] });
+    expect(compilado).toContain('"puntaje_complejidad" >=');
+    expect(compilado).toContain('"puntaje_complejidad" <=');
+    expect(compilado).not.toContain("tenant_id");
+    expect(params).toEqual([desde, hasta]);
+  });
+
+  it("sin los filtros nuevos no agrega condiciones", () => {
+    expect(buildCaseFilters({ vencimiento: undefined, complejidad: undefined }, undefined, ahora)).toBeUndefined();
+  });
+
+  it("el listado y el conteo miden contra el mismo instante", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const { consultaConteo } = await import("@/server/cases/list");
+    const datos = drizzle(async () => ({ rows: [] }));
+    const query = { ...baseQuery, vencimiento: ["vencidos"] as ["vencidos"] };
+    const lista = consultaListado(datos as never, query, "yo-1", ahora).toSQL();
+    const conteo = consultaConteo(datos as never, query, "yo-1", ahora).toSQL();
+    expect(lista.params).toContain(ahora.toISOString());
+    expect(conteo.params).toEqual([...CERRADOS, ahora.toISOString()]);
+  });
+
+  it("ordenar por puntaje manda los nulos al final y desempata por id", async () => {
+    expect(await ordenDe("puntaje_complejidad", "asc")).toMatch(/^"cases"\."puntaje_complejidad" asc nulls last, "cases"\."id" asc /);
+    expect(await ordenDe("puntaje_complejidad", "desc")).toMatch(/^"cases"\."puntaje_complejidad" desc nulls last, "cases"\."id" asc /);
+  });
+
+  it("ordenar por vencimiento cuenta sólo los casos abiertos, manda los nulos al final y desempata por id", async () => {
+    const vigente = String.raw`case when "cases"\."status" not in \(\$\d+, \$\d+, \$\d+\) then "cases"\."vence_en" end`;
+    expect(await ordenDe("vence_en", "asc")).toMatch(new RegExp(String.raw`^${vigente} asc nulls last, "cases"\."id" asc `));
+    expect(await ordenDe("vence_en", "desc")).toMatch(new RegExp(String.raw`^${vigente} desc nulls last, "cases"\."id" asc `));
+  });
+
+  it("las demás columnas se ordenan como siempre, sin nulls last ni desempate", async () => {
+    const orden = await ordenDe("created_at", "desc");
+    expect(orden).toMatch(/^"cases"\."created_at" desc /);
+    expect(orden).not.toContain("nulls last");
+  });
+
+  it("el listado trae las dos columnas nuevas", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    const sql = consultaListado(datos as never, baseQuery, "yo-1", ahora).toSQL().sql;
+    expect(sql).toMatch(
+      /"para_responder_desde", case when "status" not in \(\$\d+, \$\d+, \$\d+\) then "vence_en" end, "puntaje_complejidad"/
+    );
+  });
+});
+
+describe("CaseQuerySchema — vencimiento, complejidad y orden nuevos", () => {
+  it("acepta uno o varios valores del enum", async () => {
+    const { CaseQuerySchema } = await import("@/lib/schemas/cases");
+    const r = CaseQuerySchema.parse({ vencimiento: ["vencidos", "por_vencer"], complejidad: "alta" });
+    expect(r.vencimiento).toEqual(["vencidos", "por_vencer"]);
+    expect(r.complejidad).toEqual(["alta"]);
+  });
+
+  it.each([{ vencimiento: ["mañana"] }, { complejidad: ["altisima"] }, { sort: "puntaje" }])(
+    "rechaza %j",
+    async (raw) => {
+      const { CaseQuerySchema } = await import("@/lib/schemas/cases");
+      expect(CaseQuerySchema.safeParse(raw).success).toBe(false);
+    }
+  );
+
+  it("acepta las dos columnas de orden nuevas", async () => {
+    const { CaseQuerySchema } = await import("@/lib/schemas/cases");
+    expect(CaseQuerySchema.parse({ sort: "vence_en" }).sort).toBe("vence_en");
+    expect(CaseQuerySchema.parse({ sort: "puntaje_complejidad" }).sort).toBe("puntaje_complejidad");
   });
 });

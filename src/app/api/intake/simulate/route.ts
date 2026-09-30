@@ -206,7 +206,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             claim_type: claimType,
             status: "procesando",
             confidence_min: null,
-            assigned_to: userRow.id,
+            // Sin asignar, como un mail real: la autoasignación del agente sólo toma casos libres.
             channel: "email_sim",
           })
           .returning({ id: cases.id, created_at: cases.created_at })

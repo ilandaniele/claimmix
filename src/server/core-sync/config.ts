@@ -46,8 +46,22 @@ export function esFaltaDe0036(e: unknown): boolean {
   return codigo === "42P01" || codigo === "42703";
 }
 
-/** La 0040 sólo agrega columnas: sin ella, una consulta que las toca da 42703. Va en el `.catch` de esa consulta. */
-export function faltaLa0040(e: unknown): never {
-  if (codigoPg(e) === "42703") throw new AppError("MIGRACION_PENDIENTE", "Falta aplicar la migración 0040.");
-  throw e;
-}
+const pendienteSi =
+  (codigos: readonly string[]) =>
+  (...migraciones: string[]) =>
+  (e: unknown): never => {
+    const codigo = codigoPg(e);
+    if (codigo !== undefined && codigos.includes(codigo)) {
+      throw new AppError("MIGRACION_PENDIENTE", `Falta aplicar la migración ${migraciones.join(" o ")}.`);
+    }
+    throw e;
+  };
+
+/** Las migraciones que sólo agregan columnas: sin ellas, una consulta que las toca da 42703. Va en el `.catch` de esa consulta. */
+export const faltaLaMigracion = pendienteSi(["42703"]);
+
+/** Las que además crean una tabla: sin ellas falta la tabla (42P01) o una columna (42703). */
+export const faltaLaMigracionConTabla = pendienteSi(["42P01", "42703"]);
+
+export const faltaLa0040 = faltaLaMigracion("0040");
+export const faltaLa0042 = faltaLaMigracionConTabla("0042");

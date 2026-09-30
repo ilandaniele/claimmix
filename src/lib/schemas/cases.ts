@@ -80,8 +80,24 @@ export const ChannelSchema = z.enum(["email_sim", "email", "whatsapp_sim", "what
 export type Channel = z.infer<typeof ChannelSchema>;
 
 /** Allowed sort columns — whitelist prevents SQL injection via sort param */
-export const SortColumnSchema = z.enum(["created_at", "confidence_min", "status"]);
+export const SortColumnSchema = z.enum([
+  "created_at",
+  "confidence_min",
+  "status",
+  "puntaje_complejidad",
+  "vence_en",
+]);
 export type SortColumn = z.infer<typeof SortColumnSchema>;
+
+/**
+ * Los recortes de la bandeja por plazo y por complejidad (B10, B13). Los valores
+ * son los de `limitesDelFiltro` y `RANGOS`, y `buildCaseFilters` no compila si
+ * alguno deja de coincidir.
+ */
+export const VencimientoFiltroSchema = z.enum(["vencidos", "por_vencer"]);
+export type VencimientoFiltro = z.infer<typeof VencimientoFiltroSchema>;
+export const ComplejidadFiltroSchema = z.enum(["baja", "media", "alta"]);
+export type ComplejidadFiltro = z.infer<typeof ComplejidadFiltroSchema>;
 
 /** Ventanas del selector de período de la bandeja. Sin valor es «todo el tiempo». */
 export const PeriodoSchema = z.enum(["hoy", "7d", "30d", "90d"]);
@@ -138,6 +154,9 @@ export const CaseQuerySchema = z.object({
   customer_id: z.string().uuid().optional(),
   policy_id: z.string().uuid().optional(),
   channel: listaDe(ChannelSchema),
+  // Varios a la vez se leen «cualquiera de estos», como el resto de los grupos.
+  vencimiento: listaDe(VencimientoFiltroSchema),
+  complejidad: listaDe(ComplejidadFiltroSchema),
   is_claim: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
   // Sólo `true` filtra: «los que no están para responder» no es una sección.
   // Cualquier otro valor se ignora, como en `bandeja/page.tsx`: un 400 acá

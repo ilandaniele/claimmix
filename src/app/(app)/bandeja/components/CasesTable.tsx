@@ -9,6 +9,7 @@ import { SeverityBadge } from "./SeverityBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ConfidenceBar } from "./ConfidenceBar";
 import { Vacio } from "./Vacio";
+import { InsigniaDeComplejidad, InsigniaDeVencimiento } from "../../_components/plazo-y-complejidad";
 import { ClaseDelTardio } from "./ClaseDelTardio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import { formatAge, formatDate } from "@/lib/utils";
@@ -370,6 +371,16 @@ export function CasesTable({
         },
       },
       {
+        id: "vence_en",
+        header: t("table.col.vencimiento"),
+        cell: (row: CaseRow) => <InsigniaDeVencimiento vence={row.vence_en} />,
+      },
+      {
+        id: "puntaje_complejidad",
+        header: t("table.col.complejidad"),
+        cell: (row: CaseRow) => <InsigniaDeComplejidad puntaje={row.puntaje_complejidad} />,
+      },
+      {
         id: "assigned_to",
         header: t("table.col.assignedTo"),
         cell: (row: CaseRow) => (
@@ -499,16 +510,16 @@ export function CasesTable({
         */}
       <div role="region" aria-label={t("bandeja.tableLabel")}>
         {/*
-          * `min-w-[1080px]`: sin un piso, `table-auto` reparte lo que haya y
+          * `min-w-[1260px]`: sin un piso, `table-auto` reparte lo que haya y
           * con la ventana angosta las últimas columnas —severidad, asignación—
           * se estrujaban hasta quedar ilegibles, sin nada que permitiera
           * llegar a ellas. Con el piso, el contenedor de arriba (que ya es
           * `overflow-auto`) muestra una barra para correr la tabla al costado.
-          * El número es la suma de los anchos mínimos de las once columnas; por
+          * El número es la suma de los anchos mínimos de las columnas; por
           * encima de eso manda `w-full` y nada cambia.
           */}
         <table
-          className="w-full min-w-[1080px] table-auto text-left"
+          className="w-full min-w-[1260px] table-auto text-left"
           aria-label={t("bandeja.tableLabel")}
         >
           <thead className="sticky top-0 z-10 bg-slate-50">

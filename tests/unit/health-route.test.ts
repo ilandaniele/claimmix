@@ -91,6 +91,15 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "claim_attachments", column_name: "lectura_presupuesto" },
     // 0041.
     { table_name: "cases", column_name: "responsabilidad" },
+    // 0042.
+    { table_name: "cases", column_name: "puntaje_complejidad" },
+    { table_name: "cases", column_name: "vence_en" },
+    { table_name: "cases", column_name: "vence_plazo" },
+    { table_name: "tenants", column_name: "reglas_asignacion" },
+    { table_name: "tenants", column_name: "plazos" },
+    { table_name: "tenants", column_name: "plan_por_tipo" },
+    { table_name: "tenants", column_name: "pesos_puntaje" },
+    { table_name: "case_plan_pasos", column_name: "case_id" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -304,6 +313,26 @@ describe("GET /api/health — what it reports", () => {
 
     expect(schema.status).toBe("down");
     expect(schema.detail).toContain("cases.responsabilidad");
+  });
+
+  it("nota que falta la 0042: vencimientos, puntaje, reglas del inquilino y el plan de trabajo", async () => {
+    const faltan = [
+      "cases.puntaje_complejidad",
+      "cases.vence_en",
+      "cases.vence_plazo",
+      "tenants.reglas_asignacion",
+      "tenants.plazos",
+      "tenants.plan_por_tipo",
+      "tenants.pesos_puntaje",
+      "case_plan_pasos",
+    ];
+    mockExecute.mockResolvedValue({ rows: esquemaSin(...faltan) });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    for (const col of faltan) expect(schema.detail).toContain(col);
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

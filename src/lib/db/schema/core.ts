@@ -24,7 +24,11 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { Reglas } from "@/core/case/asignacion";
 import type { MontoEstimado, RangosDeMonto } from "@/core/case/monto-estimado";
+import type { Plan } from "@/core/case/plan-de-trabajo";
+import type { PlazoPropio } from "@/core/case/plazos";
+import type { Pesos } from "@/core/case/puntaje-complejidad";
 import type { Responsabilidad } from "@/core/case/responsabilidad";
 
 import { authUsers } from "./auth";
@@ -69,6 +73,12 @@ export const tenants = pgTable("tenants", {
   recordatorio_horas: integer("recordatorio_horas").array().notNull().default(sql`'{}'::integer[]`),
   // La tabla de montos propia; NULL = la de por defecto (migración 0040).
   rangos_de_monto: jsonb("rangos_de_monto").$type<RangosDeMonto>(),
+  // Cómo trabaja el equipo de esta aseguradora, sólo para el equipo; NULL = los
+  // valores por defecto del código (migración 0042).
+  reglas_asignacion: jsonb("reglas_asignacion").$type<Reglas>(),
+  plazos: jsonb("plazos").$type<PlazoPropio[]>(),
+  plan_por_tipo: jsonb("plan_por_tipo").$type<Plan>(),
+  pesos_puntaje: jsonb("pesos_puntaje").$type<Pesos>(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -226,6 +236,11 @@ export const cases = pgTable("cases", {
   // Opinión orientativa de responsabilidad en un choque, sólo para el equipo
   // (migración 0041). La mecánica en la que se apoya no se guarda acá.
   responsabilidad: jsonb("responsabilidad").$type<Responsabilidad>(),
+  // Ordenar el trabajo del equipo: puntaje de 0 a 100 y próximo vencimiento con
+  // su clave. NULL = sin calcular / sin plazo corriendo (migración 0042).
+  puntaje_complejidad: smallint("puntaje_complejidad"),
+  vence_en: timestamp("vence_en", { withTimezone: true, mode: "string" }),
+  vence_plazo: text("vence_plazo"),
 });
 
 export const rawMessages = pgTable("raw_messages", {
@@ -305,6 +320,34 @@ export const caseRecordatorios = pgTable(
       .notNull(),
   },
   (t) => [primaryKey({ columns: [t.case_id, t.ancla, t.etapa] })],
+);
+
+/**
+ * Un paso del plan de trabajo de un caso (0042). `titulo` es una foto de la
+ * plantilla al crear el plan. La clave primaria es la idempotencia: el plan se
+ * crea con ON CONFLICT DO NOTHING. Sin DELETE para `claimmix_app`.
+ */
+export const casePlanPasos = pgTable(
+  "case_plan_pasos",
+  {
+    case_id: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    tenant_id: uuid("tenant_id").notNull(),
+    clave: text("clave").notNull(),
+    titulo: text("titulo").notNull(),
+    orden: smallint("orden").notNull(),
+    // Estado que lo tilda solo (en_liquidacion o pagado); NULL = lo tilda una persona.
+    auto: text("auto"),
+    hecho_en: timestamp("hecho_en", { withTimezone: true, mode: "string" }),
+    hecho_por: uuid("hecho_por").references(() => users.id, { onDelete: "set null" }),
+    // 'manual' o 'auto'.
+    origen: text("origen"),
+    created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.case_id, t.clave] })],
 );
 
 export const outboundMessages = pgTable("outbound_messages", {

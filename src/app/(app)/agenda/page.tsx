@@ -2,8 +2,9 @@
  * Agenda page — Server Component.
  *
  * G39: los vencimientos ya salen de datos existentes —la ventana de 24 h de
- * WhatsApp y el cierre por abandono— y acá se juntan en una sola lista, de
- * sólo lectura, agrupada en Hoy / Mañana / por fecha.
+ * WhatsApp, el cierre por abandono y, desde B10, el plazo de cada caso— y acá
+ * se juntan en una sola lista, de sólo lectura, agrupada en Hoy / Mañana / por
+ * fecha y paginada (`?page=`, `?per_page=`, validados con `camposDePagina`).
  *
  * D-D1: la abre cualquier rol. `leerAgenda` ya tapa el titular con `OCULTO`
  * para quien no está en `CUSTOMER_PII_ROLES`; esta página no vuelve a decidir
@@ -21,13 +22,23 @@ import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { getT, type TranslationKey } from "@/lib/i18n";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { formatDate, formatDateOnly } from "@/lib/utils";
-import { leerAgenda, type Vencimiento, type TipoDeVencimiento } from "@/server/cases/agenda";
+import {
+  leerAgenda,
+  PaginaDeAgendaSchema,
+  type Vencimiento,
+  type TipoDeVencimiento,
+} from "@/server/cases/agenda";
 import { Card } from "../_components/ui";
 
 const TIPO_LABEL: Record<TipoDeVencimiento, TranslationKey> = {
   ventana_whatsapp: "agenda.tipo.ventanaWhatsapp",
   cierre_por_abandono: "agenda.tipo.cierreAbandono",
+  plazo: "agenda.tipo.plazo",
 };
+
+interface AgendaPageProps {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}
 
 interface Grupo {
   etiqueta: string;
@@ -62,7 +73,7 @@ function agrupar(
   return [...grupos.values()];
 }
 
-export default async function AgendaPage() {
+export default async function AgendaPage({ searchParams }: AgendaPageProps) {
   const session = await getSessionContext();
   if (!session?.user) redirect("/login");
   // Deduplicada con la del layout: ver lib/auth/user-row.ts.
@@ -73,8 +84,18 @@ export default async function AgendaPage() {
   const t = getT(locale);
   const ahora = new Date();
 
-  const vencimientos = await leerAgenda({ tenantId: userRow.tenant_id }, ahora, userRow.role);
+  // Una página que no se entiende (`?page=abc`) es la primera, no un error.
+  const params = await searchParams;
+  const pedida = PaginaDeAgendaSchema.safeParse({ page: params["page"], per_page: params["per_page"] });
+  const { data: vencimientos, meta } = await leerAgenda(
+    { tenantId: userRow.tenant_id },
+    ahora,
+    userRow.role,
+    pedida.success ? pedida.data : {}
+  );
   const grupos = agrupar(vencimientos, ahora, locale, t);
+  const hrefDePagina = (page: number) =>
+    `/agenda?${new URLSearchParams({ page: String(page), per_page: String(meta.per_page) }).toString()}`;
 
   return (
     <div className="flex h-full flex-col">
@@ -119,6 +140,36 @@ export default async function AgendaPage() {
             ))
           )}
         </Card>
+
+        {meta.total > 0 && (
+          <div className="flex items-center justify-between pt-4">
+            <p className="text-[13px] text-slate-500">
+              {Math.min((meta.page - 1) * meta.per_page + 1, meta.total)}–
+              {Math.min(meta.page * meta.per_page, meta.total)} {t("pagination.of")} {meta.total}
+            </p>
+            <div className="flex items-center gap-2">
+              {meta.page > 1 && (
+                <Link
+                  href={hrefDePagina(meta.page - 1)}
+                  className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                >
+                  {t("pagination.previous")}
+                </Link>
+              )}
+              <span className="text-sm text-slate-500">
+                {meta.page} / {Math.max(1, meta.pages)}
+              </span>
+              {meta.page < meta.pages && (
+                <Link
+                  href={hrefDePagina(meta.page + 1)}
+                  className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
+                >
+                  {t("pagination.next")}
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

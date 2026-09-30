@@ -21,12 +21,13 @@ export const esARServidor = {
 
   // ── Agenda (G39) ───────────────────────────────────────────────────────────
   "agenda.title": "Agenda",
-  "agenda.subtitle": "Lo que vence: ventanas de WhatsApp y conversaciones por cerrar.",
+  "agenda.subtitle": "Lo que vence: ventanas de WhatsApp, conversaciones por cerrar y plazos de los casos.",
   "agenda.empty": "No hay vencimientos por ahora.",
   "agenda.hoy": "Hoy",
   "agenda.manana": "Mañana",
   "agenda.tipo.ventanaWhatsapp": "Ventana de WhatsApp",
   "agenda.tipo.cierreAbandono": "Cierre por abandono",
+  "agenda.tipo.plazo": "Plazo del caso",
 
   // ── Case detail ────────────────────────────────────────────────────────────
   "case.detail.back": "Volver a la bandeja",
@@ -424,6 +425,19 @@ export const esARServidor = {
   "condiciones.leidas": "Leídas el {fecha}",
   "condiciones.sinLeer": "Subido, sin leer",
   "condiciones.sinSubir": "Sin condiciones cargadas",
+  // B10, B11: vencimiento, denuncia y plan de trabajo en la ficha, sólo para el equipo.
+  "caso.vencimiento": "Vencimiento",
+  "caso.complejidad": "Complejidad",
+  "caso.denuncia": "Denuncia",
+  "planDeTrabajo.titulo": "Plan de trabajo",
+  "trabajo.paso.revisar_documentacion": "Revisar la documentación recibida",
+  "trabajo.paso.verificar_cobertura": "Verificar cobertura y vigencia de la póliza",
+  "trabajo.paso.revisar_presupuesto": "Revisar el presupuesto del taller",
+  "trabajo.paso.definir_responsabilidad": "Definir la responsabilidad",
+  "trabajo.paso.verificar_denuncia_policial": "Verificar la denuncia policial",
+  "trabajo.paso.pedir_certificado_medico": "Pedir el certificado médico",
+  "trabajo.paso.entregar_a_aseguradora": "Entregar el caso a la aseguradora",
+  "trabajo.paso.confirmar_pago": "Confirmar el pago al asegurado",
 } as const;
 
 export type ClaveDelServidor = keyof typeof esARServidor;

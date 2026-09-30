@@ -18,6 +18,9 @@ import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
 import { CASE_EDITOR_ROLES, CORE_SYNC_ROLES, CUSTOMER_PII_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
+import { ESTADOS_CERRADOS } from "@/core/case/fsm";
+import { claveDeTituloDeFabrica } from "@/core/case/plan-de-trabajo";
+import { denunciaEnTermino } from "@/core/case/plazos";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -44,6 +47,13 @@ import { ResponsabilidadPanel, VeredictoDeResponsabilidad } from "./_components/
 import { ReclamoTerceroPanel } from "./_components/ReclamoTerceroPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
+import { AsignarCaso } from "./_components/AsignarCaso";
+import { PlanDeTrabajo } from "./_components/PlanDeTrabajo";
+import {
+  InsigniaDeComplejidad,
+  InsigniaDeDenuncia,
+  InsigniaDeVencimiento,
+} from "@/app/(app)/_components/plazo-y-complejidad";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
 import { getT, type TranslationKey } from "@/lib/i18n";
@@ -135,7 +145,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
    * historial de auditoría no se lleva puestos los campos extraídos.
    */
   const [detail, acciones] = await Promise.all([
-    cargarDetalleDeCaso(tenantCtx, id),
+    cargarDetalleDeCaso(tenantCtx, id, me.role),
     leerEstadoDeAcciones(tenantCtx, id),
   ]);
 
@@ -155,6 +165,9 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     attachments,
     messages,
     asignado_nombre,
+    plan,
+    carga,
+    plazo_titulo,
     cobertura,
     responsabilidad,
     cartas,
@@ -220,6 +233,14 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   const puedeEnviarAlCore = (CORE_SYNC_ROLES as string[]).includes(me.role);
   // La opinión de responsabilidad y el reclamo de un tercero son para quien trabaja el caso (B18, B24).
   const esEditor = (CASE_EDITOR_ROLES as string[]).includes(me.role);
+  // El art. 46 y el vencimiento (B10) son del equipo: al asegurado no se los decimos.
+  const denuncia = esEditor ? denunciaEnTermino(fieldValues.get("accident_date") ?? null, caseRow.created_at) : null;
+  // Un caso cerrado puede conservar el plazo (el barrido de abandono no lo limpia): no se muestra como vencido.
+  const venceEn = ESTADOS_CERRADOS.has(caseRow.status as CaseStatus) ? null : caseRow.vence_en;
+  // El art. 46 no se guarda como vencimiento (`PlazosSchema` reserva la clave): sólo corren el art. 56 y los propios.
+  // El título del propio lo eligió la aseguradora; si ya no está configurado, queda la clave.
+  const nombreDelPlazo =
+    caseRow.vence_plazo === "art56" ? t("plazo.art56") : (plazo_titulo ?? caseRow.vence_plazo?.replace(/_/g, " ") ?? null);
   const puedeTomarElControlCaso = puedeTomarElControl({
     puedeCambiarEstado: puedeCambiarEstadoCaso,
     plan: me.plan,
@@ -311,9 +332,20 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
             <FieldGrid className="sm:grid-cols-3">
               <Field label={t("case.detail.assignedTo")}>
-                {caseRow.assigned_to
-                  ? (asignado_nombre ?? t("case.detail.assigned"))
-                  : t("case.detail.unassigned")}
+                {esEditor ? (
+                  <AsignarCaso
+                    caseId={caseRow.id}
+                    rol={me.role}
+                    miId={me.id}
+                    asignadoA={caseRow.assigned_to}
+                    nombreAsignado={asignado_nombre}
+                    carga={carga}
+                  />
+                ) : caseRow.assigned_to ? (
+                  (asignado_nombre ?? t("case.detail.assigned"))
+                ) : (
+                  t("case.detail.unassigned")
+                )}
               </Field>
               <Field label={t("case.detail.created")}>
                 {/*
@@ -333,6 +365,24 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                 ) : null}
               </Field>
               <Field label={t("case.detail.channel")}>{channelLabel}</Field>
+              {esEditor && venceEn ? (
+                <Field label={t("caso.vencimiento")}>
+                  <InsigniaDeVencimiento vence={venceEn} />
+                  {nombreDelPlazo ? (
+                    <span className="mt-0.5 block text-[12.5px] text-slate-500">{nombreDelPlazo}</span>
+                  ) : null}
+                </Field>
+              ) : null}
+              {esEditor && caseRow.puntaje_complejidad !== null ? (
+                <Field label={t("caso.complejidad")}>
+                  <InsigniaDeComplejidad puntaje={caseRow.puntaje_complejidad} />
+                </Field>
+              ) : null}
+              {denuncia ? (
+                <Field label={t("caso.denuncia")}>
+                  <InsigniaDeDenuncia resultado={denuncia} />
+                </Field>
+              ) : null}
               {/* Pagado y rechazado guardan su fecha en `closed_at`; la de `en_liquidacion` está en el historial. */}
               {(caseRow.status === "pagado" || caseRow.status === "rechazado") && caseRow.closed_at ? (
                 <Field label={t(caseRow.status === "pagado" ? "case.detail.pagadoAt" : "case.detail.rechazadoAt")}>
@@ -425,6 +475,20 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               </Card>
             ) : null;
           })()}
+
+          {/* El checklist de trabajo (B11): sólo para el equipo, y sólo cuando el caso ya tiene plan. */}
+          {esEditor && plan.length > 0 && (
+            <PanelSection id="work-plan" titulo={t("planDeTrabajo.titulo")}>
+              <PlanDeTrabajo
+                caseId={caseRow.id}
+                pasos={plan.map((p) => {
+                  const clave = claveDeTituloDeFabrica(p);
+                  return clave ? { ...p, titulo: t(clave as TranslationKey) } : p;
+                })}
+                puedeCambiarEstado={puedeCambiarEstadoCaso}
+              />
+            </PanelSection>
+          )}
 
           {/* Datos del asegurado */}
           <PanelSection id="insured-data" titulo={t("case.detail.insuredData")}>

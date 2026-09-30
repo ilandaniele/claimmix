@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { Activity, Brain, CheckCircle2, ListChecks, Settings2, SlidersHorizontal, Layers } from "lucide-react";
+import { Activity, Brain, CheckCircle2, ClipboardList, ListChecks, Settings2, SlidersHorizontal, Layers } from "lucide-react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useTeclasDePestanas } from "@/lib/ui/pestanas";
 
 import { AiProviderPanel } from "../configuracion/AiProviderPanel";
@@ -12,11 +12,12 @@ import { PromptRulesPanel } from "../configuracion/PromptRulesPanel";
 import { CustomFieldsPanel } from "./CustomFieldsPanel";
 import { TrainingExamplesPanel } from "./TrainingExamplesPanel";
 import { FineTuneJobsPanel } from "./FineTuneJobsPanel";
+import { TrabajoPanel } from "./TrabajoPanel";
 import { AgentExportPanel } from "./AgentExportPanel";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import { BatchSimulatePanel } from "./BatchSimulatePanel";
 
-type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote";
+type TabId = "modelos" | "campos" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote" | "trabajo";
 
 /**
  * La etiqueta es una CLAVE, no un texto: la lista se arma una sola vez cuando
@@ -32,9 +33,10 @@ const TABS = [
   { id: "entrenamiento", clave: "consola.tab.entrenamiento", icon: Brain },
   { id: "uso", clave: "consola.tab.uso", icon: Activity },
   { id: "lote", clave: "consola.tab.lote", icon: Layers },
-] as const satisfies readonly { id: TabId; clave: TranslationKey; icon: unknown }[];
+  { id: "trabajo", clave: "consola.tab.trabajo", icon: ClipboardList },
+] as const satisfies readonly { id: TabId; clave: ClaveDelCliente; icon: unknown }[];
 
-/** `aria-controls` necesita un id, y el panel es uno solo para las siete. */
+/** `aria-controls` necesita un id, y el panel es uno solo para todas. */
 const ID_PANEL = "panel-de-la-consola";
 
 /**
@@ -121,6 +123,7 @@ export function AgentConsoleClient({ role }: { role: string }) {
         {tab === "entrenamiento" && <FineTuneJobsPanel />}
         {tab === "uso" && <ProviderUsagePanel />}
         {tab === "lote" && <BatchSimulatePanel />}
+        {tab === "trabajo" && <TrabajoPanel />}
       </div>
     </div>
   );

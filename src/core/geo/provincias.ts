@@ -63,6 +63,16 @@ export function esProvincia(nombre: string): boolean {
   return Object.hasOwn(CAJAS, claveDeProvincia(nombre));
 }
 
+/**
+ * Las provincias (o la capital) que el texto nombra, como claves de la tabla.
+ * «Ciudad de Buenos Aires» cuenta también como «buenos aires»: quien compara
+ * contra lo que dijo otra persona compara conjuntos, no una sola clave.
+ */
+export function provinciasNombradas(texto: string): string[] {
+  const plano = ` ${claveDeProvincia(texto)} `;
+  return Object.keys(CAJAS).filter((clave) => plano.includes(` ${clave} `));
+}
+
 function adentro([latMin, latMax, lonMin, lonMax]: Caja, lat: number, lon: number): boolean {
   return (
     lat >= latMin - MARGEN && lat <= latMax + MARGEN && lon >= lonMin - MARGEN && lon <= lonMax + MARGEN

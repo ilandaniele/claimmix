@@ -19,6 +19,8 @@
 import "server-only";
 
 import { nombraCulpaOLey } from "@/core/ai/nombra-culpa";
+import { clavesQueSatisfacen } from "@/core/case/required-fields";
+import { provinciasNombradas } from "@/core/geo/provincias";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
@@ -274,6 +276,7 @@ PROHIBIDO, sin excepción:
 - Prometer cobertura, pagos, montos, plazos, reintegros, grúas o turnos. Nadie evaluó el siniestro todavía.
 - Decir que algo está aprobado, cubierto o rechazado.
 - Inventar datos, números de caso, nombres o fechas que no estén acá arriba.
+- Afirmar un dato que está en DATOS A PEDIR y no dice «ya entendimos»: no lo sabemos, así que se pide, no se deduce del último mensaje. Una calle no dice la provincia.
 - Pedir algo que no esté en la lista de datos.
 - Disculpas largas, floreo, o tono de robot.
 
@@ -366,6 +369,20 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     const itemConVerbo =
       /^[ \t]*(?:[•*\-]|\d+[.)])[ \t]+(?:[^\n]*?(?:—|:)[ \t]*)?(?:decinos|mandanos|pasanos|dejanos|contanos|envianos)\b/im;
     if (itemConVerbo.test(trimmed)) return "item_con_verbo";
+  }
+
+  // Ensayo `silencio`, 30/09: a «choqué contra un poste en Alem al 500» le
+  // contestó «Entendemos que fue en CABA.» y, dos renglones más abajo, «La
+  // provincia donde ocurrió». Si se pide es porque no la tenemos: nombrar una
+  // que no dijo la persona ni nos consta es inventarla. Sólo la provincia,
+  // porque es el único dato pedido que se puede deducir de otro que sí dijo.
+  const pideLaProvincia = clavesQueSatisfacen("provincia_siniestro");
+  if (input.intent === "ask" && (input.fields ?? []).some((k) => pideLaProvincia.includes(k))) {
+    // El apellido también: «Mendoza» en el saludo no es una provincia afirmada.
+    const dadas = provinciasNombradas(
+      [input.lastMessage, input.claimantName, ...Object.values(input.knownValues ?? {})].join(" \n ")
+    );
+    if (provinciasNombradas(trimmed).some((p) => !dadas.includes(p))) return "afirma_la_provincia";
   }
 
   // Lee el último mensaje para el tono y de ahí sacó una póliza que nadie le
@@ -501,6 +518,9 @@ function explain(problem: string): string {
   }
   if (problem === "confirma_lo_que_escribio") {
     return "le preguntaste si es correcto algo que la persona acaba de escribir. Eso ya lo tenemos: no se lo devuelvas. Confirmá sólo lo que dice «ya entendimos».";
+  }
+  if (problem === "afirma_la_provincia") {
+    return "nombraste una provincia que la persona no dijo, y la provincia es justo lo que estamos pidiendo: una calle no la dice. No la afirmes ni la supongas; pedila.";
   }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";

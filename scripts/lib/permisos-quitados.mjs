@@ -10,9 +10,12 @@
  *   UPDATE que queda en audit_log; borrar la fila no dejaría rastro.
  * - case_recordatorios (0039): una etapa gastada no se reescribe ni se borra;
  *   si se pudiera, el barrido la volvería a mandar.
+ * - case_plan_pasos (0042): un paso del plan se marca o se desmarca, no se
+ *   borra; el rastro de quién lo hizo y cuándo vive en la fila y en audit_log.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
   core_sync_settings: ["DELETE"],
   case_recordatorios: ["UPDATE", "DELETE"],
+  case_plan_pasos: ["DELETE"],
 };

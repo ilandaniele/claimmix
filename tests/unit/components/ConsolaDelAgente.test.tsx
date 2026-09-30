@@ -19,7 +19,7 @@ import { AgentConsoleClient } from "../../../src/app/(app)/agente/AgentConsoleCl
 import { LocaleProvider } from "../../../src/lib/i18n/LocaleContext";
 
 /*
- * Los siete paneles se reemplazan por marcadores.
+ * Los paneles se reemplazan por marcadores.
  *
  * Cada uno hace `fetch` al montarse y trae medio grafo del cliente; lo que se
  * prueba acá es la barra, no lo que hay adentro de cada solapa.
@@ -36,6 +36,7 @@ vi.mock("../../../src/app/(app)/agente/FineTuneJobsPanel", () => panel("FineTune
 vi.mock("../../../src/app/(app)/agente/AgentExportPanel", () => panel("AgentExportPanel"));
 vi.mock("../../../src/app/(app)/agente/ProviderUsagePanel", () => panel("ProviderUsagePanel"));
 vi.mock("../../../src/app/(app)/agente/BatchSimulatePanel", () => panel("BatchSimulatePanel"));
+vi.mock("../../../src/app/(app)/agente/TrabajoPanel", () => panel("TrabajoPanel"));
 
 function montar() {
   return render(
@@ -46,11 +47,11 @@ function montar() {
 }
 
 describe("la consola del agente es un tablist", () => {
-  it("las siete son pestañas, no botones sueltos", () => {
+  it("las ocho son pestañas, no botones sueltos", () => {
     montar();
 
     expect(screen.getByRole("tablist")).toBeTruthy();
-    expect(screen.getAllByRole("tab")).toHaveLength(7);
+    expect(screen.getAllByRole("tab")).toHaveLength(8);
   });
 
   it("hay exactamente una seleccionada", () => {
@@ -104,7 +105,7 @@ describe("la consola del agente es un tablist", () => {
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
 
     const pestanas = screen.getAllByRole("tab");
-    expect(pestanas[6]!.getAttribute("aria-selected")).toBe("true");
+    expect(pestanas[7]!.getAttribute("aria-selected")).toBe("true");
   });
 
   it("Inicio y Fin van a los extremos", () => {
@@ -112,7 +113,7 @@ describe("la consola del agente es un tablist", () => {
     const lista = screen.getByRole("tablist");
 
     fireEvent.keyDown(lista, { key: "End" });
-    expect(screen.getAllByRole("tab")[6]!.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("tab")[7]!.getAttribute("aria-selected")).toBe("true");
 
     fireEvent.keyDown(lista, { key: "Home" });
     expect(screen.getAllByRole("tab")[0]!.getAttribute("aria-selected")).toBe("true");
@@ -132,5 +133,13 @@ describe("la consola del agente es un tablist", () => {
     fireEvent.click(screen.getAllByRole("tab")[6]!);
 
     expect(screen.getByText("BatchSimulatePanel")).toBeTruthy();
+  });
+
+  it("la pestaña de trabajo del equipo abre su panel", () => {
+    montar();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Trabajo del equipo" }));
+
+    expect(screen.getByText("TrabajoPanel")).toBeTruthy();
   });
 });

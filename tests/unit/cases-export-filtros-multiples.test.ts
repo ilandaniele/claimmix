@@ -148,6 +148,33 @@ describe("GET /api/cases/export.csv — filtros multi-select", () => {
     );
   });
 
+  it("plazo y complejidad también filtran el CSV (B10, B13)", async () => {
+    const res = await GET(makeRequest("?vencimiento=vencidos&vencimiento=por_vencer&complejidad=alta"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCasesForExport).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({ vencimiento: ["vencidos", "por_vencer"], complejidad: ["alta"] }),
+      USER_ID
+    );
+  });
+
+  it.each(["vencimiento=mañana", "complejidad=altisima"])("%s da 400 en el CSV", async (qs) => {
+    const res = await GET(makeRequest(`?${qs}`));
+
+    expect(res.status).toBe(400);
+    expect(mockListCasesForExport).not.toHaveBeenCalled();
+  });
+
+  it("el CSV no suma columnas de plazo ni de puntaje: los filtros no las traen", async () => {
+    const res = await GET(makeRequest("?vencimiento=vencidos&complejidad=alta"));
+
+    const encabezado = (await res.text()).split("\r\n")[0].toLowerCase();
+    expect(encabezado).not.toContain("vence");
+    expect(encabezado).not.toContain("complejidad");
+    expect(encabezado).not.toContain("puntaje");
+  });
+
   it("el encabezado dice «Situación», como la columna de la bandeja", async () => {
     const res = await GET(makeRequest(""));
 

@@ -80,6 +80,9 @@ export async function GET(request: NextRequest) {
     customer_id: searchParams.get("customer_id") ?? undefined,
     policy_id: searchParams.get("policy_id") ?? undefined,
     channel: searchParams.getAll("channel"),
+    // B10 y B13: los dos filtros nuevos del panel; el sondeo los reenvía porque están en PARAMS_DE_FILTRO.
+    vencimiento: searchParams.getAll("vencimiento"),
+    complejidad: searchParams.getAll("complejidad"),
     is_claim: searchParams.get("is_claim") ?? undefined,
     para_responder: searchParams.get("para_responder") ?? undefined,
     cola: searchParams.get("cola") ?? undefined,

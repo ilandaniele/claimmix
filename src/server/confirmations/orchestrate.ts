@@ -35,7 +35,7 @@ import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
-import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
+import { enTenant, enTenantVarias, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { firstRow, policyNumberEquals } from "@/lib/db/helpers";
 import {
   auditLog,
@@ -55,6 +55,11 @@ import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
+import {
+  ajusteDeVencimiento,
+  efectosDeTransicion,
+  type CriteriosDeTrabajo,
+} from "@/server/cases/efectos-de-transicion";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 import { deliberate } from "@/server/ai/deliberate";
 import {
@@ -225,7 +230,14 @@ export async function orchestratePostExtraction(
    * decision tree grew up; WhatsApp passes its own so the two channels share
    * the reasoning instead of each keeping a copy that drifts.
    */
-  messengerPedido: AgentMessenger = emailMessenger
+  messengerPedido: AgentMessenger = emailMessenger,
+  /**
+   * Lo que el equipo configuró para repartir, plazar y armar el plan del caso.
+   *
+   * Va aparte y nunca dentro de lo extraído: es un criterio de trabajo del
+   * equipo, y nada de lo que se arma acá lo lee el asegurado ni el redactor.
+   */
+  trabajo?: CriteriosDeTrabajo
 ): Promise<void> {
   const { extractedClaim, senderEmail, inReplyToMessageId, latestMessageText, heredadaEn } =
     extractedOutput;
@@ -285,6 +297,7 @@ export async function orchestratePostExtraction(
     await escalate({
       caseId,
       tenantId,
+      trabajo,
       senderEmail,
       latestMessageText,
       inReplyToMessageId,
@@ -630,6 +643,7 @@ export async function orchestratePostExtraction(
     await escalate({
       caseId,
       tenantId,
+      trabajo,
       senderEmail,
       latestMessageText,
       inReplyToMessageId,
@@ -786,6 +800,7 @@ export async function orchestratePostExtraction(
     await escalate({
       caseId,
       tenantId,
+      trabajo,
       senderEmail,
       latestMessageText,
       inReplyToMessageId,
@@ -990,7 +1005,7 @@ export async function orchestratePostExtraction(
     // The branches that do send a question set their own status above, so
     // reaching here means the conversation is finished as far as we are
     // concerned.
-    await setStatus(caseId, tenantId, "listo_para_core");
+    await setStatus(caseId, tenantId, "listo_para_core", trabajo);
   }
 
   if (acknowledgeOnly && !confirmationEmailDispatched && !missingInfoEmailDispatched) {
@@ -1552,6 +1567,8 @@ async function inicialesDelTitularAjeno(
 async function escalate(opts: {
   caseId: string;
   tenantId: string;
+  /** Con qué criterios del equipo se autoasigna al traspasar. */
+  trabajo?: CriteriosDeTrabajo;
   senderEmail: string;
   latestMessageText?: string;
   inReplyToMessageId?: string;
@@ -1596,7 +1613,7 @@ async function escalate(opts: {
 }): Promise<void> {
   const { caseId, tenantId, severity } = opts;
 
-  if (!(await setStatus(caseId, tenantId, "requiere_especialista"))) {
+  if (!(await setStatus(caseId, tenantId, "requiere_especialista", opts.trabajo))) {
     // Otra mano ya movió el caso: ni el mensaje al asegurado, ni la auditoría,
     // ni el aviso al especialista corresponden a un traspaso que no ocurrió.
     logger.warn({ case_id: caseId, reason: opts.reason }, "escalation.skipped_case_moved");
@@ -1837,26 +1854,52 @@ const ESTADOS_QUE_PISA_EL_AGENTE = [...ESTADOS_DE_ARRANQUE, "listo"] as const;
  * ninguna fila y no se pisa nada. Devuelve si se aplicó, para que quien llama
  * decida si lo que sigue (el mensaje, la auditoría) todavía corresponde.
  */
-async function setStatus(
+export async function setStatus(
   caseId: string,
   tenantId: string,
-  status: CaseRow["status"]
+  status: CaseRow["status"],
+  trabajo?: CriteriosDeTrabajo
 ): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
-  try {
-    const filas = await enTenant(tenantCtx, (db) =>
-      db
-        .update(cases)
-        .set({ status, updated_at: new Date().toISOString() })
-        .where(
-          and(
-            eq(cases.id, caseId),
-            or(inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE), eq(cases.status, status))
-          )
+  const cambiarEstado = (db: ClienteDatos, ajuste: ReturnType<typeof ajusteDeVencimiento> = {}) => {
+    return db
+      .update(cases)
+      .set({ status, updated_at: new Date().toISOString(), ...ajuste })
+      .where(
+        and(
+          eq(cases.id, caseId),
+          or(inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE), eq(cases.status, status))
         )
-        .returning({ id: cases.id })
-    );
+      )
+      .returning({ id: cases.id });
+  };
+  try {
+    let filas: { id: string }[] | null = null;
+    if (trabajo) {
+      /*
+       * El estado, el vencimiento, la asignación y el plan salen en un mismo
+       * lote: si algo de lo del equipo falla —una migración sin aplicar, un
+       * dato roto— no se pierde el cambio de estado, que es lo que el agente
+       * necesita para seguir. El lote es atómico, así que al fallar no quedó
+       * nada a medias y el UPDATE de siempre corre limpio.
+       */
+      try {
+        [filas] = await enTenantVarias<[{ id: string }[]]>(tenantCtx, (db) => [
+          cambiarEstado(db, ajusteDeVencimiento(status, trabajo)),
+          ...efectosDeTransicion(db, {
+            caseId,
+            hacia: status,
+            origen: "agente",
+            actorId: null,
+            criterios: trabajo,
+          }),
+        ]);
+      } catch (err) {
+        logger.warn({ code: errorCode(err), case_id: caseId, status }, "orchestrate.efectos_fallaron");
+      }
+    }
+    filas ??= await enTenant(tenantCtx, (db) => cambiarEstado(db));
     if (filas.length === 0) {
       logger.warn({ case_id: caseId, status }, "orchestrate.status_not_applied");
       return false;

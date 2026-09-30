@@ -37,6 +37,14 @@ vi.mock("@/server/cases/auditoria-si-quedo", async () => {
   return { auditoriaSiQuedo: vi.fn(actual.auditoriaSiQuedo) };
 });
 
+// Lo que sale del estado hacia el equipo (vencimiento, plan) se prueba con SQL
+// de verdad en tests/unit/server/cases/patch-efectos.test.ts; acá el `db` es
+// un mock sin `execute`.
+vi.mock("@/server/cases/efectos-de-transicion", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/cases/efectos-de-transicion")>()),
+  efectosDeTransicion: vi.fn().mockReturnValue([]),
+}));
+
 vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 
 vi.mock("@/lib/db", () => ({
@@ -559,7 +567,7 @@ describe("patchCase — confirmar_listo (P6)", () => {
 
     await patchCase("case-1", { confirmar_listo: true }, adminActor, "anonymous", null);
 
-    const columnas = vi.mocked(db.select).mock.calls.find((c) => c.length > 0)?.[0] as Record<
+    const columnas = vi.mocked(db.select).mock.calls.find((c) => c[0] && "ip" in c[0])?.[0] as unknown as Record<
       string,
       { sql: unknown }
     >;
@@ -855,12 +863,32 @@ describe("patchCase — salidas a mano", () => {
     const code = "23514";
     const caso = { ...listoCase, status: "listo_para_core" };
     setupConfirmMocks([caso], []);
-    enTenantVariasMock.mockRejectedValueOnce({ code });
+    // Falla también el reintento sin lo del equipo.
+    enTenantVariasMock.mockRejectedValueOnce({ code }).mockRejectedValueOnce({ code });
 
     await expect(
       patchCase("case-1", { status: "en_liquidacion" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "INTERNAL_ERROR" }));
     expect(logger.error).toHaveBeenCalledWith({ code }, "patch.cambio_con_auditoria_fallo");
+  });
+
+  it("si el batch con lo del equipo falla, reintenta sólo con el estado y su auditoría y avisa", async () => {
+    const caso = { ...listoCase, status: "listo_para_core" };
+    setupConfirmMocks([caso], [{ ...caso, status: "en_liquidacion" }]);
+    enTenantVariasMock.mockRejectedValueOnce({ code: "42703" });
+
+    const result = await patchCase("case-1", { status: "en_liquidacion" }, adminActor, null, null);
+
+    expect(result.case.status).toBe("en_liquidacion");
+    expect(enTenantVarias).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith(
+      { code: "42703", case_id: "case-1", status: "en_liquidacion" },
+      "patch.efectos_fallaron"
+    );
+    expect(logger.error).not.toHaveBeenCalled();
+    // El reintento no toca el vencimiento: el set es el de siempre.
+    expect(db.update).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(db.update).mock.results[0]!.value.set.mock.calls[0][0]).not.toHaveProperty("vence_en");
   });
 
   it("si el update no devuelve filas, «El caso cambió mientras lo mirabas»", async () => {

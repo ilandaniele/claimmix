@@ -19,12 +19,13 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
 
   // ── Agenda (G39) ───────────────────────────────────────────────────────────
   "agenda.title": "Agenda",
-  "agenda.subtitle": "What's due: WhatsApp windows and conversations to close.",
+  "agenda.subtitle": "What's due: WhatsApp windows, conversations to close and case deadlines.",
   "agenda.empty": "Nothing due right now.",
   "agenda.hoy": "Today",
   "agenda.manana": "Tomorrow",
   "agenda.tipo.ventanaWhatsapp": "WhatsApp window",
   "agenda.tipo.cierreAbandono": "Abandonment closure",
+  "agenda.tipo.plazo": "Case deadline",
 
   // ── Case detail ────────────────────────────────────────────────────────────
   "case.detail.back": "Back to inbox",
@@ -414,4 +415,17 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "condiciones.leidas": "Read on {fecha}",
   "condiciones.sinLeer": "Uploaded, not read",
   "condiciones.sinSubir": "No conditions uploaded",
+  // B10, B11: vencimiento, denuncia y plan de trabajo en la ficha, sólo para el equipo.
+  "caso.vencimiento": "Deadline",
+  "caso.complejidad": "Complexity",
+  "caso.denuncia": "Report",
+  "planDeTrabajo.titulo": "Work plan",
+  "trabajo.paso.revisar_documentacion": "Review the documentation received",
+  "trabajo.paso.verificar_cobertura": "Check coverage and that the policy is in force",
+  "trabajo.paso.revisar_presupuesto": "Review the repair shop's estimate",
+  "trabajo.paso.definir_responsabilidad": "Determine liability",
+  "trabajo.paso.verificar_denuncia_policial": "Verify the police report",
+  "trabajo.paso.pedir_certificado_medico": "Request the medical certificate",
+  "trabajo.paso.entregar_a_aseguradora": "Hand the case over to the insurer",
+  "trabajo.paso.confirmar_pago": "Confirm the payment to the insured",
 } as const;

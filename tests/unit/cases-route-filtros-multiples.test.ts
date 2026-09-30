@@ -103,6 +103,35 @@ describe("GET /api/cases — filtros multi-select", () => {
     );
   });
 
+  it("plazo y complejidad llegan a la consulta como arrays (B10, B13)", async () => {
+    const res = await GET(makeRequest("?vencimiento=vencidos&vencimiento=por_vencer&complejidad=alta"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCases).toHaveBeenCalledWith(
+      { tenantId: TENANT_ID },
+      expect.objectContaining({ vencimiento: ["vencidos", "por_vencer"], complejidad: ["alta"] }),
+      USER_ID
+    );
+  });
+
+  it.each(["vencimiento=mañana", "complejidad=altisima", "sort=puntaje"])("%s da 400", async (qs) => {
+    const res = await GET(makeRequest(`?${qs}`));
+
+    expect(res.status).toBe(400);
+    expect(mockListCases).not.toHaveBeenCalled();
+  });
+
+  it.each(["puntaje_complejidad", "vence_en"])("ordenar por %s llega a la consulta", async (sort) => {
+    const res = await GET(makeRequest(`?sort=${sort}&order=asc`));
+
+    expect(res.status).toBe(200);
+    expect(mockListCases).toHaveBeenCalledWith(
+      { tenantId: TENANT_ID },
+      expect.objectContaining({ sort, order: "asc" }),
+      USER_ID
+    );
+  });
+
   it("«Para responder» llega a la consulta", async () => {
     const res = await GET(makeRequest("?para_responder=true"));
 

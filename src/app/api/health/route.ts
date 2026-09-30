@@ -282,6 +282,8 @@ async function checkSchema(): Promise<Check> {
       "case_plan_pasos",
       "asistente_turnos",
       "case_desvios",
+      // 0045: borrar un caso encola acá en el mismo lote; sin la tabla no se borra nada.
+      "adjuntos_por_purgar",
     ];
     const tablesPresent = new Set(rows.map((r) => r.table_name));
     const missingTables = requiredTables.filter((t) => !tablesPresent.has(t));

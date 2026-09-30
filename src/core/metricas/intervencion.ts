@@ -127,6 +127,15 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "customer.updated": false,
   "policy.created": false,
   "policy.updated": false,
+
+  // SSO y borrados programados: configuración y mantenimiento, no gestión de un caso.
+  "sso.configurado": false,
+  "sso.dominio_verificado": false,
+  "sso.exigido": false,
+  "sso.ingreso_jit": false,
+  "sso.rechazado": false,
+  "adjuntos.purgados": false,
+  "retencion.aplicada": false,
 };
 
 /**

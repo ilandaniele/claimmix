@@ -22,6 +22,7 @@
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 
+import { signInSso } from "./actions";
 import { SignInForm } from "./SignInForm";
 
 export const metadata = {
@@ -42,6 +43,20 @@ export const ERRORES: Record<string, string> = {
     "Google nos devolvió, pero no pudimos completar el ingreso. Entrá con tu contraseña y escribinos si sigue pasando.",
   account_not_linked:
     "Ese correo ya tiene una cuenta con contraseña. Entrá con tu contraseña y, una vez adentro, vinculá Google desde Configuración — después el botón te va a funcionar.",
+  /*
+   * Better Auth lo manda cuando el gancho `user.create.before` niega el alta por
+   * Google: el correo no está habilitado o su dominio exige el SSO. Un mismo texto
+   * para los dos, sin decir cuál, y sin mandar a la contraseña a quien no tiene una.
+   */
+  unable_to_create_user:
+    "No pudimos crear una cuenta con ese correo. Si tu empresa usa SSO, entrá con «Entrar con el SSO de mi empresa»; si no, escribinos y lo vemos.",
+  // Del SSO de la empresa (B19): el texto dice qué hacer, no por qué falló por dentro.
+  sso_requerido:
+    "Tu empresa pide entrar con su SSO. Usá «Entrar con el SSO de mi empresa» e ingresá tu correo de la empresa.",
+  sso_otro_inquilino:
+    "Ese correo ya pertenece a otra cuenta de ClaimMix, así que no pudimos darte acceso por acá. Escribinos si creés que es un error.",
+  sso_fallo:
+    "No pudimos completar el ingreso con el SSO de tu empresa. Revisá que el correo sea el de la empresa y probá de nuevo en un rato, o entrá con tu contraseña.",
 };
 
 /**
@@ -120,6 +135,40 @@ export default async function LoginPage({
           )}
 
           <SignInForm />
+
+          {/*
+            El SSO de la empresa (B19). Un <details> y un formulario del servidor:
+            no suma JavaScript a la pantalla de entrada. El dominio del correo
+            decide a qué proveedor se va; si no hay SSO para ese dominio, vuelve
+            acá con el mismo aviso que cualquier otro fallo.
+          */}
+          <details className="mt-3">
+            <summary className="cursor-pointer rounded-full border border-slate-300 px-4 py-2.5 text-center text-sm font-semibold text-slate-800 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/25 dark:border-slate-600">
+              Entrar con el SSO de mi empresa
+            </summary>
+            <form action={signInSso} className="mt-3 space-y-3">
+              <div>
+                <label htmlFor="sso-email" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Correo de tu empresa
+                </label>
+                <input
+                  id="sso-email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/15 dark:border-slate-600 dark:placeholder-slate-500"
+                  placeholder="analista@aseguradora.com"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full rounded-full bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/30"
+              >
+                Continuar con el SSO
+              </button>
+            </form>
+          </details>
         </div>
 
         {/*

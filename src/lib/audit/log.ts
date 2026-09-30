@@ -564,6 +564,45 @@ export const AuditEvent = {
   CLIENTE_CAMBIO: "customer.updated",
   POLIZA_ALTA: "policy.created",
   POLIZA_CAMBIO: "policy.updated",
+
+  /**
+   * SSO_CONFIGURADO: un admin guardó el IdP de su aseguradora (B19).
+   * Payload: { campos, secreto_cambiado } — los nombres de lo que cambió, nunca
+   * el secreto ni el cifrado.
+   */
+  SSO_CONFIGURADO: "sso.configurado",
+  /** SSO_DOMINIO_VERIFICADO: el TXT `_claimmix.<dominio>` apareció. Payload: { dominio }. */
+  SSO_DOMINIO_VERIFICADO: "sso.dominio_verificado",
+  /**
+   * SSO_EXIGIDO: se prendió o se apagó «exigir SSO», o se prendió o apagó el
+   * SSO. Payload: { activo, exigir, sesiones_cerradas }.
+   */
+  SSO_EXIGIDO: "sso.exigido",
+  /**
+   * SSO_INGRESO_JIT: alguien entró por SSO por primera vez y se le creó la
+   * cuenta como viewer. Payload: {} — ni mail ni reclamos del IdP.
+   */
+  SSO_INGRESO_JIT: "sso.ingreso_jit",
+  /**
+   * SSO_RECHAZADO: el IdP devolvió a alguien y no se lo dejó entrar. Payload:
+   * { motivo } — un código, nunca el token, el mail ni los reclamos.
+   */
+  SSO_RECHAZADO: "sso.rechazado",
+
+  /**
+   * ADJUNTOS_PURGADOS: la purga diferida borró de R2 los adjuntos de un caso
+   * que ya no existe (B19). Va sin actor, sólo al borrar de verdad (el modo
+   * simular no deja rastro). Payload: { purgados, fallidos } — sólo conteos,
+   * sin paths.
+   */
+  ADJUNTOS_PURGADOS: "adjuntos.purgados",
+  /**
+   * RETENCION_APLICADA: la retención borró casos cerrados hace más de N años
+   * (B19). Va sin actor, una por inquilino, sólo al borrar de verdad (el modo
+   * simular no deja rastro). Payload: { anios, corte, candidatos, borrados } —
+   * sólo conteos y la fecha de corte.
+   */
+  RETENCION_APLICADA: "retencion.aplicada",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

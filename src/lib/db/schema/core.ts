@@ -495,6 +495,27 @@ export const formularioWeb = pgTable("formulario_web", {
 });
 
 /**
+ * El IdP OIDC de la empresa de cada inquilino (0045). El secreto va cifrado y no
+ * sale de acá en claro; el dominio sólo vale con `dominio_verificado_en`.
+ */
+export const ssoSettings = pgTable("sso_settings", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  issuer: text("issuer"),
+  client_id: text("client_id"),
+  client_secret_cifrado: text("client_secret_cifrado"),
+  dominio: text("dominio"),
+  dominio_verificado_en: timestamp("dominio_verificado_en", { withTimezone: true, mode: "string" }),
+  activo: boolean("activo").notNull().default(false),
+  exigir: boolean("exigir").notNull().default(false),
+  creado_en: timestamp("creado_en", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  actualizado_en: timestamp("actualizado_en", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
+
+/**
  * Tipos de siniestro propios de un inquilino (0044): nombre en las dos lenguas y
  * los documentos y datos que pide. La clave puede ser la de un ramo del código:
  * la fila entonces sólo le cambia los documentos (gana la fila) y se guarda sin

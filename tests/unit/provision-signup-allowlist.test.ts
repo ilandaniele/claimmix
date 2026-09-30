@@ -25,6 +25,7 @@ vi.mock("@/lib/db", () => ({
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { provisionUserProfile } from "@/lib/auth/provision";
+import { enIngresoPorSso } from "@/lib/auth/registro-permitido";
 import { db } from "@/lib/db";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -165,6 +166,92 @@ describe("provisionUserProfile — signup allowlist", () => {
     const values = mockInsert();
 
     await provisionUserProfile({ id: "u7", name: "Ya", email: "ya@aseguradora.com" });
+
+    expect(values).not.toHaveBeenCalled();
+  });
+});
+
+describe("provisionUserProfile — alta por el SSO de un inquilino", () => {
+  const env = { ...process.env };
+  const T_SSO = "20000000-0000-4000-8000-000000000002";
+  const ingreso = { tenantId: T_SSO, dominio: "empresa.com" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.GOOGLE_DEFAULT_TENANT_ID = TENANT;
+    delete process.env.ADMIN_EMAILS;
+    delete process.env.SIGNUP_ALLOWED_EMAILS;
+    mockNoExistingProfile();
+  });
+
+  afterEach(() => {
+    process.env = { ...env };
+  });
+
+  it("crea un viewer en el inquilino del state, no en el de omisión", async () => {
+    const values = mockInsert();
+
+    await enIngresoPorSso(ingreso, () =>
+      provisionUserProfile({ id: "u1", name: "Ana", email: "ana@empresa.com", emailVerified: true })
+    );
+
+    expect(values).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "u1", tenant_id: T_SSO, role: "viewer", full_name: "Ana" })
+    );
+  });
+
+  it("nunca admin, aunque el mail esté en ADMIN_EMAILS", async () => {
+    process.env.ADMIN_EMAILS = "ana@empresa.com";
+    const values = mockInsert();
+
+    await enIngresoPorSso(ingreso, () =>
+      provisionUserProfile({ id: "u1", name: "Ana", email: "ana@empresa.com", emailVerified: true })
+    );
+
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ role: "viewer", tenant_id: T_SSO }));
+  });
+
+  it("sin el mail verificado no hay perfil", async () => {
+    const values = mockInsert();
+
+    await enIngresoPorSso(ingreso, () =>
+      provisionUserProfile({ id: "u1", name: "Ana", email: "ana@empresa.com", emailVerified: false })
+    );
+
+    expect(values).not.toHaveBeenCalled();
+  });
+
+  it("un mail de otro dominio no recibe perfil, aunque esté en la allowlist de siempre", async () => {
+    process.env.SIGNUP_ALLOWED_EMAILS = "@otra.com";
+    const values = mockInsert();
+
+    await enIngresoPorSso(ingreso, () =>
+      provisionUserProfile({ id: "u1", name: "Eva", email: "eva@otra.com", emailVerified: true })
+    );
+
+    expect(values).not.toHaveBeenCalled();
+  });
+
+  it("si el perfil ya existe no toca nada", async () => {
+    (db.select as ReturnType<typeof vi.fn>).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ id: "u1" }]) }),
+      }),
+    });
+    const values = mockInsert();
+
+    await enIngresoPorSso(ingreso, () =>
+      provisionUserProfile({ id: "u1", name: "Ana", email: "ana@empresa.com", emailVerified: true })
+    );
+
+    expect(values).not.toHaveBeenCalled();
+  });
+
+  it("fuera del SSO, el mismo mail sigue sujeto a la allowlist", async () => {
+    const values = mockInsert();
+
+    await provisionUserProfile({ id: "u1", name: "Ana", email: "ana@empresa.com", emailVerified: true });
 
     expect(values).not.toHaveBeenCalled();
   });

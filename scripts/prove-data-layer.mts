@@ -9,7 +9,9 @@
  * `enTenantVarias`— y no con SQL escrito para la ocasión. Una prueba que no pasa
  * por el mismo camino que el código no prueba el código.
  *
- * Necesita DATABASE_URL_APP y dos inquilinos con datos. Sólo lee.
+ * Necesita DATABASE_URL_APP y dos inquilinos con datos. Sólo lee, salvo la
+ * sección 5, que escribe y borra un caso marcador y por eso corre sólo en CI
+ * (contra el ensayo) o con `--escribe`: nunca a ciegas con el `.env.local`.
  */
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
@@ -27,6 +29,7 @@ import {
   ESTADOS_ESCALADO,
 } from "@/core/case/fsm";
 import { contarCasos, buscarCaso } from "@/server/asistente/herramientas";
+import { deleteCases } from "@/server/cases/delete";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 
@@ -342,6 +345,59 @@ if (conDatos.length < 2) {
     } finally {
       await limpieza.end();
     }
+  }
+}
+
+// ── 5. Borrar el caso del inquilino de al lado ─────────────────────────────
+//
+// `deleteCases` es el único camino que borra casos y encola sus adjuntos de R2
+// para la purga diferida (B19). Si un admin de B pudiera borrar, o encolar, lo de
+// A, la pared de la capa estaría rota justo donde el daño no tiene vuelta.
+//
+// Se siembra un caso marcador en A con el rol dueño —sin adjuntos: nunca se usa
+// un caso real— y se intenta borrar desde el contexto de B. Tiene que devolver
+// `[]`, el marcador tiene que seguir ahí y la cola no puede tener una fila de ese
+// caso. La limpieza corre siempre. Escribe, así que sólo corre en CI (ensayo) o
+// con `--escribe`: con el `.env.local` de un desarrollador el dueño es producción.
+console.log("\n▸ Borrar el caso del inquilino de al lado");
+if (conDatos.length < 2) {
+  console.log("     (hace falta un segundo inquilino: se saltea)");
+} else if (process.env.CI !== "true" && !process.argv.includes("--escribe")) {
+  console.log("     (escribe un caso marcador: sólo corre en CI o con --escribe contra el ensayo)");
+} else {
+  const otro = conDatos[1];
+  const marca = `PRUEBA-BORRADO-${a.id.slice(0, 8)}`;
+  const dueno = new Pool({ connectionString: process.env.DATABASE_URL?.trim() });
+  try {
+    const { rows } = await dueno.query(
+      `INSERT INTO cases (tenant_id, policy_number, status, channel)
+       VALUES ($1, $2, 'recibido', 'email_sim') RETURNING id::text AS id`,
+      [a.id, marca]
+    );
+    const marcador: string = rows[0].id;
+
+    const borrados = await deleteCases(ctxDe(otro), [marcador], {
+      id: "00000000-0000-0000-0000-000000000000",
+      role: "admin",
+    });
+    const sigue = await dueno.query(`SELECT 1 FROM cases WHERE id = $1`, [marcador]);
+    const encolados = await dueno.query(`SELECT 1 FROM adjuntos_por_purgar WHERE case_id = $1`, [marcador]);
+
+    if (borrados.length > 0 || sigue.rowCount !== 1) {
+      mal(`un admin de "${otro.name}" pudo borrar el caso de "${a.name}"`);
+      problemas.push("deleteCases borra casos de otro inquilino");
+    } else {
+      bien(`desde "${otro.name}", borrar el caso de "${a.name}" devuelve [] y el caso sigue ahí`);
+    }
+    if (encolados.rowCount !== 0) {
+      mal(`el intento dejó ${encolados.rowCount} fila(s) en la cola de purga de adjuntos`);
+      problemas.push("deleteCases encola adjuntos de otro inquilino");
+    } else {
+      bien("y no deja nada en la cola de purga de adjuntos");
+    }
+  } finally {
+    await dueno.query(`DELETE FROM cases WHERE policy_number = $1 AND tenant_id = $2`, [marca, a.id]);
+    await dueno.end();
   }
 }
 

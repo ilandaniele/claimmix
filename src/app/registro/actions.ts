@@ -36,6 +36,7 @@ import {
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { SignUpSchema } from "@/lib/schemas/auth";
 import { logger } from "@/lib/observability/logger";
+import { altaBloqueadaPorSso } from "@/server/sso/exigir";
 
 type SignUpState = {
   error?: string;
@@ -104,8 +105,11 @@ export async function signUp(
    *
    * Así que las dos cosas terminan en el aviso neutro. Quien tenga que entrar
    * y no pueda, habla con un admin — que es el mismo camino que ya tenía.
+   *
+   * Un dominio con «Exigir SSO» va al mismo aviso: no se autorregistra con
+   * contraseña, y distinguirlo diría qué aseguradoras usan la plataforma.
    */
-  if (!puedeRegistrarse(email, permitidosConfigurados())) {
+  if (!puedeRegistrarse(email, permitidosConfigurados()) || (await altaBloqueadaPorSso(email, tenantId))) {
     redirect("/login?aviso=usa_tu_cuenta");
   }
 

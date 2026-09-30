@@ -727,6 +727,41 @@ El resto de B5 vive en `pnpm verify`, sin red ni base:
 `pnpm pentest` suma sondas sin credenciales: `/api/v1` con Bearer basura y con
 una clave forjada, y `/api/admin/core-sync` sin sesión.
 
+#### Seguridad demostrable: SSO, purga de adjuntos y retención (B19)
+
+Todo corre en `pnpm verify`, sin red, sin base real y sin gastar tokens. **Con la
+migración 0045 sin aplicar**, `pnpm check` completo queda rojo (`/api/health` da
+degradado por `adjuntos_por_purgar`) y `pnpm tenancy`, `pnpm permisos` y
+`pnpm capa-datos` no se pueden correr: la aplica el dueño a mano en las tres
+bases antes del check.
+
+| test | qué cubre |
+| --- | --- |
+| `tests/unit/migracion-0045.test.ts` | RLS `FORCE` y política de `sso_settings` y `adjuntos_por_purgar`, los permisos de `claimmix_app` (sólo leer e insertar en la cola), los CHECKs y el índice parcial del dominio, leídos del SQL |
+| `tests/unit/core/sso.test.ts`, `tests/unit/sso-dominio.test.ts` | el dominio: coincidencia exacta, sin subdominios ni proveedores abiertos, y el token del TXT |
+| `tests/unit/sso-inquilino.test.ts`, `sso-inquilino-flujo.test.ts`, `sso-ingreso.test.ts` | el plugin: el arranque, el callback (firma, `iss`, `aud`, `nonce`, dominio), el alta por primer ingreso , que quien ya estaba en el inquilino (mail local sin verificar, admin incluido) entre por su id y siga entrando sólo por SSO con «exigir», y que una rechazada sin `errorCallbackURL` vuelva a `/login` con su código |
+| `tests/unit/sso-exigir.test.ts`, `tests/unit/login-sso-requerido.test.ts` | «exigir»: corta contraseña y Google para el dominio, no niega el alta de un admin ni el cambio de contraseña, niega el alta abierta antes de crear la cuenta, y el login manda a `/login?error=sso_requerido` sin contar un fallo de credenciales |
+| `tests/unit/https-fijado.test.ts` | la llamada al IdP: IP fijada, tope de tamaño y de tiempo, sin cuerpo si no es 2xx |
+| `tests/integration/admin/sso.test.ts` | `/api/admin/sso` entera, con el IdP, el DNS y el cierre de sesiones simulados. El secreto nunca vuelve en una respuesta. El `CASE` del PUT (issuer, dominio y `client_id`) y el `EXISTS` del PATCH (la cuenta SSO del propio admin) se verifican sólo dibujando el SQL: se confirman en QA después de la 0045 |
+| `tests/unit/sso-panel*.test.ts*`, `sso-acciones.test.ts`, `configuracion-sso-pagina.test.tsx` | el panel de /configuracion y las acciones del servidor |
+| `tests/unit/cases-bulk-delete.test.ts`, `borrar-deja-rastro.test.ts` | borrar un caso anota los adjuntos en la cola en el mismo lote, y deja rastro en la auditoría |
+| `tests/unit/purgar-adjuntos.test.ts` | la purga: gracia, `purgar_despues` nulo = cancelada, de a 50, idempotente, el error queda como texto fijo, manda la fila más nueva por objeto y una purga lograda cierra las viejas |
+| `tests/unit/core/retencion.test.ts`, `tests/unit/server/retencion.test.ts` | los modos, la fecha de corte, el tope por inquilino, el `DELETE` que vuelve a comprobar `closed_at` y que no se toquen clientes, pólizas ni la auditoría |
+| `tests/unit/server/api/cron-reap-stuck-route.test.ts` | la purga y la retención corren sólo dentro de la hora 04 UTC y UNA vez por día (cupo de 24 h, que fuera de la ventana no se gasta), una no frena a la otra ni al barrido del limitador |
+
+**El IdP falso.** No hay un IdP real en ninguna capa de ensayo. `tests/integration/admin/sso.test.ts`
+simula el descubrimiento OIDC, la verificación del TXT y el cierre de sesiones, y
+lo que prueba es la ruta, no la red. El flujo completo contra Entra ID, Okta o
+Google Workspace de una aseguradora lo prueba el piloto.
+
+`pnpm pentest` suma `attackSso` (las rutas del plugin y `/api/admin/sso` sin
+sesión, y la respuesta uniforme para un dominio desconocido; la sonda del
+dominio privado se saltea con `--solo-superficie` porque necesita la base) y tres
+sondas de `cualesBorra` en la pared entre inquilinos. No escribe ni abre sesiones:
+en producción es de sólo lectura. La sección 5 de `scripts/prove-data-layer.mts`
+(borrar el caso del inquilino de al lado) sí escribe, y por eso sólo corre en CI
+o con `--escribe`.
+
 ---
 
 ## Cuándo correr qué

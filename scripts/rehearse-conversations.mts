@@ -1242,6 +1242,21 @@ async function extraccionPendiente(caseId: string): Promise<boolean> {
   return row?.pending === true;
 }
 
+/**
+ * Tras un timeout el worker deja el archivo esperando una hora (`plazoAgotado`),
+ * y la retoma de producción, dos minutos después, lo saltea igual. La del ensayo
+ * tiene que leerlo: con la espera puesta, un timeout sobre la nota de voz o el
+ * PDF los dejaba afuera de la retoma y el escenario cerraba con «1 adjunto(s)
+ * leído(s), esperaba 2» por una caída de Vertex. Si el modelo vuelve a fallar,
+ * la retoma vuelve a marcarlos y el rojo sigue siendo rojo.
+ */
+async function levantarPlazos(caseId: string): Promise<void> {
+  await db
+    .update(claimAttachments)
+    .set({ metadatos: sql`${claimAttachments.metadatos} - 'plazoAgotado'` })
+    .where(and(eq(claimAttachments.case_id, caseId), eq(claimAttachments.tenant_id, TENANT_ID!)));
+}
+
 /** Lo que salió, y qué claves pidió. La misma consulta, una columna más. */
 async function repliesSince(
   caseId: string,
@@ -1467,6 +1482,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
       let said = await repliesSince(active, seen);
       if (said.length === 0 && turn.expect?.replies !== 0 && (await extraccionPendiente(active))) {
         console.log("       ⟳ el modelo no llegó en treinta segundos; se retoma el caso una vez");
+        await levantarPlazos(active);
         await runIntakeAgent({ caseId: active, tenantId: TENANT_ID!, userId: null, source: "worker" });
         said = await repliesSince(active, seen);
       }

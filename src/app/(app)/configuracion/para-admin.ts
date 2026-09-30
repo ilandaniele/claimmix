@@ -8,6 +8,7 @@ import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { esFaltaDe0036, vistaDeLaConfig, type VistaDeLaConfig } from "@/server/core-sync/config";
 import { listaDelTenant } from "@/server/notify/specialist-alert";
+import { panelSso, type PanelSso } from "@/server/sso/panel";
 
 export interface ParaAdmin {
   alertas: string[];
@@ -65,5 +66,19 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
     if (esFaltaDe0036(e)) return { alertas: await listaDelTenant(tenantId), core: null, migracionPendiente: true };
     logger.error({ code: errorCode(e) }, "configuracion.admin_no_se_leyo");
     return { alertas: await listaDelTenant(tenantId), migracionPendiente: false };
+  }
+}
+
+/**
+ * El SSO del admin, aparte del lote de arriba: sin la 0045 esa lectura falla, y
+ * no puede llevarse puestos los montos y la entrega al core que sí se leen.
+ * Nunca rechaza; `null` es que no se pudo leer y la sección no se muestra.
+ */
+export async function ssoParaAdmin(tenantId: string): Promise<PanelSso | null> {
+  try {
+    return await panelSso(tenantId);
+  } catch (e) {
+    logger.error({ code: errorCode(e) }, "configuracion.sso_no_se_leyo");
+    return null;
   }
 }

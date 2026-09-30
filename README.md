@@ -78,6 +78,8 @@ Optional seed data lives in `neon/seed.sql`.
 | `PUBSUB_SERVICE_ACCOUNT` | push | Service account of our push subscription; the token's `email` must match it. Required wherever `PUBSUB_AUDIENCE` is set |
 | `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_BUCKET` | attachments | S3-compatible storage |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | no | Observability |
+| `RETENCION_MODO` / `RETENCION_ANIOS` | no | Retention of closed cases. Off by default (`apagado`); `simular` only counts, `borrar` deletes cases closed more than `RETENCION_ANIOS` years ago (1 to 30, default 5). Runs in the `reap-stuck` cron, 04 UTC window only |
+| `PURGA_ADJUNTOS_MODO` / `PURGA_GRACIA_DIAS` | no | Deferred deletion of R2 attachments of deleted cases. Off by default; `PURGA_GRACIA_DIAS` is the grace period (7 to 365, default 30) |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | no | Rate limiting backend when `RATE_LIMIT_PROVIDER=upstash`; default backend is Postgres |
 
 ## Agent Console
@@ -100,6 +102,7 @@ Gemini is the agent provider, behind a validated claim-output contract. The work
 - Mutations re-check role authorization server-side.
 - Audit events are written for training, provider, field, and model deployment changes.
 - Raw email content is never logged to stdout.
+- Per-tenant OIDC SSO, deferred purge of deleted cases' R2 attachments and an opt-in 5-year retention sweep (both off by default). What is and is not covered, including the open debts, is in [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
 
 ## Tests
 

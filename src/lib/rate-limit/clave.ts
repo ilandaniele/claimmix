@@ -13,6 +13,7 @@ export type AmbitoDeCupo =
   | "auth:in"
   | "auth:up"
   | "auth:reset"
+  | "auth:sso"
   | "auth:ip"
   | "demo-public"
   | "denuncia-web"
@@ -29,7 +30,8 @@ export type AmbitoDeCupo =
   | "lectura-presupuesto"
   | "lectura-reclamo"
   | "asistente-caso"
-  | "revision-de-desvios";
+  | "revision-de-desvios"
+  | "purga-y-retencion";
 
 export function claveDeCupo(ambito: AmbitoDeCupo, ...partes: string[]): string {
   return [ambito, ...partes.map((p) => p.trim().toLowerCase())].join(":");

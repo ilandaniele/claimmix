@@ -209,9 +209,11 @@ export async function abrirAdjunto(
  * belongs to a claim file and deleting one is a decision for a person with a
  * retention policy, not for code reacting to a message.
  *
- * It exists for the health check, which proves the bucket really works by
- * writing to it — and would otherwise leave a scrap of test data behind on
- * every run, forever.
+ * Two callers, and only those: the health check, which proves the bucket really
+ * works by writing to it — and would otherwise leave a scrap of test data behind
+ * on every run — and the deferred purge (`purgar-adjuntos.ts`), which deletes
+ * the objects of cases that were already deleted, after a grace period and from
+ * a queue, never at the moment a person deletes a case.
  */
 export async function deleteAttachment(storagePath: string): Promise<boolean> {
   try {

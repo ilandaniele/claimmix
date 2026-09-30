@@ -130,6 +130,15 @@ export const RATE_LIMIT_CONFIGS = {
   SYNC_TO_CORE: { limit: 5, windowMs: 60_000 },
 
   /**
+   * SSO_ADMIN: 10 por minuto por usuario, para /api/admin/sso (B19).
+   *
+   * Verificar el dominio consulta un DNS y guardar la config pide el documento
+   * del IdP a una URL que escribe quien llama: el techo evita que el panel
+   * sirva de trampolín para pedidos salientes.
+   */
+  SSO_ADMIN: { limit: 10, windowMs: 60_000 },
+
+  /**
    * CORE_API: 120 por minuto por IP, para /api/v1 (B5).
    *
    * Lo pide el sistema de la aseguradora, no una persona: sondea y pagina. Con
@@ -226,6 +235,16 @@ export const RATE_LIMIT_CONFIGS = {
    * después de las 21 h de Argentina.
    */
   REVISION_DE_DESVIOS: { limit: 1, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * PURGA_Y_RETENCION: una purga de adjuntos y una retención (B19) por día, para
+   * todo el sistema. `reap-stuck` se llama cada quince minutos y la ventana de las
+   * 04 UTC todavía deja pasar unas cinco corridas: sin este cupo, los cinco intentos
+   * de la purga se gastan en esa hora y una corrida encimada cuenta dos veces el
+   * mismo fallo. Se pide sólo dentro de la ventana, así que la ventana fija de 24 h
+   * la consume la primera llamada de las 04 UTC.
+   */
+  PURGA_Y_RETENCION: { limit: 1, windowMs: 24 * 60 * 60_000 },
 
   /**
    * PADRON_IMPORTAR: 30 importaciones o vistas previas del padrón por hora y por

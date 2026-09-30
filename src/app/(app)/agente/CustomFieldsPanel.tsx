@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 type CustomField = {
   id: string;
@@ -30,7 +30,7 @@ const FIELD_TYPES = ["text", "number", "date", "boolean", "enum", "email", "phon
  * abajo, con caida al valor crudo: `claim_type` es `text` y un tipo que el
  * producto todavia no conozca tiene que verse, no desaparecer.
  */
-const TIPO_SINIESTRO: Record<string, TranslationKey> = {
+const TIPO_SINIESTRO: Record<string, ClaveDelCliente> = {
   "": "type.todos",
   choque: "type.choque",
   robo: "type.robo",

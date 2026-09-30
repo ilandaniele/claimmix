@@ -14,7 +14,7 @@ import { CaseDetailClient } from "../../src/app/(app)/casos/[id]/CaseDetailClien
 import { AuditTimeline } from "../../src/app/(app)/casos/[id]/components/AuditTimeline";
 import { EscalateDialog } from "../../src/app/(app)/casos/[id]/components/EscalateDialog";
 import { LocaleProvider } from "../../src/lib/i18n/LocaleContext";
-import { esAR } from "../../src/lib/i18n/es-AR";
+import { esAR } from "../../src/lib/i18n/index";
 import type { CaseRow } from "../../src/server/cases/list";
 import { SIN_ACCIONES } from "../../src/server/cases/acciones";
 

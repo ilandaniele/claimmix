@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Play, CheckCircle, AlertCircle } from "lucide-react";
 import type { ClaimType } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 /*
  * Los tipos son los MISMOS `type.*` que usan los filtros de la bandeja, no una
@@ -14,7 +14,7 @@ import type { TranslationKey } from "@/lib/i18n";
  * La lista se arma al cargar el modulo, cuando todavia no hay locale ni hook,
  * asi que la etiqueta es una CLAVE y se traduce en el `map` de abajo.
  */
-const CLAIM_TYPES: { value: ClaimType | ""; clave: TranslationKey }[] = [
+const CLAIM_TYPES: { value: ClaimType | ""; clave: ClaveDelCliente }[] = [
   { value: "", clave: "lote.aleatorio" },
   { value: "choque", clave: "type.choque" },
   { value: "robo", clave: "type.robo" },

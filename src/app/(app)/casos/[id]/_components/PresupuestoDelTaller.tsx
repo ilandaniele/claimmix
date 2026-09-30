@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 
 import { esMotivoSinLeer } from "@/core/ai/sin-leer";
 import type { LecturaGuardada } from "@/core/case/presupuesto-taller";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { formatArs } from "@/lib/utils";
 
@@ -28,7 +28,7 @@ export function PresupuestoDelTaller({ caseId, attachmentId, inicial, puedeLeer 
   const router = useRouter();
   const [lectura, setLectura] = useState(inicial);
   const [estado, setEstado] = useState<"idle" | "leyendo">("idle");
-  const [aviso, setAviso] = useState<TranslationKey | null>(null);
+  const [aviso, setAviso] = useState<ClaveDelCliente | null>(null);
 
   async function leer() {
     setEstado("leyendo");

@@ -1,6 +1,6 @@
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
-const MOTIVOS = new Map<string, TranslationKey>([
+const MOTIVOS = new Map<string, ClaveDelCliente>([
   ["timeout", "core.motivo.timeout"],
   ["red", "core.motivo.red"],
   ["destino_rechazado", "core.motivo.destino_rechazado"],
@@ -12,7 +12,7 @@ const MOTIVOS = new Map<string, TranslationKey>([
  * `motivo` de la prueba). Un código desconocido, como los que dejó el
  * simulador viejo, no se muestra crudo.
  */
-export function textoDelMotivo(t: (clave: TranslationKey) => string, motivo: string | null | undefined): string {
+export function textoDelMotivo(t: (clave: ClaveDelCliente) => string, motivo: string | null | undefined): string {
   const clave = MOTIVOS.get(motivo ?? "");
   if (clave) return t(clave);
   const http = /^http_(\d{3})$/.exec(motivo ?? "");

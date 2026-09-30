@@ -15,7 +15,7 @@
 "use client";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 const ESTILO_FRAUDE: Record<string, string> = {
   high: "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-100",
@@ -23,7 +23,7 @@ const ESTILO_FRAUDE: Record<string, string> = {
   low: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/60 dark:text-yellow-100",
 };
 
-const TEXTO_FRAUDE: Record<string, TranslationKey> = {
+const TEXTO_FRAUDE: Record<string, ClaveDelCliente> = {
   high: "riesgo.fraude.high",
   medium: "riesgo.fraude.medium",
   low: "riesgo.fraude.low",
@@ -49,7 +49,7 @@ const ESTILO_LESIONES: Record<string, string> = {
   none: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
 };
 
-const TEXTO_LESIONES: Record<string, TranslationKey> = {
+const TEXTO_LESIONES: Record<string, ClaveDelCliente> = {
   fatal: "riesgo.lesiones.fatal",
   severe: "riesgo.lesiones.severe",
   minor: "riesgo.lesiones.minor",

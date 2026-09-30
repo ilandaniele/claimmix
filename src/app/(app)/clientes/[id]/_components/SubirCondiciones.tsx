@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { esMotivoSinLeer } from "@/core/ai/sin-leer";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 interface Props {
@@ -24,7 +24,7 @@ export function SubirCondiciones({ policyId, subido }: Props) {
   const t = useT();
   const router = useRouter();
   const [subiendo, setSubiendo] = useState(false);
-  const [aviso, setAviso] = useState<{ clave: TranslationKey; detalle?: string } | null>(null);
+  const [aviso, setAviso] = useState<{ clave: ClaveDelCliente; detalle?: string } | null>(null);
 
   async function subir(archivo: File) {
     setSubiendo(true);

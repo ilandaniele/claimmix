@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 interface PromptRule {
   id: string;
@@ -31,7 +31,7 @@ type PanelState = "loading" | "ready" | "error";
  * `rule_type` es `text` en la base, no un enum, asi que un tipo que no este
  * aca se muestra crudo antes que dejar el lugar vacio.
  */
-const RULE_TYPE_LABELS: Record<string, TranslationKey> = {
+const RULE_TYPE_LABELS: Record<string, ClaveDelCliente> = {
   extraction: "reglas.tipo.extraction",
   classification: "reglas.tipo.classification",
   severity: "reglas.tipo.severity",

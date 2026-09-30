@@ -1,7 +1,7 @@
 "use client";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 import { estadoDelDocumento, type EstadoDelDocumento } from "@/core/case/required-docs";
@@ -81,7 +81,7 @@ function DocGroup({
 }: {
   docs: MissingDoc[];
   statusLabels: Record<EstadoDelDocumento, string>;
-  t: (key: TranslationKey) => string;
+  t: (key: ClaveDelCliente) => string;
 }) {
   return (
     <ul className="space-y-2" aria-label="Lista de documentación requerida" role="list">

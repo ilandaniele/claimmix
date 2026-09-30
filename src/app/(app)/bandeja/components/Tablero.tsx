@@ -7,7 +7,7 @@ import { formatCaseNumber } from "@/core/case/numero";
 import { SeverityBadge } from "./SeverityBadge";
 import { Vacio } from "./Vacio";
 import type { CaseRow } from "@/server/cases/list";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 /**
@@ -15,7 +15,7 @@ import { useT } from "@/lib/i18n/LocaleContext";
  * ya usa el chip de estado del panel de filtros (`grupos-de-filtro.ts`). No
  * hace falta una traducción nueva por columna.
  */
-const ETIQUETA_DE_COLUMNA: Record<ClaveDeEstado, TranslationKey> = {
+const ETIQUETA_DE_COLUMNA: Record<ClaveDeEstado, ClaveDelCliente> = {
   procesando: "tabs.procesando",
   esperando: "tabs.esperando",
   confirmacion_pendiente: "status.confirmacion_pendiente",

@@ -24,7 +24,7 @@ import { TomarElControlDialog } from "./components/TomarElControlDialog";
 import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
 import { ClaseDelTardio } from "@/app/(app)/bandeja/components/ClaseDelTardio";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
@@ -47,7 +47,7 @@ interface CaseDetailClientProps {
   puedeDevolverAlAgente: boolean;
 }
 
-type Aviso = [TranslationKey, "success" | "info"];
+type Aviso = [ClaveDelCliente, "success" | "info"];
 
 export function CaseDetailClient({
   caseId,
@@ -84,7 +84,7 @@ export function CaseDetailClient({
     url: string,
     init: RequestInit,
     aviso: (res: Response) => Aviso | Promise<Aviso>,
-    errores: Partial<Record<number, TranslationKey>> = {}
+    errores: Partial<Record<number, ClaveDelCliente>> = {}
   ) {
     setOcupado(true);
     try {

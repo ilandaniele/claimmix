@@ -14,12 +14,23 @@
  *   <h1>{t('nav.bandeja')}</h1>
  *
  * Backwards-compatible: t(key) still works and defaults to es-AR.
+ *
+ * Este módulo junta los dos diccionarios (cliente y servidor) y es sólo para
+ * código de servidor: si un componente de cliente lo importa, el navegador se
+ * baja también los textos que nunca pinta. Los de cliente usan LocaleContext.
  */
 
-import { esAR, type TranslationKey } from "./es-AR";
-import { enUS } from "./en-US";
+import { esAR as esARCliente, type ClaveDelCliente } from "./es-AR";
+import { esARServidor, type ClaveDelServidor } from "./es-AR.servidor";
+import { enUS as enUSCliente } from "./en-US";
+import { enUSServidor } from "./en-US.servidor";
 
 export type Locale = "es-AR" | "en-US";
+
+export type TranslationKey = ClaveDelCliente | ClaveDelServidor;
+
+const esAR = { ...esARCliente, ...esARServidor };
+const enUS = { ...enUSCliente, ...enUSServidor };
 
 const TRANSLATIONS: Record<Locale, Record<TranslationKey, string>> = {
   "es-AR": esAR,
@@ -38,4 +49,4 @@ export function getT(locale: Locale): (key: TranslationKey) => string {
 }
 
 // Re-export for consumers that need the raw maps or types.
-export { esAR, enUS, type TranslationKey };
+export { esAR, enUS, type ClaveDelCliente, type ClaveDelServidor };

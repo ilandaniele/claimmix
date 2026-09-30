@@ -34,6 +34,10 @@ const PREFIJOS_EXCLUIDOS = [
   "padron.",
   "customer.",
   "policy.",
+  // Del SSO, la retención y la purga de adjuntos (B19): son del inquilino o de sistema, no de un caso.
+  "sso.",
+  "retencion.",
+  "adjuntos.",
 ];
 const VALORES_EXCLUIDOS = new Set([
   "agent.memory_config_exported",

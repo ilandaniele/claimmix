@@ -42,8 +42,16 @@ import { join } from "node:path";
  * los casos de todos los inquilinos y acepta acotarse a uno cuando lo llama el
  * `after()` de un webhook, que sí sabe de quién es el mensaje. Misma forma
  * exacta que `reapStuckProcessingCases`, que es el diez.
+ *
+ * El doce y el trece son de «Exigir SSO» (`src/server/sso/usuarios.ts`) y no
+ * tienen cómo ir por `enTenant`: `dominioExigeSso` corre en el gancho de sesión,
+ * antes de que haya inquilino, y compara el inquilino del perfil con el de la
+ * configuración en una sola consulta; `cerrarSesionesDelDominio` borra sesiones,
+ * que no son de un inquilino, de las cuentas de ese inquilino. Sin ese filtro
+ * «exigir» de una aseguradora tocaba a las cuentas de otra con un mail del mismo
+ * dominio. `correoExigeSso`, que sí conoce el inquilino, va por `enTenant`.
  */
-const TOPE_FILTROS = 11;
+const TOPE_FILTROS = 13;
 
 function archivos(dir, ext = [".ts", ".tsx"]) {
   if (!existsSync(dir)) return [];

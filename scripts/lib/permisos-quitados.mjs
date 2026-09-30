@@ -18,6 +18,8 @@
  *   los lee, así que una falla de la app no puede inventarlos ni tapar uno.
  * - formulario_web (0044): apagar el formulario es un UPDATE de `activo`; borrar
  *   la fila liberaría el enlace público sin rastro para que otro lo tome.
+ * - adjuntos_por_purgar (0045): la app sólo encola; la cola no se reescribe ni se
+ *   vacía desde ahí, y cancelar una purga es un UPDATE que hace el dueño.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
@@ -27,4 +29,5 @@ export const PERMISOS_QUITADOS = {
   asistente_turnos: ["UPDATE", "DELETE"],
   case_desvios: ["INSERT", "UPDATE", "DELETE"],
   formulario_web: ["DELETE"],
+  adjuntos_por_purgar: ["UPDATE", "DELETE"],
 };

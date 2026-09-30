@@ -23,6 +23,9 @@ import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
 import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
 import { revisarDesvios } from "@/server/desvios/revision-nocturna";
+import { aplicarRetencion, type ResultadoRetencion } from "@/server/cases/retencion";
+import { purgarAdjuntos, type ResultadoPurga } from "@/server/storage/purgar-adjuntos";
+import { ventanaDiaria } from "@/core/retencion";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
@@ -117,6 +120,40 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // La purga de adjuntos y la retención (B19) son UNA por día. La ruta la llama
+  // GitHub cada quince minutos y Vercel a las 04:07, así que la ventana de las 04
+  // UTC sola deja pasar cinco corridas en esa hora: los cinco intentos de la purga se
+  // gastarían de una vez y dos corridas encimadas contarían el mismo fallo dos veces.
+  // El cupo de 24 h deja pasar sólo a la primera de la ventana, y se pide DENTRO de
+  // ella para que la llamada de las 00 UTC no lo gaste. Las dos nacen apagadas y van
+  // detrás de todo lo demás, con el mismo minuto de margen. Primero la purga y después
+  // la retención: lo que la retención borra hoy queda encolado para la purga de dentro
+  // de la gracia. Si una falla, la otra corre.
+  let purga: ResultadoPurga | null = null;
+  let retencion: ResultadoRetencion | null = null;
+  if (ventanaDiaria(new Date()) && Date.now() < hasta - 60_000) {
+    let cupoDelDia = false;
+    try {
+      const cupo = await rateLimit(claveDeCupo("purga-y-retencion"), RATE_LIMIT_CONFIGS.PURGA_Y_RETENCION);
+      cupoDelDia = cupo.allowed;
+    } catch (err) {
+      // Ante la duda no se borra: lo que hoy no entra, entra mañana.
+      logger.error({ code: errorCode(err) }, "cron_reap_stuck.cupo_de_borrado_fallo");
+    }
+    if (cupoDelDia) {
+      try {
+        purga = await purgarAdjuntos({ hasta: hasta - 60_000 });
+      } catch (err) {
+        logger.error({ code: errorCode(err) }, "cron_reap_stuck.purga_de_adjuntos_fallo");
+      }
+      try {
+        retencion = await aplicarRetencion({ hasta: hasta - 60_000 });
+      } catch (err) {
+        logger.error({ code: errorCode(err) }, "cron_reap_stuck.retencion_fallo");
+      }
+    }
+  }
+
   // Third sweep, same reason: the rate limiter writes a row per key per window
   // and none of them mean anything once the window has passed.
   const { purgeExpiredRateLimits } = await import("@/lib/rate-limit/postgres");
@@ -131,6 +168,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     recordatorios_salteados: recordatorios.salteados,
     avisos_de_cierre: avisosDeCierre,
     desvios_nuevos: desviosNuevos,
+    purga,
+    retencion,
     rate_limit_rows_purged: purged,
   });
 }

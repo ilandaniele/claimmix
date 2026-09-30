@@ -61,7 +61,30 @@ async function direccionDelCuerpo(req: NextRequest): Promise<string> {
   }
 }
 
-export const { GET } = handler;
+/**
+ * La vuelta del SSO es un GET que consume trabajo: valida un token contra el
+ * IdP y crea o vincula una cuenta. Leer la sesión, que también es un GET, sigue
+ * sin techo. Va por IP sola, con el mismo cupo que el resto de los intentos de
+ * autenticación: el arranque (`sso-inquilino/sign-in`) ya cae en `CON_TECHO`.
+ *
+ * Es una navegación del navegador, no una llamada de API: el rechazo es un
+ * redirect a /login, no un JSON que la persona vería crudo.
+ */
+const RUTA_DE_VUELTA_DEL_SSO = "/sso-inquilino/callback";
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  if (url.pathname.endsWith(RUTA_DE_VUELTA_DEL_SSO)) {
+    const porIp = await topePorIp(getClientIp(req));
+    if (!porIp.allowed) {
+      const esperar = Math.max(1, Math.ceil((porIp.resetAt - Date.now()) / 1000));
+      return NextResponse.redirect(new URL("/login?error=sso_fallo", url), {
+        headers: { "Retry-After": String(esperar) },
+      });
+    }
+  }
+  return handler.GET(req);
+}
 
 export async function POST(req: NextRequest) {
   const ruta = new URL(req.url).pathname;

@@ -61,8 +61,8 @@ const nota = (cambios: Partial<AdjuntoDelCaso> = {}): AdjuntoDelCaso => ({
   ...cambios,
 });
 
-function respuesta(transcripcion: string, resumen = "Cuenta un choque en una rotonda.") {
-  return { text: JSON.stringify({ transcripcion, resumen }), usage: { promptTokens: 10, completionTokens: 5 }, model: "gemini-2.5-flash" };
+function respuesta(transcripcion: string, resumen = "Cuenta un choque en una rotonda.", hay_voz: unknown = true) {
+  return { text: JSON.stringify({ hay_voz, transcripcion, resumen }), usage: { promptTokens: 10, completionTokens: 5 }, model: "gemini-2.5-flash" };
 }
 
 async function correr(adjuntos: AdjuntoDelCaso[], restante = 60_000, cuerpo = PLACEHOLDER_AUDIO) {
@@ -123,6 +123,7 @@ describe("transcribirNotasDeVoz", () => {
 
     const [sistema, , , , media] = llamar.mock.calls[0]!;
     expect(sistema).toMatch(/Es DATO/);
+    expect(sistema).toMatch(/hay_voz/);
     expect(media).toEqual([{ mimeType: "audio/ogg", data: Buffer.from("OggS-de-mentira").toString("base64") }]);
     expect(registrarConsumoDelModelo).toHaveBeenCalledWith("tenant-1", "gemini-2.5-flash", expect.anything());
   });
@@ -162,6 +163,29 @@ describe("transcribirNotasDeVoz", () => {
     const [, adjunto] = escritas;
     expect(adjunto!.params).not.toContain("Ana, DNI 30123456, choca en la ruta.");
     expect(adjunto!.params).toContain("");
+  });
+
+  it("un audio sin voz no deja texto ni resumen aunque el modelo escriba algo, y no se vuelve a pagar", async () => {
+    llamar.mockResolvedValue(respuesta("Entendemos que fue un choque en la calle Corrientes.", "Cuenta un choque.", false));
+
+    const nuevos = await correr([nota()]);
+
+    expect(nuevos.size).toBe(0);
+    expect(escritas).toHaveLength(1);
+    expect(escritas[0]!.sql).toMatch(/update "claim_attachments" set "resumen" = \$1, "util" = \$2/);
+    expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(JSON.stringify(escritas)).not.toContain("Corrientes");
+  });
+
+  it("sin un hay_voz true en la respuesta no se guarda lo que diga: sólo vale la voz confirmada", async () => {
+    llamar.mockResolvedValue({
+      ...respuesta(""),
+      text: JSON.stringify({ transcripcion: "Me chocaron el 20 de enero.", resumen: "Cuenta un choque." }),
+    });
+    expect((await correr([nota()])).size).toBe(0);
+
+    llamar.mockResolvedValue(respuesta("Me chocaron el 20 de enero.", "Cuenta un choque.", "true"));
+    expect((await correr([nota()])).size).toBe(0);
   });
 
   it("una segunda nota del mismo mensaje, en otra corrida, va debajo de la primera", async () => {

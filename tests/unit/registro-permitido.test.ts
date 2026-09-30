@@ -15,7 +15,9 @@ import {
   parsearPermitidos,
   puedeRegistrarse,
   enAltaDeAdmin,
+  enIngresoPorSso,
   esAltaDeAdmin,
+  ingresoPorSso,
   altaHabilitada,
 } from "@/lib/auth/registro-permitido";
 
@@ -186,5 +188,58 @@ describe("altaHabilitada", () => {
     process.env.ADMIN_EMAILS = "quien.opera@claimmix.com";
     expect(altaHabilitada("quien.opera@claimmix.com")).toBe(true);
     expect(altaHabilitada("otro@claimmix.com")).toBe(false);
+  });
+});
+
+describe("altaHabilitada dentro de un ingreso por SSO", () => {
+  const T = "11111111-1111-4111-8111-111111111111";
+  const ingreso = { tenantId: T, dominio: "empresa.com" };
+
+  it("el dominio verificado del inquilino hace de allowlist, sin variable alguna", async () => {
+    delete process.env.SIGNUP_ALLOWED_EMAILS;
+    await enIngresoPorSso(ingreso, async () => {
+      expect(altaHabilitada("quien.sea@empresa.com")).toBe(true);
+      expect(altaHabilitada("Quien.Sea@EMPRESA.com")).toBe(true);
+    });
+  });
+
+  it("otro dominio, un subdominio o un dominio que termina igual no entran", async () => {
+    process.env.SIGNUP_ALLOWED_EMAILS = "@otra.com";
+    await enIngresoPorSso(ingreso, async () => {
+      for (const mal of ["x@otra.com", "x@sub.empresa.com", "x@malaempresa.com", "x@empresa.com@malicioso.com"]) {
+        expect(altaHabilitada(mal)).toBe(false);
+      }
+    });
+  });
+
+  it("no se escapa del pedido: después, el mismo mail vuelve a pedir la lista", async () => {
+    delete process.env.SIGNUP_ALLOWED_EMAILS;
+    await enIngresoPorSso(ingreso, async () => {
+      expect(ingresoPorSso()).toEqual(ingreso);
+    });
+    expect(ingresoPorSso()).toBeUndefined();
+    expect(altaHabilitada("quien.sea@empresa.com")).toBe(false);
+  });
+
+  it("no es una alta de admin", async () => {
+    await enIngresoPorSso(ingreso, async () => {
+      expect(esAltaDeAdmin()).toBe(false);
+    });
+  });
+
+  it("dos ingresos de inquilinos distintos a la vez no se contaminan", async () => {
+    delete process.env.SIGNUP_ALLOWED_EMAILS;
+    const visto: string[] = [];
+    await Promise.all([
+      enIngresoPorSso({ tenantId: "a", dominio: "uno.com" }, async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        visto.push(`a:${ingresoPorSso()?.tenantId}:${altaHabilitada("x@uno.com")}:${altaHabilitada("x@dos.com")}`);
+      }),
+      enIngresoPorSso({ tenantId: "b", dominio: "dos.com" }, async () => {
+        await new Promise((r) => setTimeout(r, 1));
+        visto.push(`b:${ingresoPorSso()?.tenantId}:${altaHabilitada("x@dos.com")}:${altaHabilitada("x@uno.com")}`);
+      }),
+    ]);
+    expect(visto.sort()).toEqual(["a:a:true:false", "b:b:true:false"]);
   });
 });

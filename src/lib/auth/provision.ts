@@ -1,4 +1,5 @@
 import {
+  ingresoPorSso,
   permitidosConfigurados,
   puedeRegistrarse,
 } from "./registro-permitido";
@@ -6,6 +7,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
+import { dominioDelMail } from "@/core/sso";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { enTenant } from "@/data/scope";
@@ -131,6 +133,26 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     .where(eq(users.id, user.id))
     .limit(1);
   if (existing.length > 0) return;
+
+  /*
+   * Alta por el SSO de un inquilino: entra al inquilino del `state`, como
+   * `viewer`, y nunca como admin aunque el mail esté en ADMIN_EMAILS. Quien
+   * necesite más rol lo recibe de un admin desde /admin/users. Sin el dominio
+   * verificado por el IdP no hay perfil, que es la forma segura de negarse.
+   */
+  const sso = ingresoPorSso();
+  if (sso) {
+    if (!user.emailVerified || dominioDelMail(user.email) !== sso.dominio) return;
+    await enTenant({ tenantId: sso.tenantId }, (db) =>
+      db.insert(users).values({
+        id: user.id,
+        tenant_id: sso.tenantId,
+        full_name: user.name || user.email,
+        role: "viewer",
+      })
+    );
+    return;
+  }
 
   if (!isSignupAllowed(user.email, user.emailVerified)) {
     // No profile row → no tenant → no access to any claim. The Better Auth

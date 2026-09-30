@@ -107,6 +107,8 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "formulario_web", column_name: "tenant_id" },
     { table_name: "tenant_claim_types", column_name: "tenant_id" },
     { table_name: "cases", column_name: "canal_web" },
+    // 0045.
+    { table_name: "adjuntos_por_purgar", column_name: "id" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -253,6 +255,27 @@ describe("GET /api/health — what it reports", () => {
       expect(schema.status, falta[0]).toBe("degraded");
       expect(schema.detail).toContain("migración 0044 pendiente");
     }
+  });
+
+  it("sin la cola de purga (0045) cae, porque borrar un caso dejaría de andar; sso_settings no cuenta", async () => {
+    const schemaCon = async (...falta: string[]) => {
+      mockExecute.mockImplementation((q: unknown) =>
+        Promise.resolve(
+          JSON.stringify(q).includes("ai_usage")
+            ? { rows: [{ total: 0 }] }
+            : { rows: esquemaSin(...falta) }
+        )
+      );
+      const body = await (await GET(request(`Bearer ${SECRET}`))).json();
+      return body.checks.find((c: { name: string }) => c.name === "migraciones");
+    };
+
+    const sinCola = await schemaCon("adjuntos_por_purgar");
+    expect(sinCola.status).toBe("down");
+    expect(sinCola.detail).toContain("adjuntos_por_purgar");
+
+    // El SSO tolera la tabla ausente (queda apagado) y el esquema no la pide.
+    expect((await schemaCon("sso_settings")).status).toBe("ok");
   });
 
   it("nota que falta lo comercial, no sólo lo del camino caliente", async () => {

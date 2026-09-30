@@ -17,6 +17,7 @@
  * que atacan es el que tenga el número más alto.
  */
 
+import { NextRequest } from "next/server";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockRateLimit } = vi.hoisted(() => ({ mockRateLimit: vi.fn() }));
@@ -125,5 +126,65 @@ describe("clientIpFromHeaders", () => {
   it("sin ninguna cabecera devuelve algo, no undefined", () => {
     // Va a parar a una clave de cupo: un undefined la rompería.
     expect(clientIpFromHeaders(new Headers())).toBe("anonymous");
+  });
+});
+
+describe("GET /api/auth/sso-inquilino/callback", () => {
+  /*
+   * La vuelta del SSO valida un token y crea o vincula cuentas: es un GET que
+   * trabaja, así que lleva el techo por IP. Leer la sesión, otro GET, no.
+   */
+  async function cargarRuta(topePorIpSimulado: ReturnType<typeof vi.fn>, handlerGet: ReturnType<typeof vi.fn>) {
+    vi.resetModules();
+    vi.doMock("better-auth/next-js", () => ({
+      toNextJsHandler: () => ({ GET: handlerGet, POST: vi.fn() }),
+    }));
+    vi.doMock("@/lib/auth", () => ({ auth: {} }));
+    vi.doMock("@/lib/rate-limit/index", async (original) => ({
+      ...(await original<typeof import("@/lib/rate-limit/index")>()),
+      topePorIp: topePorIpSimulado,
+    }));
+    return import("@/app/api/auth/[...all]/route");
+  }
+
+  const pedido = (ruta: string) =>
+    new NextRequest(`http://x/api/auth/${ruta}`, { headers: { "x-vercel-forwarded-for": "1.2.3.4" } });
+
+  it("con cupo, pasa a Better Auth", async () => {
+    const tope = vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: 0 });
+    const get = vi.fn().mockResolvedValue(new Response("ok"));
+    const { GET } = await cargarRuta(tope, get);
+
+    const res = await GET(pedido("sso-inquilino/callback?code=c&state=s"));
+
+    expect(tope).toHaveBeenCalledWith("1.2.3.4");
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(await res.text()).toBe("ok");
+  });
+
+  it("sin cupo, vuelve a /login sin tocar Better Auth y dice cuánto esperar", async () => {
+    const tope = vi.fn().mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 20_000 });
+    const get = vi.fn();
+    const { GET } = await cargarRuta(tope, get);
+
+    const res = await GET(pedido("sso-inquilino/callback?code=c&state=s"));
+
+    expect(get).not.toHaveBeenCalled();
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname + new URL(res.headers.get("location")!).search).toBe(
+      "/login?error=sso_fallo"
+    );
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+  });
+
+  it("leer la sesión no consume cupo", async () => {
+    const tope = vi.fn();
+    const get = vi.fn().mockResolvedValue(new Response("{}"));
+    const { GET } = await cargarRuta(tope, get);
+
+    await GET(pedido("get-session"));
+
+    expect(tope).not.toHaveBeenCalled();
+    expect(get).toHaveBeenCalledTimes(1);
   });
 });

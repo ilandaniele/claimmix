@@ -46,14 +46,16 @@ export function esFaltaDe0036(e: unknown): boolean {
   return codigo === "42P01" || codigo === "42703";
 }
 
+/** El aviso de que falta aplicar una migración a mano: el texto, escrito una sola vez. */
+export const migracionPendiente = (...migraciones: string[]) =>
+  new AppError("MIGRACION_PENDIENTE", `Falta aplicar la migración ${migraciones.join(" o ")}.`);
+
 const pendienteSi =
   (codigos: readonly string[]) =>
   (...migraciones: string[]) =>
   (e: unknown): never => {
     const codigo = codigoPg(e);
-    if (codigo !== undefined && codigos.includes(codigo)) {
-      throw new AppError("MIGRACION_PENDIENTE", `Falta aplicar la migración ${migraciones.join(" o ")}.`);
-    }
+    if (codigo !== undefined && codigos.includes(codigo)) throw migracionPendiente(...migraciones);
     throw e;
   };
 

@@ -25,15 +25,59 @@
 
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 
-import { enTenant, type TenantContext } from "@/data/scope";
+import { leerGracia } from "@/core/retencion";
+import { ESTADOS_CERRADOS } from "@/core/case/fsm";
+import { enTenantVarias, type TenantContext } from "@/data/scope";
 import type { UserRow } from "@/lib/db/types";
-import { cases } from "@/lib/db/schema";
+import { adjuntosPorPurgar, cases, claimAttachments } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
-/** Quién borra: el id para la auditoría, el rol para saber qué le toca. */
-export type ActorDelBorrado = Pick<UserRow, "id" | "role">;
+/**
+ * Quién borra: el id para la auditoría, el rol para saber qué le toca.
+ *
+ * `retencion` es el barrido de los cinco años: no es una persona, no tiene id ni
+ * «lo suyo», y su alcance lo fija `antesDe` y no un rol.
+ */
+export type ActorDelBorrado =
+  | Pick<UserRow, "id" | "role">
+  | { id: null; role: "retencion" };
+
+type Opciones = {
+  /** Sólo lo cerrado antes de esta fecha. Lo pone la retención, nunca una persona. */
+  antesDe?: Date;
+};
+
+/**
+ * La condición de qué casos se borran, en UN solo lugar.
+ *
+ * La usan las dos sentencias del lote —la que encola los adjuntos y la que
+ * borra—, y tienen que coincidir al caso: si una se armara con una condición y
+ * la otra con otra parecida, la cola recibiría adjuntos de casos que siguen
+ * vivos o dejaría afuera los de los que se borraron.
+ *
+ * Con `antesDe` el estado y la fecha de cierre se revalidan en el propio DELETE:
+ * un caso que se reabrió entre que la retención lo listó y ahora (P8) ya no
+ * coincide y no se borra.
+ */
+export function cualesBorra(ids: string[], actor: ActorDelBorrado, { antesDe }: Opciones = {}) {
+  return and(
+    inArray(cases.id, ids),
+    actor.role === "analyst" ? eq(cases.assigned_to, actor.id) : undefined,
+    antesDe ? cerradoAntesDe(antesDe) : undefined
+  );
+}
+
+/**
+ * Qué es un caso vencido para la retención: en un estado cerrado y con `closed_at`
+ * anterior al corte. La usan el listado de la retención y el DELETE, que tiene que
+ * volver a comprobarlo: si difirieran, se listaría lo que el borrado no toca o al
+ * revés.
+ */
+export function cerradoAntesDe(corte: Date) {
+  return and(inArray(cases.status, [...ESTADOS_CERRADOS]), lt(cases.closed_at, corte.toISOString()));
+}
 
 /**
  * Borra los casos indicados que pertenezcan al inquilino del contexto.
@@ -56,6 +100,18 @@ export type ActorDelBorrado = Pick<UserRow, "id" | "role">;
  * cualquier caso del inquilino, igual que editan cualquiera. `viewer` no llega:
  * lo frena la ruta.
  *
+ * ── Los adjuntos de R2 ──────────────────────────────────────────────────────
+ *
+ * El borrado anota los `storage_path` de los adjuntos del caso en
+ * `adjuntos_por_purgar`, en la misma transacción, y la purga diferida los borra
+ * de R2 pasada la gracia (`PURGA_GRACIA_DIAS`). Un adjunto que otro caso todavía
+ * usa no se borra: la purga lo comprueba al momento de purgar.
+ *
+ * La cola sólo se agrega, sin ON CONFLICT: si el objeto ya estaba anotado por
+ * otro caso que lo compartía, entra otra fila y la purga obedece a la más nueva.
+ * Ignorar el choque dejaba mandar a una fila vieja, cancelada o ya vencida, y el
+ * rol de la aplicación no puede actualizarla para renovarla.
+ *
  * @returns los ids efectivamente borrados. Un id que no existe —o que es de
  *   otra aseguradora, o de otro analista— no aparece, y eso no es un error: es
  *   la respuesta.
@@ -63,19 +119,48 @@ export type ActorDelBorrado = Pick<UserRow, "id" | "role">;
 export async function deleteCases(
   ctx: TenantContext,
   ids: string[],
-  actor: ActorDelBorrado
+  actor: ActorDelBorrado,
+  opciones: Opciones = {}
 ): Promise<string[]> {
   if (ids.length === 0) return [];
 
-  const soloLoSuyo =
-    actor.role === "analyst" ? eq(cases.assigned_to, actor.id) : undefined;
+  const cuales = cualesBorra(ids, actor, opciones);
+  const dias = leerGracia(process.env);
 
-  const borrados = await enTenant<Array<{ id: string }>>(ctx, (db) =>
-    db
-      .delete(cases)
-      .where(and(inArray(cases.id, ids), soloLoSuyo))
-      .returning({ id: cases.id })
-  );
+  /*
+   * Un solo lote, y el orden importa: primero se anotan los adjuntos y después
+   * se borra el caso, porque el borrado los arrastra por cascada y ya no habría
+   * de dónde leerlos. Es una transacción: si el DELETE falla, la cola no recibe
+   * nada, y si sale bien, recibe justo los adjuntos de lo que se borró.
+   *
+   * Los objetos de R2 NO se borran acá. Se anotan con una gracia (`purgar_despues`)
+   * y los borra la purga diferida, que puede cortarse, reintentarse y dejar
+   * rastro; y mientras tanto un borrado por error todavía se puede recuperar
+   * con un punto en el tiempo de la base sin quedarse con los archivos perdidos.
+   */
+  const [, borrados] = await enTenantVarias<
+    [unknown, Array<{ id: string }>]
+  >(ctx, (db) => [
+    db.insert(adjuntosPorPurgar)
+      .select((qb) =>
+        qb
+          .selectDistinctOn([claimAttachments.storage_path], {
+            id: sql<string>`gen_random_uuid()`.as("id"),
+            tenant_id: cases.tenant_id,
+            case_id: cases.id,
+            storage_path: sql<string>`${claimAttachments.storage_path}`.as("storage_path"),
+            encolado_en: sql<string>`now()`.as("encolado_en"),
+            purgar_despues: sql<string>`now() + make_interval(days => ${dias})`.as("purgar_despues"),
+            purgado_en: sql<string | null>`null::timestamptz`.as("purgado_en"),
+            intentos: sql<number>`0::smallint`.as("intentos"),
+            ultimo_error: sql<string | null>`null::text`.as("ultimo_error"),
+          })
+          .from(claimAttachments)
+          .innerJoin(cases, eq(cases.id, claimAttachments.case_id))
+          .where(and(isNotNull(claimAttachments.storage_path), cuales))
+      ),
+    db.delete(cases).where(cuales).returning({ id: cases.id }),
+  ]);
 
   /*
    * Que quede quién borró qué.
@@ -98,7 +183,10 @@ export async function deleteCases(
       event_type: AuditEvent.CASE_DELETED,
       target_type: "case",
       target_id: id,
-      payload: { borrados_en_la_tanda: borrados.length },
+      payload: {
+        borrados_en_la_tanda: borrados.length,
+        ...(actor.role === "retencion" ? { por_retencion: true } : {}),
+      },
     });
   }
 

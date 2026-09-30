@@ -22,12 +22,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockSignUpEmail, mockWriteAuditLog, mockRateLimit, mockTopePorIp } = vi.hoisted(
+const { mockSignUpEmail, mockWriteAuditLog, mockRateLimit, mockTopePorIp, mockAltaBloqueadaPorSso } = vi.hoisted(
   () => ({
     mockSignUpEmail: vi.fn(),
     mockWriteAuditLog: vi.fn(),
     mockRateLimit: vi.fn(),
     mockTopePorIp: vi.fn(),
+    mockAltaBloqueadaPorSso: vi.fn(),
   })
 );
 
@@ -53,6 +54,9 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/auth", () => ({
   auth: { api: { signUpEmail: mockSignUpEmail } },
 }));
+
+// La consulta a la base de «¿este dominio exige SSO?» es de otra prueba (sso-exigir.test.ts).
+vi.mock("@/server/sso/exigir", () => ({ altaBloqueadaPorSso: mockAltaBloqueadaPorSso }));
 
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockWriteAuditLog,
@@ -104,6 +108,7 @@ beforeEach(() => {
   mockRateLimit.mockResolvedValue({ allowed: true, remaining: 2, resetAt: 0, retryAfterSeconds: 0 });
   mockTopePorIp.mockResolvedValue({ allowed: true, remaining: 29, resetAt: 0, retryAfterSeconds: 0 });
   mockWriteAuditLog.mockResolvedValue(undefined);
+  mockAltaBloqueadaPorSso.mockResolvedValue(false);
 });
 
 describe("el alta no distingue una dirección que ya existe", () => {
@@ -176,6 +181,20 @@ describe("el alta no distingue una dirección que ya existe", () => {
     expect(r.destino).toBe("/login?aviso=usa_tu_cuenta");
     expect(r.error).toBeUndefined();
     // Y no se llega a crear nada: nadie ocupa una direccion ajena.
+    expect(mockSignUpEmail).not.toHaveBeenCalled();
+  });
+
+  it("un dominio que exige SSO va al MISMO aviso y no deja una cuenta creada sin sesión posible", async () => {
+    // Con «Exigir SSO» el gancho de sesión le negaría la sesión después de crear el
+    // usuario: quedaba una cuenta a medias y el reintento contestaba «ya existe».
+    // Se corta antes de crear nada, y al mismo lugar que cualquier otro rechazo.
+    mockAltaBloqueadaPorSso.mockResolvedValue(true);
+
+    const r = await darDeAlta();
+
+    expect(mockAltaBloqueadaPorSso).toHaveBeenCalledWith("ana@aseguradora.com", "tenant-por-omision-0000-0000-0000");
+    expect(r.destino).toBe("/login?aviso=usa_tu_cuenta");
+    expect(r.error).toBeUndefined();
     expect(mockSignUpEmail).not.toHaveBeenCalled();
   });
 });

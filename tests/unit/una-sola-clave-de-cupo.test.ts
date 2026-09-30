@@ -105,6 +105,11 @@ vi.mock("@/lib/auth/session", () => ({ getSessionContext: vi.fn() }));
 vi.mock("@/lib/auth/provision", () => ({ resolveDefaultTenantId: () => null }));
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/db/schema", () => ({ users: {} }));
+// Las preguntas al SSO van a la base: acá sólo importa con qué clave se pide el cupo.
+vi.mock("@/server/sso/exigir", () => ({
+  CODIGO_SSO_REQUERIDO: "sso_requerido",
+  altaBloqueadaPorSso: async () => false,
+}));
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn(),
   AuditEvent: { AUTH_RATE_LIMITED: "auth.rate_limited", AUTH_SIGN_UP: "auth.sign_up" },

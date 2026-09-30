@@ -2550,7 +2550,7 @@ tanto como la otra.
 - ~~**`page` sin tope superior** (OFFSET ilimitado) y **`q` sin largo mínimo**~~ ✅
   **HECHO**: `page` acotado en la API (#135) y en la pantalla de clientes (16/09);
   `q` exige tres caracteres en `/api/cases`.
-- **`audit_log` crece 142 filas por caso** y no tiene retención: a 100 k casos son
+- **`audit_log` crece 142 filas por caso** y sigue sin retención (B19 agregó la de los casos y la purga de adjuntos, y a propósito no tocó la auditoría): a 100 k casos son
   14,2 M filas y ~5,9 GB. Y **`claim_messages` pesa 31 kB por fila** porque guarda
   el payload entero del proveedor: ~24 GB a la misma escala.
 - **El agregado sin ventana de `/metricas` y el tope mensual del presupuesto** son
@@ -4339,41 +4339,115 @@ CHECK sólo exige el formato de la clave.
 `FIELD_LABELS` que sólo lee el servidor pasaron a
 `src/lib/labels/instruccion-de-campo.ts` y dejaron de viajar al navegador.
 
+### Seguridad demostrable para vender a una aseguradora (B19, 2026-09-30)
+
+Un hueco más del informe de Clive del 28/09, en la rama
+`feat/seguridad-demostrable-b19`, que sale de la de B16, B17 y B26. La migración
+es la `0045_sso_y_purga_de_adjuntos.sql`, aplicada a mano el 30/09 en producción
+(`ep-proud-resonance`), staging y QA y verificada en vivo: RLS y `FORCE`, las dos
+políticas, los cuatro índices y `claimmix_app` con sólo `SELECT` e `INSERT` en la
+cola. PR #363.
+
+**SSO OIDC por inquilino.** Plugin propio de Better Auth (`sso-inquilino`,
+`src/lib/auth/sso-inquilino.ts`) con el núcleo puro en `src/core/sso.ts` y la red
+en `src/server/sso/`. Un IdP por aseguradora, en `/configuracion`
+(`SsoPanel`, servidor) y `/api/admin/sso` (GET, PUT, POST para verificar el dominio, PATCH para activar o exigir). El dominio del mail
+sólo vale si se prueba con un TXT; la coincidencia es exacta y los proveedores
+de correo abierto no entran. El callback valida firma (`jose`), `iss`, `aud`,
+`nonce` y dominio. «Exigir SSO» apaga la contraseña y Google para ese dominio y
+cierra sus sesiones; pide que el propio admin ya tenga su cuenta `sso:<inquilino>`
+(no la de cualquiera), niega el alta por contraseña de ese dominio antes de crear
+la cuenta, y deja pasar el alta hecha por un admin y el cambio de contraseña. Las
+cuentas `sso:*` no están en `trustedProviders`, pero quien ya existía en el mismo
+inquilino con ese mail se vincula por su id (las cuentas locales nacen con el mail
+sin verificar; sin esto «exigir» dejaba afuera al admin). Cambiar issuer, dominio
+o `client_id` apaga `activo` y `exigir`, y el secreto viejo no sobrevive a otro
+issuer ni a otro `client_id`. Tabla nueva `sso_settings`, con RLS `FORCE` y el
+secreto cifrado `aes-256-gcm`.
+
+**Borrado diferido y recuperable de adjuntos.** Borrar un caso (`deleteCases`)
+anota sus adjuntos en `adjuntos_por_purgar` en el mismo lote. El cron
+`reap-stuck` los borra de R2 pasada la gracia (`PURGA_GRACIA_DIAS`, 30), de a 50
+y uno por uno (`src/server/storage/purgar-adjuntos.ts`). `claimmix_app` sólo lee
+e inserta en la cola, que sólo se agrega: sin `UNIQUE` ni `ON CONFLICT`, manda la
+fila más nueva por `storage_path` y una purga lograda cierra las viejas del mismo
+objeto. La purga y la retención corren UNA vez por día (cupo de 24 h pedido dentro
+de la ventana de las 04 UTC): sin él, las cinco llamadas de esa hora gastaban los
+cinco intentos de la purga. `PURGA_ADJUNTOS_MODO` nace en `apagado`.
+
+**Retención de casos.** `src/server/cases/retencion.ts` y `src/core/retencion.ts`:
+casos cerrados (`cerrado`, `pagado`, `rechazado`) con `closed_at` anterior a
+`RETENCION_ANIOS` (5). Sólo dentro de la hora 04 UTC del cron y una vez por día,
+hasta 200 por inquilino por corrida, y el `DELETE` vuelve a comprobar estado y
+`closed_at` con el mismo predicado (`cerradoAntesDe`) que usa el listado.
+`RETENCION_MODO` nace en `apagado`; `simular` sólo cuenta. No toca clientes,
+pólizas, `audit_log` ni `no_relevante`. No hay cron nuevo.
+
+**Pen test más ancho.** `pnpm pentest` suma `attackSso` (las rutas del plugin y
+`/api/admin/sso` sin sesión, y un dominio privado desconocido) y tres sondas de
+`cualesBorra` en la pared entre inquilinos. Sigue siendo de sólo lectura en
+producción. `scripts/prove-data-layer.mts` suma la sección 5 (borrar el caso del
+inquilino de al lado), que escribe y por eso sólo corre en CI o con `--escribe`.
+
+**Documento de respuestas.** `docs/SEGURIDAD.md`, en formato CAIQ-lite: regiones,
+cifrado, aislamiento, roles, SSO, retención, subprocesadores, backups y las
+deudas dichas tal cual. Lo que no se pudo verificar dice «a verificar». La
+política de privacidad pública no se tocó: el texto propuesto está en el
+documento.
+
+**Peso del bundle.** 309,87 kB contra el tope de 310, medido con `pnpm build && pnpm peso` (`pnpm peso` imprime 310 redondeado): B19 no sumó nada al navegador. El panel del SSO es un componente de servidor montado desde `configuracion/page.tsx`, y el margen que había era de 0,13 kB.
+
 ### 🙋 Waiting on you (not code)
 
-- **Aplicar 0044 (B16, B17 y B26) antes de desplegar.** A mano en
-  `ep-proud-resonance`, en la rama `production` de Veltra (`STAGING_DATABASE_URL`)
-  y en QA (`ep-wispy-flower`), en ese orden y después de la 0043. Hasta que esté
-  aplicada, `/api/health` da degradado con «migración 0044 pendiente». Además,
-  encender el formulario de un inquilino de prueba y mandar una denuncia real por
+- **B19: la 0045 ya está aplicada** (30/09, en producción, staging y QA). Falta
+  probar en QA lo que sólo se comprobó con SQL dibujado: el `CASE` del PUT y el `EXISTS`
+  del PATCH de `/api/admin/sso`, la cola de purga (incluido borrar dos veces el
+  mismo objeto) y una pasada de la retención en `simular`. Además:
+  - Confirmar la separación de buckets de R2: QA tiene el suyo
+    (`claimmix-qa-attachments`); falta confirmar el de staging contra el de
+    producción.
+  - Decidir cuándo pasar `RETENCION_MODO` y `PURGA_ADJUNTOS_MODO` de `apagado` a
+    `simular` y después a `borrar`. No se encendieron en ningún ambiente.
+  - Verificar la ventana de PITR de Neon en el plan vigente y probar una
+    restauración. Verificar la región de la base de producción y la ubicación del
+    balde de R2.
+  - SOC 2, ISO 27001 y un pen test externo: no son código, están en
+    `docs/SEGURIDAD.md` como pendientes del dueño.
+  - **Cancelar una purga:** el dueño hace
+    `UPDATE adjuntos_por_purgar SET purgar_despues = NULL` (con `WHERE` por
+    inquilino o caso). Un `NULL` es una purga cancelada, salvo que después se
+    borre otro caso que comparta el objeto: la fila nueva manda.
+  - **Apagar «exigir SSO»** si alguien se queda afuera: el dueño hace
+    `UPDATE sso_settings SET exigir = false WHERE tenant_id = '<id>'`.
+  - Que alguien revise el texto de privacidad propuesto en `docs/SEGURIDAD.md`
+    (bcrypt por scrypt, cinco roles, regiones reales, retención apagada por
+    defecto) y, si lo aprueba, lo pase a `src/app/privacy/page.tsx`.
+
+- **B16, B17 y B26: la 0044 ya está aplicada** (30/09, en producción, staging y
+  QA). Falta encender el formulario de un inquilino de prueba y mandar una denuncia real por
   la web: el ensayo no tiene escenario del canal `web`.
 
-- **Aplicar 0043 (B12, B14, B15 y B22) antes de desplegar.** A mano en
-  `ep-proud-resonance`, en la rama `production` de Veltra (`STAGING_DATABASE_URL`)
-  y en QA (`ep-wispy-flower`), en ese orden y después de la 0042. Además, mirar
+- **B12, B14, B15 y B22: la 0043 ya está aplicada** (30/09, en las tres bases).
+  Falta mirar
   el primer barrido de `/desvios` (puede traer hasta 30 días de cierres viejos) y
   decidir si hace falta un rol supervisor: hoy la pantalla es de owner, admin y
   specialist.
 
-- **Aplicar 0038 y 0039 (B3 y B4) antes de desplegar.** A mano en staging, QA
-  y producción. Además, confirmar que un mensaje tardío que cuenta otro
+- **B3 y B4: la 0038 y la 0039 ya están aplicadas** (29/09, en las tres bases).
+  Falta confirmar que un mensaje tardío que cuenta otro
   siniestro no abra un caso nuevo solo.
 
-- **Aplicar 0040 (B6, B21 y B23) antes de desplegar.** A mano en staging (y la
-  base del E2E, si es otra), QA y producción, después de la 0039. Además,
+- **B6, B21 y B23: la 0040 ya está aplicada** (29/09, en las tres bases). Falta
   validar la tabla de montos por defecto y decidir si un viewer puede ver
   cobertura, monto y presupuesto.
 
-- **Aplicar 0041 (B18 y B24) antes de desplegar.** A mano en staging (y la
-  base del E2E, si es otra), QA y producción, después de la 0040. Además,
-  que un abogado revise las citas de la Ley 24.449 (art. 41, 44 y 48 inc. g) y
+- **B18 y B24: la 0041 ya está aplicada** (30/09, en las tres bases). Falta que
+  un abogado revise las citas de la Ley 24.449 (art. 41, 44 y 48 inc. g) y
   confirme el art. 39 inc. b para la regla de vehículo detenido.
 
-- **Aplicar 0042 (B9, B10, B11 y B13) antes de desplegar.** A mano en
-  `ep-proud-resonance`, en la rama `production` de Veltra (`STAGING_DATABASE_URL`)
-  y en QA (`ep-wispy-flower`), en ese orden y después de la 0041. Además,
-  decidir si el tope de `pnpm peso` sube por encima de 310 kB (esta tanda deja
-  318 medidos en Windows) y, si se mergea, que alguien defina las reglas de
+- **B9, B10, B11 y B13: la 0042 ya está aplicada** (30/09, en las tres bases).
+  El tope de `pnpm peso` no subió: se recortó código hasta entrar en 310 kB.
+  Falta que alguien defina las reglas de
   asignación y los plazos propios de cada aseguradora en la pestaña «Trabajo del
   equipo».
 

@@ -17,6 +17,7 @@
 
 "use server";
 
+import { APIError } from "better-auth/api";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -35,6 +36,8 @@ import {
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { SignInSchema } from "@/lib/schemas/auth";
 import { logger } from "@/lib/observability/logger";
+import { CODIGO_SSO_REQUERIDO } from "@/server/sso/exigir";
+import { urlDelSso } from "@/server/sso/ingreso";
 
 type SignInState = {
   error?: string;
@@ -113,7 +116,16 @@ export async function signIn(
       headers: headerStore,
     });
     userId = result.user.id;
-  } catch {
+  } catch (e) {
+    /*
+     * «Exigir SSO»: la contraseña estaba bien y el gancho de sesión la frenó.
+     * Decir «Credenciales inválidas» acá manda a quien no se equivocó a probar
+     * otra contraseña, y cuenta un fallo que no fue. Sólo lo oye quien acertó la
+     * contraseña, así que no ayuda a adivinarla.
+     */
+    if (e instanceof APIError && e.body?.code === CODIGO_SSO_REQUERIDO) {
+      redirect(`/login?error=${CODIGO_SSO_REQUERIDO}`);
+    }
     await writeAuditLog({
       tenant_id: "00000000-0000-0000-0000-000000000000",
       actor_id: null,
@@ -234,4 +246,16 @@ export async function signInWithGoogle(): Promise<void> {
   }
 
   redirect(url);
+}
+
+/**
+ * Empezar el ingreso con el SSO de la empresa (B19).
+ *
+ * Sin URL del IdP —dominio sin SSO, IdP caído o demasiados intentos— vuelve a
+ * /login con el mismo código: desde afuera no se distingue una causa de otra.
+ * `redirect()` queda afuera del try por lo mismo que en `signInWithGoogle`.
+ */
+export async function signInSso(formData: FormData): Promise<void> {
+  const url = await urlDelSso(String(formData.get("email") ?? ""), "/bandeja", "/login");
+  redirect(url ?? "/login?error=sso_fallo");
 }

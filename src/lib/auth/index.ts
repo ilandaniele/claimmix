@@ -7,15 +7,12 @@ import { nextCookies } from "better-auth/next-js";
 import { db } from "@/lib/db";
 import { accounts, authUsers, sessions, verifications } from "@/lib/db/schema";
 
-import { provisionUserProfile } from "./provision";
+import { resolveBaseURL } from "./base-url";
+import { provisionUserProfile, resolveDefaultTenantId } from "./provision";
 import { altaHabilitada } from "./registro-permitido";
+import { ssoInquilino } from "./sso-inquilino";
 import { logger } from "@/lib/observability/logger";
-
-function resolveBaseURL(): string {
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
+import { altaBloqueadaPorSso, revisarSesionNueva } from "@/server/sso/exigir";
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
@@ -196,10 +193,17 @@ export const auth = betterAuth({
          * Devolver `false` aborta la creacion. La pantalla de registro ademas
          * comprueba antes, para poder decir algo entendible en vez del error
          * generico que sale de aca.
+         *
+         * Con «Exigir SSO» en el dominio tampoco se crea: el gancho de sesion
+         * le negaria la sesion a la cuenta recien hecha y quedaria a medias.
          */
         before: async (user) => {
           const email = typeof user.email === "string" ? user.email : "";
-          if (altaHabilitada(email)) return;
+          if (altaHabilitada(email)) {
+            if (!(await altaBloqueadaPorSso(email, resolveDefaultTenantId()))) return;
+            logger.warn({ motivo: "dominio_exige_sso" }, "auth.registro.rechazado");
+            return false;
+          }
           logger.warn({
         dominio: email.slice(email.lastIndexOf("@") + 1) || "(sin dominio)",
         motivo: "fuera_de_signup_allowed_emails",
@@ -208,6 +212,22 @@ export const auth = betterAuth({
         },
         after: async (user) => {
           await provisionUserProfile(user);
+        },
+      },
+    },
+    session: {
+      create: {
+        /*
+         * Toda sesión nueva pasa por acá, entre por contraseña, por Google o por
+         * el SSO de una aseguradora. Es el único punto que ve a las tres: frenar
+         * sólo el formulario de contraseña dejaría abierta la puerta de Google.
+         *
+         * «Exigir SSO» se aplica acá y no en cada ruta de ingreso. Ver
+         * `src/server/sso/exigir.ts`, que además cuida que un ingreso por SSO
+         * caiga en la aseguradora del `state` y en ninguna otra.
+         */
+        before: async (session, context) => {
+          await revisarSesionNueva(session.userId, context?.path);
         },
       },
     },
@@ -237,10 +257,12 @@ export const auth = betterAuth({
    * Si algún día hace falta banear o suplantar, va por una ruta propia bajo
    * `/api/admin/`, con el inquilino en la mano y su fila de auditoría.
    *
+   * `ssoInquilino` es nuestro, no el de Better Auth: ver `sso-inquilino.ts`.
+   *
    * `nextCookies` va último para que `Set-Cookie` funcione desde los Server
    * Actions.
    */
-  plugins: [nextCookies()],
+  plugins: [ssoInquilino(), nextCookies()],
 });
 
 export type Auth = typeof auth;

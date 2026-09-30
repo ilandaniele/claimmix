@@ -28,7 +28,9 @@ import packageJson from "../../../../package.json";
 import { ADMIN_ROLES } from "@/lib/auth/require-role";
 import { CoreSyncPanel } from "./CoreSyncPanel";
 import { MontosPanel } from "./MontosPanel";
-import { paraAdmin } from "./para-admin";
+import { paraAdmin, ssoParaAdmin } from "./para-admin";
+import { SsoPanel } from "./SsoPanel";
+import { esResultadoSso } from "./sso-resultados";
 import { MONTOS_POR_DEFECTO } from "@/core/case/monto-estimado";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -82,9 +84,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default async function ConfiguracionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ vinculo?: string }>;
+  searchParams: Promise<{ vinculo?: string; sso?: string }>;
 }) {
-  const { vinculo } = await searchParams;
+  const { vinculo, sso } = await searchParams;
   const locale = await getAccountLocale();
   const t = getT(locale);
 
@@ -100,9 +102,10 @@ export default async function ConfiguracionPage({
   const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const email: string = session.user.email ?? "—";
 
-  const [userHasGeminiKey, admin] = await Promise.all([
+  const [userHasGeminiKey, admin, panelDelSso] = await Promise.all([
     getUserGeminiKey(session.user.id).then(Boolean, () => false),
     esAdmin && userRow ? paraAdmin(userRow.tenant_id) : null,
+    esAdmin && userRow ? ssoParaAdmin(userRow.tenant_id) : null,
   ]);
 
   // AI thresholds — read from env with documented defaults
@@ -217,6 +220,13 @@ export default async function ConfiguracionPage({
         {admin && admin.montos !== undefined && (
           <Section title={t("configuracion.montos.titulo")}>
             <MontosPanel inicial={admin.montos} porDefecto={MONTOS_POR_DEFECTO} />
+          </Section>
+        )}
+
+        {/* ── Inicio de sesión único de la aseguradora (B19, sólo admin) ────── */}
+        {panelDelSso && (
+          <Section title={t("configuracion.sso.titulo")}>
+            <SsoPanel panel={panelDelSso} t={t} email={email} resultado={esResultadoSso(sso) ? sso : null} />
           </Section>
         )}
 

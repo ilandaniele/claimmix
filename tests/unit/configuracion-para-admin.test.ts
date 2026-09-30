@@ -6,17 +6,20 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { enTenantVarias, listaDelTenant } = vi.hoisted(() => ({
+const { enTenantVarias, listaDelTenant, panelSso, loggerError } = vi.hoisted(() => ({
   enTenantVarias: vi.fn(),
   listaDelTenant: vi.fn(),
+  panelSso: vi.fn(),
+  loggerError: vi.fn(),
 }));
 
 vi.mock("@/data/scope", () => ({ enTenantVarias }));
 vi.mock("@/server/notify/specialist-alert", () => ({ listaDelTenant }));
-vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
+vi.mock("@/server/sso/panel", () => ({ panelSso }));
+vi.mock("@/lib/observability/logger", () => ({ logger: { error: loggerError, warn: vi.fn(), info: vi.fn() } }));
 
 import { drizzle } from "drizzle-orm/pg-proxy";
-import { paraAdmin } from "@/app/(app)/configuracion/para-admin";
+import { paraAdmin, ssoParaAdmin } from "@/app/(app)/configuracion/para-admin";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
 const VISTA = { webhook_url: "https://core.aseguradora.com.ar/hook", enabled: true };
@@ -101,5 +104,39 @@ describe("paraAdmin", () => {
     expect(admin).toEqual({ alertas: ["ana@aseguradora.com.ar"], migracionPendiente: false });
     expect(admin.core).toBeUndefined();
     expect(enTenantVarias).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * El panel de SSO (B19) se lee aparte de lo demás de un admin: sin la 0045 la
+ * lectura falla, y si fuera parte del lote se llevaría puestos los montos y la
+ * entrega al core, que sí se pueden mostrar.
+ */
+describe("ssoParaAdmin", () => {
+  const PANEL = { issuer: "https://idp.empresa.com", activo: true, migracion_pendiente: false };
+
+  it("devuelve el panel del inquilino que se le pide", async () => {
+    panelSso.mockResolvedValue(PANEL);
+
+    await expect(ssoParaAdmin(TENANT)).resolves.toBe(PANEL);
+    expect(panelSso).toHaveBeenCalledExactlyOnceWith(TENANT);
+  });
+
+  it("nunca rechaza: un error de la base da null, deja el rastro sin el mensaje y la página sigue", async () => {
+    panelSso.mockRejectedValue(Object.assign(new Error("password authentication failed for user owner"), { code: "28P01" }));
+
+    await expect(ssoParaAdmin(TENANT)).resolves.toBeNull();
+    expect(loggerError).toHaveBeenCalledOnce();
+    const [datos, evento] = loggerError.mock.calls[0]!;
+    expect(evento).toBe("configuracion.sso_no_se_leyo");
+    expect(JSON.stringify(datos)).not.toContain("password");
+  });
+
+  it("no toca el lote de lo demás: paraAdmin no lo lee", async () => {
+    enTenantVarias.mockResolvedValueOnce([[{ emails: [], horas: [] }], [VISTA]]);
+
+    await paraAdmin(TENANT);
+
+    expect(panelSso).not.toHaveBeenCalled();
   });
 });

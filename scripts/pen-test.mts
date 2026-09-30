@@ -662,6 +662,116 @@ async function attackBetterAuthAdmin(): Promise<void> {
   }
 }
 
+/**
+ * El SSO por inquilino (B19): lo que se puede atacar sin cuenta y sin un IdP.
+ *
+ * Sólo HTTP y sólo lo que no deja nada: ningún intento abre una sesión ni
+ * escribe datos de negocio (queda el contador del limitador, como con cualquier
+ * pedido). Un IdP de verdad (issuer ajeno, dominio ajeno, inquilino ajeno)
+ * no se ensaya contra producción: lo cubre el IdP falso de
+ * `tests/integration/admin/sso.test.ts`.
+ *
+ * Lo que sí se prueba acá es la puerta: que el retorno del IdP rechaza lo que
+ * no trae un `state` suyo, y que el arranque no cuenta quién usa la plataforma.
+ */
+async function attackSso(): Promise<void> {
+  console.log("\nEl SSO por inquilino (sin cuenta, sin IdP):\n");
+
+  const vuelta = `${BASE}/api/auth/sso-inquilino/callback`;
+  const arranque = `${BASE}/api/auth/sso-inquilino/sign-in`;
+
+  /*
+   * 429 también es un rechazo: el tope por IP contesta antes que el handler.
+   * Un 5xx, en cambio, es que el handler se rompió con una entrada ajena.
+   */
+  const rechazado = (res: { status: number; headers: Headers }): boolean => {
+    if (res.status === 429) return true;
+    if (![302, 303, 307, 308].includes(res.status)) return false;
+    const destino = res.headers.get("location");
+    if (!destino) return false;
+    const url = new URL(destino, BASE);
+    return url.pathname === "/login" && url.searchParams.has("error");
+  };
+  const sinSesion = (res: { headers: Headers }) => !/session_token/i.test(res.headers.get("set-cookie") ?? "");
+
+  const intentos: Array<[string, string, string]> = [
+    ["sin state", "", "una sesión sin pasar por el IdP"],
+    ["con state forjado", "?state=forjado-por-mi&code=x", "una sesión con un state que no salió de nuestro arranque"],
+    ["con un state que tiene forma de firmado", "?state=aaaa.bbbb.cccc&code=x", "lo mismo, con un state de otro arranque"],
+    ["con el error del IdP y sin state", "?error=access_denied", "llenar de ruido el registro o la pantalla de otro"],
+    ["con un state gigante", `?state=${"a".repeat(6000)}&code=x`, "tirar el handler con una entrada fuera de tamaño"],
+    ["con el inquilino en la consulta", "?state=forjado&tenant=00000000-0000-0000-0000-000000000001", "elegir el inquilino desde afuera"],
+  ];
+  for (const [nombre, consulta, premio] of intentos) {
+    const res = await head(`${vuelta}${consulta}`, { method: "GET" });
+    probe(
+      `el retorno del IdP ${nombre} se rechaza y vuelve a /login`,
+      rechazado(res) && sinSesion(res),
+      premio,
+      res.status === 404 ? "respondió 404: la ruta no existe" : `respondió ${res.status}`
+    );
+  }
+
+  // El arranque: la misma forma de respuesta digan lo que digan del dominio.
+  const arrancar = (email: string, extra = "", cuerpo: Record<string, unknown> = {}) =>
+    head(`${arranque}${extra}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: BASE },
+      body: JSON.stringify({ email, ...cuerpo }),
+    });
+  const sinUrl = (res: { status: number; body: string }) => res.status === 200 && res.body.replace(/\s/g, "") === '{"url":null}';
+
+  // Todo mail con forma de mail pasa por el tope del limitador, que vive en la base: contra un server local sin ella contesta 500.
+  const sinBase: Array<[string, string]> = [["un mail que no es un mail", "no-es-un-mail"]];
+  const conBase: Array<[string, string]> = soloSuperficie
+    ? []
+    : [
+        ["un dominio público", "pentest@gmail.com"],
+        ["un dominio sin SSO", "pentest@dominio-sin-sso-pentest.invalid"],
+      ];
+
+  for (const [nombre, email] of [...sinBase, ...conBase]) {
+    const res = await arrancar(email);
+    probe(
+      `el arranque con ${nombre} contesta igual que cualquier otro: sin URL`,
+      sinUrl(res) || res.status === 429,
+      "averiguar qué aseguradoras usan la plataforma, y con qué IdP",
+      `respondió ${res.status}`
+    );
+  }
+
+  if (soloSuperficie) {
+    console.log(
+      "  (--solo-superficie: se saltean el dominio público, el dominio sin SSO y el inquilino en la consulta, " +
+        "porque el tope del arranque se resuelve en la base; se siguen comprobando en el post-deploy.)"
+    );
+  } else {
+    const sinExtra = await arrancar("pentest@gmail.com");
+    const conInquilino = await arrancar("pentest@gmail.com", "?tenant=00000000-0000-0000-0000-000000000001", {
+      tenant: "00000000-0000-0000-0000-000000000001",
+      tenantId: "00000000-0000-0000-0000-000000000001",
+    });
+    probe(
+      "un inquilino pedido en la consulta o en el cuerpo se ignora",
+      sinExtra.status === 429 || conInquilino.status === 429 || (sinUrl(conInquilino) && conInquilino.body === sinExtra.body),
+      "elegir desde afuera en qué aseguradora cae el ingreso",
+      `respondió ${conInquilino.status}`
+    );
+  }
+
+  const sinCuerpo = await head(arranque, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: BASE },
+    body: JSON.stringify({}),
+  });
+  probe(
+    "el arranque sin mail se rechaza con un 4xx, no con un 5xx",
+    sinCuerpo.status >= 400 && sinCuerpo.status < 500,
+    "tirar el handler con un cuerpo vacío",
+    `respondió ${sinCuerpo.status}`
+  );
+}
+
 function auditAdminGuards(): void {
   console.log("\nLos candados de /api/admin, leídos del código:\n");
 
@@ -1044,6 +1154,34 @@ async function attackTenantWall(): Promise<void> {
   } else {
     console.log("  (TENANT_A no tiene hilos del asistente: no hay control para la lectura por persona)");
   }
+
+  // ── Y el borrado de casos (B19): la condición del DELETE, sin ejecutar ninguno ──
+  //
+  // `deleteCases` anota los adjuntos de R2 y borra con esta MISMA condición
+  // (`cualesBorra`). Acá sólo se la usa en un SELECT: si desde B la condición no
+  // encuentra el caso de A, el DELETE y el encolado de la purga tampoco.
+  const { cualesBorra } = await import("@/server/cases/delete");
+  const { enTenant } = await import("@/data/scope");
+  const admin = { id: "00000000-0000-4000-8000-000000000b19", role: "admin" } as const;
+  const loQueBorraria = (tenantId: string, antesDe?: Date) =>
+    enTenant<Array<{ id: string }>>({ tenantId }, (t) =>
+      t.select({ id: cases.id }).from(cases).where(cualesBorra([victim.id], admin, { antesDe }))
+    );
+  probe(
+    "la condición del borrado encuentra el caso desde su dueño",
+    (await loQueBorraria(TENANT_A)).length === 1,
+    "sin esto, que desde el otro dé cero filas no prueba nada"
+  );
+  probe(
+    "desde el otro inquilino la condición del borrado no encuentra el caso",
+    (await loQueBorraria(TENANT_B)).length === 0,
+    "borrar, y de paso encolar para la purga, los adjuntos de otra aseguradora"
+  );
+  probe(
+    "ni con el corte de la retención",
+    (await loQueBorraria(TENANT_B, new Date())).length === 0,
+    "la retención borrando casos de otra aseguradora"
+  );
 
   console.log("\nSólo lectura: nada se escribió ni se borró.");
 }
@@ -1440,6 +1578,7 @@ async function attackAgent(): Promise<void> {
 
 await attackSurface();
 await attackBetterAuthAdmin();
+await attackSso();
 auditAdminGuards();
 if (soloSuperficie) {
   console.log(

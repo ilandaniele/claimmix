@@ -462,7 +462,7 @@ FIELDS TO EXTRACT (use empty string + confidence=0 if not found):
 - email: Email address of the claimant (if different from sender)
 - phone: Phone number
 - dni: Argentine DNI (national ID) — do NOT echo verbatim; use only for matching hint
-- policy_number: Insurance policy number — do NOT echo verbatim; use only for matching hint
+- policy_number: Insurance policy number, copied exactly as the person wrote it, prefix and suffix included ("POL-3390-F", never just "3390") — do NOT echo it in summary/reasoning; use only for matching hint
 - accident_date: Date of incident (ISO 8601 preferred)
 - accident_location: Address or location of the incident
 - accident_description: Description of what happened

@@ -36,9 +36,8 @@ import {
   getAbandonAfterDays,
   leLlegoLaPregunta,
 } from "@/server/intake/close-abandoned";
-import { CUSTOMER_PII_ROLES } from "@/lib/auth/roles";
 import { camposDePagina } from "@/lib/schemas/paginacion";
-import { OCULTO } from "@/server/cases/pii";
+import { titularParaElRol } from "@/server/cases/pii";
 
 export type TipoDeVencimiento = "ventana_whatsapp" | "cierre_por_abandono" | "plazo";
 
@@ -66,12 +65,6 @@ const ultimoEntranteWhatsApp = sql<string | null>`(
 
 /** Desde cuándo cuenta el abandono: lo mismo que usa el barrido. */
 const desdeQueEspera = sql<string>`coalesce(${cases.updated_at}, ${cases.created_at})`;
-
-/** El nombre, o `OCULTO` si hay algo que tapar y el rol no puede verlo. */
-function titularDe(nombre: string | null, puedeVerTitular: boolean): string | null {
-  if (puedeVerTitular) return nombre;
-  return nombre ? OCULTO : null;
-}
 
 /**
  * Las tres ramas con la misma forma: `case_id`, `titular`, `tipo` y `vence`.
@@ -126,7 +119,6 @@ export async function leerAgenda(
   entrada: Partial<PaginaDeAgenda> = {}
 ): Promise<Pagina<Vencimiento>> {
   const { page, per_page } = PaginaDeAgendaSchema.parse(entrada);
-  const puedeVerTitular = (CUSTOMER_PII_ROLES as readonly string[]).includes(rol);
   const ramas = ramasDeLaAgenda(ahora, getAbandonAfterDays());
 
   const [conteo, filas] = await enTenantVarias<[Array<{ n: number }>, FilaDeAgenda[]]>(ctx, (db) => [
@@ -149,7 +141,7 @@ export async function leerAgenda(
     data: filas.map((f) => ({
       caseId: f.case_id,
       numero: formatCaseNumber(f.case_id),
-      titular: titularDe(f.titular, puedeVerTitular),
+      titular: titularParaElRol(f.titular, rol),
       tipo: f.tipo,
       vence: new Date(f.vence).toISOString(),
     })),

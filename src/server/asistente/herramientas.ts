@@ -28,10 +28,10 @@ import { digitsOnlyEquals, escapeLike } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
 import { estadosAConsultar } from "@/core/case/filtro-de-estado";
 import type { ConteoDeCasos, Intencion } from "@/core/asistente/intencion";
-import { rangoDelPeriodo } from "@/core/asistente/intencion";
+import { rangoDelPeriodo } from "@/core/metricas/periodo";
 import { formatCaseNumber } from "@/core/case/numero";
-import { getCaseDetail } from "@/server/cases/get";
-import { conversacionDelCaso } from "@/server/cases/conversacion";
+import { getCaseDetail, type CaseDetail } from "@/server/cases/get";
+import { conversacionDelCaso, type Conversacion } from "@/server/cases/conversacion";
 import { mensajesSinPiiSiNoCorresponde, OCULTO } from "@/server/cases/pii";
 import { redactString } from "@/lib/audit/redact";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
@@ -215,8 +215,19 @@ async function detalleParaResumen(
     getCaseDetail(tenantId, caseId),
     conversacionDelCaso(tenantCtx, caseId),
   ]);
-  if (!detalle) return null;
+  return detalle ? armarDetalle(detalle, conversacion, rol) : null;
+}
 
+/**
+ * El detalle enmascarado por rol, sin tocar la base. Lo comparten el resumen de
+ * un caso y la pregunta sobre un caso: que el modelo lea lo mismo que ve la
+ * persona, ni un dato más.
+ */
+export function armarDetalle(
+  detalle: Pick<CaseDetail, "case" | "extracted_fields" | "missing_docs">,
+  conversacion: Conversacion | null,
+  rol: string
+): DetalleDelCaso {
   const esViewer = rol === "viewer";
 
   const campos = detalle.extracted_fields.map((f) => {

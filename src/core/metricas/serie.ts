@@ -1,6 +1,7 @@
 /**
  * La serie de actividad de /metricas: reclamos abiertos, WhatsApps y mails
- * atendidos, por día (30), por mes (12) o por año (5).
+ * atendidos, y cuántos de los abiertos siguen escalados, quedaron listos o se
+ * cerraron, por día (30), por mes (12) o por año (5).
  *
  * La base devuelve sólo los períodos que tuvieron casos. Acá se arma la ventana
  * entera y se rellenan los huecos con cero: un día sin casos que no aparece se
@@ -23,6 +24,10 @@ export interface PuntoSerie {
   mails: number;
   reclamos_whatsapp: number;
   reclamos_mail: number;
+  /** De los abiertos ese período, cuántos están hoy en cada situación: no cuántos pasaron alguna vez por ahí. */
+  escalados: number;
+  listos: number;
+  cerrados: number;
 }
 
 const LARGO: Record<Unidad, number> = { dia: 30, mes: 12, anio: 5 };
@@ -87,6 +92,9 @@ export function completarSerie(
       mails: fila?.mails ?? 0,
       reclamos_whatsapp: fila?.reclamos_whatsapp ?? 0,
       reclamos_mail: fila?.reclamos_mail ?? 0,
+      escalados: fila?.escalados ?? 0,
+      listos: fila?.listos ?? 0,
+      cerrados: fila?.cerrados ?? 0,
     };
   });
 }

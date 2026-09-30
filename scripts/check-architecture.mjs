@@ -402,7 +402,7 @@ console.log("\n▸ nadie usa db.$count (la capa no lo puede armar)");
  * hace `find-raw-db.mjs` para delimitar los tramos de la capa.
  */
 function anidaEnTenant(txt) {
-  const re = /\benTenant(?:Varias)?\s*(?:<[^(]*>)?\s*\(/g;
+  const re = /\benTenant(?:DeUsuario)?(?:Varias)?\s*(?:<[^(]*>)?\s*\(/g;
   let m;
   while ((m = re.exec(txt))) {
     const abre = txt.indexOf("(", m.index);
@@ -417,7 +417,7 @@ function anidaEnTenant(txt) {
     }
     // El cuerpo de la llamada, sin contar su propio nombre.
     const adentro = txt.slice(abre + 1, i);
-    if (/\benTenant(?:Varias)?\s*(?:<[^(]*>)?\s*\(/.test(adentro)) return true;
+    if (/\benTenant(?:DeUsuario)?(?:Varias)?\s*(?:<[^(]*>)?\s*\(/.test(adentro)) return true;
   }
   return false;
 }

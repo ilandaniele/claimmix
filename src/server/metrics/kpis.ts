@@ -14,9 +14,16 @@
 import "server-only";
 
 import { and, count, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
-import { ESTADOS_CERRADOS, ESTADOS_ESCALADO } from "@/core/case/fsm";
+import {
+  ESTADOS_CERRADOS,
+  ESTADOS_COMPLETADO_SIN_PERSONA,
+  ESTADOS_ESCALADO,
+  FSM_TRANSITIONS,
+} from "@/core/case/fsm";
 
 import { mesArgentino, medianocheHaceDias, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+import { porcentaje, unDecimal, type FilaDeCiclo, type FilaDeCuello } from "@/core/metricas/ciclo";
+import { PERIODO_POR_DEFECTO, rangoDelPeriodo, type Periodo } from "@/core/metricas/periodo";
 import {
   completarSerie,
   desdeDe,
@@ -32,14 +39,34 @@ import {
 import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import { completadoConfirmado } from "@/server/cases/listo-confirmado";
+import { consultaDeCiclo, consultaDeCuellos } from "@/server/metrics/trayecto";
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
+/*
+ * `total_cases_month` y `escalated_count` quedaron de cuando el tablero sólo
+ * mostraba el mes: hoy siguen el período elegido. `/api/metricas` los devuelve
+ * con esos nombres y renombrarlos rompería a quien los lea.
+ */
 export interface MetricasSummary {
   total_cases_month: number;
   avg_first_response_minutes: number | null;
-  auto_completion_rate: number;
+  /** Antes `auto_completion_rate`: no mide qué hizo el agente solo, mide qué quedó completado y confirmado. */
+  completado_confirmado_rate: number;
   escalated_count: number;
+  /** De los reclamos del período, el % que llegó a `listo_para_core` sin que una persona tocara el caso. Es un piso. */
+  sin_intervencion_rate: number | null;
+  /** Mensajes de las dos partes por reclamo del período. */
+  mensajes_por_caso: number | null;
+  /** Mediana en horas de recibido a listo_para_core (el «tiempo para completar» de B15) y a pagado o rechazado. */
+  ciclo: {
+    mediana_horas_listo: number | null;
+    casos_listo: number;
+    mediana_horas_cierre: number | null;
+    casos_cierre: number;
+  };
+  /** Los estados donde los casos se quedan más tiempo, de mayor a menor. */
+  cuellos: FilaDeCuello[];
 }
 
 export interface ResumenDeAyer {
@@ -63,7 +90,9 @@ export interface MetricasData {
     by_user: AiUsageByUser[];
     by_model: AiUsageByModel[];
   };
+  /** El rango del período elegido, `[start, end)`. El uso de IA sigue el mes calendario. */
   period: { start: string; end: string };
+  periodo: Periodo;
   /** Sólo si se pidió: /api/metricas no la pide y devuelve null. */
   serie: PuntoSerie[] | null;
   /** Sólo si se pidió: /api/metricas no lo pide y la clave no aparece. */
@@ -128,6 +157,10 @@ export function consultaDeActividad(db: ClienteDatos, unidad: Unidad, desde: str
       mails: sql<number>`count(*) filter (where ${cases.channel} = 'email')::int`,
       reclamos_whatsapp: sql<number>`count(*) filter (where ${cases.is_claim} is true and ${cases.channel} = 'whatsapp')::int`,
       reclamos_mail: sql<number>`count(*) filter (where ${cases.is_claim} is true and ${cases.channel} = 'email')::int`,
+      // Por situación de hoy y por día de apertura: sale del propio caso, sin recorrer la auditoría.
+      escalados: sql<number>`count(*) filter (where ${inArray(cases.status, [...ESTADOS_ESCALADO])})::int`,
+      listos: sql<number>`count(*) filter (where ${inArray(cases.status, [...ESTADOS_COMPLETADO_SIN_PERSONA])})::int`,
+      cerrados: sql<number>`count(*) filter (where ${esCierre})::int`,
     })
     .from(cases)
     .where(and(gte(cases.created_at, desde), inArray(cases.channel, ["whatsapp", "email"])))
@@ -158,13 +191,19 @@ export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
 /**
  * Todo lo que muestra la pantalla, para un inquilino.
  *
+ * Las tarjetas, las distribuciones por estado y tipo, el ciclo y los cuellos de
+ * botella miran el `periodo` elegido (el mes por omisión); el uso de IA sigue
+ * siendo el del mes calendario, que es el que se factura.
+ *
  * `serie` agrega la consulta de actividad al MISMO lote, así la pantalla sigue
  * en un viaje. Sin ella no se lee y vuelve null. `ayer` hace lo mismo con el
- * resumen del día anterior.
+ * resumen del día anterior. El mes a mes de los últimos doce meses no va acá:
+ * recorre la auditoría de todo el año, y quien lo pide no necesita nada de lo
+ * demás (ver `getHistorialDeMetricas`).
  */
 export async function getTenantKpis(
   tenantCtx: TenantContext,
-  opts?: { serie?: Unidad; ayer?: boolean }
+  opts?: { serie?: Unidad; ayer?: boolean; periodo?: Periodo }
 ): Promise<MetricasData> {
   /*
    * ── La ventana del mes, en horario argentino ────────────────────────────────
@@ -175,10 +214,12 @@ export async function getTenantKpis(
    * anterior. O sea que el panel de septiembre traía adentro las últimas tres
    * horas de agosto, y no había forma de verlo desde acá.
    */
-  const { inicio: monthStart, fin: monthEnd } = mesArgentino();
   // Uno solo para la consulta y el relleno: si cambia el día entre los dos, la
   // ventana leída y la dibujada no coinciden.
   const ahora = new Date();
+  const { inicio: monthStart, fin: monthEnd } = mesArgentino(ahora);
+  const periodo = opts?.periodo ?? PERIODO_POR_DEFECTO;
+  const { desde, hasta } = rangoDelPeriodo(periodo, ahora);
 
   type Usos = {
     calls: number;
@@ -197,10 +238,11 @@ export async function getTenantKpis(
     [usageAllTimeRow],
     usageByUserRows,
     usageByModelRows,
+    [cicloRow],
+    cuellosRows,
     ...opcionales
   /*
-   * Nueve consultas —diez con la serie, once con las dos— en UN viaje, no en
-   * nueve.
+   * Once consultas —hasta trece con la serie y ayer— en UN viaje, no en once.
    *
    * Estaba en `Promise.all([enTenant(...), enTenant(...), ...])`, que las pone
    * en paralelo pero NO las junta: cada `enTenant` abre su propio `batch()` con
@@ -225,6 +267,8 @@ export async function getTenantKpis(
       [Usos],
       Array<Usos & { user_id: string | null; full_name: string | null; email: string | null }>,
       Array<Usos & { model: string }>,
+      [FilaDeCiclo],
+      Array<FilaDeCuello>,
       ...Array<PuntoSerie[] | ResumenDeAyer[]>,
     ]
   >(tenantCtx, (db) => {
@@ -259,13 +303,14 @@ export async function getTenantKpis(
           })
           .from(cases)
           .where(and(
-            gte(cases.created_at, monthStart),
-            lt(cases.created_at, monthEnd),
+            gte(cases.created_at, desde),
+            lt(cases.created_at, hasta),
           )),
       // Agrupado en la base: traía las 458 filas de `cases` para contarlas.
       db
           .select({ status: cases.status, n: sql<number>`count(*)::int` })
           .from(cases)
+          .where(and(gte(cases.created_at, desde), lt(cases.created_at, hasta)))
           .groupBy(cases.status),
       // Idem, y el `is not null` reemplaza al `if (row.claim_type)` que
       // descartaba esas filas después de haberlas traído. `is_claim is true`
@@ -274,7 +319,12 @@ export async function getTenantKpis(
       db
           .select({ claim_type: cases.claim_type, n: sql<number>`count(*)::int` })
           .from(cases)
-          .where(and(isNotNull(cases.claim_type), sql`${cases.is_claim} is true`))
+          .where(and(
+            isNotNull(cases.claim_type),
+            sql`${cases.is_claim} is true`,
+            gte(cases.created_at, desde),
+            lt(cases.created_at, hasta),
+          ))
           .groupBy(cases.claim_type),
       db
           .select({ n: count() })
@@ -282,8 +332,8 @@ export async function getTenantKpis(
           .where(and(
             // Idem: el canal real escribe `requiere_especialista`.
             inArray(cases.status, [...ESTADOS_ESCALADO]),
-            gte(cases.created_at, monthStart),
-            lt(cases.created_at, monthEnd),
+            gte(cases.created_at, desde),
+            lt(cases.created_at, hasta),
           )),
       /*
        * Los cinco de arriba, contados y ordenados por la base.
@@ -303,8 +353,8 @@ export async function getTenantKpis(
           .leftJoin(users, eq(cases.assigned_to, users.id))
           .where(and(
             esCierre,
-            gte(cases.closed_at, monthStart),
-            lt(cases.closed_at, monthEnd),
+            gte(cases.closed_at, desde),
+            lt(cases.closed_at, hasta),
             isNotNull(cases.assigned_to),
           ))
           .groupBy(cases.assigned_to, users.full_name)
@@ -362,6 +412,8 @@ export async function getTenantKpis(
             lt(aiUsage.created_at, monthEnd),
           ))
           .groupBy(aiUsage.model),
+      consultaDeCiclo(db, desde, hasta),
+      consultaDeCuellos(db, desde, hasta),
       ...(opts?.serie
         ? [consultaDeActividad(db, opts.serie, desdeDe(opts.serie, ahora))]
         : []),
@@ -383,7 +435,7 @@ export async function getTenantKpis(
       : null;
 
   const listoCount = resumenMes?.listo ?? 0;
-  const autoCompletionRate =
+  const completadoConfirmadoRate =
     totalCasesMonth > 0 ? Math.round((listoCount / totalCasesMonth) * 100) : 0;
 
   const byStatus: Record<string, number> = {};
@@ -400,6 +452,11 @@ export async function getTenantKpis(
   for (const t of ClaimTypeSchema.options) {
     if (!(t in byType)) byType[t] = 0;
   }
+
+  // Sólo estados que el esquema conoce: el nombre sale de un payload de auditoría.
+  const cuellos = cuellosRows
+    .filter((row) => Object.hasOwn(FSM_TRANSITIONS, row.estado))
+    .map((row) => ({ ...row, horas_promedio: unDecimal(row.horas_promedio) ?? 0 }));
 
   const topAnalysts = topAnalystsRows.map((row) => ({
     full_name: row.full_name ?? "Analista",
@@ -427,8 +484,17 @@ export async function getTenantKpis(
     summary: {
       total_cases_month: totalCasesMonth,
       avg_first_response_minutes: avgFirstResponseMinutes,
-      auto_completion_rate: autoCompletionRate,
+      completado_confirmado_rate: completadoConfirmadoRate,
       escalated_count: escalatedRow?.n ?? 0,
+      sin_intervencion_rate: porcentaje(cicloRow?.sin_intervencion ?? 0, cicloRow?.reclamos ?? 0),
+      mensajes_por_caso: unDecimal(cicloRow?.mensajes_por_caso),
+      ciclo: {
+        mediana_horas_listo: unDecimal(cicloRow?.mediana_horas_listo),
+        casos_listo: cicloRow?.con_listo ?? 0,
+        mediana_horas_cierre: unDecimal(cicloRow?.mediana_horas_cierre),
+        casos_cierre: cicloRow?.con_cierre ?? 0,
+      },
+      cuellos,
     },
     by_status: byStatus,
     by_type: byType,
@@ -439,7 +505,8 @@ export async function getTenantKpis(
       by_user: usageByUser,
       by_model: usageByModel,
     },
-    period: { start: monthStart, end: monthEnd },
+    period: { start: desde, end: hasta },
+    periodo,
     serie: opts?.serie
       ? completarSerie(opts.serie, ahora, serieFilas ?? [])
       : null,

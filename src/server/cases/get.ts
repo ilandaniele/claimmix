@@ -15,8 +15,9 @@
  * AC10: Wrong-tenant case returns null (caller returns 404 NOT_FOUND).
  */
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
+import { AuditEvent } from "@/lib/audit/log";
 import { firstRow } from "@/lib/db/helpers";
 import { auditLog, cases, extractedFields, missingDocs } from "@/lib/db/schema";
 import { errorCode } from "@/lib/observability/error-code";
@@ -184,7 +185,20 @@ export async function fetchAuditLog(
           payload: auditLog.payload,
         })
         .from(auditLog)
-        .where(and(eq(auditLog.target_type, "case"), eq(auditLog.target_id, caseId)))
+        .where(
+          and(
+            eq(auditLog.target_type, "case"),
+            eq(auditLog.target_id, caseId),
+            // Los cambios de estado del agente se auditan para el trayecto (B14), no para
+            // la ficha: uno por estado y por mensaje llenaba los veinte lugares y
+            // desplazaba lo que hizo el equipo. `is distinct from`, no `<>`: sin
+            // `trigger` el operador da nulo y la fila legítima se perdería.
+            or(
+              ne(auditLog.event_type, AuditEvent.CASE_STATUS_CHANGED),
+              sql`${auditLog.payload}->>'trigger' is distinct from 'agent'`
+            )
+          )
+        )
         .orderBy(desc(auditLog.created_at))
         .limit(20)
     );

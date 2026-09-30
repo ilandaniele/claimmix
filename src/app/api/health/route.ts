@@ -267,7 +267,14 @@ async function checkSchema(): Promise<Check> {
 
     // 0017 crea una tabla entera; sin ella una factura cerrada se recalcula en
     // cada consulta, que es justo lo que la 0017 existe para impedir.
-    const requiredTables = ["billing_invoices", "rate_limit_counters", "case_recordatorios", "case_plan_pasos"];
+    const requiredTables = [
+      "billing_invoices",
+      "rate_limit_counters",
+      "case_recordatorios",
+      "case_plan_pasos",
+      "asistente_turnos",
+      "case_desvios",
+    ];
     const tablesPresent = new Set(rows.map((r) => r.table_name));
     const missingTables = requiredTables.filter((t) => !tablesPresent.has(t));
     const missing = required

@@ -8,18 +8,23 @@
  * termina en el servidor. Los enlaces a casos salen únicamente de `casos[]`,
  * nunca del texto libre de la respuesta.
  *
- * El historial es sólo de este componente: nunca viaja al servidor y se pierde
- * al recargar la página.
+ * En `/casos/<id>` la caja pregunta sobre ESE caso (`caseId` en el pedido) y la
+ * conversación vive en el servidor, por persona y por caso: al abrir el caso se
+ * pide de vuelta. En el resto de las pantallas el historial es sólo de este
+ * componente: nunca viaja al servidor y se pierde al recargar la página. Cada
+ * pantalla lleva el suyo, para que una respuesta sobre un caso no aparezca al
+ * navegar a otro.
  *
  * Vive en `/asistente` (page.tsx, sin `textareaRef`) y adentro del panel
  * flotante (`AsistenteFlotante.tsx`, que pasa su propio ref y enfoca el
  * textarea en cada apertura).
  */
 
-import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLocale, useT } from "@/lib/i18n/LocaleContext";
+import type { MotivoSinLeer } from "@/core/ai/sin-leer";
 import { formatCaseNumber } from "@/core/case/numero";
 import { formatDate } from "@/lib/utils";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
@@ -35,8 +40,10 @@ interface CasoEncontrado {
 
 interface RespuestaDelAsistente {
   texto: string;
-  herramienta: "contar_casos" | "buscar_caso" | "ninguna";
+  herramienta: "contar_casos" | "buscar_caso" | "pregunta_caso" | "ninguna";
   casos: CasoEncontrado[];
+  /** Por qué no hubo respuesta; la frase sale del diccionario, no de `texto`. */
+  sinLeer?: MotivoSinLeer;
 }
 
 interface Intercambio {
@@ -46,6 +53,21 @@ interface Intercambio {
 
 /** Las últimas 5, ni una más: es un historial de sesión, no un registro. */
 const TOPE_HISTORIAL = 5;
+const AMBITO_GENERAL = "general";
+
+/** Los turnos guardados (pregunta, respuesta, pregunta…) como intercambios; un turno suelto sin su par se descarta. */
+function aIntercambios(turnos: unknown): Intercambio[] {
+  if (!Array.isArray(turnos)) return [];
+  const salida: Intercambio[] = [];
+  for (let i = 0; i + 1 < turnos.length; i += 2) {
+    const p = turnos[i] as { rol?: string; texto?: string };
+    const r = turnos[i + 1] as { rol?: string; texto?: string };
+    if (p?.rol === "user" && r?.rol === "assistant" && typeof p.texto === "string" && typeof r.texto === "string") {
+      salida.push({ pregunta: p.texto, respuesta: { texto: r.texto, herramienta: "pregunta_caso", casos: [] } });
+    }
+  }
+  return salida;
+}
 
 const ESTILO_CHIP =
   "rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 " +
@@ -63,18 +85,38 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
   const pathname = usePathname();
   const [pregunta, setPregunta] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const [historial, setHistorial] = useState<Intercambio[]>([]);
+  const [porAmbito, setPorAmbito] = useState<Record<string, Intercambio[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const hilosPedidos = useRef(new Set<string>());
   const finRef = useRef<HTMLDivElement>(null);
   const textareaPropio = useRef<HTMLTextAreaElement>(null);
   const textareaRef = textareaRefExterno ?? textareaPropio;
 
-  // "Resumí este caso": sólo dentro de /casos/<id>. El número sale del propio
+  // Dentro de /casos/<id> la caja habla de ESE caso. El número sale del propio
   // id de la ruta — `formatCaseNumber` es puro, no hace falta pedirlo de nuevo.
   const casoActual = useMemo(() => {
     const m = /^\/casos\/([0-9a-fA-F-]+)$/.exec(pathname ?? "");
-    return m ? { numero: formatCaseNumber(m[1]!) } : null;
+    return m ? { id: m[1]!, numero: formatCaseNumber(m[1]!) } : null;
   }, [pathname]);
+  const ambito = casoActual?.id ?? AMBITO_GENERAL;
+  const historial = porAmbito[ambito] ?? [];
+
+  // El hilo guardado del caso, una vez por caso. Si falla, la caja arranca vacía.
+  const casoId = casoActual?.id;
+  useEffect(() => {
+    if (!casoId || hilosPedidos.current.has(casoId)) return;
+    hilosPedidos.current.add(casoId);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/asistente?caseId=${encodeURIComponent(casoId)}`);
+        if (!res.ok) return;
+        const previos = aIntercambios(((await res.json()) as { turnos?: unknown }).turnos);
+        setPorAmbito((prev) => ({ ...prev, [casoId]: [...previos, ...(prev[casoId] ?? [])].slice(-TOPE_HISTORIAL) }));
+      } catch {
+        hilosPedidos.current.delete(casoId);
+      }
+    })();
+  }, [casoId]);
 
   const enviar = useCallback(
     async (texto: string) => {
@@ -88,7 +130,7 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
         const res = await fetch("/api/asistente", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pregunta: limpia }),
+          body: JSON.stringify(casoId ? { pregunta: limpia, caseId: casoId } : { pregunta: limpia }),
         });
 
         if (res.status === 429) {
@@ -105,7 +147,10 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
         }
 
         const data = (await res.json()) as RespuestaDelAsistente;
-        setHistorial((prev) => [...prev, { pregunta: limpia, respuesta: data }].slice(-TOPE_HISTORIAL));
+        setPorAmbito((prev) => ({
+          ...prev,
+          [ambito]: [...(prev[ambito] ?? []), { pregunta: limpia, respuesta: data }].slice(-TOPE_HISTORIAL),
+        }));
         setPregunta("");
         // Opcional: jsdom (tests) no implementa scrollIntoView.
         requestAnimationFrame(() => finRef.current?.scrollIntoView?.({ block: "end" }));
@@ -115,7 +160,7 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
         setEnviando(false);
       }
     },
-    [enviando, t]
+    [enviando, t, casoId, ambito]
   );
 
   const handleSubmit = useCallback(
@@ -138,31 +183,7 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
     <div className="space-y-4">
       {historial.length === 0 && (
         <div className="flex flex-wrap gap-2" data-testid="asistente-chips">
-          <button type="button" className={ESTILO_CHIP} onClick={() => void enviar(t("asistente.chip.conteoMes"))}>
-            {t("asistente.chip.conteoMes")}
-          </button>
-          <button
-            type="button"
-            className={ESTILO_CHIP}
-            onClick={() => void enviar(t("asistente.chip.whatsappsHoy"))}
-          >
-            {t("asistente.chip.whatsappsHoy")}
-          </button>
-          <button
-            type="button"
-            className={ESTILO_CHIP}
-            onClick={() => void enviar(t("asistente.chip.reclamos30dias"))}
-          >
-            {t("asistente.chip.reclamos30dias")}
-          </button>
-          <button
-            type="button"
-            className={ESTILO_CHIP}
-            onClick={() => llenarYEnfocar(t("asistente.chip.buscarCasoPrefill"))}
-          >
-            {t("asistente.chip.buscarCasoLabel")}
-          </button>
-          {casoActual && (
+          {casoActual ? (
             <button
               type="button"
               className={ESTILO_CHIP}
@@ -172,6 +193,33 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
             >
               {t("asistente.chip.resumirCaso")}
             </button>
+          ) : (
+            <>
+              <button type="button" className={ESTILO_CHIP} onClick={() => void enviar(t("asistente.chip.conteoMes"))}>
+                {t("asistente.chip.conteoMes")}
+              </button>
+              <button
+                type="button"
+                className={ESTILO_CHIP}
+                onClick={() => void enviar(t("asistente.chip.whatsappsHoy"))}
+              >
+                {t("asistente.chip.whatsappsHoy")}
+              </button>
+              <button
+                type="button"
+                className={ESTILO_CHIP}
+                onClick={() => void enviar(t("asistente.chip.reclamos30dias"))}
+              >
+                {t("asistente.chip.reclamos30dias")}
+              </button>
+              <button
+                type="button"
+                className={ESTILO_CHIP}
+                onClick={() => llenarYEnfocar(t("asistente.chip.buscarCasoPrefill"))}
+              >
+                {t("asistente.chip.buscarCasoLabel")}
+              </button>
+            </>
           )}
         </div>
       )}
@@ -186,7 +234,7 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
           rows={3}
           value={pregunta}
           onChange={(e) => setPregunta(e.target.value)}
-          placeholder={t("asistente.placeholder")}
+          placeholder={t(casoActual ? "asistente.caso.placeholder" : "asistente.placeholder")}
           maxLength={500}
           className="w-full resize-none rounded-md border border-control px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-900 dark:text-slate-100"
         />
@@ -215,11 +263,18 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
             >
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{intercambio.pregunta}</p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">
-                {intercambio.respuesta.texto}
+                {intercambio.respuesta.sinLeer
+                  ? t(`lectura.sinLeer.${intercambio.respuesta.sinLeer}`)
+                  : intercambio.respuesta.texto}
               </p>
               {intercambio.respuesta.herramienta === "buscar_caso" && intercambio.respuesta.casos.length === 1 && (
                 <p className="mt-2 text-xs italic text-slate-500 dark:text-slate-400">
                   {t("asistente.avisoResumenIA")}
+                </p>
+              )}
+              {intercambio.respuesta.herramienta === "pregunta_caso" && !intercambio.respuesta.sinLeer && (
+                <p className="mt-2 text-xs italic text-slate-500 dark:text-slate-400">
+                  {t("asistente.avisoRespuestaIA")}
                 </p>
               )}
               {intercambio.respuesta.casos.length > 0 && (

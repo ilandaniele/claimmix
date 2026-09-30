@@ -1,5 +1,5 @@
 /**
- * El puente de alcance de los tests: `enTenant`/`enTenantVarias` sin RLS.
+ * El puente de alcance de los tests: `enTenant`/`enTenantVarias`/`enTenantDeUsuarioVarias` sin RLS.
  *
  * Los tests unitarios mockean `@/lib/db` con cadenas encadenadas, y el `db`
  * real cambia por un getter; por eso `obtenerDb` se lee EN CADA llamada y no
@@ -11,12 +11,14 @@
 export type PuenteDeAlcance = {
   enTenant: (_ctx: unknown, armar: (db: unknown) => unknown) => Promise<unknown>;
   enTenantVarias: (_ctx: unknown, armar: (db: unknown) => unknown[]) => Promise<unknown[]>;
+  enTenantDeUsuarioVarias: (_ctx: unknown, armar: (db: unknown) => unknown[]) => Promise<unknown[]>;
 };
 
 export function puenteDeAlcance(obtenerDb: () => unknown): PuenteDeAlcance {
   return {
     enTenant: (_ctx, armar) => Promise.resolve(armar(obtenerDb())),
     enTenantVarias: (_ctx, armar) => Promise.all(armar(obtenerDb())),
+    enTenantDeUsuarioVarias: (_ctx, armar) => Promise.all(armar(obtenerDb())),
   };
 }
 

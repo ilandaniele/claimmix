@@ -25,12 +25,16 @@ import { PLAZO_DE_CONTEO_MS, TOPE_TOKENS_PDF } from "@/server/worker/adjuntos";
 
 export type Lectura<T> = { ok: T } | { sinLeer: MotivoSinLeer };
 
-type AmbitoDeLectura = Extract<AmbitoDeCupo, "condiciones-poliza" | "lectura-presupuesto" | "lectura-reclamo">;
+type AmbitoDeLectura = Extract<
+  AmbitoDeCupo,
+  "condiciones-poliza" | "lectura-presupuesto" | "lectura-reclamo" | "asistente-caso"
+>;
 
 const CUPOS: Record<AmbitoDeLectura, keyof typeof RATE_LIMIT_CONFIGS> = {
   "condiciones-poliza": "CONDICIONES_POR_POLIZA",
   "lectura-presupuesto": "LECTURA_PRESUPUESTO_POR_CASO",
   "lectura-reclamo": "LECTURA_RECLAMO_POR_CASO",
+  "asistente-caso": "ASISTENTE_CASO",
 };
 
 export async function leerDocumento<T>({

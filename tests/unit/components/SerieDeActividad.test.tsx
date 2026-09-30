@@ -2,7 +2,7 @@
  * La serie de actividad de /metricas, dibujada.
  *
  * Las barras son clases y no `style`, por la CSP (ver `anchoDeBarra`): lo que se
- * afirma es que la clase refleje la proporción contra el máximo de las TRES
+ * afirma es que la clase refleje la proporción contra el máximo de las SEIS
  * series, y que cambiar de unidad sea un enlace y no estado en el navegador.
  */
 
@@ -22,11 +22,12 @@ vi.mock("next/link", async () => {
 });
 
 import { SerieDeActividad } from "@/app/(app)/metricas/_components/SerieDeActividad";
+import { SITUACION_EN_CERO } from "../../mocks/metricas-datos";
 
 const SERIE = [
-  { clave: "2026-07", reclamos: 0, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0 },
-  { clave: "2026-08", reclamos: 2, whatsapps: 10, mails: 5, reclamos_whatsapp: 1, reclamos_mail: 1 },
-  { clave: "2026-09", reclamos: 4, whatsapps: 0, mails: 1, reclamos_whatsapp: 3, reclamos_mail: 1 },
+  { clave: "2026-07", reclamos: 0, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0, ...SITUACION_EN_CERO },
+  { clave: "2026-08", reclamos: 2, whatsapps: 10, mails: 5, reclamos_whatsapp: 1, reclamos_mail: 1, ...SITUACION_EN_CERO },
+  { clave: "2026-09", reclamos: 4, whatsapps: 0, mails: 1, reclamos_whatsapp: 3, reclamos_mail: 1, escalados: 1, listos: 2, cerrados: 1 },
 ];
 
 function dibujar() {
@@ -84,7 +85,7 @@ describe("SerieDeActividad", () => {
 
   it("rotula los días en el orden de cada idioma, sin correrlos al anterior", () => {
     const dia = [
-      { clave: "2026-08-31", reclamos: 1, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0 },
+      { clave: "2026-08-31", reclamos: 1, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0, ...SITUACION_EN_CERO },
     ];
 
     const { unmount } = render(<SerieDeActividad serie={dia} unidad="dia" locale="es-AR" />);
@@ -103,22 +104,52 @@ describe("SerieDeActividad", () => {
     expect(screen.getByText(/no simulations/)).toBeInTheDocument();
   });
 
-  it("dibuja tres barras por período", () => {
+  it("dibuja seis barras por período", () => {
     const serie = dibujar();
 
-    expect(within(serie).getAllByTestId("barra")).toHaveLength(SERIE.length * 3);
+    expect(within(serie).getAllByTestId("barra")).toHaveLength(SERIE.length * 6);
   });
 
-  it("la barra más larga es el máximo de las tres series, y el cero no se dibuja", () => {
+  it("la barra más larga es el máximo de las seis series, y el cero no se dibuja", () => {
     const barras = within(dibujar()).getAllByTestId("barra");
 
-    // Orden: por período, y adentro reclamos, whatsapps, mails.
-    const [julio, agosto, septiembre] = [0, 3, 6].map((i) => barras.slice(i, i + 3));
+    // Orden: por período, y adentro reclamos, whatsapps, mails, escalados, listos, cerrados.
+    const [julio, agosto, septiembre] = [0, 6, 12].map((i) => barras.slice(i, i + 6));
     expect(agosto[1]).toHaveClass("w-full");
     expect(agosto[2]).toHaveClass("w-[50%]");
     expect(septiembre[0]).toHaveClass("w-[40%]");
     expect(septiembre[1]).toHaveClass("w-0");
+    // Las tres de situación comparten la escala: 2 listos contra el máximo de 10.
+    expect(septiembre[3]).toHaveClass("w-[10%]");
+    expect(septiembre[4]).toHaveClass("w-[20%]");
+    expect(septiembre[5]).toHaveClass("w-[10%]");
     for (const b of julio) expect(b).toHaveClass("w-0");
+  });
+
+  it("el resumen suma también las tres de situación", () => {
+    const serie = dibujar();
+    const actual = within(within(serie).getByTestId("resumen-actual"))
+      .getAllByRole("definition")
+      .map((el) => el.textContent);
+    const ventana = within(within(serie).getByTestId("resumen-ventana"))
+      .getAllByRole("definition")
+      .map((el) => el.textContent);
+
+    expect(actual).toEqual(["4", "0", "1", "1", "2", "1"]);
+    expect(ventana).toEqual(["6", "10", "6", "1", "2", "1"]);
+  });
+
+  it("los enlaces de unidad conservan el período elegido", () => {
+    render(<SerieDeActividad serie={SERIE} unidad="mes" locale="es-AR" periodo="mes_pasado" />);
+
+    const hrefs = within(screen.getByTestId("serie-actividad"))
+      .getAllByRole("link")
+      .map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual([
+      "/metricas?serie=dia&periodo=mes_pasado",
+      "/metricas?serie=mes&periodo=mes_pasado",
+      "/metricas?serie=anio&periodo=mes_pasado",
+    ]);
   });
 
   it("rotula los meses con su nombre y cada número con su serie", () => {
@@ -130,11 +161,11 @@ describe("SerieDeActividad", () => {
 
   it("el resumen de arriba: el período actual es el último punto de la serie", () => {
     const resumen = within(dibujar()).getByTestId("resumen-actual");
-    // Orden del `<dl>`: reclamos, whatsapps, mails — el mismo de `ColumnaResumen`.
+    // Orden del `<dl>`: reclamos, whatsapps, mails y, después, la situación.
     const valores = within(resumen).getAllByRole("definition").map((el) => el.textContent);
 
     expect(within(resumen).getByText("Este mes")).toBeInTheDocument();
-    expect(valores).toEqual(["4", "0", "1"]);
+    expect(valores.slice(0, 3)).toEqual(["4", "0", "1"]);
     expect(within(resumen).getByText("3 por WhatsApp · 1 por mail")).toBeInTheDocument();
   });
 
@@ -143,7 +174,7 @@ describe("SerieDeActividad", () => {
     const valores = within(resumen).getAllByRole("definition").map((el) => el.textContent);
 
     expect(within(resumen).getByText("Últimos 12 meses")).toBeInTheDocument();
-    expect(valores).toEqual(["6", "10", "6"]);
+    expect(valores.slice(0, 3)).toEqual(["6", "10", "6"]);
     expect(within(resumen).getByText("4 por WhatsApp · 2 por mail")).toBeInTheDocument();
   });
 
@@ -164,7 +195,7 @@ describe("SerieDeActividad", () => {
     render(
       <SerieDeActividad
         serie={[
-          { clave: "2026", reclamos: 0, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0 },
+          { clave: "2026", reclamos: 0, whatsapps: 0, mails: 0, reclamos_whatsapp: 0, reclamos_mail: 0, ...SITUACION_EN_CERO },
         ]}
         unidad="anio"
         locale="en-US"

@@ -207,6 +207,25 @@ export const RATE_LIMIT_CONFIGS = {
    * caso trae de verdad; el resto no puede comerse el presupuesto de IA.
    */
   LECTURA_RECLAMO_POR_CASO: { limit: 3, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * ASISTENTE_CASO: 30 preguntas sobre un caso por día, por persona y por caso.
+   * Cada una manda el caso entero al modelo, y el tope por minuto del asistente
+   * no frena a quien insiste con el mismo caso todo el día: sin éste, un caso
+   * abierto en loop gasta el presupuesto de IA.
+   */
+  ASISTENTE_CASO: { limit: 30, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * REVISION_DE_DESVIOS: una revisión de calidad (B22) por día, para todo el
+   * sistema. `reap-stuck` lo dispara GitHub Actions cada quince minutos y el
+   * resto de sus barridos tienen que seguir corriendo así, pero la revisión son
+   * cinco INSERT ... SELECT sobre la auditoría de todos los inquilinos: repetirla
+   * noventa y seis veces por día no encuentra nada nuevo y sí gasta la base. La
+   * ventana fija de 24 h cae en el día UTC, así que corre en la primera llamada
+   * después de las 21 h de Argentina.
+   */
+  REVISION_DE_DESVIOS: { limit: 1, windowMs: 24 * 60 * 60_000 },
 } as const;
 
 /**

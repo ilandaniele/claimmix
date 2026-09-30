@@ -60,6 +60,7 @@ import {
   efectosDeTransicion,
   type CriteriosDeTrabajo,
 } from "@/server/cases/efectos-de-transicion";
+import { auditoriaSiCambia } from "@/server/cases/auditoria-si-quedo";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 import { deliberate } from "@/server/ai/deliberate";
 import {
@@ -1875,28 +1876,54 @@ export async function setStatus(
       .returning({ id: cases.id });
   };
   try {
+    /*
+     * La auditoría del cambio, el estado, el vencimiento, la asignación y el
+     * plan salen en un mismo lote: si algo de lo que rodea al estado falla
+     * —una migración sin aplicar, un dato roto— no se pierde el cambio, que es
+     * lo que el agente necesita para seguir. El lote es atómico, así que al
+     * fallar no quedó nada a medias y el UPDATE de siempre corre limpio.
+     *
+     * La auditoría va primero porque lee el estado de antes (B14: de ahí sale
+     * cuánto estuvo el caso en cada estado); sólo queda si el estado cambia.
+     *
+     * Si falla lo del equipo, el segundo intento es el estado con su auditoría
+     * y nada más: sin ella el tablero no ve el paso a listo y la revisión
+     * nocturna marcaría, para siempre, un cierre «sin pasar por listo». El
+     * UPDATE solo es el último recurso, para cuando falla hasta la auditoría.
+     */
     let filas: { id: string }[] | null = null;
-    if (trabajo) {
-      /*
-       * El estado, el vencimiento, la asignación y el plan salen en un mismo
-       * lote: si algo de lo del equipo falla —una migración sin aplicar, un
-       * dato roto— no se pierde el cambio de estado, que es lo que el agente
-       * necesita para seguir. El lote es atómico, así que al fallar no quedó
-       * nada a medias y el UPDATE de siempre corre limpio.
-       */
+    for (const conEfectos of trabajo ? [true, false] : [false]) {
+      const criterios = conEfectos ? trabajo : undefined;
       try {
-        [filas] = await enTenantVarias<[{ id: string }[]]>(tenantCtx, (db) => [
-          cambiarEstado(db, ajusteDeVencimiento(status, trabajo)),
-          ...efectosDeTransicion(db, {
-            caseId,
-            hacia: status,
-            origen: "agente",
-            actorId: null,
-            criterios: trabajo,
-          }),
+        [, filas] = await enTenantVarias<[unknown, { id: string }[]]>(tenantCtx, (db) => [
+          auditoriaSiCambia(
+            db,
+            {
+              caseId,
+              actorId: null,
+              eventType: AuditEvent.CASE_STATUS_CHANGED,
+              payload: { trigger: "agent" },
+              desde: ESTADOS_QUE_PISA_EL_AGENTE,
+            },
+            status
+          ),
+          cambiarEstado(db, criterios ? ajusteDeVencimiento(status, criterios) : {}),
+          ...(criterios
+            ? efectosDeTransicion(db, {
+                caseId,
+                hacia: status,
+                origen: "agente",
+                actorId: null,
+                criterios,
+              })
+            : []),
         ]);
+        break;
       } catch (err) {
-        logger.warn({ code: errorCode(err), case_id: caseId, status }, "orchestrate.efectos_fallaron");
+        logger.warn(
+          { code: errorCode(err), case_id: caseId, status, con_efectos: conEfectos },
+          "orchestrate.efectos_fallaron"
+        );
       }
     }
     filas ??= await enTenant(tenantCtx, (db) => cambiarEstado(db));

@@ -33,6 +33,12 @@ import { CUSTOMER_PII_ROLES, type UserRole } from "@/lib/auth/roles";
 /** Lo que se ve en lugar de una dirección de correo o un teléfono. */
 export const OCULTO = "[oculto]";
 
+/** El nombre del titular, o `OCULTO` si hay algo que tapar y el rol no puede verlo. */
+export function titularParaElRol(nombre: string | null, rol: string): string | null {
+  if (CUSTOMER_PII_ROLES.includes(rol as UserRole)) return nombre;
+  return nombre ? OCULTO : null;
+}
+
 function sinIdentificadores<T extends string | null | undefined>(texto: T): T {
   return (texto ? redactString(texto) : texto) as T;
 }

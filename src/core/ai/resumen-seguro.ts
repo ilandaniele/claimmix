@@ -62,13 +62,23 @@ export function tieneMontoInventado(resumen: string, conocidos: Set<string>): bo
   });
 }
 
-/** Las guardas del asistente: largo, centinelas, enlaces, números y montos. */
+/**
+ * Las guardas del asistente: largo, centinelas, enlaces, números y montos.
+ *
+ * `montos` son importes que sí se pueden repetir aunque no estén en `valores`
+ * (la estimación de cobertura, que no es un campo del caso). Van aparte porque
+ * `digitosConocidos` sólo guarda corridas de 6 o más cifras y `tieneMontoInventado`
+ * descarta cualquier monto con signo de moneda que no conozca, aunque sea de
+ * 50.000: un importe corto legítimo se rechazaba.
+ */
 export function resumenValido(
   resumen: string,
   valores: readonly (string | null | undefined)[],
-  tope = 1200
+  tope = 1200,
+  montos: readonly number[] = []
 ): boolean {
   const conocidos = digitosConocidos(valores);
+  for (const monto of montos) conocidos.add(String(Math.trunc(monto)));
   return (
     resumen.length > 0 &&
     resumen.length <= tope &&

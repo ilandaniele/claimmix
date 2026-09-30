@@ -12,10 +12,16 @@
  *   si se pudiera, el barrido la volvería a mandar.
  * - case_plan_pasos (0042): un paso del plan se marca o se desmarca, no se
  *   borra; el rastro de quién lo hizo y cuándo vive en la fila y en audit_log.
+ * - asistente_turnos (0043): un turno de la conversación no se reescribe ni se
+ *   borra; se va con el caso o con la persona.
+ * - case_desvios (0043): los escribe el barrido con el rol dueño; la app sólo
+ *   los lee, así que una falla de la app no puede inventarlos ni tapar uno.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
   core_sync_settings: ["DELETE"],
   case_recordatorios: ["UPDATE", "DELETE"],
   case_plan_pasos: ["DELETE"],
+  asistente_turnos: ["UPDATE", "DELETE"],
+  case_desvios: ["INSERT", "UPDATE", "DELETE"],
 };

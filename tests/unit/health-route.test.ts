@@ -100,6 +100,9 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "tenants", column_name: "plan_por_tipo" },
     { table_name: "tenants", column_name: "pesos_puntaje" },
     { table_name: "case_plan_pasos", column_name: "case_id" },
+    // 0043.
+    { table_name: "asistente_turnos", column_name: "id" },
+    { table_name: "case_desvios", column_name: "case_id" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -333,6 +336,17 @@ describe("GET /api/health — what it reports", () => {
 
     expect(schema.status).toBe("down");
     for (const col of faltan) expect(schema.detail).toContain(col);
+  });
+
+  it("nota que falta la 0043: la conversación del asistente y los desvíos de la revisión nocturna", async () => {
+    mockExecute.mockResolvedValue({ rows: esquemaSin("asistente_turnos", "case_desvios") });
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const schema = (await res.json()).checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(schema.status).toBe("down");
+    expect(schema.detail).toContain("asistente_turnos");
+    expect(schema.detail).toContain("case_desvios");
   });
 
   it("answers 503 when anything is down, so a watcher notices", async () => {

@@ -1,4 +1,6 @@
-import type { ExtractedField } from "@/lib/schemas/extracted-claim";
+import type { ExtractedClaim, ExtractedField } from "@/lib/schemas/extracted-claim";
+import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { soloAlfanumerico } from "@/core/case/respaldado-por-busqueda";
 import { bareAddress } from "@/lib/email/reserved";
 import { nombreDePersona, nombreVisibleDelSobre } from "@/core/nombres/nombre-de-persona";
 import { normalizarPatente } from "@/core/case/patente";
@@ -24,6 +26,12 @@ const LABELED_DNI_RE = /\bDNI\s*:\s*([0-9.]{7,12})(?=\D|$)/i;
 const CBU_RE = /\bCBU\s*(?:Nro\.?|N[ro]*\.?|No\.?)?\s*:?\s*([0-9]{18,24})(?=\D|$)/i;
 const CLAIM_REF_RE = /\bSiniestro\s+([A-Z0-9][A-Z0-9-]{4,})\b/i;
 const POLICY_NUMBER_RE = /\b(?:N[uú]mero\s+de\s+p[oó]liza|P[oó]liza)\s*:\s*([A-Z0-9][A-Z0-9-]{4,})\b/i;
+/**
+ * «La póliza es POL-3390-F», sin los dos puntos que pide la de arriba. Exige un
+ * dígito adentro: «póliza vencida» no es un número.
+ */
+const POLICY_NUMBER_LOOSE_RE =
+  /\bp[oó]liza\s+(?:(?:es|n[°º.o]*|nro\.?|n[uú]mero)\s+)*((?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{4,})\b/i;
 const ACCIDENT_DATE_RE = /\bAccidente\s+del\s+(\d{1,2}\/\d{1,2}\/\d{4})\b/i;
 const INCIDENT_DATE_RE = /\b(?:ocurrido\s+el\s+d[ií]a|d[ií]a)\s+(\d{1,2}(?:\s+de\s+[a-záéíóúñ]+(?:\s+de)?\s+\d{4}|\/\d{1,2}\/\d{4}))\b/i;
 const DATE_RE = /\b(\d{1,2}\/\d{1,2}\/\d{4})\b/;
@@ -91,7 +99,7 @@ export function parseEmailClaimFields(input: ParseInput): ExtractedField[] {
   addField(fields, "phone", matchValue(PHONE_RE, text) ?? phoneFromSender(input.senderEmail));
   addField(fields, "dni", normalizeDni(matchValue(DNI_RE, text) ?? matchValue(LABELED_DNI_RE, text)));
   addField(fields, "cbu", normalizeDigits(matchValue(CBU_RE, text)));
-  addField(fields, "policy_number", matchValue(POLICY_NUMBER_RE, text) ?? matchValue(CLAIM_REF_RE, subject) ?? matchValue(CLAIM_REF_RE, text));
+  addField(fields, "policy_number", polizaEscrita(text) ?? matchValue(CLAIM_REF_RE, subject) ?? matchValue(CLAIM_REF_RE, text));
   addField(fields, "accident_date", matchValue(ACCIDENT_DATE_RE, subject) ?? matchValue(DATE_RE, subject) ?? normalizeIncidentDate(matchValue(INCIDENT_DATE_RE, text)) ?? matchValue(DATE_RE, text));
   addField(fields, "accident_location", extractAccidentLocation(text));
   addField(fields, "claim_type", inferClaimType(text));
@@ -122,6 +130,54 @@ export function sanearContacto(fields: ExtractedField[]): ExtractedField[] {
   return fields
     .filter((f) => f !== emailField)
     .concat(esTelefono ? [{ ...emailField, field_key: "phone" }] : []);
+}
+
+function polizaEscrita(text: string): string | null {
+  return matchValue(POLICY_NUMBER_RE, text) ?? matchValue(POLICY_NUMBER_LOOSE_RE, text);
+}
+
+/**
+ * El número de póliza del modelo, cuando es un pedazo del que escribió la persona.
+ *
+ * El ensayo `mail-que-no-coincide-con-el-padron` dice «La póliza es POL-3390-F»
+ * y el modelo devolvía `policy_number: "3390"`, a veces con `numero_poliza:
+ * "POL-3390-F"` al lado, que pierde: la clave canónica gana (`canonizarCampos`).
+ * El buscador comparaba «3390» con «POL-3390-F», daba cero, y el worker no se
+ * enteraba de que quien escribía no era el titular: derivaba sólo si el modelo lo
+ * deliberaba, y eso varía entre corridas.
+ *
+ * Sólo un pedazo, no cualquier valor distinto: si el modelo eligió otro número
+ * (la foto de una póliza, otro dato del texto) no se lo pisa.
+ */
+export function anclarPolizaAlTexto(claim: ExtractedClaim, text: string): ExtractedClaim {
+  const escrita = polizaEscrita(text);
+  if (!escrita) return claim;
+
+  const entera = soloAlfanumerico(escrita);
+  const esPedazo = (valor?: string) => {
+    const v = soloAlfanumerico(valor ?? "");
+    return v.length >= 3 && v.length < entera.length && entera.includes(v);
+  };
+  const confianza = FIELD_CONFIDENCE.policy_number;
+  const tipada = claim.extracted_fields;
+
+  return {
+    ...claim,
+    fields: claim.fields.map((f) =>
+      canonicalFieldKey(f.field_key) === "policy_number" && esPedazo(f.field_value)
+        ? { ...f, field_value: escrita, confidence: Math.max(f.confidence, confianza) }
+        : f
+    ),
+    ...(tipada && esPedazo(tipada.policy_number)
+      ? {
+          extracted_fields: { ...tipada, policy_number: escrita },
+          field_confidences: {
+            ...claim.field_confidences,
+            policy_number: Math.max(claim.field_confidences.policy_number ?? 0, confianza),
+          },
+        }
+      : {}),
+  };
 }
 
 export function mergeExtractedFields(

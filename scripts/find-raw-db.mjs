@@ -71,7 +71,7 @@ function tramosDeLaCapa(s) {
   // lleva un argumento de tipo, el paréntesis no viene pegado al nombre, y sin
   // esto el tramo entero quedaba sin reconocer y sus consultas salían como
   // crudas cuando no lo son.
-  const re = /\b(?:paginarEnTenant|enTenant(?:Varias)?)\s*(?:<[^(]*>)?\s*\(/g;
+  const re = /\b(?:paginarEnTenant|enTenant(?:DeUsuario)?(?:Varias)?)\s*(?:<[^(]*>)?\s*\(/g;
   let m;
   while ((m = re.exec(s))) {
     let i = s.indexOf("(", m.index);

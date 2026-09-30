@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
 import { formatDate } from "@/lib/utils";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
@@ -80,7 +80,7 @@ const MAX_POLLS = 24; // ~2 minutes
 
 // El motivo llega crudo desde la base; acá sólo se elige con qué clave se
 // escribe. Si aparece uno que no está en el mapa se muestra tal cual.
-const BLOCKING_LABEL_KEYS: Record<string, TranslationKey> = {
+const BLOCKING_LABEL_KEYS: Record<string, ClaveDelCliente> = {
   invalid_json: "agente.bloqueo.invalid_json",
   not_a_claim: "agente.bloqueo.not_a_claim",
   no_linked_case: "agente.bloqueo.no_linked_case",

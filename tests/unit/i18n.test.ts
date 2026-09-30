@@ -3,8 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { t, getT, esAR } from "@/lib/i18n/index";
-import { enUS } from "@/lib/i18n/en-US";
+import { t, getT, esAR, enUS } from "@/lib/i18n/index";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locale-shared";
 
 describe("t() translation helper", () => {

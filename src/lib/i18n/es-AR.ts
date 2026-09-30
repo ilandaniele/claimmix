@@ -6,6 +6,11 @@
  *
  * Convention: keys use dot-notation by namespace (nav, tabs, status, etc.).
  * Use the typed `t()` helper from src/lib/i18n/index.ts for type-safe access.
+ *
+ * Sólo las claves que lee algún componente de cliente: este archivo viaja al
+ * navegador. El texto que pinta sólo el servidor (páginas, paneles, mails) va
+ * en es-AR.servidor.ts. `ClaveDelCliente` hace que un componente de cliente que
+ * pida una clave del servidor no compile.
  */
 
 export const esAR = {
@@ -28,7 +33,6 @@ export const esAR = {
   "nav.operation": "Operación",
   "nav.demo": "Demo",
   "nav.principal": "Navegación principal",
-  "nav.saltarAlContenido": "Saltar al contenido",
   "nav.agente": "Agente",
   "nav.agenteBloqueado": "Solo administradores pueden abrir la consola del agente.",
   "nav.facturacion": "Facturación",
@@ -106,7 +110,6 @@ export const esAR = {
   "tabs.filtrarPorEstado": "Filtrar por situación",
 
   // ── Case table columns ─────────────────────────────────────────────────────
-  "table.col.id": "ID",
   "table.col.incidentDate": "Fecha de siniestro",
   "table.col.policyholder": "Asegurado",
   "table.col.policy": "Póliza",
@@ -140,9 +143,7 @@ export const esAR = {
   "bandeja.deleteConfirmBodyN": "Estás por eliminar",
   "bandeja.deleteConfirmIrreversible": "Esta acción no se puede deshacer.",
   "bandeja.deleteRemember": "No volver a preguntar",
-  "bandeja.title": "Bandeja de siniestros",
   "bandeja.paraResponder": "Para responder",
-  "bandeja.subtitle": "Gestioná y filtrá los siniestros FNOL del sistema",
   "bandeja.showing": "Mostrando",
   "bandeja.claims": "siniestros",
   "bandeja.selected": "seleccionado(s)",
@@ -160,15 +161,6 @@ export const esAR = {
   "tablero.verTodos": "Ver todos",
   "tablero.vacio": "Sin casos en esta columna.",
 
-  // ── Agenda (G39) ───────────────────────────────────────────────────────────
-  "agenda.title": "Agenda",
-  "agenda.subtitle": "Lo que vence: ventanas de WhatsApp y conversaciones por cerrar.",
-  "agenda.empty": "No hay vencimientos por ahora.",
-  "agenda.hoy": "Hoy",
-  "agenda.manana": "Mañana",
-  "agenda.tipo.ventanaWhatsapp": "Ventana de WhatsApp",
-  "agenda.tipo.cierreAbandono": "Cierre por abandono",
-
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",
   "simulate.scenario": "Tipo de siniestro",
@@ -184,13 +176,8 @@ export const esAR = {
 
   // ── Case detail ────────────────────────────────────────────────────────────
   "case.detail.title": "Detalle del caso",
-  "case.detail.back": "Volver a la bandeja",
-  "case.detail.extractedFields": "Campos extraídos",
-  "case.detail.missingDocs": "Documentación y datos",
   "case.detail.docsGroup": "Documentación",
   "case.detail.fieldsGroup": "Datos por confirmar",
-  "case.detail.rawEmail": "Texto original",
-  "case.detail.auditLog": "Historial",
   "case.detail.confidence": "Confianza",
   "case.detail.close": "Cerrar siniestro",
   "case.detail.escalate": "Escalar",
@@ -207,12 +194,6 @@ export const esAR = {
   "tardio.tipo.consulta_estado": "Pregunta cómo va",
   "tardio.tipo.otro": "Otra cosa",
   "tardio.tipo.sin_clasificar": "Sin clasificar",
-  "tardio.aviso.asunto": "Mensaje nuevo en un caso que atiende una persona: {tipo}",
-  "tardio.aviso.cuerpo": "El asegurado volvió a escribir sobre un caso que el agente ya terminó. El agente no le contestó: le responde una persona.",
-  "tardio.aviso.quePide": "Qué pide: {tipo}",
-  "tardio.aviso.resumen": "Resumen: {resumen}",
-  "tardio.aviso.caso": "Caso: {caso}",
-  "tardio.aviso.abrir": "Abrir: {link}",
   "case.detail.exportToCore": "Exportar al Core",
   "case.detail.markComplete": "Marcar completo",
   "case.detail.resolveEscalated": "Resolver escalado → Listo",
@@ -227,21 +208,12 @@ export const esAR = {
   "case.detail.salidaConfirmar": "No se puede deshacer. ¿Confirmás?",
   "case.detail.salidaSi": "Sí, confirmar",
   "case.detail.salidaNo": "Cancelar",
-  "case.detail.insuredData": "Datos del asegurado",
-  "case.detail.policyholderName": "Nombre",
-  "case.detail.policyNumber": "Póliza",
   "case.detail.email": "Email",
-  "case.detail.channel": "Canal de ingreso",
-  "case.detail.pagadoAt": "Pagado el",
-  "case.detail.rechazadoAt": "Rechazado el",
-  "case.detail.assignedTo": "Analista asignado",
   "case.detail.assigned": "Asignado",
   "case.detail.unassigned": "Sin asignar",
-  "case.detail.created": "Creado",
   "case.detail.noFields": "Sin campos extraídos.",
   "case.detail.noMissingDocs": "Sin documentación pendiente.",
   "case.detail.noAuditEvents": "Sin eventos registrados.",
-  "case.detail.rawEmailToggle": "Ver texto original",
   "case.detail.copyClipboard": "Copiar al portapapeles",
   "case.detail.copied": "¡Copiado!",
   "case.detail.field": "Campo",
@@ -351,8 +323,6 @@ export const esAR = {
   "audit.claim.closure_notice_sent": "Se le avisó que el caso se cerró",
   "audit.claim.closure_notice_skipped": "No se le avisó el cierre",
   "audit.claim.closure_notice_failed": "El aviso de cierre no se pudo mandar",
-  "cierre.aviso.asunto": "Cerramos tu denuncia",
-  "cierre.aviso.cuerpo": "Hola. Como no recibimos lo que te pedimos, cerramos la denuncia. Si todavía la necesitás, mandanos un correo nuevo contándonos qué pasó.",
 
   // ── Missing docs ───────────────────────────────────────────────────────────
   "docs.parte_amistoso": "Parte amistoso de accidente",
@@ -421,26 +391,10 @@ export const esAR = {
   // ── Supplemental pages ─────────────────────────────────────────────────────
   "analisis.title": "Análisis",
   "analisis.subtitle": "Estadísticas agregadas de siniestros",
-  "metricas.title": "Métricas",
-  "metricas.subtitle": "KPIs del sistema",
   "admin.users.title": "Gestión de analistas",
   "admin.users.invite": "Invitar analista",
-  "configuracion.title": "Configuración",
-  "configuracion.subtitle": "Preferencias de cuenta y parámetros del sistema",
 
   // ── Configuración — cuenta, umbrales de IA, sistema y avisos (E10) ─
-  "configuracion.cuenta": "Cuenta",
-  "configuracion.umbrales": "Umbrales de IA",
-  "configuracion.umbralConfianza": "Umbral de confianza",
-  "configuracion.umbralAyuda": "(ajustable vía variable CONFIDENCE_THRESHOLD)",
-  "configuracion.capMensual": "Cap mensual de IA",
-  "configuracion.capAyuda": "(configurado en el plan de despliegue)",
-  "configuracion.soloAdmins": "Solo los administradores pueden modificar los umbrales de IA.",
-  "configuracion.miClave": "Mi clave de IA",
-  "configuracion.sistema": "Información del sistema",
-  "configuracion.version": "Versión de la app",
-  "configuracion.node": "Versión de Node.js",
-  "configuracion.region": "Región de despliegue",
   "configuracion.alertas.titulo": "Avisos de casos urgentes",
   "configuracion.alertas.ayuda": "Un correo por línea, hasta 10. Si la dejás vacía, se avisa como hasta ahora.",
   "configuracion.alertas.guardadas": "Lista guardada.",
@@ -451,7 +405,6 @@ export const esAR = {
   "configuracion.recordatorios.h48": "A las 48 h",
   "configuracion.recordatorios.h48y120": "A las 48 h y a los 5 días",
   "configuracion.recordatorios.actual": "A las {horas} h (como está hoy)",
-  "configuracion.core.titulo": "Entrega al sistema central",
   "configuracion.core.ayuda": "Con el envío activado, «Enviar al sistema central» manda el caso firmado a la URL de tu sistema. El caso lleva datos personales del asegurado.",
   "configuracion.core.migracionPendiente": "Falta aplicar la migración 0036 (entrega al core). Hasta entonces los casos se entregan por fuera.",
   "configuracion.core.url": "URL del webhook",
@@ -557,11 +510,6 @@ export const esAR = {
   "periodo.90d": "90 días",
 
   // ── Case detail email sections ──────────────────────────────────────────────
-  "case.detail.parsedEmail": "Datos del email",
-  "case.detail.fieldConfirmations": "Confirmaciones pendientes",
-  "case.detail.attachments": "Adjuntos",
-  "case.detail.coreSyncAction": "Enviar al sistema central",
-  "case.detail.isClaim": "¿Es reclamo?",
   "case.detail.severity": "Severidad",
   "case.detail.noConfirmations": "Sin confirmaciones pendientes.",
   "case.detail.noAttachments": "Sin adjuntos.",
@@ -582,54 +530,10 @@ export const esAR = {
   "case.detail.pending": "Pendiente",
   "case.detail.attachmentCount": "adjunto(s)",
   "case.detail.openAttachment": "Abrir",
-  "case.detail.customer": "Cliente",
-  "case.detail.policy": "Póliza vinculada",
-  "case.detail.linked": "Vinculada",
-  "case.detail.pendingCount": "pendiente(s)",
-  "case.detail.coreReadyDescription": "Este caso está listo para ser enviado al sistema central. Revisá los campos confirmados antes de proceder.",
-  "case.detail.coreSyncReintentar": "El último envío al sistema central falló. Podés reintentarlo.",
-  "case.detail.coreSyncSinConfigurar": "La integración con el sistema del asegurador no está configurada: desde acá no se envía. Un administrador la activa en Configuración.",
-  "case.detail.coreSyncCasoDePrueba": "Es un caso simulado o de prueba: no se envía al sistema central.",
-  "case.detail.coreSyncEntregadoPorFuera": "Si ya lo entregaste por fuera, marcalo con «Entregado por fuera».",
-  "case.detail.coreExternalId": "ID en el sistema central",
-  "case.detail.coreSentAt": "Enviado",
   "case.detail.coreSyncRed": "Error de red. Intentá de nuevo.",
   "case.detail.coreSyncReintentarBoton": "Reintentar",
-  "case.detail.noRawEmail": "Sin texto original disponible.",
-  "case.detail.agentAnalysis": "Análisis del agente",
   "case.detail.auditReason": "Motivo",
-  "case.detail.pendientesTitulo": "Falta para completar el caso",
   "case.detail.technicalData": "Ver datos técnicos",
-  "case.detail.verDetalleTecnico": "Ver detalle técnico",
-  "case.detail.injuries": "Lesiones",
-  "case.detail.fraudAnalysis": "Alertas de fraude",
-  "case.detail.fraudDisclaimer": "Análisis automático — solo orientativo. La decisión final la toma el ajustador.",
-  "case.detail.fraudNoDetails": "Sin detalles adicionales.",
-  "case.detail.resumenIA": "IA",
-  "fraude.indicio.timeline_inconsistency": "Fechas",
-  "fraude.indicio.location_inconsistency": "Lugar",
-  "fraude.indicio.damage_inconsistency": "Daños",
-  "fraude.indicio.documentation_gap": "Documentación",
-  "fraude.indicio.repeat_claimant": "Reclamos repetidos",
-  "fraude.indicio.behavior_signal": "Conducta",
-  "fraude.indicio.other": "Otro",
-  "fraude.derivado.documento_fecha": "La fecha de un documento adjunto no coincide con la fecha del siniestro.",
-  "fraude.derivado.documento_patente": "Un documento adjunto menciona una patente que no es la del reclamo ni la de la póliza.",
-  "fraude.derivado.documento_dni": "El DNI de un documento adjunto no coincide con el del reclamo ni con el de la póliza.",
-  "fraude.derivado.documento_nombre": "El nombre de un documento adjunto no coincide con el del reclamo ni con el de la póliza.",
-  "fraude.derivado.foto_antes": "Una foto adjunta se sacó antes de la fecha del siniestro.",
-  "fraude.derivado.foto_futura": "Una foto adjunta tiene una fecha posterior a hoy.",
-  "fraude.derivado.foto_fuera_del_pais": "Una foto adjunta se sacó fuera del país.",
-  "fraude.derivado.foto_fuera_de_provincia": "Una foto adjunta se sacó fuera de la provincia del siniestro.",
-  "case.detail.ramoSinCalibrar": "Ramo sin calibrar",
-  "case.detail.ramoSinCalibrarAyuda": "Este tipo de siniestro todavía no tiene reglas específicas: el agente no sabe qué datos ni qué documentos pedir. Revisalo con más cuidado.",
-  "case.detail.resumen.reportaTipo": "{quien} reporta un siniestro de {tipo}",
-  "case.detail.resumen.reporta": "{quien} reporta un siniestro",
-  "case.detail.resumen.asegurado": "El asegurado",
-  "case.detail.resumen.fecha": " el {fecha}",
-  "case.detail.resumen.lugar": " en {lugar}",
-  "case.detail.resumen.sinHeridos": ", sin heridos",
-  "case.detail.resumen.conHeridos": ", con heridos",
   "case.detail.motivo.processingTimeout": "El análisis tardó demasiado",
   "case.detail.motivo.conflict": "Un dato no coincide con lo que teníamos",
   "case.detail.motivo.severidad": "Severidad: {nivel}",
@@ -666,7 +570,6 @@ export const esAR = {
   "attachment.duplicado": "Duplicado",
   "attachment.noSirve": "No sirve",
 
-  "gmail.accounts.title": "Cuentas Gmail de ingreso",
   "gmail.accounts.helper": "Conectá una o más casillas Gmail para crear siniestros automáticamente desde cada inbox.",
   "gmail.accounts.connect": "Conectar Gmail",
   "gmail.accounts.connectAnother": "Conectar otra cuenta",
@@ -710,7 +613,6 @@ export const esAR = {
   // ── Messages thread (W2) ────────────────────────────────────────────────────
   "messages.thread.title": "Conversación",
   "messages.thread.from": "De",
-  "messages.thread.subject": "Asunto",
   "messages.thread.received_at": "Recibido",
   "messages.thread.attachments": "adjunto(s)",
   "messages.thread.no_subject": "(sin asunto)",
@@ -739,50 +641,9 @@ export const esAR = {
   "messages.reply.venceEn": "Podés responder hasta el {fecha}.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
-  "clientes.title": "Clientes",
-  "clientes.subtitle": "Clientes y pólizas del tenant",
-  "clientes.search": "Buscar por nombre, DNI o email...",
-  "clientes.empty": "No se encontraron clientes.",
-  "clientes.col.name": "Nombre",
-  "clientes.col.dni": "DNI",
-  "clientes.col.email": "Email",
-  "clientes.col.phone": "Teléfono",
   "clientes.col.policies": "Pólizas",
   "clientes.col.cases": "Casos",
-  "clientes.col.createdAt": "Alta",
-  "clientes.back": "Volver a clientes",
   "clientes.detail.personalInfo": "Datos personales",
-  "clientes.detail.policies": "Pólizas",
-  "clientes.detail.cases": "Casos",
-  "clientes.detail.noPolicies": "Sin pólizas registradas.",
-  "clientes.detail.noCases": "Sin casos registrados.",
-  "clientes.detail.viewClient": "Ver cliente",
-  "clientes.detail.policyNumber": "Número de póliza",
-  "clientes.detail.policyType": "Tipo",
-  "clientes.detail.policyStatus": "Estado",
-  "clientes.detail.validFrom": "Vigencia desde",
-  "clientes.detail.validTo": "Vigencia hasta",
-  /*
-   * Lo que quedaba escrito a mano en las dos pantallas de clientes.
-   *
-   * Los encabezados sí pasaban por `t()`, así que con la interfaz en inglés
-   * quedaba una mezcla: columnas «Name / ID number / Registered» y al lado
-   * botones «Buscar» y «Limpiar», celdas «Automóvil» y «Activa», y al pie
-   * «Mostrando 1–14 de 14 clientes». Hasta ahora no se notaba porque el padrón
-   * de ensayo estaba vacío.
-   */
-  "clientes.doSearch": "Buscar",
-  "clientes.clear": "Limpiar",
-  "clientes.tableLabel": "Tabla de clientes",
-  "clientes.plural": "clientes",
-  "clientes.policyType.auto": "Automóvil",
-  "clientes.policyType.home": "Hogar",
-  "clientes.policyType.life": "Vida",
-  "clientes.policyType.business": "Empresa",
-  "clientes.policyType.other": "Otro",
-  "clientes.policyStatus.active": "Activa",
-  "clientes.policyStatus.expired": "Vencida",
-  "clientes.policyStatus.cancelled": "Cancelada",
   // ── Las baldosas de indicador de la bandeja ─────────────────────────────────
   // Estaban escritas a mano en castellano dentro de `bandeja/page.tsx`, asi que
   // con la interfaz en ingles la fila de indicadores seguia en castellano.
@@ -827,133 +688,10 @@ export const esAR = {
   "agente.valoresExtraidos": "Valores extraídos (último análisis)",
   "agente.yaConfirmado": "Ejemplo ya confirmado",
 
-  // ── El indicador de estado del agente, al pie del sidebar (G37) ─────
-  "agente.estado.activo": "Agente activo",
-  "agente.estado.modo_prueba": "Modo de prueba",
-  "agente.estado.sin_presupuesto": "Sin presupuesto",
-  "agente.estado.procesando": "{n} en curso",
-
-  // ── Los nombres comerciales de los planes ──────────────────────────
-  // El precio y la aritmética siguen en `lib/billing/plans.ts`, que no conoce
-  // el diccionario: acá está sólo cómo se escribe el nombre.
-  "plan.piloto": "Piloto",
-  "plan.operativo": "Operativo",
-  "plan.profesional": "Profesional",
-  "plan.corporativo": "Corporativo",
-  "plan.enterprise": "Enterprise",
-
   // ── Plan Pro — las funciones que el plan abre, no un plan del catálogo ─
   "planPro.nombre": "Plan Pro",
   "planPro.bloqueado": "Disponible con el Plan Pro",
-  "planPro.asistente": "Asistente con IA",
   "planPro.responder": "Responder por WhatsApp desde la app",
-
-  // ── Cartera — la vista del operador de ClaimMix, cruza aseguradoras ───
-  "cartera.aFacturar": "A facturar",
-  "cartera.ayuda.alta": "Un cliente nuevo se da de alta con",
-  "cartera.ayuda.aplica": ", que aplica los términos del plan e imprime lo que queda por configurar a mano. El alta entera se ensaya sobre un tenant descartable con",
-  "cartera.col.cliente": "Cliente",
-  "cartera.col.costoIa": "Costo IA",
-  "cartera.col.denuncias": "Denuncias",
-  "cartera.col.estado": "Estado",
-  "cartera.col.margen": "Margen",
-  "cartera.col.plan": "Plan",
-  "cartera.deMargen": "de margen",
-  "cartera.empty": "Todavía no hay clientes.",
-  "cartera.estado.active": "Activo",
-  "cartera.estado.churned": "Se fue",
-  "cartera.estado.suspended": "Suspendido",
-  "cartera.estado.trial": "Prueba",
-  "cartera.hasta": "hasta",
-  "cartera.incluidas": "incl.",
-  "cartera.mensajes": "mensajes",
-  "cartera.sinIngresos": "sin ingresos todavía",
-  "cartera.stat.clientes": "Clientes",
-  "cartera.stat.costoIa": "Costo de IA",
-  "cartera.stat.denuncias": "Denuncias facturables",
-  "cartera.subtitle": "La cartera y sus números de",
-  "cartera.subtitleOperator": "Sólo la ve quien opera ClaimMix.",
-  "cartera.title": "Cartera",
-
-  // ── Facturacion — la liquidacion del mes de una aseguradora ───────
-  "facturacion.aFacturar": "A facturar",
-  "facturacion.abonoPlan": "Abono {n}",
-  "facturacion.antesDelAlta": "Este mes es anterior al alta de la cuenta: no se factura.",
-  "facturacion.bucket.facturables": "Facturables",
-  "facturacion.bucket.mensajesEnTotal": "Mensajes en total",
-  "facturacion.bucket.noEranDenuncias": "No eran denuncias",
-  "facturacion.bucket.sinResolver": "Sin resolver",
-  "facturacion.cambiarMes": "Cambiar de mes",
-  "facturacion.cerradoAntesDeLaFecha": "Esta liquidación quedó guardada el",
-  "facturacion.cerradoDespuesDeLaFecha": "y ya no cambia, aunque después se editen o se borren casos de ese mes.",
-  "facturacion.costoDeIa": "Costo de IA",
-  "facturacion.deDondeSale": "De dónde sale ese número",
-  "facturacion.deDondeSaleDetalle": "Se factura la denuncia que el agente reconoció como denuncia. Lo que descartó por no serlo no se cobra: cobrar el spam filtrado convertiría al filtro en una fuente de ingresos.",
-  "facturacion.denunciasIncluidas": "Denuncias incluidas",
-  "facturacion.excedente": "Excedente",
-  "facturacion.formatoPeriodo": "AAAA-MM",
-  "facturacion.llamadasAlModelo": "Llamadas al modelo",
-  "facturacion.loQueCosto": "Lo que costó atenderlo",
-  "facturacion.margen": "Margen",
-  "facturacion.mesAnterior": "Mes anterior",
-  "facturacion.mesEnCurso": "Mes en curso.",
-  "facturacion.mesEnCursoDetalle": "El número sube con cada denuncia que entra. Se cierra solo cuando termine el mes, y a partir de ahí no se mueve.",
-  "facturacion.mesSiguiente": "Mes siguiente",
-  "facturacion.periodoCerrado": "Período cerrado.",
-  "facturacion.periodoEsperado": "Se espera",
-  "facturacion.periodoInvalido": "no es un período válido.",
-  "facturacion.plan": "plan {n}",
-  "facturacion.porDenunciaFacturable": "Por denuncia facturable",
-  "facturacion.sinIngresos": "sin ingresos este mes",
-  "facturacion.total": "Total",
-  "facturacion.verMesEnCurso": "Ver el mes en curso",
-
-  // ── Metricas — el tablero del mes ─────────────────────────────────
-  "metricas.actividad.titulo": "Actividad",
-  "metricas.actividad.dia": "Por día",
-  "metricas.actividad.mes": "Por mes",
-  "metricas.actividad.anio": "Por año",
-  "metricas.actividad.reclamos": "Reclamos abiertos",
-  "metricas.actividad.whatsapps": "WhatsApps atendidos",
-  "metricas.actividad.mails": "Mails atendidos",
-  "metricas.actividad.nota": "Sólo WhatsApp y mail reales, sin simulaciones. Un reclamo abierto es un caso confirmado como siniestro, así que pueden ser menos que el total del mes.",
-  "metricas.ayer.titulo": "Resumen de ayer",
-  "metricas.ayer.ahora": "Pendientes ahora",
-  "metricas.card.completitudAuto": "Tasa de completitud automática",
-  "metricas.card.escalados": "Siniestros escalados",
-  "metricas.card.primeraRespuesta": "Tiempo medio hasta la primera respuesta",
-  "metricas.card.totalMes": "Casos del mes",
-  "metricas.col.casosCerrados": "Casos cerrados",
-  "metricas.col.costo": "Costo",
-  "metricas.col.modelo": "Modelo",
-  "metricas.col.tokens": "Tokens",
-  "metricas.col.usuario": "Usuario",
-  "metricas.emptyPeriod": "No hay datos disponibles para el período seleccionado.",
-  "metricas.ia.costoMes": "Costo este mes",
-  "metricas.ia.costoTotal": "Costo histórico",
-  "metricas.ia.ejecAbrev": "ejec.",
-  "metricas.ia.ejecuciones": "ejecuciones",
-  "metricas.ia.porModelo": "Tokens por modelo este mes",
-  "metricas.ia.porUsuario": "Tokens por usuario este mes",
-  "metricas.ia.prompt": "prompt",
-  "metricas.ia.respuesta": "respuesta",
-  "metricas.ia.subtitulo": "Tokens consumidos y costo estimado del tenant.",
-  "metricas.ia.titulo": "Uso de IA",
-  "metricas.ia.tokensMes": "Tokens este mes",
-  "metricas.ia.tokensTotal": "Tokens históricos",
-  "metricas.ia.vacio": "Sin consumo de IA este mes.",
-  "metricas.porEstado": "Siniestros por situación (histórico)",
-  "metricas.porTipo": "Siniestros por tipo (histórico)",
-  "metricas.resumen.esteAnio": "Este año",
-  "metricas.resumen.esteMes": "Este mes",
-  "metricas.resumen.hoy": "Hoy",
-  "metricas.resumen.porCanal": "{whatsapp} por WhatsApp · {mail} por mail",
-  "metricas.resumen.ultimos12meses": "Últimos 12 meses",
-  "metricas.resumen.ultimos30dias": "Últimos 30 días",
-  "metricas.resumen.ultimos5anios": "Últimos 5 años",
-  "metricas.sinCasosCerrados": "Ningún caso cerrado este mes.",
-  "metricas.sinDatos": "Sin datos.",
-  "metricas.topAnalistas": "Top 5 analistas — casos cerrados este mes",
 
   // ── Alta y roles de los usuarios de una aseguradora ───────────────
   "usuarios.activo": "Activo",
@@ -978,8 +716,6 @@ export const esAR = {
   "usuarios.form.rol": "Rol",
   "usuarios.invitar": "Invitar usuario",
   "usuarios.propio": "Tu usuario",
-  "usuarios.title": "Gestión de usuarios",
-  "usuarios.subtitle": "Invitá usuarios y asigná roles operativos o administradores.",
   "usuarios.rol.admin": "Admin",
   "usuarios.rol.analyst": "Analista",
   "usuarios.rol.owner": "Owner",
@@ -1002,7 +738,6 @@ export const esAR = {
   "consola.tab.modelos": "Modelos",
   "consola.tab.reglas": "Reglas de prompt",
   "consola.tab.uso": "Uso del proveedor",
-  "consola.titulo": "Consola del agente",
 
 
   // ── Lo que dice un lector de pantalla donde no hay texto ──────────
@@ -1025,7 +760,6 @@ export const esAR = {
 
 
   // ── El shell — lo poco que el layout dice por sí mismo ────────────
-  "layout.nombreFallback": "Analista",
   "toast.cerrar": "Cerrar notificación",
   "toast.region": "Notificaciones",
 
@@ -1288,18 +1022,6 @@ export const esAR = {
   "ft.sincronizar": "Sincronizar",
 
 
-  // ── Vincular Google a una cuenta que ya existe ────────────────────
-  // El «Continuar con Google» del login sirve para ENTRAR. Vincular es otra
-  // cosa y sólo es seguro desde adentro: ver `vincular-google.ts`.
-  "google.ayuda": "Se vincula desde acá y no desde la pantalla de entrada a propósito: entrando con tu contraseña y volviendo de Google quedan probadas las dos mitades, así que nadie que se haya adelantado con tu dirección puede quedarse con tu cuenta.",
-  "google.sinVincular": "Sin vincular",
-  "google.titulo": "Entrar con Google",
-  "google.vinculado": "Listo. La próxima vez podés entrar con Google.",
-  "google.vincular": "Vincular Google",
-  "google.vinculoError": "No pudimos vincular tu cuenta de Google. Probá de nuevo.",
-  "google.yaVinculada": "Vinculada: ya podés entrar con Google",
-
-
   // ── La bandeja que responde al click, y la selección sin recuadros ───
   // «Actualizando…» es lo que dice la lista mientras la navegación está en
   // vuelo: el control ya cambió, el servidor todavía no contestó.
@@ -1312,7 +1034,6 @@ export const esAR = {
 
   // ── Asistente — preguntas en lenguaje natural sobre los casos ──────────
   "asistente.titulo": "Asistente",
-  "asistente.subtitulo": "Preguntá por los casos del inquilino, en lenguaje natural.",
   "asistente.preguntaLabel": "Tu pregunta",
   "asistente.placeholder": "¿Cuántos casos hubo este mes? ¿Qué pasó con el caso de Roberto Paz?",
   "asistente.enviar": "Preguntar",
@@ -1347,29 +1068,6 @@ export const esAR = {
   "ayuda.paso5.texto": "«Exportar» baja un CSV con los mismos filtros que estás mirando.",
 
   // B6, B21, B23: cobertura, monto y presupuesto del taller. Sólo para el equipo.
-  "cobertura.titulo": "Cobertura y monto",
-  "cobertura.veredicto.cubre": "Cubre",
-  "cobertura.veredicto.no_cubre": "No cubre",
-  "cobertura.veredicto.dudoso": "Dudoso",
-  "cobertura.condiciones.sin_poliza": "El caso no está vinculado a una póliza: no hay contra qué cotejar la cobertura.",
-  "cobertura.condiciones.sin_subir": "La póliza no tiene cargado el PDF de condiciones.",
-  "cobertura.condiciones.sin_leer": "El PDF de condiciones está subido, sin leer.",
-  "cobertura.motivo.sin_coberturas_cargadas": "No hay coberturas leídas de la póliza.",
-  "cobertura.motivo.poliza_no_activa": "La póliza no figura activa hoy: revisá si lo estaba el día del siniestro.",
-  "cobertura.motivo.sin_fecha": "No se sabe la fecha del siniestro.",
-  "cobertura.motivo.fuera_de_vigencia": "El siniestro es de fuera de la vigencia de la póliza.",
-  "cobertura.motivo.sin_cobertura_para_el_tipo": "La póliza no tiene una cobertura para este tipo de siniestro.",
-  "cobertura.motivo.cobertura_segun_alcance": "La póliza cubre este tipo de siniestro sólo en parte (daño parcial o total, robo del auto o de partes, sólo al tercero): depende del alcance.",
-  "cobertura.motivo.fuera_del_ambito": "El siniestro ocurrió fuera del ámbito territorial de la póliza.",
-  "cobertura.motivo.ambito_dudoso": "No se puede asegurar que el lugar del siniestro esté dentro del ámbito territorial de la póliza.",
-  "cobertura.motivo.sin_lugar": "No se sabe en qué provincia ocurrió el siniestro.",
-  "cobertura.motivo.vehiculo_no_coincide": "La patente informada no es la de un vehículo de la póliza.",
-  "cobertura.motivo.bajo_franquicia": "El monto estimado queda por debajo de la franquicia.",
-  "cobertura.motivo.supera_suma_asegurada": "El monto estimado supera la suma asegurada.",
-  "monto.titulo": "Monto estimado",
-  "monto.origen.tabla": "según la tabla de montos",
-  "monto.origen.presupuesto": "según el presupuesto del taller",
-  "monto.orientativo": "Orientativo, para ordenar el trabajo: no es una liquidación y no se le informa al asegurado.",
   "presupuesto.titulo": "Presupuesto del taller",
   "presupuesto.total": "Total",
   "presupuesto.leer": "Leer presupuesto",
@@ -1389,13 +1087,9 @@ export const esAR = {
   "lectura.sinLeer.paginas": "Sin leer: el documento es demasiado largo para leerlo entero.",
   "lectura.sinLeer.modelo": "Sin leer: el modelo no contestó. Probá de nuevo en un rato.",
   "lectura.sinLeer.formato": "Sin leer: el modelo contestó algo que no se pudo usar.",
-  "condiciones.titulo": "Condiciones de la póliza",
   "condiciones.subir": "Subir PDF de condiciones",
   "condiciones.reemplazar": "Reemplazar PDF",
   "condiciones.subiendo": "Subiendo y leyendo…",
-  "condiciones.leidas": "Leídas el {fecha}",
-  "condiciones.sinLeer": "Subido, sin leer",
-  "condiciones.sinSubir": "Sin condiciones cargadas",
   "condiciones.error": "No se pudo subir el PDF.",
   "configuracion.montos.titulo": "Montos orientativos",
   "configuracion.montos.ayuda": "Rango en pesos por tipo y gravedad, para ordenar el trabajo del equipo. No se le informa al asegurado. Una celda vacía usa el valor por defecto.",
@@ -1408,4 +1102,4 @@ export const esAR = {
 
 } as const;
 
-export type TranslationKey = keyof typeof esAR;
+export type ClaveDelCliente = keyof typeof esAR;

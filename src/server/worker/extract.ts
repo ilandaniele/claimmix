@@ -52,13 +52,17 @@ import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-class
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
 import { fusionarIndicadores } from "@/core/case/contradicciones";
 import { estimarMonto } from "@/core/case/monto-estimado";
+import { responsabilidadDelCaso } from "@/core/case/responsabilidad";
+import { atenderCartas, atenderCartasDeUnTardio } from "@/server/cases/lectura-reclamo";
 import {
   adjuntosDelCaso,
   anotarLecturas,
+  conLecturasDeEstaCorrida,
   consultaAdjuntos,
   deAdjuntos,
   indiciosDeAdjuntos,
   marcarPlazoAgotado,
+  mecanicasDeAdjuntos,
   paraElModelo,
   type AdjuntoDelCaso,
   type ParaElModelo,
@@ -187,6 +191,13 @@ const EXTRACTION_LEASE_MS = RESERVA_DE_EXTRACCION_MS;
  * a mitad de una escritura.
  */
 const PRESUPUESTO_DE_CORRIDA_MS = 40_000;
+
+/**
+ * Cuánto dura la más corta de las funciones que corren esta extracción
+ * (`/api/intake/simulate`, 180 s). Es el corte que se supone cuando quien llama
+ * no dice cuál es el suyo: pasarse de ese número mata la invocación donde esté.
+ */
+const FUNCION_MAS_CORTA_MS = 180_000;
 
 /**
  * Lo que la llamada al modelo necesita para siquiera intentar.
@@ -567,7 +578,11 @@ export async function runEmailExtractionWorker(
   caseId: string,
   tenantId: string,
   userId: string | null,
-  opts?: { retoma?: boolean }
+  opts?: {
+    retoma?: boolean;
+    /** Cuándo mata Vercel esta invocación (epoch ms): puede haber empezado antes que esta corrida. */
+    hasta?: number;
+  }
 ): Promise<void> {
   // El contexto se arma una vez, acá, a partir del inquilino que llega en la
   // firma. Todo lo que consulte o escriba abajo lo recibe: esa es la única
@@ -576,6 +591,7 @@ export async function runEmailExtractionWorker(
   // El reloj de esta corrida. Ver PRESUPUESTO_DE_CORRIDA_MS.
   const arrancó = Date.now();
   const restanteMs = () => PRESUPUESTO_DE_CORRIDA_MS - (Date.now() - arrancó);
+  const hasta = opts?.hasta ?? arrancó + FUNCION_MAS_CORTA_MS;
   // Declared before try so the catch block can log them if Gemini fails mid-extraction.
   let emailBody = "";
   let emailSubject = "";
@@ -596,6 +612,8 @@ export async function runEmailExtractionWorker(
   let leidos: string[] | null = null;
   // Los archivos que van al modelo; el catch los marca si la llamada agota el plazo.
   let vistos: ParaElModelo = { hashes: [], media: [] };
+  // Las cartas de un tercero que esta corrida dejó para leer cuando ya no tenga la reserva (B24).
+  let cartasPorLeer: { adjuntos: AdjuntoDelCaso[]; vistos: ParaElModelo } | null = null;
 
   try {
     // ── a) Fetch case + raw_messages ──────────────────────────────────────────
@@ -672,6 +690,9 @@ export async function runEmailExtractionWorker(
       });
       // No lo contesta el agente: sólo se clasifica para quien lo atiende.
       await atenderMensajeTardio({ tenantId, caseId });
+      // Y si trae la carta de un tercero (B24), se la lee para el equipo, aunque
+      // el caso no admita «Para responder»: un caso cerrado o derivado también la recibe.
+      await leerCartasDespues(() => atenderCartasDeUnTardio({ tenantId, caseId, hasta }));
       return;
     }
 
@@ -912,11 +933,12 @@ export async function runEmailExtractionWorker(
 
     // Lo que leyó de cada archivo va a su fila y no sigue: ni al registro de la
     // corrida, que alimenta el entrenamiento, ni al orquestador.
+    // La mecánica del relato sigue el mismo camino: sólo alimenta la opinión de
+    // responsabilidad del equipo (B18), nunca los campos ni el resumen.
     const lecturas = extractedClaim.adjuntos ?? [];
-    extractedClaim = { ...extractedClaim, adjuntos: [] };
-    if (extractedClaim.parse_failed !== true) {
-      await anotarLecturas(caseId, tenantCtx, vistos, lecturas);
-    }
+    const mecanicaDelRelato = extractedClaim.mecanica ?? null;
+    extractedClaim = { ...extractedClaim, adjuntos: [], mecanica: null };
+    const lecturasAnotadas = extractedClaim.parse_failed === true || (await anotarLecturas(caseId, tenantCtx, vistos, lecturas));
 
     // ── e2) Defensive hydration: mirror typed extracted_fields into fields[] + scrub PII ──
     // This is a defensive layer — the primary fix is in the prompt (RULE D / RULE F).
@@ -1351,6 +1373,12 @@ export async function runEmailExtractionWorker(
     // con el tipo y la gravedad contra cuyo rango se aceptó: el SET ve la fila
     // de antes, así que si este UPDATE los cambia, vuelve la tabla.
     const tipo = caseUpdate.claim_type ?? caseRow.claim_type;
+    const responsabilidad = responsabilidadDelCaso(
+      tipo,
+      mecanicaDelRelato,
+      mecanicasDeAdjuntos(adjuntos, vistos, lecturas)
+    );
+    if (responsabilidad !== undefined) caseUpdate.responsabilidad = responsabilidad;
     const monto = estimarMonto(tipo, finalSeverity, caseRow.rangos_de_monto);
     (caseUpdate as Record<string, unknown>).monto_estimado = sql`CASE WHEN ${cases.monto_estimado}->>'origen' = 'presupuesto' AND ${cases.claim_type} IS NOT DISTINCT FROM ${tipo} AND ${cases.severity} IS NOT DISTINCT FROM ${finalSeverity} THEN ${cases.monto_estimado} ELSE ${monto ? JSON.stringify(monto) : null}::jsonb END`;
 
@@ -1455,6 +1483,15 @@ export async function runEmailExtractionWorker(
         missing_fields_count: missingFieldKeys.length,
         model: extractedClaim.extraction_model,
       }, "email_worker.extraction_complete");
+
+    // La carta con que un tercero reclama (B24) se lee cuando la corrida ya no
+    // tiene la reserva: leerla acá demoraría la respuesta de lo que entre
+    // mientras tanto. Sin las lecturas de esta corrida anotadas no se las usa:
+    // la próxima corrida vuelve a leer esos archivos y pisaría la carta.
+    cartasPorLeer = {
+      adjuntos: lecturasAnotadas ? conLecturasDeEstaCorrida(adjuntos, vistos, lecturas) : adjuntos,
+      vistos,
+    };
   } catch (err) {
     const errName = err instanceof Error ? err.name : "UnknownError";
 
@@ -1563,6 +1600,38 @@ export async function runEmailExtractionWorker(
         await redispatchExtraction(caseId, tenantId, tenantCtx, restanteMs());
       }
     }
+  }
+
+  // Sólo se llega acá si la corrida terminó: no tira, y lo que falle no toca
+  // ni la respuesta ni el estado del caso.
+  if (cartasPorLeer) {
+    const porLeer = cartasPorLeer;
+    await leerCartasDespues(() => atenderCartas({ tenantId, caseId, hasta, ...porLeer }));
+  }
+}
+
+/**
+ * La lectura de una carta (B24) va después de contestar el pedido, no antes.
+ *
+ * Son hasta tres lecturas de varios segundos. Dentro de la corrida, el pedido
+ * a `/api/worker/extract` no contestaba hasta terminarlas: el re-despacho que
+ * lo esperaba con su plazo lo cortaba y devolvía el caso a la cola sin que
+ * nada hubiera fallado, y el webhook de WhatsApp, que atiende los casos de a
+ * uno, hacía esperar al siguiente. `after()` mantiene viva la invocación sin
+ * esperar la lectura.
+ *
+ * Fuera de un pedido —una prueba, un script— `after()` tira, y ahí se espera.
+ *
+ * El import es dinámico a propósito: el bundle de pasos del flujo durable
+ * arrastra este módulo y Node no resuelve `next/server` sin extensión. Así
+ * sólo se carga al leer una carta, y si no carga también se espera.
+ */
+async function leerCartasDespues(leer: () => Promise<void>): Promise<void> {
+  try {
+    const { after } = await import("next/server");
+    after(leer);
+  } catch {
+    await leer();
   }
 }
 

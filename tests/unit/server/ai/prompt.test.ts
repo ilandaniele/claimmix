@@ -226,3 +226,42 @@ describe("buildEmailClaimPrompt - Gemini training-memory context", () => {
     expect(learningPrompt).toContain("Zurich policy context");
   });
 });
+
+describe("buildEmailClaimPrompt — collision mechanics (B18) and third-party claim letters (B24)", () => {
+  it("pide la mecánica con las mismas claves que valida Zod y sin inferir", () => {
+    expect(PROMPT).toContain("COLLISION MECHANICS (mecanica)");
+    for (const clave of [
+      "maniobra_asegurado",
+      "semaforo_tercero",
+      "interseccion",
+      "venia_por_la_derecha",
+      "embistio_de_atras",
+      "excepcion_prioridad",
+    ]) {
+      expect(PROMPT).toContain(clave);
+    }
+    expect(PROMPT).toContain("Never infer");
+    expect(PROMPT).toContain("never say who is at fault");
+  });
+
+  it("la mecánica no toca el tipo de siniestro: un choque de un solo vehículo sigue clasificándose por las reglas de siempre", () => {
+    expect(PROMPT).toContain("mecanica has nothing to do with claim_type and never changes it");
+    expect(PROMPT).toContain("still gets its claim_type from the DECISIVE TEST");
+    expect(PROMPT).toContain("mecanica=null does not mean the claim type is unknown");
+  });
+
+  it("el silencio sobre las excepciones de prioridad es null: false sólo si el texto dice que ninguna rigió", () => {
+    expect(PROMPT).toContain("false ONLY if the text explicitly says none of that applied");
+    expect(PROMPT).toContain("Silence about it is null, never false");
+    expect(PROMPT).not.toContain("false only if the text says nothing of the kind applied");
+  });
+
+  it("la mecánica de un adjunto va sólo a ese adjunto y lo leído sigue sin salir de adjuntos", () => {
+    expect(PROMPT).toContain("Data read from an <adjunto> goes ONLY into adjuntos");
+    expect(PROMPT).toContain("go ONLY into that file's mecanica");
+  });
+
+  it("fija los tipos con que se reconoce una carta de reclamo y la documentación médica", () => {
+    for (const tipo of ["carta_reclamo", "historia_clinica", "certificado_medico"]) expect(PROMPT).toContain(tipo);
+  });
+});

@@ -1,6 +1,6 @@
 /**
  * Un documento al modelo y de vuelta un dato validado, o el motivo de por qué
- * no se leyó (B6 y B21).
+ * no se leyó (B6, B21 y B24).
  *
  * El orden es el de la clasificación del mensaje tardío: motor, presupuesto de
  * IA, cupo, y recién ahí el modelo. Las páginas se cuentan antes del cupo: un
@@ -25,11 +25,12 @@ import { PLAZO_DE_CONTEO_MS, TOPE_TOKENS_PDF } from "@/server/worker/adjuntos";
 
 export type Lectura<T> = { ok: T } | { sinLeer: MotivoSinLeer };
 
-type AmbitoDeLectura = Extract<AmbitoDeCupo, "condiciones-poliza" | "lectura-presupuesto">;
+type AmbitoDeLectura = Extract<AmbitoDeCupo, "condiciones-poliza" | "lectura-presupuesto" | "lectura-reclamo">;
 
 const CUPOS: Record<AmbitoDeLectura, keyof typeof RATE_LIMIT_CONFIGS> = {
   "condiciones-poliza": "CONDICIONES_POR_POLIZA",
   "lectura-presupuesto": "LECTURA_PRESUPUESTO_POR_CASO",
+  "lectura-reclamo": "LECTURA_RECLAMO_POR_CASO",
 };
 
 export async function leerDocumento<T>({

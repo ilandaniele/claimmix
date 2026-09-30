@@ -148,6 +148,15 @@ describe("con el reloj", () => {
     expect(r.retomados).toBe(1);
   });
 
+  it("le pasa a cada corrida el momento en que mata Vercel la invocación", async () => {
+    devuelve([{ id: "caso-1", tenant_id: "t-1" }]);
+    const hasta = T0 + MINIMO_PARA_RETOMAR_MS + 1_000;
+
+    await retomarExtraccionesPendientes({ hasta });
+
+    expect(mockRunIntakeAgent).toHaveBeenCalledWith(expect.objectContaining({ caseId: "caso-1", hasta }));
+  });
+
   it("el reloj corta a mitad de la lista", async () => {
     devuelve([
       { id: "caso-1", tenant_id: "t-1" },

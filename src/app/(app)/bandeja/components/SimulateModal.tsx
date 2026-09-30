@@ -11,7 +11,7 @@
 import { useState, useCallback } from "react";
 import type { OpcionDeEscenario } from "@/server/intake/scenarios";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useDialogoModal } from "../../_components/dialogo-modal";
 
 interface SimulateModalProps {
@@ -28,7 +28,7 @@ type InputMode = "scenario" | "custom";
  * vocabulario del producto se dice como en todas las demas pantallas; si no,
  * se sigue capitalizando el valor crudo antes que no mostrarlo.
  */
-export const TIPO: Record<string, TranslationKey> = {
+export const TIPO: Record<string, ClaveDelCliente> = {
   choque: "type.choque",
   robo: "type.robo",
   granizo: "type.granizo",

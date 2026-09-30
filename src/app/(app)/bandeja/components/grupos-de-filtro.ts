@@ -29,13 +29,13 @@
  * renderiza, que es el único que tiene el `useT()`.
  */
 
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 export interface OpcionDeFiltro {
   /** Lo que va al parámetro de la URL. */
   clave: string;
   /** Clave de i18n de lo que se lee en el chip. */
-  etiqueta: TranslationKey;
+  etiqueta: ClaveDelCliente;
   /**
    * Sólo la severidad lo usa: el color de su nivel. Pinta el chip cuando está
    * elegido y el puntito de la marca cuando está puesto, porque el color ES lo
@@ -49,7 +49,7 @@ export interface GrupoDeFiltro {
   /** El parámetro de búsqueda que este grupo escribe. */
   param: string;
   /** Clave de i18n del título del grupo. */
-  rotulo: TranslationKey;
+  rotulo: ClaveDelCliente;
   opciones: OpcionDeFiltro[];
   /**
    * El resto de los grupos son multi-selección: se puede marcar «choque» y
@@ -177,8 +177,8 @@ export interface FiltroPuesto {
   /** El valor puesto, para poder sacarlo con `alternar` sin releer la URL. */
   valor: string;
   /** Clave de i18n del grupo, para leer «Severidad: Crítico» y no sólo «Crítico». */
-  rotulo: TranslationKey;
-  etiqueta: TranslationKey;
+  rotulo: ClaveDelCliente;
+  etiqueta: ClaveDelCliente;
   color?: string;
 }
 

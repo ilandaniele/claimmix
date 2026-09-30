@@ -1,5 +1,5 @@
 /**
- * Un documento al modelo (B6, B21): motor, presupuesto de IA y cupo antes de
+ * Un documento al modelo (B6, B21, B24): motor, presupuesto de IA y cupo antes de
  * gastar; el consumo se anota; y sin lectura vuelve el motivo, nunca un dato
  * inventado. Tampoco tira: la pantalla dice «sin leer».
  */
@@ -27,6 +27,7 @@ vi.mock("@/lib/rate-limit/index", () => ({
   RATE_LIMIT_CONFIGS: {
     CONDICIONES_POR_POLIZA: { limit: 5, windowMs: 1 },
     LECTURA_PRESUPUESTO_POR_CASO: { limit: 5, windowMs: 2 },
+    LECTURA_RECLAMO_POR_CASO: { limit: 3, windowMs: 3 },
   },
 }));
 vi.mock("@/lib/observability/logger", () => ({ logger: { warn: m.warn, error: vi.fn(), info: vi.fn() } }));
@@ -74,6 +75,9 @@ describe("leerDocumento", () => {
 
     await leer({ ambito: "condiciones-poliza", partesDeClave: [TENANT, "poliza-1"] });
     expect(m.rateLimit).toHaveBeenLastCalledWith(`condiciones-poliza:${TENANT}:poliza-1`, { limit: 5, windowMs: 1 });
+
+    await leer({ ambito: "lectura-reclamo" });
+    expect(m.rateLimit).toHaveBeenLastCalledWith(`lectura-reclamo:${TENANT}:caso-1`, { limit: 3, windowMs: 3 });
   });
 
   it.each([

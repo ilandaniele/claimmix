@@ -211,6 +211,44 @@ describe("alertSpecialists — a real claim", () => {
   });
 });
 
+describe("alertSpecialists — la opinión de responsabilidad (B18)", () => {
+  it.each([
+    "El otro auto tuvo la culpa del choque.",
+    "Según el art. 48 inc. g, el tercero es responsable.",
+    "Aplica la ley 24.449 al caso.",
+  ])("un resumen que la adelanta se omite: %s", async (summary) => {
+    database({ channel: "email" });
+
+    await alertSpecialists({ caseId: CASE, tenantId: TENANT, severity: "critical", claimTypeLabel: "choque", summary });
+
+    const { textBody } = mockSend.mock.calls[0][0];
+    expect(textBody).not.toContain("Resumen:");
+    expect(textBody).not.toMatch(/culpa|24\.449|art\./i);
+  });
+
+  it("una patente vieja o un DNI que se parecen a la ley no lo omiten", async () => {
+    database({ channel: "email" });
+
+    await alertSpecialists({
+      caseId: CASE,
+      tenantId: TENANT,
+      severity: "critical",
+      claimTypeLabel: "choque",
+      summary: "Patente ART 123, titular con DNI 24.449.882.",
+    });
+
+    expect(mockSend.mock.calls[0][0].textBody).toContain("Resumen:");
+  });
+
+  it("un resumen neutro se muestra como siempre", async () => {
+    database({ channel: "email" });
+
+    await alert();
+
+    expect(mockSend.mock.calls[0][0].textBody).toContain("Resumen: Se prendió fuego el auto en la ruta 3.");
+  });
+});
+
 describe("alertSpecialists — a simulation", () => {
   it("does not email anyone about a simulated email case", async () => {
     // The bug, exactly: seventeen of these reached a real inbox.
@@ -660,6 +698,16 @@ describe("avisarMensajeTardio", () => {
     const entrada = mockAudit.mock.calls[0][0];
     expect(entrada.event_type).toBe("claim.late_message_alerted");
     expect(entrada.payload).toEqual({ message_id: MSG, recipients: 1, delivered: true });
+  });
+
+  it("un resumen que nombra la culpa o la ley no va en el correo (B18)", async () => {
+    database({ listaDelTenant: ["guardia@aseguradora.com"] });
+
+    await tardio("consulta_estado", "Dice que la culpa fue del otro conductor.");
+
+    const { textBody } = mockSend.mock.calls[0][0];
+    expect(textBody).not.toContain("Resumen:");
+    expect(textBody).not.toContain("culpa");
   });
 
   it("sin clasificar lo dice, y sin resumen no deja la línea vacía", async () => {

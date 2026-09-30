@@ -15,7 +15,7 @@
 
 import type { LecturaGuardada } from "@/core/case/presupuesto-taller";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 
 import { PresupuestoDelTaller } from "./PresupuestoDelTaller";
@@ -100,9 +100,9 @@ const MOTIVOS_CONOCIDOS = new Set([
  * y códigos internos de otras partes —«conflict», «unsafe_run»— que hoy salen
  * crudos. Cada llamador decide qué hacer con eso.
  */
-export function claveDeMotivoDeRechazo(motivo: string): TranslationKey | null {
+export function claveDeMotivoDeRechazo(motivo: string): ClaveDelCliente | null {
   return MOTIVOS_CONOCIDOS.has(motivo)
-    ? (`attachment.rejected.${motivo}` as TranslationKey)
+    ? (`attachment.rejected.${motivo}` as ClaveDelCliente)
     : null;
 }
 

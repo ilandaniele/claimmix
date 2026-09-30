@@ -20,7 +20,7 @@ import {
   OPCIONES_DE_ESCENARIO,
   SCENARIOS,
 } from "../../src/server/intake/scenarios";
-import { esAR } from "../../src/lib/i18n/es-AR";
+import { esAR } from "../../src/lib/i18n/index";
 
 /*
  * Los textos salen del diccionario, no escritos a mano.

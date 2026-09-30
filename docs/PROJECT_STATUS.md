@@ -4073,6 +4073,72 @@ presupuesto. `GET /api/cases/:id` devuelve `monto_estimado` a todos los roles
 del equipo. Los montos por defecto son una estimación que tiene que validar el
 dueño. Un PDF de condiciones de más de 10 páginas se rechaza.
 
+### ⚖️ Responsabilidad en choques y reclamo de un tercero (B18 y B24, 2026-09-29)
+
+Dos huecos del informe de Clive del 28/09, en la rama
+`feat/responsabilidad-y-terceros-b18-b24`, que sale de la de B6, B23 y B21.
+Todo es para el equipo que edita el caso (owner, admin, specialist, analyst).
+Nada sale al asegurado: ni la respuesta del agente, ni su prompt, ni las
+plantillas, ni el aviso por mail al especialista, ni `GET /api/cases/:id` para
+un viewer. El agente nunca le dice a la persona quién tuvo la culpa.
+
+**B18: responsabilidad.** La mecánica del choque (semáforos, quién embistió de
+atrás, si venía por una vía con prioridad, un vehículo detenido) se saca del
+relato, del parte amistoso y de la exposición policial en la misma llamada de
+la extracción, sin llamada nueva al modelo. `src/core/case/responsabilidad.ts`
+es una función pura que devuelve una opinión PRELIMINAR (asegurado, tercero,
+compartida o no determinable) con la regla y el motivo. Cita la Ley 24.449:
+art. 48 inc. g para el choque desde atrás, art. 44 para el semáforo, sólo si
+quien lo enfrentaba venía en marcha (un vehículo detenido no se culpa), y art.
+41 sólo cuando consta que no hubo excepción de prioridad. Con datos
+insuficientes dice «no determinable» y lista lo que falta. Se calcula en los
+choques (`choque` y `rc`) y se guarda en `cases.responsabilidad`; al
+reclasificar el caso a otro tipo se borra, y la ficha nunca la muestra fuera de
+un choque. La ficha la muestra con la marca «orientativa». Si dos documentos se
+contradicen, `difiere` lo avisa.
+
+**B24: reclamo de un tercero.** Una carta documento o un reclamo (PDF o foto)
+se reconoce al leer el adjunto: reclamante, rubros, montos y plazos. Si llega
+una historia clínica, `cruzarConHistoria` marca lo que no coincide o falta. La
+ficha muestra la carta, el cruce y lo que falta. Las lesiones siguen derivando
+al especialista como antes. Lo que se lee de los adjuntos y la mecánica no
+llegan al log del agente ni al orquestador: el worker los saca antes.
+La carta se lee con `after()` de Next, cuando la corrida ya soltó la reserva y
+el worker ya contestó (si `after()` no está disponible, en el momento; se
+importa de `next/server` de forma dinámica porque el bundle de pasos de
+`pnpm flujos` arrastra `extract.ts` y Node no resuelve ese import estático), y sólo
+si a la invocación le quedan tres plazos del modelo; si no, vuelve en la
+próxima corrida. Así el re-despacho no espera la lectura y no vuelve el caso a
+la cola. Una carta que llega a un caso que el agente ya no lee (derivado,
+cerrado) también se lee para el equipo: los archivos del último mensaje que
+nadie miró se reconocen en esa misma lectura. Una sola corrida a la vez lee
+cada carta: la toma con una marca en `metadatos.leyendoCarta` (vence a los
+3 minutos). Se leen todas las pendientes, una por contenido. Lo que ningún
+reintento arregla (archivo, páginas, respuesta inusable) queda anotado en
+`datos.sin_leer` y la ficha lo dice; lo pasajero (sin cupo, sin presupuesto,
+modelo caído) se reintenta.
+
+**Las lecturas del modelo** de este lote pasan por `leer-documento.ts`
+(`checkBudget`, `registrarConsumoDelModelo`, cupo por caso con
+`claveDeCupo` y su entrada propia en `RATE_LIMIT_CONFIGS`). El contenido del
+documento va al modelo como archivo, con el sistema diciéndole que es dato, y
+lo que vuelve pasa por zod y por `esResumenSeguro`. Sin cupo o sin presupuesto la ficha dice «sin leer» y no se
+inventa nada.
+
+**Antes del deploy.** La 0041 (`0041_responsabilidad_en_choques.sql`, una
+columna `responsabilidad jsonb` que admite NULL) se aplica a mano en staging, QA
+y producción, en ese orden, después de la 0040. Sin ella no entra **ningún**
+caso: Drizzle lista todas las columnas del esquema en el INSERT a `cases`. El paso «Migraciones aplicadas» de `deploy-checks.yml` y `/api/health` quedan
+en rojo hasta que se aplique. El ensayo `alcance-responsabilidad-clara` también la necesita en la
+base del ensayo.
+
+**Para revisar.** Un abogado tiene que revisar las citas de la Ley 24.449 (la
+regla de vehículo detenido no cita nada porque el art. 39 inc. b no está
+verificado). Los paneles nuevos son sólo para los roles que editan el caso: un
+viewer no los ve, a diferencia del panel de cobertura. El aviso por mail al
+especialista omite la línea «Resumen» entera si el resumen nombra la culpa o la
+ley.
+
 ### 🙋 Waiting on you (not code)
 
 - **Aplicar 0038 y 0039 (B3 y B4) antes de desplegar.** A mano en staging, QA
@@ -4083,6 +4149,11 @@ dueño. Un PDF de condiciones de más de 10 páginas se rechaza.
   base del E2E, si es otra), QA y producción, después de la 0039. Además,
   validar la tabla de montos por defecto y decidir si un viewer puede ver
   cobertura, monto y presupuesto.
+
+- **Aplicar 0041 (B18 y B24) antes de desplegar.** A mano en staging (y la
+  base del E2E, si es otra), QA y producción, después de la 0040. Además,
+  que un abogado revise las citas de la Ley 24.449 (art. 41, 44 y 48 inc. g) y
+  confirme el art. 39 inc. b para la regla de vehículo detenido.
 
 - ~~**Qué hacer con la respuesta a un caso ya derivado.**~~ ✅ **RESUELTO
   25/09 en #293 (P6).** `findExistingWhatsAppCase` suma el mensaje al caso en

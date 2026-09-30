@@ -298,6 +298,12 @@ interface Scenario {
     indicios?: string[];
     /** Cuántos adjuntos tienen que haber quedado leídos (`resumen` escrito). */
     leidos?: number;
+    /**
+     * Quién es el responsable preliminar en `cases.responsabilidad` (B18):
+     * `asegurado`, `tercero`, `compartida` o `no_determinable`. Sin opinión
+     * escrita se informa `sin_leer`.
+     */
+    responsabilidad?: string;
   };
 }
 
@@ -338,6 +344,24 @@ const SCENARIOS: Scenario[] = [
       docsDeclined: ["parte_amistoso"],
       knows: ["policy_number", "full_name"],
     },
+  },
+
+  {
+    id: "alcance-responsabilidad-clara",
+    what: "Un choque por alcance con la responsabilidad clara: el agente sigue pidiendo lo de siempre, no le adelanta la culpa y la opinión queda para el equipo",
+    turns: [
+      {
+        say: "Hola, me chocaron de atrás ayer a las 19 en Bahía Blanca, Av. Alem al 2300, yo estaba parado y el otro auto no frenó. Soy Martín Sosa, patente AB 123 CD, póliza POL-4471-A, DNI 30.145.882. No hubo heridos.",
+        expect: {
+          replies: 1,
+          // La opinión es orientativa y del equipo: al asegurado no se le dice quién tuvo la culpa ni se le cita la ley.
+          avoids: ["culpa", "24.449", "24449", "art. 48", "artículo 48", "cubierto", "aprobado"],
+          // Ni por ser un choque claro se le piden papeles del otro conductor.
+          noAsked: ["party_b_plate", "party_b_name", "party_b_insurer"],
+        },
+      },
+    ],
+    finally: { responsabilidad: "tercero" },
   },
 
   {
@@ -482,7 +506,9 @@ const SCENARIOS: Scenario[] = [
     turns: [
       {
         say: "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114.",
-        expect: { replies: 1 },
+        // El tipo ya está dicho: pedirlo era el efecto de un bloque del prompt
+        // que hacía caer el choque contra un poste en `other`.
+        expect: { replies: 1, noAsked: ["claim_type"] },
       },
       // The three-messages-in-ninety-seconds bug: each round was individually
       // correct, and nobody was reading.
@@ -1675,6 +1701,14 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
       );
       for (const tipo of want.indicios ?? []) {
         if (!tipos.has(tipo)) note(scenario.id, 0, `no marcó el indicio ${tipo}`, `indicio:${tipo}`);
+      }
+
+      if (want.responsabilidad !== undefined) {
+        const [opinion] = await db.select({ responsabilidad: cases.responsabilidad }).from(cases).where(eq(cases.id, caseId));
+        const responsable = (opinion?.responsabilidad as { responsable?: string } | null)?.responsable ?? "sin_leer";
+        if (responsable !== want.responsabilidad) {
+          note(scenario.id, 0, `responsabilidad ${responsable}, esperaba ${want.responsabilidad}`, "responsabilidad");
+        }
       }
 
       if (want.leidos !== undefined) {

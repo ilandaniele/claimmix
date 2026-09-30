@@ -27,7 +27,7 @@
 import { useState } from "react";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { ExportToCorePanel } from "./ExportToCorePanel";
 import type { EstadoDeAcciones } from "@/server/cases/acciones";
 
@@ -65,7 +65,7 @@ function ReAnalyzeButton({
 }: {
   onReAnalyze: () => void;
   reAnalyzing: boolean;
-  t: (key: TranslationKey) => string;
+  t: (key: ClaveDelCliente) => string;
 }) {
   return (
     <button
@@ -137,7 +137,7 @@ function BannerCerrado({ etiqueta }: { etiqueta: string }) {
   );
 }
 
-type Salida = readonly [hacia: CaseStatus, etiqueta: TranslationKey, testId: string];
+type Salida = readonly [hacia: CaseStatus, etiqueta: ClaveDelCliente, testId: string];
 
 /**
  * Las salidas a mano de un estado: el primer clic pregunta, el segundo manda
@@ -153,7 +153,7 @@ function SalidasAMano({
   salidas: readonly Salida[];
   onTransition: (toStatus: CaseStatus) => void;
   dialogOpen: boolean;
-  t: (key: TranslationKey) => string;
+  t: (key: ClaveDelCliente) => string;
 }) {
   const [armada, setArmada] = useState<CaseStatus | null>(null);
 

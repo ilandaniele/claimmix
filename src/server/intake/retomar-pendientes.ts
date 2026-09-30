@@ -167,6 +167,7 @@ export async function retomarExtraccionesPendientes(opts?: {
         tenantId: caso.tenant_id,
         source: "worker",
         retoma: true,
+        hasta: opts?.hasta,
       });
       hechos.push(caso.id);
     } catch (e) {

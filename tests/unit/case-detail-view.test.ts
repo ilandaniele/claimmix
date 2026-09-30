@@ -618,3 +618,193 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
     expect(Object.keys(reg.columnas[cual] ?? {})).not.toContain("datos");
   });
 });
+
+describe("cargarDetalleDeCaso — responsabilidad y carta de un tercero (B18, B24)", () => {
+  const OPINION = {
+    v: 1,
+    responsable: "tercero",
+    regla: "ley24449_art48g",
+    motivo: { clave: "alcance", params: { parte: "tercero" } },
+    faltantes: [],
+    difiere: false,
+  };
+  const RECLAMO = {
+    es_reclamo: true,
+    reclamante: { nombre: "Marta Gómez", patente: null, aseguradora: null, letrado: null },
+    rubros: [
+      { rubro: "danio_material", monto: 800_000 },
+      { rubro: "incapacidad", monto: 1_200_000 },
+    ],
+    moneda: "ARS",
+    plazo_dias: 10,
+    fecha_carta: "2026-09-20",
+    adjunta: ["presupuesto"],
+  };
+  const fila = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    filename: `${id}.pdf`,
+    content_type: "application/pdf",
+    size_bytes: 100,
+    external_url: null,
+    uploaded_at: "2026-08-01T10:00:00Z",
+    rejected_reason: null,
+    storage_path: `t/${id}`,
+    matched_doc_key: null,
+    resumen: null,
+    util: null,
+    content_hash: null,
+    tipo: null,
+    nombre: null,
+    reclamo: null,
+    sin_leer: null,
+    descarte: null,
+    lectura_presupuesto: null,
+    ...extra,
+  });
+  const conAdjuntos = (adjuntos: unknown[], caso: Record<string, unknown> = {}) =>
+    new Map(TODO)
+      .set(cases, [{ ...CASO_DE_CORREO, ...caso }])
+      .set(claimAttachments, adjuntos);
+
+  it("la opinión guardada llega validada; una que no tiene la forma no llega", async () => {
+    espiar(conAdjuntos([], { claim_type: "choque", responsabilidad: OPINION }));
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toEqual(OPINION);
+
+    espiar(conAdjuntos([], { claim_type: "choque", responsabilidad: { ...OPINION, responsable: "el vecino" } }));
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toBeNull();
+
+    espiar(conAdjuntos([], { claim_type: "choque", responsabilidad: null }));
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toBeNull();
+  });
+
+  it("un choque donde el asegurado responde ante un tercero (rc) también la muestra", async () => {
+    espiar(conAdjuntos([], { claim_type: "rc", responsabilidad: OPINION }));
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toEqual(OPINION);
+  });
+
+  it("si el caso ya no es un choque, una opinión que quedó guardada no se muestra", async () => {
+    for (const claim_type of ["robo", "other", null]) {
+      espiar(conAdjuntos([], { claim_type, responsabilidad: OPINION }));
+      expect((await cargarDetalleDeCaso(CTX, CASO))!.responsabilidad).toBeNull();
+    }
+  });
+
+  it("la carta leída sale con lo que falta y el cruce con la historia clínica", async () => {
+    espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO })]));
+
+    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO))!;
+
+    expect(cartas).toHaveLength(1);
+    expect(cartas[0]).toMatchObject({
+      id: "carta",
+      total: 2_000_000,
+      faltantes: [],
+      cruces: ["reclama_incapacidad_sin_historia"],
+    });
+    expect(cartas[0]!.reclamo!.reclamante.nombre).toBe("Marta Gómez");
+  });
+
+  it("con la historia clínica de la misma persona no hay cruce; de otra, sí", async () => {
+    espiar(
+      conAdjuntos([
+        fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO }),
+        fila("hc", { tipo: "historia_clinica", nombre: "Marta Gómez" }),
+      ])
+    );
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]!.cruces).toEqual([]);
+
+    espiar(
+      conAdjuntos([
+        fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO }),
+        fila("hc", { tipo: "historia_clinica", nombre: "Roberto Sosa" }),
+      ])
+    );
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]!.cruces).toEqual(["historia_de_otra_persona"]);
+  });
+
+  it("una carta reconocida y todavía sin leer sale como sin leer, sin inventar nada", async () => {
+    espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: null })]));
+
+    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO))!;
+
+    expect(cartas).toEqual([
+      { id: "carta", filename: "carta.pdf", reclamo: null, sinLeer: null, faltantes: [], cruces: [], total: null },
+    ]);
+  });
+
+  it("el motivo por el que una carta no se pudo leer viaja a la pantalla; uno desconocido, no", async () => {
+    espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", sin_leer: "paginas" })]));
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]).toMatchObject({ reclamo: null, sinLeer: "paginas" });
+
+    espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", sin_leer: "el_vecino" })]));
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]).toMatchObject({ reclamo: null, sinLeer: null });
+  });
+
+  it("una carta ya leída no muestra un motivo viejo", async () => {
+    espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO, sin_leer: "formato" })]));
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]).toMatchObject({ sinLeer: null });
+  });
+
+  it("el mismo archivo mandado dos veces es una carta y un panel", async () => {
+    espiar(
+      conAdjuntos([
+        fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO, content_hash: "h1" }),
+        fila("carta-2", { tipo: "carta_reclamo", reclamo: RECLAMO, content_hash: "h1" }),
+        fila("otra", { tipo: "carta_reclamo", reclamo: RECLAMO, content_hash: "h2" }),
+      ])
+    );
+    expect((await cargarDetalleDeCaso(CTX, CASO))!.cartas.map((c) => c.id)).toEqual(["carta", "otra"]);
+  });
+
+  describe("el presupuesto que la carta dice adjuntar", () => {
+    const sinAdjuntar = { ...RECLAMO, adjunta: [], rubros: [{ rubro: "danio_material", monto: 800_000 }] };
+    const faltantes = async (adjuntos: unknown[]) => {
+      espiar(conAdjuntos(adjuntos));
+      return (await cargarDetalleDeCaso(CTX, CASO))!.cartas[0]!.faltantes;
+    };
+
+    it("lo decide la misma regla que ofrece leer un presupuesto", async () => {
+      const carta = fila("carta", { tipo: "carta_reclamo", reclamo: sinAdjuntar });
+      expect(await faltantes([carta])).toContain("presupuesto");
+      // Por tipo, por nombre o por lo que el modelo resumió: da igual, es la regla de `esCandidatoAPresupuesto`.
+      expect(await faltantes([carta, fila("p1", { tipo: "presupuesto" })])).not.toContain("presupuesto");
+      expect(await faltantes([carta, fila("p2", { filename: "cotizacion-taller.pdf" })])).not.toContain("presupuesto");
+      expect(await faltantes([carta, fila("p3", { resumen: "Repuestos y mano de obra" })])).not.toContain("presupuesto");
+    });
+
+    it("un archivo que el modelo no mira no es un presupuesto, y la carta misma tampoco", async () => {
+      const carta = fila("carta", { tipo: "carta_reclamo", reclamo: sinAdjuntar, filename: "presupuesto-reclamado.pdf" });
+      expect(await faltantes([carta, fila("p1", { tipo: "presupuesto", content_type: "application/zip" })])).toContain(
+        "presupuesto"
+      );
+      expect(await faltantes([carta])).toContain("presupuesto");
+    });
+  });
+
+  it("una carta leída que no era un reclamo, una rechazada o una lectura rota no dan panel con datos", async () => {
+    espiar(
+      conAdjuntos([
+        fila("no-era", { tipo: "carta_reclamo", reclamo: { ...RECLAMO, es_reclamo: false } }),
+        fila("rechazada", { tipo: "carta_reclamo", reclamo: RECLAMO, rejected_reason: "too_large", storage_path: null }),
+        fila("rota", { tipo: "carta_reclamo", reclamo: { rubros: "muchos" } }),
+        fila("otro-doc", { tipo: "presupuesto" }),
+      ])
+    );
+
+    const { cartas } = (await cargarDetalleDeCaso(CTX, CASO))!;
+
+    expect(cartas.map((c) => [c.id, c.reclamo])).toEqual([["rota", null]]);
+  });
+
+  it("los adjuntos no llevan ni el nombre del documento ni la lectura de la carta ni su motivo", async () => {
+    const reg = espiar(conAdjuntos([fila("carta", { tipo: "carta_reclamo", reclamo: RECLAMO, nombre: "Marta Gómez" })]));
+
+    const { attachments } = (await cargarDetalleDeCaso(CTX, CASO))!;
+
+    expect(attachments[0]).not.toHaveProperty("nombre");
+    expect(attachments[0]).not.toHaveProperty("reclamo");
+    expect(attachments[0]).not.toHaveProperty("sin_leer");
+    const cual = reg.tablas.indexOf(claimAttachments);
+    expect(Object.keys(reg.columnas[cual] ?? {})).not.toContain("datos");
+  });
+});

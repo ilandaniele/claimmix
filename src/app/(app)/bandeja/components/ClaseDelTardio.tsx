@@ -7,11 +7,11 @@
 "use client";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 export function ClaseDelTardio({ tipo, resumen }: { tipo: string | null; resumen?: string | null }) {
   const t = useT();
-  const etiqueta = t(`tardio.tipo.${tipo ?? "sin_clasificar"}` as TranslationKey);
+  const etiqueta = t(`tardio.tipo.${tipo ?? "sin_clasificar"}` as ClaveDelCliente);
   if (!etiqueta) return null;
   return (
     <span

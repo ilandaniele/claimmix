@@ -255,6 +255,24 @@ describe("runIntakeAgent", () => {
     });
   });
 
+  it("hasta, cuando mata Vercel la invocación, llega al worker", async () => {
+    setupSelectResults([
+      [{ id: "case-004", tenant_id: "tenant-001", channel: "whatsapp", status: "procesando" }],
+    ]);
+
+    await runIntakeAgent({
+      caseId: "case-004",
+      tenantId: "tenant-001",
+      source: "whatsapp",
+      hasta: 1_800_000_000_000,
+    });
+
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith("case-004", "tenant-001", null, {
+      retoma: false,
+      hasta: 1_800_000_000_000,
+    });
+  });
+
   it("returns case_not_found when db returns no rows", async () => {
     setupSelectResults([[]]);
 

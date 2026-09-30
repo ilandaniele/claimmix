@@ -57,6 +57,7 @@ function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {
     mensaje_tardio_resumen: null,
     mensaje_tardio_reservado_en: null,
     monto_estimado: null,
+    responsabilidad: null,
     // No son columnas de `cases`: las suma `consultaListado` por subconsulta.
     fecha_siniestro: null,
     assigned_name: null,

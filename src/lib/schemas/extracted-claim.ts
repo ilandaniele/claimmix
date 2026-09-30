@@ -20,6 +20,7 @@
  */
 
 import { z } from "zod";
+import { MecanicaSchema, mecanicaJson } from "@/core/case/mecanica";
 import { SeveritySchema } from "@/lib/schemas/cases";
 
 /** Single extracted field with confidence score. */
@@ -145,6 +146,8 @@ export const AdjuntoLeidoSchema = z.object({
   resumen: z.string().max(200).catch(""),
   util: z.boolean().nullable().catch(null),
   documento: DocumentoLeidoSchema.nullable().catch(null),
+  /** La mecánica del choque que cuenta este documento (un parte, una denuncia), o null. */
+  mecanica: MecanicaSchema.nullable().catch(null),
 });
 
 export type AdjuntoLeido = z.infer<typeof AdjuntoLeidoSchema>;
@@ -296,6 +299,13 @@ export const ExtractedClaimSchema = z.object({
    */
   adjuntos: z.array(AdjuntoLeidoSchema).max(6).default([]).catch([]),
 
+  /**
+   * La mecánica del choque tal como la cuenta el relato (B18). Sale de la misma
+   * extracción, no de una llamada aparte, y no llega a la ficha, al resumen ni
+   * al asegurado: sólo alimenta la opinión de responsabilidad del equipo.
+   */
+  mecanica: MecanicaSchema.nullable().catch(null),
+
   // ── Granular injury severity ──────────────────────────────────────────────
 
   /**
@@ -435,11 +445,13 @@ export const RESPUESTA_JSON_SCHEMA = {
                 required: Object.keys(DocumentoLeidoSchema.shape),
                 additionalProperties: false,
               },
+              mecanica: mecanicaJson,
             },
-            required: ["indice", "resumen", "util", "documento"],
+            required: ["indice", "resumen", "util", "documento", "mecanica"],
             additionalProperties: false,
           },
         },
+        mecanica: mecanicaJson,
         injury_severity: { type: ["string", "null"] },
       },
       required: [
@@ -464,6 +476,7 @@ export const RESPUESTA_JSON_SCHEMA = {
         "fraud_risk_level",
         "fraud_indicators",
         "adjuntos",
+        "mecanica",
         "injury_severity",
       ],
       additionalProperties: false,

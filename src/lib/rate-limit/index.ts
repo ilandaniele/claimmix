@@ -200,6 +200,13 @@ export const RATE_LIMIT_CONFIGS = {
    * no puede comerse el presupuesto de IA.
    */
   LECTURA_PRESUPUESTO_POR_CASO: { limit: 5, windowMs: 24 * 60 * 60_000 },
+
+  /**
+   * LECTURA_RECLAMO_POR_CASO: 3 lecturas de una carta de reclamo de un tercero
+   * por día y por caso. Cada carta se lee una sola vez y alcanza para las que un
+   * caso trae de verdad; el resto no puede comerse el presupuesto de IA.
+   */
+  LECTURA_RECLAMO_POR_CASO: { limit: 3, windowMs: 24 * 60 * 60_000 },
 } as const;
 
 /**

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 
 // ── Example emails ────────────────────────────────────────────────────────────
 
@@ -269,12 +269,12 @@ function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: num
             como una isla clara en la página. Ámbar sí: 7,28:1. */}
         {result.severity && (
           <span className="rounded-lg bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700">
-            Severidad: {t(`severity.${result.severity}` as TranslationKey)}
+            Severidad: {t(`severity.${result.severity}` as ClaveDelCliente)}
           </span>
         )}
         {result.injury_severity && result.injury_severity !== "none" && (
           <span className="rounded-lg bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700">
-            Lesiones: {t(`riesgo.lesiones.${result.injury_severity}` as TranslationKey)}
+            Lesiones: {t(`riesgo.lesiones.${result.injury_severity}` as ClaveDelCliente)}
           </span>
         )}
         {!isClaim && (
@@ -380,7 +380,7 @@ function VideoSection() {
 // ── Cómo usar section ─────────────────────────────────────────────────────────
 
 // Mismas claves que `Ayuda.tsx`: un solo texto para la demo y para la app.
-const PASOS_AYUDA: ReadonlyArray<{ titulo: TranslationKey; texto: TranslationKey }> = [
+const PASOS_AYUDA: ReadonlyArray<{ titulo: ClaveDelCliente; texto: ClaveDelCliente }> = [
   { titulo: "ayuda.paso1.titulo", texto: "ayuda.paso1.texto" },
   { titulo: "ayuda.paso2.titulo", texto: "ayuda.paso2.texto" },
   { titulo: "ayuda.paso3.titulo", texto: "ayuda.paso3.texto" },

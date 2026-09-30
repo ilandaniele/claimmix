@@ -1,6 +1,6 @@
 import { Lock } from "lucide-react";
 
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { Card, Pill } from "./ui";
 
 /**
@@ -17,7 +17,7 @@ export function BloqueoPlanPro({
   t,
   funcion,
 }: {
-  t: (k: TranslationKey) => string;
+  t: (k: ClaveDelCliente) => string;
   funcion?: string;
 }) {
   return (

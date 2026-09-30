@@ -7,8 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { AuditEvent } from "@/lib/audit/log";
-import { esAR } from "@/lib/i18n/es-AR";
-import { enUS } from "@/lib/i18n/en-US";
+import { esAR, enUS } from "@/lib/i18n/index";
 
 describe.each([
   ["es-AR", esAR],

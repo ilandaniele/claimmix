@@ -16,7 +16,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { CASE_EDITOR_ROLES, CORE_SYNC_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
+import { CASE_EDITOR_ROLES, CORE_SYNC_ROLES, CUSTOMER_PII_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
 import type { TenantContext } from "@/data/scope";
 import {
@@ -40,6 +40,8 @@ import {
 } from "./_components/RiskBadges";
 import { AttachmentsPanel } from "./_components/AttachmentsPanel";
 import { CoberturaPanel, VeredictoDeCobertura } from "./_components/CoberturaPanel";
+import { ResponsabilidadPanel, VeredictoDeResponsabilidad } from "./_components/ResponsabilidadPanel";
+import { ReclamoTerceroPanel } from "./_components/ReclamoTerceroPanel";
 import { MessagesThread } from "./_components/MessagesThread";
 import { CoreSyncButton } from "./_components/CoreSyncButton";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
@@ -154,6 +156,8 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     messages,
     asignado_nombre,
     cobertura,
+    responsabilidad,
+    cartas,
   } = detail;
 
   const isEmailCase =
@@ -214,6 +218,8 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
   const puedeCambiarEstadoCaso = puedeCambiarEstado(me, caseRow.assigned_to);
   const puedeEnviarAlCore = (CORE_SYNC_ROLES as string[]).includes(me.role);
+  // La opinión de responsabilidad y el reclamo de un tercero son para quien trabaja el caso (B18, B24).
+  const esEditor = (CASE_EDITOR_ROLES as string[]).includes(me.role);
   const puedeTomarElControlCaso = puedeTomarElControl({
     puedeCambiarEstado: puedeCambiarEstadoCaso,
     plan: me.plan,
@@ -525,6 +531,29 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               accesorio={<VeredictoDeCobertura cobertura={cobertura} t={t} />}
             >
               <CoberturaPanel cobertura={cobertura} t={t} />
+            </PanelSection>
+          )}
+
+          {/* Responsabilidad orientativa en un choque (B18): sólo para el equipo, nunca para el asegurado. */}
+          {esEditor && responsabilidad && (
+            <PanelSection
+              id="liability"
+              titulo={t("responsabilidad.titulo")}
+              accesorio={<VeredictoDeResponsabilidad responsabilidad={responsabilidad} t={t} />}
+            >
+              <ResponsabilidadPanel responsabilidad={responsabilidad} t={t} />
+            </PanelSection>
+          )}
+
+          {/* Carta de reclamo de un tercero (B24): sólo para el equipo, nunca para el asegurado. */}
+          {esEditor && cartas.length > 0 && (
+            <PanelSection id="third-party-claim" titulo={t("reclamo.titulo")}>
+              <ReclamoTerceroPanel
+                cartas={cartas}
+                t={t}
+                locale={locale}
+                puedeVerReclamante={(CUSTOMER_PII_ROLES as string[]).includes(me.role)}
+              />
             </PanelSection>
           )}
 

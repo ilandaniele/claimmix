@@ -1,6 +1,7 @@
 /**
  * Cobertura, monto estimado y lectura del presupuesto son del equipo (B6, B23,
- * B21). Nada de lo que le escribe al asegurado —la respuesta del agente, su
+ * B21), igual que la opinión de responsabilidad y la carta de un tercero (B18,
+ * B24). Nada de lo que le escribe al asegurado —la respuesta del agente, su
  * prompt y sus herramientas, las plantillas— ni el aviso por mail al
  * especialista puede llegar a esos módulos ni nombrar esas columnas.
  *
@@ -32,6 +33,9 @@ const MODULOS_DEL_EQUIPO = [
   "src/core/case/cobertura.ts",
   "src/core/case/monto-estimado.ts",
   "src/core/case/presupuesto-taller.ts",
+  "src/core/case/responsabilidad.ts",
+  "src/core/case/reclamo-tercero.ts",
+  "src/server/cases/lectura-reclamo.ts",
   "src/core/poliza/condiciones.ts",
   "src/server/ai/leer-documento.ts",
   "src/server/cases/detail-view.ts",
@@ -45,6 +49,9 @@ const COLUMNAS_DEL_EQUIPO = [
   "condiciones_leidas_en",
   "rangos_de_monto",
   "lectura_presupuesto",
+  // Con el punto: «responsabilidad civil» es un tipo de siniestro y lo nombra el prompt.
+  ".responsabilidad",
+  ".reclamo",
 ];
 
 function carpeta(ruta: string): string[] {
@@ -100,9 +107,11 @@ describe("lo del equipo no sale al asegurado", () => {
     const desdeLaFicha = [...alcanzables("src/app/(app)/casos/[id]/page.tsx")].map(normal);
     expect(desdeLaFicha).toContain("src/server/cases/detail-view.ts");
     expect(desdeLaFicha).toContain("src/core/case/cobertura.ts");
+    expect(desdeLaFicha).toContain("src/core/case/responsabilidad.ts");
+    expect(desdeLaFicha).toContain("src/core/case/reclamo-tercero.ts");
   });
 
-  it.each(SALEN_AL_ASEGURADO)("%s no llega a la cobertura, el monto ni el presupuesto", (entrada) => {
+  it.each(SALEN_AL_ASEGURADO)("%s no llega a la cobertura, el monto, el presupuesto, la responsabilidad ni la carta de un tercero", (entrada) => {
     const llega = [...alcanzables(entrada)].map(normal).filter((r) => MODULOS_DEL_EQUIPO.includes(r));
     expect(llega).toEqual([]);
   });
@@ -110,5 +119,10 @@ describe("lo del equipo no sale al asegurado", () => {
   it.each(SALEN_AL_ASEGURADO)("%s no nombra las columnas nuevas", (entrada) => {
     const fuente = readFileSync(join(RAIZ, entrada), "utf8");
     expect(COLUMNAS_DEL_EQUIPO.filter((c) => fuente.includes(c))).toEqual([]);
+  });
+
+  it.each(SALEN_AL_ASEGURADO)("%s no cita la ley de tránsito ni las reglas de responsabilidad", (entrada) => {
+    const fuente = readFileSync(join(RAIZ, entrada), "utf8");
+    expect(fuente).not.toMatch(/24\.?449|art48g|ley24449/i);
   });
 });

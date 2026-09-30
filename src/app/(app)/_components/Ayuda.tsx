@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { CircleHelp } from "lucide-react";
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useDialogoModal } from "./dialogo-modal";
 
 // Mismas claves que `ComoUsar` en la demo pública: un solo texto para las dos.
-const PASOS: ReadonlyArray<{ titulo: TranslationKey; texto: TranslationKey }> = [
+const PASOS: ReadonlyArray<{ titulo: ClaveDelCliente; texto: ClaveDelCliente }> = [
   { titulo: "ayuda.paso1.titulo", texto: "ayuda.paso1.texto" },
   { titulo: "ayuda.paso2.titulo", texto: "ayuda.paso2.texto" },
   { titulo: "ayuda.paso3.titulo", texto: "ayuda.paso3.texto" },

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { TranslationKey } from "@/lib/i18n";
+import type { ClaveDelCliente } from "@/lib/i18n";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { textoDelMotivo } from "@/lib/i18n/motivo-de-core";
 import type { VistaDeLaConfig } from "@/server/core-sync/config";
@@ -23,7 +23,7 @@ type Respuesta = Record<string, unknown> & {
 };
 
 // El `message` del servidor viene en castellano: se traduce el `motivo`, o el código.
-const RECHAZOS = new Map<string, TranslationKey>([
+const RECHAZOS = new Map<string, ClaveDelCliente>([
   ["url", "configuracion.core.urlAyuda"],
   ["migracion", "configuracion.core.migracionPendiente"],
   ["incompleto", "configuracion.core.incompleto"],

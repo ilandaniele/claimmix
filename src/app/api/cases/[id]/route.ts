@@ -12,6 +12,7 @@
 import { type NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { ALL_ROLES } from "@/lib/auth/require-role";
+import { CASE_EDITOR_ROLES } from "@/lib/auth/roles";
 import { entrar, type Entrada } from "@/lib/api/entrada";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -41,10 +42,15 @@ async function resolveContext(etiqueta: string): Promise<Entrada | null> {
   }
 }
 
-/** Drizzle numeric → string; convert confidence_min back to number for the JSON shape. */
-function serializeCase(row: CaseRow) {
+/**
+ * Drizzle numeric → string; convert confidence_min back to number for the JSON shape.
+ * La opinión de responsabilidad (B18) es del equipo que edita el caso: un viewer no la recibe.
+ */
+function serializeCase(row: CaseRow, role: string) {
+  const { responsabilidad, ...resto } = row;
   return {
-    ...row,
+    ...resto,
+    ...((CASE_EDITOR_ROLES as readonly string[]).includes(role) ? { responsabilidad } : {}),
     confidence_min:
       row.confidence_min === null ? null : Number(row.confidence_min),
   };
@@ -94,7 +100,7 @@ export async function GET(
     // shape matches the previous PostgREST response (numbers).
     return ok({
       ...detail,
-      case: serializeCase(detail.case),
+      case: serializeCase(detail.case, userRow.role),
       extracted_fields: detail.extracted_fields.map((f) => ({
         ...f,
         confidence: Number(f.confidence),
@@ -243,7 +249,7 @@ export async function PATCH(
   try {
     const ua = request.headers.get("user-agent");
     const result = await patchCase(caseId, parsed.data, userRow, ip, ua);
-    return ok({ case: serializeCase(result.case) });
+    return ok({ case: serializeCase(result.case, userRow.role) });
   } catch (error) {
     if (error instanceof AppError) {
       return err(error);

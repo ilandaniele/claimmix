@@ -156,7 +156,7 @@ function scheduleAgent(
         break;
       }
       try {
-        await runIntakeAgent({ caseId: caseIds[i], tenantId, source: "whatsapp" });
+        await runIntakeAgent({ caseId: caseIds[i], tenantId, source: "whatsapp", hasta });
       } catch (err) {
         const name = err instanceof Error ? err.name : "UnknownError";
         logger.error({ error_name: name, case_id: caseIds[i] }, "webhooks_whatsapp.agent_error");

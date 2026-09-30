@@ -2,7 +2,7 @@
 
 import { formatDate } from "@/lib/utils";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
-import { esAR, type TranslationKey } from "@/lib/i18n";
+import { esAR, type ClaveDelCliente } from "@/lib/i18n/es-AR";
 import { claveDeMotivoDeRechazo } from "../_components/AttachmentsPanel";
 
 /*
@@ -30,7 +30,7 @@ interface AuditTimelineProps {
 function eventLabel(
   eventType: string,
   channel: string | undefined,
-  t: (key: TranslationKey) => string
+  t: (key: ClaveDelCliente) => string
 ): string {
   // El correo por WhatsApp lo llevan las mismas tablas que el correo real, así
   // que el evento es igual — «email.received» — pero para quien lee la
@@ -39,7 +39,7 @@ function eventLabel(
     return t("audit.whatsapp.received");
   }
 
-  const i18nKey = `audit.${eventType}` as TranslationKey;
+  const i18nKey = `audit.${eventType}` as ClaveDelCliente;
   if (i18nKey in esAR) {
     return t(i18nKey);
   }
@@ -50,7 +50,7 @@ function eventLabel(
 }
 
 /** Motivos propios que esta pantalla sabe nombrar, además de los de adjuntos. */
-const MOTIVOS_DEL_CASO: Record<string, TranslationKey> = {
+const MOTIVOS_DEL_CASO: Record<string, ClaveDelCliente> = {
   processing_timeout: "case.detail.motivo.processingTimeout",
   conflict: "case.detail.motivo.conflict",
   lesiones: "case.detail.motivo.lesiones",
@@ -68,7 +68,7 @@ const SEVERIDAD = /^severidad (high|critical)$/;
 
 function motivoLegible(
   reason: string,
-  t: (key: TranslationKey) => string
+  t: (key: ClaveDelCliente) => string
 ): string {
   const clave = claveDeMotivoDeRechazo(reason);
   if (clave) return t(clave);
@@ -78,7 +78,7 @@ function motivoLegible(
 
   // No se toca `orchestrate.ts:294`: ese texto también va a `alertSpecialists`.
   const m = SEVERIDAD.exec(reason);
-  if (m) return t("case.detail.motivo.severidad").replace("{nivel}", t(`severity.${m[1]}` as TranslationKey));
+  if (m) return t("case.detail.motivo.severidad").replace("{nivel}", t(`severity.${m[1]}` as ClaveDelCliente));
 
   return reason;
 }

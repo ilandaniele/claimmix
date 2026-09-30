@@ -23,7 +23,8 @@ export type AmbitoDeCupo =
   | "clasificacion-tardia"
   | "condiciones-poliza"
   | "subida-condiciones"
-  | "lectura-presupuesto";
+  | "lectura-presupuesto"
+  | "lectura-reclamo";
 
 export function claveDeCupo(ambito: AmbitoDeCupo, ...partes: string[]): string {
   return [ambito, ...partes.map((p) => p.trim().toLowerCase())].join(":");

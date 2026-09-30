@@ -69,6 +69,11 @@ async function correr(opciones: {
   fila?: Partial<FilaDeCaso> & Record<string, unknown>;
   transcripciones?: Map<string, string>;
   motor?: "gemini" | "mock";
+  /** Lo que contesta `anotarLecturas`: false si no pudo guardar las lecturas. */
+  lecturasAnotadas?: boolean;
+  hasta?: number;
+  /** El `after()` de Next: por defecto el real, que fuera de un pedido tira y la lectura corre en el momento. */
+  despues?: (tarea: () => Promise<void>) => void;
 } & Conversacion = {}) {
   vi.resetModules();
   const espiaDeUpdate: Mock<(data: Record<string, unknown>) => void> = vi.fn();
@@ -97,7 +102,7 @@ async function correr(opciones: {
     resolveExtractionEngine: vi.fn().mockResolvedValue(opciones.motor ?? "gemini"),
   }));
 
-  const anotarLecturas = vi.fn().mockResolvedValue(undefined);
+  const anotarLecturas = vi.fn().mockResolvedValue(opciones.lecturasAnotadas ?? true);
   const paraElModelo = vi.fn().mockResolvedValue(opciones.vistos ?? { hashes: [], media: [] });
   const marcarPlazoAgotado = vi.fn().mockResolvedValue(undefined);
   vi.doMock("@/server/worker/adjuntos", async () => ({
@@ -121,12 +126,33 @@ async function correr(opciones: {
   const orquestador = vi.fn().mockResolvedValue(undefined);
   vi.doMock("@/server/confirmations/orchestrate", () => ({ orchestratePostExtraction: orquestador }));
 
+  const atenderCartas = vi.fn().mockResolvedValue(undefined);
+  vi.doMock("@/server/cases/lectura-reclamo", () => ({ atenderCartas }));
+  const { despues } = opciones;
+  // `doMock` sobrevive a `resetModules`: sin esto el `after` de un caso queda para los que siguen.
+  vi.doUnmock("next/server");
+  if (despues) {
+    vi.doMock("next/server", async () => ({ ...(await vi.importActual<object>("next/server")), after: despues }));
+  }
+
   const { runEmailExtractionWorker } = await import("@/server/worker/extract");
-  await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
+  await runEmailExtractionWorker(CASE_ID, TENANT_ID, null, opciones.hasta ? { hasta: opciones.hasta } : undefined);
 
   const escrito = espiaDeUpdate.mock.calls.map((c) => c[0]);
   const delCaso = escrito.find((d) => "is_claim" in d && d.is_claim === true);
-  return { extractor, anotarLecturas, paraElModelo, marcarPlazoAgotado, transcribir, logAgentRun, orquestador, escrito, delCaso };
+  return {
+    extractor,
+    anotarLecturas,
+    paraElModelo,
+    marcarPlazoAgotado,
+    transcribir,
+    logAgentRun,
+    orquestador,
+    atenderCartas,
+    espiaDeUpdate,
+    escrito,
+    delCaso,
+  };
 }
 
 describe("fotos y PDF al modelo", () => {
@@ -202,6 +228,175 @@ describe("indicios de los documentos", () => {
     const { delCaso } = await correr();
     expect(delCaso).not.toHaveProperty("fraud_risk_level");
     expect(delCaso).not.toHaveProperty("fraud_indicators");
+  });
+});
+
+describe("responsabilidad en choques (B18)", () => {
+  const mecanica = (c: Record<string, unknown> = {}) => ({
+    maniobra_asegurado: null,
+    maniobra_tercero: null,
+    semaforo_asegurado: null,
+    semaforo_tercero: null,
+    interseccion: null,
+    venia_por_la_derecha: null,
+    embistio_de_atras: "tercero",
+    excepcion_prioridad: null,
+    ...c,
+  });
+  const choque = { field_confidences: {}, extracted_fields: { accident_date: "2026-09-10", claim_type: "choque" } };
+
+  it("un choque con mecánica deja la opinión en el mismo UPDATE del caso", async () => {
+    const { delCaso } = await correr({ claim: { ...choque, mecanica: mecanica() } });
+    expect(delCaso?.responsabilidad).toMatchObject({ v: 1, responsable: "tercero", regla: "ley24449_art48g" });
+  });
+
+  it("la mecánica del relato no llega al registro de la corrida ni al orquestador", async () => {
+    const { logAgentRun, orquestador } = await correr({ claim: { ...choque, mecanica: mecanica() } });
+    expect(logAgentRun.mock.calls[0]![0].claim.mecanica).toBeNull();
+    expect(orquestador.mock.calls[0]![2].extractedClaim.mecanica).toBeNull();
+  });
+
+  it("la mecánica de un parte leído en esta corrida también cuenta", async () => {
+    const lectura = {
+      indice: 1,
+      resumen: "Parte amistoso.",
+      util: true,
+      documento: { tipo: "Parte", fecha: null, patente: null, dni: null, nombre: null, lugar: null, provincia: null },
+      mecanica: mecanica({ embistio_de_atras: "asegurado" }),
+    };
+    const { delCaso } = await correr({ adjuntos: [adjunto({})], vistos: VISTOS, claim: { ...choque, adjuntos: [lectura] } });
+    expect(delCaso?.responsabilidad).toMatchObject({ responsable: "asegurado", regla: "ley24449_art48g" });
+  });
+
+  it("un choque sin mecánica no escribe opinión", async () => {
+    const { delCaso } = await correr({ claim: choque });
+    expect(delCaso).not.toHaveProperty("responsabilidad");
+  });
+
+  it("un choque donde el asegurado responde ante un tercero (rc) también deja opinión", async () => {
+    const { delCaso } = await correr({
+      claim: { field_confidences: {}, extracted_fields: { accident_date: "2026-09-10", claim_type: "rc" }, mecanica: mecanica() },
+    });
+    expect(delCaso?.responsabilidad).toMatchObject({ responsable: "tercero", regla: "ley24449_art48g" });
+  });
+
+  it("si el caso ya no es un choque, borra la opinión que tenía aunque el modelo mande mecánica", async () => {
+    const { delCaso } = await correr({
+      fila: { responsabilidad: { v: 1, responsable: "tercero" } },
+      claim: { field_confidences: {}, extracted_fields: { accident_date: "2026-09-10", claim_type: "robo" }, mecanica: mecanica() },
+    });
+    expect(delCaso).toHaveProperty("responsabilidad", null);
+  });
+});
+
+describe("carta de un tercero (B24)", () => {
+  const lecturaDeCarta = {
+    indice: 1,
+    resumen: "Carta documento.",
+    util: true,
+    documento: { tipo: "carta_reclamo", fecha: null, patente: null, dni: null, nombre: null, lugar: null, provincia: null },
+    mecanica: null,
+  };
+
+  it("la carta que el modelo reconoció en esta corrida se lee después de contestar, con el archivo que ya vio", async () => {
+    const { atenderCartas, orquestador } = await correr({
+      adjuntos: [adjunto({})],
+      vistos: VISTOS,
+      claim: { adjuntos: [lecturaDeCarta] },
+    });
+    expect(atenderCartas).toHaveBeenCalledTimes(1);
+    const pedido = atenderCartas.mock.calls[0]![0];
+    expect(pedido).toMatchObject({ tenantId: TENANT_ID, caseId: CASE_ID, vistos: VISTOS });
+    expect(pedido.adjuntos[0].datos).toMatchObject({ tipo: "carta_reclamo" });
+    expect(orquestador.mock.invocationCallOrder[0]).toBeLessThan(atenderCartas.mock.invocationCallOrder[0]!);
+  });
+
+  it("la lectura sale de la respuesta del worker: el re-despacho no espera a que el modelo lea la carta", async () => {
+    const pendientes: Array<() => Promise<void>> = [];
+    const { atenderCartas } = await correr({
+      adjuntos: [adjunto({})],
+      vistos: VISTOS,
+      claim: { adjuntos: [lecturaDeCarta] },
+      despues: (tarea) => void pendientes.push(tarea),
+    });
+    // La corrida ya terminó y la carta todavía no se leyó.
+    expect(atenderCartas).not.toHaveBeenCalled();
+    expect(pendientes).toHaveLength(1);
+
+    await pendientes[0]!();
+    expect(atenderCartas).toHaveBeenCalledTimes(1);
+    expect(atenderCartas.mock.calls[0]![0]).toMatchObject({ tenantId: TENANT_ID, caseId: CASE_ID, vistos: VISTOS });
+  });
+
+  it("si Next no puede agendar la lectura, se lee en el momento y no se pierde", async () => {
+    const { atenderCartas } = await correr({
+      adjuntos: [adjunto({})],
+      vistos: VISTOS,
+      claim: { adjuntos: [lecturaDeCarta] },
+      despues: () => {
+        throw new Error("`after` was called outside a request scope");
+      },
+    });
+    expect(atenderCartas).toHaveBeenCalledTimes(1);
+  });
+
+  it("se lee cuando la corrida ya soltó la reserva del caso: leerla antes demoraría la respuesta de lo que entre", async () => {
+    const { atenderCartas, espiaDeUpdate } = await correr({
+      adjuntos: [adjunto({})],
+      vistos: VISTOS,
+      claim: { adjuntos: [lecturaDeCarta] },
+    });
+    const soltar = espiaDeUpdate.mock.calls.findIndex(([d]) => d.extraction_lease_at === null);
+    expect(soltar).toBeGreaterThanOrEqual(0);
+    expect(espiaDeUpdate.mock.invocationCallOrder[soltar]).toBeLessThan(atenderCartas.mock.invocationCallOrder[0]!);
+  });
+
+  it("no se lee si la corrida no terminó: el caso queda para el barrido, sin carta que leer", async () => {
+    const { atenderCartas } = await correr({
+      adjuntos: [adjunto({})],
+      vistos: VISTOS,
+      claim: { adjuntos: [lecturaDeCarta] },
+      error: { status: 500 },
+    });
+    expect(atenderCartas).not.toHaveBeenCalled();
+  });
+
+  it("le pasa el momento en que Vercel mata la invocación, o uno propio si nadie se lo dio", async () => {
+    const dada = await correr({ adjuntos: [adjunto({})], vistos: VISTOS, hasta: 1_800_000_000_000 });
+    expect(dada.atenderCartas.mock.calls[0]![0].hasta).toBe(1_800_000_000_000);
+
+    const antes = Date.now();
+    const propia = await correr({ adjuntos: [adjunto({})], vistos: VISTOS });
+    const { hasta } = propia.atenderCartas.mock.calls[0]![0];
+    expect(hasta).toBeGreaterThan(antes);
+    expect(hasta).toBeLessThanOrEqual(Date.now() + 180_000);
+  });
+
+  it("si las lecturas de esta corrida no se pudieron guardar, no se usan: la próxima corrida pisaría la carta", async () => {
+    const { atenderCartas } = await correr({
+      adjuntos: [adjunto({})],
+      vistos: VISTOS,
+      claim: { adjuntos: [lecturaDeCarta] },
+      lecturasAnotadas: false,
+    });
+    expect(atenderCartas.mock.calls[0]![0].adjuntos).toEqual([adjunto({})]);
+    expect(atenderCartas.mock.calls[0]![0].adjuntos[0].datos).toBeNull();
+  });
+
+  it("sin lectura de esta corrida, las filas van como estaban", async () => {
+    const previa = adjunto({ datos: { tipo: "carta_reclamo", fecha: null, patente: null, dni: null, nombre: null, lugar: null, provincia: null } });
+    const { atenderCartas } = await correr({ adjuntos: [previa] });
+    expect(atenderCartas.mock.calls[0]![0].adjuntos).toEqual([previa]);
+  });
+
+  it("lo que se lee de la carta no entra al orquestador ni al registro de la corrida", async () => {
+    const { orquestador, logAgentRun } = await correr({
+      adjuntos: [adjunto({})],
+      vistos: VISTOS,
+      claim: { adjuntos: [lecturaDeCarta] },
+    });
+    expect(orquestador.mock.calls[0]![2].extractedClaim.adjuntos).toEqual([]);
+    expect(JSON.stringify(logAgentRun.mock.calls)).not.toContain("carta_reclamo");
   });
 });
 

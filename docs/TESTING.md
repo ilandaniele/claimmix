@@ -55,7 +55,7 @@ de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 
 ### 2. `pnpm rehearse` — minutos, gasta tokens
 
-Veintidós denuncias enteras, de punta a punta, contra el mismo código, la misma base
+Veinticuatro denuncias enteras, de punta a punta, contra el mismo código, la misma base
 y el mismo modelo que producción. Por los canales simulados: en los dos el
 mensajero redacta la respuesta exactamente como lo haría; WhatsApp la guarda en
 vez de enviarla, y mail hace lo mismo con cualquier dirección `@example.com`.
@@ -80,6 +80,14 @@ datos no coinciden con el padrón — y `tomar-el-control`/`devolver-al-agente`
 Ese último está porque no estaba: es el único mensaje del producto cuyo piso ES
 un dato —dice cuáles son los dos valores que no coinciden— y se rompió sin que
 nadie lo viera, porque no había un ensayo que lo imprimiera.
+
+`alcance-responsabilidad-clara` (B18) cuenta un choque por alcance con la
+responsabilidad a la vista y mira tres cosas: que la respuesta no diga quién
+tuvo la culpa ni cite la ley de tránsito (`avoids`), que no pida datos del otro
+conductor (`noAsked` sobre `party_b_*`) y que `cases.responsabilidad` quede con
+el tercero como responsable (`finally.responsabilidad`, que informa `sin_leer`
+si no se escribió opinión). Necesita la migración 0041 aplicada en la base del
+ensayo.
 
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.
@@ -751,7 +759,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
-2. `pnpm rehearse`: las quince conversaciones enteras contra el agente real.
+2. `pnpm rehearse`: las veinticuatro conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa

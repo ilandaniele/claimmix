@@ -45,6 +45,8 @@ export interface IntakeAgentInput {
   source?: "gmail" | "whatsapp" | "worker" | "cron" | "simulate" | "manual";
   /** Viene del barrido de pendientes: el worker no marca si sigue ocupado. */
   retoma?: boolean;
+  /** Cuándo mata Vercel esta invocación (epoch ms). Sin él, el worker supone la función más corta. */
+  hasta?: number;
 }
 
 export interface IntakeAgentResult {
@@ -197,6 +199,7 @@ export async function runIntakeAgent(input: IntakeAgentInput): Promise<IntakeAge
   if (action === "extract_email" || action === "extract_whatsapp") {
     await runEmailExtractionWorker(input.caseId, input.tenantId, input.userId ?? null, {
       retoma: input.retoma === true,
+      hasta: input.hasta,
     });
     return {
       ok: true,

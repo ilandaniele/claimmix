@@ -13,7 +13,10 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { enTenant, enTenantVarias, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { MAX_PAGINAS_PDF, normalizarMime, seMira, type Metadatos } from "@/core/adjuntos/firma";
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
+import type { MotivoSinLeer } from "@/core/ai/sin-leer";
 import { cruzarDocumentos, type FotoCruzable, type IndicioDerivado } from "@/core/case/contradicciones";
+import { MecanicaSchema, tieneMecanica, type Mecanica } from "@/core/case/mecanica";
+import { esCartaDeReclamo, esDocumentoMedico } from "@/core/case/reclamo-tercero";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
 import { claimAttachments } from "@/lib/db/schema";
 import type { AdjuntoLeido, DocumentoLeido } from "@/lib/schemas/extracted-claim";
@@ -22,6 +25,17 @@ import type { PolicyMatch } from "@/server/matching/policy-matcher";
 import { readAttachment } from "@/server/storage/claim-attachments-bucket";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
+
+/**
+ * Lo que se guarda en `claim_attachments.datos`: lo que dice el documento, más
+ * la mecánica de un parte o una denuncia (B18) y la carta de un tercero ya leída
+ * (B24), o por qué no hay forma de leerla. Sólo el equipo lo ve.
+ */
+export type DatosDeAdjunto = DocumentoLeido & {
+  mecanica?: Mecanica | null;
+  reclamo?: unknown;
+  sin_leer?: MotivoSinLeer;
+};
 
 export interface AdjuntoDelCaso {
   id: string;
@@ -33,7 +47,7 @@ export interface AdjuntoDelCaso {
   resumen: string | null;
   util: boolean | null;
   rejected_reason: string | null;
-  datos: DocumentoLeido | null;
+  datos: DatosDeAdjunto | null;
   metadatos: Metadatos | null;
 }
 
@@ -87,6 +101,19 @@ export interface ParaElModelo {
   /** Uno por archivo, en el orden de `media`: el `indice` que devuelve el modelo es la posición + 1. */
   hashes: string[];
   media: InlineMedia[];
+}
+
+/**
+ * Lo que el modelo leyó de cada archivo que vio, por contenido. Un `indice` que
+ * no es de ningún archivo enviado no se cuenta, y si repite, vale el primero.
+ */
+export function lecturasPorHash(vistos: ParaElModelo, lecturas: AdjuntoLeido[]): Map<string, AdjuntoLeido> {
+  const salida = new Map<string, AdjuntoLeido>();
+  for (const l of lecturas) {
+    const hash = vistos.hashes[l.indice - 1];
+    if (hash !== undefined && !salida.has(hash)) salida.set(hash, l);
+  }
+  return salida;
 }
 
 /**
@@ -159,25 +186,28 @@ export async function paraElModelo(
  * Lo que el modelo leyó de cada archivo que vio, en una sola ida a la base.
  * Un archivo sin lectura queda con resumen vacío y no null: ya se leyó y no
  * vuelve al modelo. Si falla, se registra y la extracción sigue: los archivos
- * vuelven a ir en la próxima corrida.
+ * vuelven a ir en la próxima corrida. Dice si quedó anotado.
  */
 export async function anotarLecturas(
   caseId: string,
   tenantCtx: TenantContext,
   vistos: ParaElModelo,
   lecturas: AdjuntoLeido[]
-): Promise<void> {
-  if (vistos.hashes.length === 0) return;
+): Promise<boolean> {
+  if (vistos.hashes.length === 0) return true;
+  const leidas = lecturasPorHash(vistos, lecturas);
   try {
     await enTenantVarias(tenantCtx, (db) =>
-      vistos.hashes.map((hash, i) => {
-        const leido = lecturas.find((l) => l.indice === i + 1);
+      vistos.hashes.map((hash) => {
+        const leido = leidas.get(hash);
         return db
           .update(claimAttachments)
           .set({
             resumen: leido && esResumenSeguro(leido.resumen, [], 200) ? leido.resumen : "",
             util: leido?.util ?? null,
-            datos: leido?.documento ?? null,
+            datos: leido?.documento
+              ? { ...leido.documento, ...(tieneMecanica(leido.mecanica) ? { mecanica: leido.mecanica } : {}) }
+              : null,
           })
           .where(
             and(
@@ -188,8 +218,10 @@ export async function anotarLecturas(
           );
       })
     );
+    return true;
   } catch (err) {
     logger.error({ case_id: caseId, code: errorCode(err) }, "email_worker.lecturas_error");
+    return false;
   }
 }
 
@@ -237,6 +269,65 @@ export function marcarPlazoAgotado(caseId: string, tenantCtx: TenantContext, has
 }
 
 /**
+ * Las cartas de un tercero que todavía nadie leyó a fondo (B24), una por
+ * contenido: el mismo archivo mandado dos veces es una carta. Las que ya se sabe
+ * que no se pueden leer no vuelven.
+ *
+ * Son las que el modelo reconoció al leer los archivos del caso y, si se pasa
+ * `deMensaje`, los archivos sin leer de ese mensaje: llegó a un caso que el
+ * agente ya no lee, y sin la extracción nadie reconoció si alguno es una carta.
+ */
+export function cartasPendientes(adjuntos: AdjuntoDelCaso[], deMensaje?: string): AdjuntoDelCaso[] {
+  const hashes = new Set<string>();
+  // Un duplicado que llegó después no se reconoce de nuevo: su gemelo ya se leyó.
+  const yaLeidos = new Set(adjuntos.filter((a) => (a.datos || a.resumen !== null) && a.content_hash).map((a) => a.content_hash!));
+  return adjuntos.filter((a) => {
+    const { datos } = a;
+    if (a.rejected_reason !== null || a.storage_path === null) return false;
+    const sinReconocer =
+      !datos &&
+      deMensaje !== undefined &&
+      a.claim_message_id === deMensaje &&
+      a.resumen === null &&
+      !(a.content_hash && yaLeidos.has(a.content_hash)) &&
+      seMira(a.content_type) &&
+      !!a.metadatos?.firma;
+    const reconocida = !!datos && esCartaDeReclamo(datos.tipo) && datos.reclamo === undefined && !datos.sin_leer;
+    if (!sinReconocer && !reconocida) return false;
+    if (a.content_hash) {
+      if (hashes.has(a.content_hash)) return false;
+      hashes.add(a.content_hash);
+    }
+    return true;
+  });
+}
+
+/**
+ * Las filas del caso con lo que esta corrida leyó de los archivos que todavía
+ * no tenían lectura: la fila de la base es la de antes de anotarla.
+ */
+export function conLecturasDeEstaCorrida(
+  adjuntos: AdjuntoDelCaso[],
+  vistos: ParaElModelo,
+  lecturas: AdjuntoLeido[]
+): AdjuntoDelCaso[] {
+  const leidas = lecturasPorHash(vistos, lecturas);
+  return adjuntos.map((a) => {
+    const documento = a.content_hash ? leidas.get(a.content_hash)?.documento : null;
+    return documento ? { ...a, datos: documento } : a;
+  });
+}
+
+/** La mecánica que cuentan los partes y denuncias del caso, los leídos antes y los de esta corrida (B18). */
+export function mecanicasDeAdjuntos(adjuntos: AdjuntoDelCaso[], vistos: ParaElModelo, lecturas: AdjuntoLeido[]): Mecanica[] {
+  const deEstaCorrida = [...lecturasPorHash(vistos, lecturas).values()].filter((l) => l.documento);
+  const atajar = MecanicaSchema.nullable().catch(null);
+  return [...adjuntos.map((a) => a.datos?.mecanica), ...deEstaCorrida.map((l) => l.mecanica)]
+    .map((m) => atajar.parse(m))
+    .filter(tieneMecanica);
+}
+
+/**
  * Los documentos del caso —los leídos antes y los de esta corrida— y las fotos
  * con fecha o GPS, cruzados contra el reclamo y la primera póliza encontrada.
  *
@@ -253,11 +344,15 @@ export function indiciosDeAdjuntos(entrada: {
   ahora: Date;
 }): IndicioDerivado[] {
   const { adjuntos, vistos, lecturas, campos, poliza, ahora } = entrada;
-  const deEstaCorrida = lecturas.filter((l) => l.indice >= 1 && l.indice <= vistos.hashes.length);
-  const leidas = new Map(deEstaCorrida.map((l) => [vistos.hashes[l.indice - 1]!, l]));
-  const documentos = [...adjuntos.map((a) => a.datos), ...deEstaCorrida.map((l) => l.documento)].filter(
+  const leidas = lecturasPorHash(vistos, lecturas);
+  const deEstaCorrida = [...leidas.values()];
+  const leidos = [...adjuntos.map((a) => a.datos), ...deEstaCorrida.map((l) => l.documento)].filter(
     (d): d is DocumentoLeido => !!d
   );
+  // La carta de un tercero, y la documentación médica que la acompaña, son de
+  // quien reclama: sus nombres y patentes no se cotejan contra el asegurado.
+  const hayCarta = leidos.some((d) => esCartaDeReclamo(d.tipo));
+  const documentos = leidos.filter((d) => !esCartaDeReclamo(d.tipo) && !(hayCarta && esDocumentoMedico(d.tipo)));
   const fotos: FotoCruzable[] = adjuntos
     .filter((a) => {
       if (a.rejected_reason !== null || !a.metadatos) return false;

@@ -20,6 +20,8 @@
  *   la fila liberaría el enlace público sin rastro para que otro lo tome.
  * - adjuntos_por_purgar (0045): la app sólo encola; la cola no se reescribe ni se
  *   vacía desde ahí, y cancelar una purga es un UPDATE que hace el dueño.
+ * - ai_usage_mensual (0046): lo escribe el trigger de `ai_usage` con SECURITY
+ *   DEFINER; la app sólo lo lee, así que no puede falsear lo que ve el tablero.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
@@ -30,4 +32,5 @@ export const PERMISOS_QUITADOS = {
   case_desvios: ["INSERT", "UPDATE", "DELETE"],
   formulario_web: ["DELETE"],
   adjuntos_por_purgar: ["UPDATE", "DELETE"],
+  ai_usage_mensual: ["INSERT", "UPDATE", "DELETE"],
 };

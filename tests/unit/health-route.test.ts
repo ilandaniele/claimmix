@@ -109,6 +109,8 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "cases", column_name: "canal_web" },
     // 0045.
     { table_name: "adjuntos_por_purgar", column_name: "id" },
+    // 0046.
+    { table_name: "ai_usage_mensual", column_name: "tenant_id" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -276,6 +278,21 @@ describe("GET /api/health — what it reports", () => {
 
     // El SSO tolera la tabla ausente (queda apagado) y el esquema no la pide.
     expect((await schemaCon("sso_settings")).status).toBe("ok");
+  });
+
+  it("sin el acumulador de uso de IA (0046) cae, porque /metricas dejaría de abrir", async () => {
+    mockExecute.mockImplementation((q: unknown) =>
+      Promise.resolve(
+        JSON.stringify(q).includes("ai_usage")
+          ? { rows: [{ total: 0 }] }
+          : { rows: esquemaSin("ai_usage_mensual") }
+      )
+    );
+    const body = await (await GET(request(`Bearer ${SECRET}`))).json();
+    const migraciones = body.checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(migraciones.status).toBe("down");
+    expect(migraciones.detail).toContain("ai_usage_mensual");
   });
 
   it("nota que falta lo comercial, no sólo lo del camino caliente", async () => {

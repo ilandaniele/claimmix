@@ -330,7 +330,23 @@ Desde B14 y B15 mide también **el tablero de métricas** (`getTenantKpis`), en 
 escenarios: el mes en curso, y el peor caso, el año con el historial de doce
 meses y la serie por día. Leen la auditoría con un cruce lateral por caso, que se
 rompe si no se usa el índice parcial `idx_audit_log_trayecto`, y por eso están
-en la carga y no sólo en los tests de forma.
+en la carga y no sólo en los tests de forma. El uso de IA del tablero sale del
+acumulador mensual `ai_usage_mensual` (0046) y no de `ai_usage`; `pnpm load`
+comprueba que los cuellos entren a la auditoría por `target_id` (sin Hash Join) y
+que el acumulador coincida con `ai_usage`. Si no coincide, o dice «NO SE PUDO
+COMPROBAR», se recompone volviendo a aplicar la 0046 entera
+(`node scripts/migrate.mjs --env <VAR> --forget 0046 --apply` y después
+`--apply`), nunca corriendo su backfill suelto: sin el `LOCK` ni la transacción
+el acumulador queda vacío si entra una llamada a la IA en el medio.
+
+Que el trigger de `ai_usage` suma de verdad lo prueba, contra un Postgres real, la
+sección 6 de `scripts/prove-data-layer.mts` (`pnpm capa-datos`): un INSERT como
+`claimmix_app` suma en el acumulador, la app no lo puede escribir directo, y
+borrar al usuario pasa su uso a `user_id` nulo sin romper. Escribe (un uso de IA
+marcador y una persona descartable, que borra al terminar), así que sólo corre
+en CI contra el ensayo o con `--escribe`, y necesita la 0046 aplicada en esa
+base. Si el trigger falla, `recordUsage` traga el error y los tres topes de
+presupuesto dejan de contar en silencio; esto lo atrapa antes de producción.
 
 Sobre esa mitad hay **cuatro formas**, y cada una contesta una pregunta
 distinta. Que sean cuatro y no una repetida con otro nombre es el punto: si las

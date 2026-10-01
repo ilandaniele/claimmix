@@ -9,9 +9,10 @@
  * `enTenantVarias`— y no con SQL escrito para la ocasión. Una prueba que no pasa
  * por el mismo camino que el código no prueba el código.
  *
- * Necesita DATABASE_URL_APP y dos inquilinos con datos. Sólo lee, salvo la
- * sección 5, que escribe y borra un caso marcador y por eso corre sólo en CI
- * (contra el ensayo) o con `--escribe`: nunca a ciegas con el `.env.local`.
+ * Necesita DATABASE_URL_APP y dos inquilinos con datos. Sólo lee, salvo las
+ * secciones 5 y 6, que escriben y borran un caso marcador (la 5) y un uso de IA
+ * marcador con un usuario descartable (la 6) y por eso corren sólo en CI (contra
+ * el ensayo) o con `--escribe`: nunca a ciegas con el `.env.local`.
  */
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
@@ -401,6 +402,175 @@ if (conDatos.length < 2) {
   }
 }
 
+// ── 6. El uso de IA suma en el acumulador del tablero ──────────────────────
+//
+// El tablero de /metricas lee `ai_usage_mensual` (0046), que mantiene un trigger
+// SECURITY DEFINER de `ai_usage`. Ese trigger no corre contra un Postgres de
+// verdad en ningún otro chequeo, y si falla, `recordUsage` traga el error: los
+// tres topes de presupuesto dejarían de contar sin que nada lo avise. Se prueba
+// por el camino de la app (`enTenant`, el rol sin BYPASSRLS), que es el que lo
+// dispara:
+//   · un INSERT de `ai_usage` entra y suma en el acumulador;
+//   · `claimmix_app` no puede escribir el acumulador directo;
+//   · al borrar al usuario, la cascada —que corre sin inquilino en la sesión—
+//     pasa su uso a `user_id` nulo sin romper el borrado.
+//
+// El modelo marcador aísla la prueba del uso real del inquilino, y la persona es
+// descartable: nunca se usa un usuario real. Escribe, así que sólo corre en CI
+// (ensayo) o con `--escribe`. La limpieza corre al empezar y siempre al terminar.
+console.log("\n▸ El uso de IA suma en el acumulador del tablero");
+if (process.env.CI !== "true" && !process.argv.includes("--escribe")) {
+  console.log("     (escribe uso de IA marcador: sólo corre en CI o con --escribe contra el ensayo)");
+} else {
+  const modelo = `prueba-capa-datos-${a.id.slice(0, 8)}`;
+  const correo = `capa-datos.${a.id.slice(0, 8)}@capa-datos.invalid`;
+  const dueno = new Pool({ connectionString: process.env.DATABASE_URL?.trim() });
+  const limpiar = async () => {
+    await dueno.query(`DELETE FROM ai_usage WHERE tenant_id = $1 AND model = $2`, [a.id, modelo]);
+    await dueno.query(`DELETE FROM ai_usage_mensual WHERE tenant_id = $1 AND model = $2`, [a.id, modelo]);
+    await dueno.query(`DELETE FROM "user" WHERE email = $1`, [correo]);
+  };
+  const acumulado = async () => {
+    const [fila] = await enTenant(ctxDe(a), (db) =>
+      db
+        .select({
+          calls: sql<number>`coalesce(sum(${tables.aiUsageMensual.calls}), 0)::int`,
+          prompt: sql<number>`coalesce(sum(${tables.aiUsageMensual.prompt_tokens}), 0)::int`,
+          completion: sql<number>`coalesce(sum(${tables.aiUsageMensual.completion_tokens}), 0)::int`,
+          costo: sql<string>`coalesce(sum(${tables.aiUsageMensual.cost_usd}), 0)::text`,
+          conUsuario: sql<number>`count(*) filter (where ${tables.aiUsageMensual.user_id} is not null and ${tables.aiUsageMensual.calls} > 0)::int`,
+        })
+        .from(tables.aiUsageMensual)
+        .where(eq(tables.aiUsageMensual.model, modelo))
+    );
+    return fila!;
+  };
+  const esperado = (f: Awaited<ReturnType<typeof acumulado>>) =>
+    f.calls === 2 && f.prompt === 14 && f.completion === 6 && Number(f.costo) === 0.015;
+
+  try {
+    await limpiar();
+    const { rows } = await dueno.query(
+      `INSERT INTO "user" (name, email) VALUES ('Prueba capa de datos', $1) RETURNING id::text AS id`,
+      [correo]
+    );
+    const persona: string = rows[0].id;
+    await dueno.query(
+      `INSERT INTO users (id, tenant_id, full_name, role) VALUES ($1, $2, 'Prueba capa de datos', 'viewer')`,
+      [persona, a.id]
+    );
+
+    // 1. Dos INSERT por el camino de la app: el trigger tiene que sumarlos.
+    let entro = true;
+    try {
+      for (const [prompt, completion, costo] of [[10, 4, "0.0100"], [4, 2, "0.0050"]] as const) {
+        await enTenant(ctxDe(a), (db) =>
+          db.insert(tables.aiUsage).values({
+            tenant_id: a.id,
+            user_id: persona,
+            model: modelo,
+            prompt_tokens: prompt,
+            completion_tokens: completion,
+            cost_usd: costo,
+          })
+        );
+      }
+    } catch (e) {
+      entro = false;
+      const codigo = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "error");
+      mal(`un INSERT de ai_usage como claimmix_app falla (${codigo}): el trigger del acumulador está roto`);
+      problemas.push("el INSERT de ai_usage falla por el trigger del acumulador");
+    }
+
+    if (entro) {
+      const suma = await acumulado();
+      if (esperado(suma) && suma.conUsuario > 0) {
+        bien("dos INSERT de ai_usage suman 2 llamadas, 14 + 6 tokens y 0.015 USD en el acumulador");
+      } else {
+        mal(
+          `el acumulador no suma lo que entró: ${suma.calls} llamada(s), ${suma.prompt} + ${suma.completion} tokens, ` +
+            `${suma.costo} USD (esperaba 2, 14 + 6, 0.015)`
+        );
+        problemas.push("el trigger de ai_usage no suma en ai_usage_mensual");
+      }
+
+      // 2. El acumulador no se escribe desde la app: el trigger es su única puerta.
+      const pasaron: string[] = [];
+      const intentos: Array<[string, () => Promise<unknown>]> = [
+        [
+          "INSERT",
+          () =>
+            enTenant(ctxDe(a), (db) =>
+              db
+                .insert(tables.aiUsageMensual)
+                .values({ tenant_id: a.id, mes: "2000-01-01", user_id: null, model: modelo, calls: 99 })
+            ),
+        ],
+        [
+          "UPDATE",
+          () =>
+            enTenant(ctxDe(a), (db) =>
+              db.update(tables.aiUsageMensual).set({ calls: 99 }).where(eq(tables.aiUsageMensual.model, modelo))
+            ),
+        ],
+        [
+          "DELETE",
+          () =>
+            enTenant(ctxDe(a), (db) =>
+              db.delete(tables.aiUsageMensual).where(eq(tables.aiUsageMensual.model, modelo))
+            ),
+        ],
+      ];
+      for (const [verbo, intento] of intentos) {
+        try {
+          await intento();
+          pasaron.push(verbo);
+        } catch {
+          // Lo esperado: el rol no tiene el permiso.
+        }
+      }
+      if (pasaron.length > 0) {
+        mal(`claimmix_app pudo hacer ${pasaron.join(", ")} directo sobre ai_usage_mensual`);
+        problemas.push("la app puede escribir ai_usage_mensual directo");
+      } else {
+        bien("claimmix_app no puede hacer INSERT, UPDATE ni DELETE directo sobre ai_usage_mensual");
+      }
+
+      // 3. Borrar al usuario: la cascada pasa su uso a `user_id` nulo, sin romper.
+      let borrado = true;
+      try {
+        await dueno.query(`DELETE FROM "user" WHERE id = $1`, [persona]);
+      } catch (e) {
+        borrado = false;
+        const codigo = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "error");
+        mal(`borrar a un usuario con uso de IA falla (${codigo}): el trigger rompe la cascada`);
+        problemas.push("borrar un usuario con uso de IA falla por el trigger del acumulador");
+      }
+      if (borrado) {
+        const tras = await acumulado();
+        const huerfanas = await dueno.query(
+          `SELECT count(*)::int AS n FROM ai_usage WHERE tenant_id = $1 AND model = $2 AND user_id IS NULL`,
+          [a.id, modelo]
+        );
+        if (esperado(tras) && tras.conUsuario === 0 && huerfanas.rows[0].n === 2) {
+          bien("al borrar al usuario, su uso pasa a user_id nulo y el acumulador no pierde nada");
+        } else {
+          mal(
+            `tras borrar al usuario el acumulador quedó en ${tras.calls} llamada(s), ${tras.prompt} + ${tras.completion} ` +
+              `tokens, ${tras.conUsuario} fila(s) con usuario, ${huerfanas.rows[0].n} de ai_usage sin usuario (esperaba 2, 14 + 6, 0, 2)`
+          );
+          problemas.push("la cascada de users no pasa el uso de IA a user_id nulo en el acumulador");
+        }
+      }
+    }
+  } finally {
+    try {
+      await limpiar();
+    } finally {
+      await dueno.end();
+    }
+  }
+}
 
 // ── Veredicto ──────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(70));

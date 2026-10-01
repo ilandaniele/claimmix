@@ -1,8 +1,8 @@
 /**
  * El SQL de `src/server/metrics/trayecto.ts`, renderizado sin base.
  *
- * Ejecutarlo contra datos lo hace `pnpm capa-datos`. Acá se afirma lo que se
- * rompe en silencio: que los eventos vayan como literales (si van como
+ * Ejecutarlo contra datos y mirar el plan lo hace `pnpm load` (`explainPlans`).
+ * Acá se afirma lo que se rompe en silencio: que los eventos vayan como literales (si van como
  * parámetros Postgres no puede usar el índice parcial), que el cruce con la
  * auditoría compare el id del caso como texto, que las ventanas estén en el
  * orden en que hace falta, y que no se cuente dos veces el mismo mail.
@@ -16,6 +16,11 @@ import { PgDialect, QueryBuilder } from "drizzle-orm/pg-core";
 import { EVENTOS_CON_ESTADO, EVENTOS_DE_TRAYECTO } from "@/core/metricas/transiciones";
 import { EVENTOS_DE_INTERVENCION } from "@/core/metricas/intervencion";
 import {
+  CON_ESTADO,
+  DEL_CASO,
+  HACIA,
+  NO_ES_INTERMEDIO,
+  SE_APLICO,
   consultaDeCiclo,
   consultaDeCuellos,
   consultaDeHistorial,
@@ -165,5 +170,20 @@ describe("consultaDeCuellos", () => {
 
   it("el rango es lo único que viaja como parámetro", () => {
     expect(params).toEqual([DESDE, HASTA]);
+  });
+
+  it("mantiene el lateral parametrizado: `offset 0` justo antes de cerrarlo", () => {
+    // Sin la valla Postgres lo aplana en un Hash Join sobre todo idx_audit_log_trayecto
+    // (uuid_out no es leakproof y bajo RLS no se empuja al índice): 25-45 ms en vez de 0,5.
+    expect(sql).toMatch(/is not null\s+offset 0\s*\)\s*e\b/);
+    expect(sql.match(/offset 0/g)).toHaveLength(1);
+  });
+
+  it("la valla no se contagia a las otras consultas ni a los fragmentos compartidos", () => {
+    expect(armar(consultaDeCiclo).sql).not.toMatch(/offset/);
+    expect(armar(consultaDeHistorial).sql).not.toMatch(/offset/);
+    for (const f of [CON_ESTADO, HACIA, SE_APLICO, NO_ES_INTERMEDIO, DEL_CASO]) {
+      expect(new PgDialect().sqlToQuery(plantilla`${f}`).sql).not.toMatch(/offset/);
+    }
   });
 });

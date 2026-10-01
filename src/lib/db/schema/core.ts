@@ -11,8 +11,10 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   bigserial,
   boolean,
+  date,
   inet,
   integer,
   jsonb,
@@ -22,6 +24,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 import type { Reglas } from "@/core/case/asignacion";
@@ -447,6 +450,26 @@ export const aiUsage = pgTable("ai_usage", {
     .defaultNow()
     .notNull(),
 });
+
+/**
+ * El uso de IA sumado por mes (0046), mantenido por el trigger de `ai_usage`.
+ * Lo lee el tablero de métricas; `claimmix_app` no lo puede escribir. `mes` es el
+ * primer día del mes en hora argentina y `user_id` es nulo si el usuario se borró.
+ */
+export const aiUsageMensual = pgTable(
+  "ai_usage_mensual",
+  {
+    tenant_id: uuid("tenant_id").notNull(),
+    mes: date("mes", { mode: "string" }).notNull(),
+    user_id: uuid("user_id"),
+    model: text("model").notNull(),
+    calls: bigint("calls", { mode: "number" }).notNull().default(0),
+    prompt_tokens: bigint("prompt_tokens", { mode: "number" }).notNull().default(0),
+    completion_tokens: bigint("completion_tokens", { mode: "number" }).notNull().default(0),
+    cost_usd: numeric("cost_usd").notNull().default("0"),
+  },
+  (t) => [unique("ai_usage_mensual_clave").on(t.tenant_id, t.mes, t.user_id, t.model).nullsNotDistinct()],
+);
 
 export const requiredDocsConfig = pgTable(
   "required_docs_config",

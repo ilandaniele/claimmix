@@ -4399,6 +4399,23 @@ documento.
 
 ### 🙋 Waiting on you (not code)
 
+- **Carga de lectura: aplicar la 0046 ANTES de mergear.** El tablero de métricas
+  hacía 1,3 s (mes) y 1,5 s (año + serie) de p95 con 20 analistas contra un tope
+  de 500 ms. Dos causas: los cuellos aplanaban su lateral en un Hash Join sobre
+  todo `idx_audit_log_trayecto` (arreglado con `offset 0`, sin migración) y las
+  cuatro lecturas de IA recorrían `ai_usage` entera. Esas pasan a leer
+  `ai_usage_mensual`, que mantiene un trigger (`0046_uso_de_ia_por_mes.sql`).
+  Se aplica a mano, con el dueño de la base (necesita `BYPASSRLS`), en este orden:
+  QA (`ep-wispy-flower`), producción (`ep-proud-resonance`) y la rama `production`
+  de Veltra. Sin ella `/metricas` falla con 42P01, `/api/health` cae con «faltan:
+  ai_usage_mensual» y el CI queda rojo por `--exigir-al-dia`. Después de aplicarla,
+  `pnpm load` compara el acumulador contra `ai_usage` y la sección 6 de
+  `pnpm capa-datos` (en CI, contra la rama `production` de Veltra) prueba el
+  trigger con un INSERT, los permisos de `claimmix_app` y la cascada de `users`:
+  sin la 0046 en esa base también queda rojo. Si el acumulador diverge se
+  recompone volviendo a aplicar la 0046 entera (`--forget 0046 --apply` y
+  `--apply`), no corriendo su backfill suelto. Si el dueño la rechaza, el commit
+  de `offset 0` va solo.
 - **B19: la 0045 ya está aplicada** (30/09, en producción, staging y QA). Falta
   probar en QA lo que sólo se comprobó con SQL dibujado: el `CASE` del PUT y el `EXISTS`
   del PATCH de `/api/admin/sso`, la cola de purga (incluido borrar dos veces el

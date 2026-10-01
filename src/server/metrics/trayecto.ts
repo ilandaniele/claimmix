@@ -149,6 +149,8 @@ export function consultaDeHistorial(db: ClienteDatos, desde: string, hasta: stri
  * empezó) y la que sigue abierta (todavía no terminó).
  */
 export function consultaDeCuellos(db: ClienteDatos, desde: string, hasta: string) {
+  // `offset 0` es una valla: sin ella Postgres aplana el lateral y, como uuid_out no es
+  // leakproof, bajo RLS `target_id = c.id::text` no baja al índice y se lee todo idx_audit_log_trayecto.
   const cambios = sql`(
     select c.id as caso, e.id as evento, e.t as t, e.estado as estado
       from (select ${cases.id} as id, ${cases.tenant_id} as tenant_id from ${cases} where ${cohorte(desde, hasta)}) c
@@ -157,6 +159,7 @@ export function consultaDeCuellos(db: ClienteDatos, desde: string, hasta: string
         where a.target_type = 'case' and a.target_id = c.id::text and a.tenant_id = c.tenant_id
           and a.event_type in (${CON_ESTADO}) and ${SE_APLICO} and ${NO_ES_INTERMEDIO}
           and ${HACIA} is not null
+        offset 0
      ) e
   ) cambios`;
   const conPrevio = sql`(

@@ -69,6 +69,11 @@ import {
   type Sample,
 } from "./lib/medir-carga.mjs";
 import {
+  INDICES_DEL_TABLERO,
+  lineasDelPlan,
+  numeroDeLaPrimeraFila,
+} from "./lib/chequeos-de-carga.mjs";
+import {
   escribirReporte,
   type Endpoint,
   type Fila,
@@ -136,6 +141,8 @@ const {
 const { getCaseDetail } = await import("@/server/cases/get");
 const { getTenantKpis } = await import("@/server/metrics/kpis");
 const { getHistorialDeMetricas } = await import("@/server/metrics/historial");
+const { consultaDeCuellos } = await import("@/server/metrics/trayecto");
+const { rangoDelPeriodo } = await import("@/core/metricas/periodo");
 
 /**
  * El inquilino, como lo recibe la aplicación.
@@ -402,10 +409,12 @@ async function prepararLectura(): Promise<{
     },
     {
       // El tablero de métricas entero, en un solo viaje a la base: los
-      // contadores del período, el ciclo (recibido a listo y a cierre) y las
-      // estadías por estado leen la auditoría con un cruce lateral por caso,
-      // que es lo que se rompe si el índice parcial de trayecto no se usa.
-      // El período es el de todos los días: el mes en curso.
+      // contadores del período; el ciclo (recibido a listo y a cierre) y las
+      // estadías por estado, que leen la auditoría con un cruce lateral por caso
+      // y se rompen si el índice parcial de trayecto no se usa (los cuellos lo
+      // cercan con `offset 0`); y el uso de IA, que sale del acumulador mensual
+      // `ai_usage_mensual` y no recorre `ai_usage`, cuyo costo crece con toda la
+      // historia. El período es el de todos los días: el mes en curso.
       name: "tablero de métricas (mes)",
       run: async () => {
         await getTenantKpis(CTX, { periodo: "este_mes" });
@@ -790,14 +799,6 @@ async function formaEstres(escenario: Escenario, max: number): Promise<Forma> {
   };
 }
 
-/** Las filas de un EXPLAIN, venga el driver con `{rows}` o con un arreglo. */
-function lineasDelPlan(resultado: unknown): string {
-  const filas = Array.isArray(resultado)
-    ? resultado
-    : ((resultado as { rows?: unknown[] } | null)?.rows ?? []);
-  return filas.map((r) => Object.values(r as Record<string, unknown>)[0]).join(" ");
-}
-
 /**
  * Preguntarle a Postgres cómo piensa resolver las consultas del tablero.
  *
@@ -820,6 +821,8 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
 
   const notas: string[] = [];
   let ok = true;
+
+  const { desde, hasta } = rangoDelPeriodo("este_anio", new Date());
 
   const plans = [
     {
@@ -861,6 +864,22 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
       exigeIndice: false,
       consulta: (d: ClienteDatos) => consultaListado(d, { ...QUERY, q: "gonzalez" } as never),
     },
+    {
+      // Los cuellos cruzan cada caso con su auditoría por un lateral. Sin la
+      // valla `offset 0` Postgres lo aplana en un Hash Join sobre todo
+      // `idx_audit_log_trayecto` (bajo RLS `uuid_out` no es leakproof y
+      // `target_id = c.id::text` no baja al índice): 25-45 ms en vez de 0,5.
+      // El año entero es el rango más ancho que pide el tablero.
+      name: "cuellos del tablero",
+      exigeIndice: false,
+      consulta: (d: ClienteDatos) => consultaDeCuellos(d, desde, hasta),
+      exige: (plan: string) =>
+        /Hash Join/.test(plan)
+          ? "aplanó el lateral en un Hash Join (falta la valla `offset 0`)"
+          : /Index Cond: \(+target_id = /.test(plan)
+            ? null
+            : "no entra a la auditoría por target_id",
+    },
   ];
 
   for (const plan of plans) {
@@ -876,10 +895,13 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
       const seq = /Seq Scan on (?:public\.)?cases\b/i.test(explained);
       const idx = explained.match(/Index (?:Only )?Scan(?: Backward)? using (\w+)/i);
       if (seq && plan.exigeIndice) ok = false;
+      const roto = plan.exige?.(explained) ?? null;
+      if (roto) ok = false;
       const linea =
         `${plan.name}: ` +
         `${seq ? "recorre `cases` entera (Seq Scan)" : idx ? `usa ${idx[1]}` : "plan mixto"}` +
-        `${seq && plan.exigeIndice ? "   ← regresión" : ""}`;
+        `${seq && plan.exigeIndice ? "   ← regresión" : ""}` +
+        `${roto ? `   ← regresión: ${roto}` : ""}`;
       notas.push(linea);
       console.log(`  ${linea}`);
     } catch (err) {
@@ -909,7 +931,12 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
    * corren UNA VEZ POR FILA: sin ellos, abrir la bandeja recorre
    * `extracted_fields` y `outbound_messages` veinticinco veces cada una.
    *
-   * Por eso se comprueba la existencia y no el uso.
+   * Por eso se comprueba la existencia y no el uso. `idx_audit_log_trayecto`
+   * (0043) es el de los cuellos y el ciclo, y ése el plan de arriba SÍ exige que
+   * se use, sea cual sea el tamaño de la auditoría (esta carga sólo corre contra
+   * producción, donde el planificador lo prefiere). Que además se vigile acá es
+   * para el rojo: sin el índice el plan de arriba sólo dice «no entra a la
+   * auditoría por target_id», y esto dice cuál falta.
    *
    * ── El que se vigilaba no era el que se usa ────────────────────────────
    *
@@ -925,13 +952,7 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
    * mismas dos columnas, uno ASC y otro DESC, y un btree se recorre en los dos
    * sentidos.
    */
-  const declarados = [
-    "idx_cases_policyholder_name_trgm",
-    "idx_cases_policy_number_trgm",
-    "idx_cases_tenant_created_at",
-    "idx_extracted_fields_case_id",
-    "idx_outbound_messages_case_id",
-  ];
+  const declarados = Object.keys(INDICES_DEL_TABLERO);
   // sin-inquilino: el catálogo de Postgres no tiene tenant_id.
   const r = await db.execute(
     sql.raw(
@@ -955,10 +976,62 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
     notas.push(linea);
     console.log(`  ✗ ${linea}`);
     console.log(`     Hoy anda igual y se cae solo cuando la tabla crezca.`);
-    console.log(`     Los de búsqueda se reponen con la migración 0020; el resto con la 0001.`);
+    console.log(
+      `     Se reponen con la migración que los crea: ${faltan.map((n) => `${n} → ${INDICES_DEL_TABLERO[n]}`).join(", ")}.`
+    );
   }
 
   return { ok, notas };
+}
+
+/**
+ * Que el acumulador mensual de IA (0046) diga lo mismo que `ai_usage`.
+ *
+ * El tablero lee `ai_usage_mensual`, que mantiene un trigger. Si alguien lo
+ * deshabilita, vacía `ai_usage` o restaura sólo una de las dos, el tablero
+ * seguiría andando y mostraría un número viejo sin que nada se enterara. Esto
+ * compara las dos en una sola sentencia, como `claimmix_app` y para el
+ * inquilino del ensayo: cuenta las filas que están en un lado y no en el otro.
+ * Si no da cero, se recompone volviendo a aplicar la 0046 entera (ver su
+ * cabecera): el backfill suelto no lleva el `LOCK` ni la transacción.
+ *
+ * Un resultado que no trae un número no es un cero: se cuenta como «no se pudo
+ * comprobar», que es rojo, igual que un error de la base.
+ */
+async function comprobarAcumuladorDeIa(): Promise<{ ok: boolean; notas: string[] }> {
+  const columnas = "mes, user_id, model, calls, prompt_tokens, completion_tokens, cost_usd";
+  const historia =
+    `(select public.claimmix_mes_argentino(created_at) as mes, user_id, model, count(*) as calls, ` +
+    `sum(prompt_tokens) as prompt_tokens, sum(completion_tokens) as completion_tokens, sum(cost_usd) as cost_usd ` +
+    `from ai_usage group by 1, 2, 3) h`;
+  const acumulado = `(select ${columnas} from ai_usage_mensual where calls > 0) a`;
+  const diferencias = sql.raw(
+    `select count(*)::int as n from (` +
+      `(select ${columnas} from ${historia} except select ${columnas} from ${acumulado}) ` +
+      `union all ` +
+      `(select ${columnas} from ${acumulado} except select ${columnas} from ${historia})` +
+      `) d`
+  );
+
+  const sinComprobar = (motivo: string) => {
+    const linea = `acumulador mensual de IA: NO SE PUDO COMPROBAR (${motivo}) — ¿está aplicada la 0046?`;
+    console.log(`  ✗ ${linea}`);
+    return { ok: false, notas: [linea] };
+  };
+
+  try {
+    const [resultado] = await enTenantVarias<[unknown]>(CTX, (d) => [d.execute(diferencias)]);
+    const n = numeroDeLaPrimeraFila(resultado);
+    if (n === null) return sinComprobar("el resultado no trae un número");
+    const linea =
+      n === 0
+        ? "el uso de IA del acumulador mensual coincide con ai_usage"
+        : `el acumulador mensual de IA difiere de ai_usage en ${n} fila(s) — recomponer volviendo a aplicar la 0046 (migrate.mjs --forget 0046 --apply y después --apply)`;
+    console.log(`  ${n === 0 ? "✓" : "✗"} ${linea}`);
+    return { ok: n === 0, notas: [linea] };
+  } catch (err) {
+    return sinComprobar(err instanceof Error ? err.name : "error");
+  }
 }
 
 // ── El camino de escritura: el pico de la puerta de entrada ──────────────────
@@ -1385,8 +1458,9 @@ try {
     if (forma === "carga") {
       const f = await formaCarga(escenarios);
       const planes = await explainPlans();
-      f.ok = f.ok && planes.ok;
-      f.notas.push(...notasLectura, ...planes.notas);
+      const acumulador = await comprobarAcumuladorDeIa();
+      f.ok = f.ok && planes.ok && acumulador.ok;
+      f.notas.push(...notasLectura, ...planes.notas, ...acumulador.notas);
       formas.push(f);
     } else if (forma === "pico") {
       formas.push(await formaPico(escenarios[0]!));

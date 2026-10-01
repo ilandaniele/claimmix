@@ -21,7 +21,7 @@ import {
   FSM_TRANSITIONS,
 } from "@/core/case/fsm";
 
-import { mesArgentino, medianocheHaceDias, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+import { diaArgentino, medianocheHaceDias, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import { porcentaje, unDecimal, type FilaDeCiclo, type FilaDeCuello } from "@/core/metricas/ciclo";
 import { PERIODO_POR_DEFECTO, rangoDelPeriodo, type Periodo } from "@/core/metricas/periodo";
 import {
@@ -36,7 +36,7 @@ import {
   type ClienteDatos,
   type TenantContext,
 } from "@/data/scope";
-import { aiUsage, authUsers, cases, users } from "@/lib/db/schema";
+import { aiUsageMensual, authUsers, cases, users } from "@/lib/db/schema";
 import { CANALES_REALES, ClaimTypeSchema } from "@/lib/schemas/cases";
 import { completadoConfirmado } from "@/server/cases/listo-confirmado";
 import { consultaDeCiclo, consultaDeCuellos } from "@/server/metrics/trayecto";
@@ -134,6 +134,14 @@ function normalizeUsage(row?: {
   };
 }
 
+/** Las cuatro sumas del acumulador `ai_usage_mensual` (0046). `float8` para que vuelvan como número, no como texto. */
+const usoSumado = () => ({
+  calls: sql<number>`coalesce(sum(${aiUsageMensual.calls}), 0)::float8`,
+  prompt_tokens: sql<number>`coalesce(sum(${aiUsageMensual.prompt_tokens}), 0)::float8`,
+  completion_tokens: sql<number>`coalesce(sum(${aiUsageMensual.completion_tokens}), 0)::float8`,
+  cost_usd: sql<number>`coalesce(sum(${aiUsageMensual.cost_usd}), 0)::float8`,
+});
+
 /**
  * Reclamos abiertos, WhatsApps y mails atendidos por período, desde `desde`.
  *
@@ -217,7 +225,8 @@ export async function getTenantKpis(
   // Uno solo para la consulta y el relleno: si cambia el día entre los dos, la
   // ventana leída y la dibujada no coinciden.
   const ahora = new Date();
-  const { inicio: monthStart, fin: monthEnd } = mesArgentino(ahora);
+  // El acumulador de IA (0046) guarda el mes como su primer día en hora argentina.
+  const mesIa = `${diaArgentino(ahora).slice(0, 7)}-01`;
   const periodo = opts?.periodo ?? PERIODO_POR_DEFECTO;
   const { desde, hasta } = rangoDelPeriodo(periodo, ahora);
 
@@ -361,57 +370,31 @@ export async function getTenantKpis(
           .orderBy(sql`count(*) desc, ${users.full_name} asc`)
           .limit(5),
       db
-          .select({
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-          })
-          .from(aiUsage)
-          .where(and(
-            gte(aiUsage.created_at, monthStart),
-            lt(aiUsage.created_at, monthEnd),
-          )),
+          .select(usoSumado())
+          .from(aiUsageMensual)
+          .where(eq(aiUsageMensual.mes, mesIa)),
+      db
+          .select(usoSumado())
+          .from(aiUsageMensual),
       db
           .select({
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-          })
-          .from(aiUsage),
-      db
-          .select({
-            user_id: aiUsage.user_id,
+            user_id: aiUsageMensual.user_id,
             full_name: users.full_name,
             email: authUsers.email,
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+            ...usoSumado(),
           })
-          .from(aiUsage)
-          .leftJoin(users, eq(users.id, aiUsage.user_id))
-          .leftJoin(authUsers, eq(authUsers.id, aiUsage.user_id))
-          .where(and(
-            gte(aiUsage.created_at, monthStart),
-            lt(aiUsage.created_at, monthEnd),
-          ))
-          .groupBy(aiUsage.user_id, users.full_name, authUsers.email),
+          .from(aiUsageMensual)
+          .leftJoin(users, eq(users.id, aiUsageMensual.user_id))
+          .leftJoin(authUsers, eq(authUsers.id, aiUsageMensual.user_id))
+          .where(eq(aiUsageMensual.mes, mesIa))
+          .groupBy(aiUsageMensual.user_id, users.full_name, authUsers.email)
+          .having(sql`sum(${aiUsageMensual.calls}) > 0`),
       db
-          .select({
-            model: aiUsage.model,
-            calls: count(),
-            prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::float8`,
-            completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::float8`,
-            cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
-          })
-          .from(aiUsage)
-          .where(and(
-            gte(aiUsage.created_at, monthStart),
-            lt(aiUsage.created_at, monthEnd),
-          ))
-          .groupBy(aiUsage.model),
+          .select({ model: aiUsageMensual.model, ...usoSumado() })
+          .from(aiUsageMensual)
+          .where(eq(aiUsageMensual.mes, mesIa))
+          .groupBy(aiUsageMensual.model)
+          .having(sql`sum(${aiUsageMensual.calls}) > 0`),
       consultaDeCiclo(db, desde, hasta),
       consultaDeCuellos(db, desde, hasta),
       ...(opts?.serie

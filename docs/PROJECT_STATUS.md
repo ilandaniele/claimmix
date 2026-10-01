@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-09-30. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-01. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -4396,6 +4396,35 @@ política de privacidad pública no se tocó: el texto propuesto está en el
 documento.
 
 **Peso del bundle.** 309,87 kB contra el tope de 310, medido con `pnpm build && pnpm peso` (`pnpm peso` imprime 310 redondeado): B19 no sumó nada al navegador. El panel del SSO es un componente de servidor montado desde `configuracion/page.tsx`, y el margen que había era de 0,13 kB.
+
+### 📊 La carga del tablero de métricas vuelve bajo 500 ms (0046, 2026-10-01)
+
+Los diez lotes llegaron a main con la promoción #364 (cbf4d30), y el Post-deploy
+de producción (run 36792967193) dio «Carga de lectura» en rojo, y era real: el
+tablero de L8 (`getTenantKpis`) daba p95 de 1,3 s (mes) y 1,5 s (año + serie) con
+20 analistas. El tope de 500 ms no se tocó. Arreglo en el PR #365, con la migración
+`0046`, aplicada a mano el 01/10 en QA, producción (`ep-proud-resonance`) y
+staging, con el acumulador sin diferencias contra `ai_usage`.
+
+- **Cuellos.** El lateral `cambios` de `consultaDeCuellos`
+  (`src/server/metrics/trayecto.ts`) lleva `offset 0`. Bajo RLS `uuid_out` no es
+  leakproof, así que `target_id = c.id::text` no bajaba como condición de índice
+  y el planner aplanaba el lateral en un Hash Join sobre toda la auditoría.
+- **Uso de IA.** Las cuatro lecturas del tablero leen `ai_usage_mensual` en vez
+  de recorrer `ai_usage`. La tabla la mantiene el trigger `trg_ai_usage_mensual`,
+  la primera función `SECURITY DEFINER` del repo; la app sólo lee el acumulador.
+  Si diverge, se recompone reaplicando la `0046` entera, nunca el backfill suelto.
+
+La promoción #366 (8e7159c) dejó el Post-deploy de producción verde entero (run
+36822794378). Peor caso de la Carga 492 ms (año + serie con 20 analistas), contra
+1,5 s antes: pasa con 8 ms de margen, así que una consulta nueva sobre el tablero
+se mide con `pnpm load` antes de promover. `pnpm check` completo verde el mismo día,
+con 25 conversaciones sin diferencias.
+
+En el mismo PR que esta nota, el override `brace-expansion@1` sube a `>=1.1.21`:
+la 1.1.18 que traía eslint por `minimatch` 3 tenía dos alertas altas de Dependabot
+(GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p) y una media (GHSA-q2hr-2g5m-vwhr), sólo
+en desarrollo.
 
 ### 🙋 Waiting on you (not code)
 

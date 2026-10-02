@@ -11,12 +11,35 @@
 import * as Sentry from "@sentry/nextjs";
 import { limpiarEventoDeSentry } from "@/lib/observability/sentry-scrub";
 
+// La v11 sacó `sendDefaultPii` y por defecto junta todo: cuerpos, cabeceras,
+// variables locales, parámetros de consultas y prompts de IA. Cada categoría
+// va apagada a mano; `Required` hace que una categoría nueva no compile hasta
+// que alguien la decida.
+type DataCollection = NonNullable<Parameters<typeof Sentry.init>[0]["dataCollection"]>;
+
+const SIN_DATOS_DE_PERSONAS: Required<Omit<DataCollection, "frameContextLines">> = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: false,
+  httpBodies: [],
+  urlQueryParams: false,
+  graphQL: { document: false, variables: false },
+  genAI: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  queues: false,
+  stackFrameVariables: false,
+};
+
 if (process.env.SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
     environment: process.env.NODE_ENV,
     tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
-    sendDefaultPii: false,
+    dataCollection: SIN_DATOS_DE_PERSONAS,
+    // La v11 manda los spans en tandas por defecto y ahí ignora
+    // `beforeSendTransaction`; con "static" la transacción sigue pasando por
+    // el scrub. En la v12 se va y hay que pasarlo a `beforeSendSpan`.
+    traceLifecycle: "static",
     // AC18 + #137: mensaje, breadcrumbs, cabeceras, cookies, extra y user.
     beforeSend: (event) => limpiarEventoDeSentry(event),
     // Las transacciones llevan la misma URL, cabeceras y cookies que un error.

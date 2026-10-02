@@ -1,13 +1,14 @@
 /**
  * ConfiguracionClient — password change form.
  *
- * Uses Better Auth's changePassword which requires the current password.
+ * Le pega directo a `/api/auth/change-password` de Better Auth, que pide la
+ * contraseña actual. Es el mismo pedido que hacía `authClient.changePassword`,
+ * sin los 17 kB del cliente en el bundle por una sola llamada.
  */
 
 "use client";
 
 import { useState } from "react";
-import { authClient } from "@/lib/auth/client";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 type FormState = "idle" | "loading" | "success" | "error";
@@ -49,13 +50,13 @@ export function ConfiguracionClient() {
        *
        * El mismo criterio en `onPasswordReset`, para el camino de recuperación.
        */
-      const { error } = await authClient.changePassword({
-        currentPassword,
-        newPassword,
-        revokeOtherSessions: true,
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword, revokeOtherSessions: true }),
       });
 
-      if (error) {
+      if (!res.ok) {
         setErrorMsg(t("password.errorCambio"));
         setState("error");
         return;

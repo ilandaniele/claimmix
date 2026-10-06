@@ -63,7 +63,7 @@ describe("Google con el correo sin verificar", () => {
   it.each([[{ email_verified: false }], [{ email_verified: undefined }], [{ email_verified: "true" }], [{ email_verified: 1 }], [undefined]])(
     "rechaza Google sin email_verified === true: %o",
     async (profile) => {
-      await expect(validar({ email: "ana@gmail.com" }, fuente({ providerId: "google", profile }))).resolves.toEqual({
+      await expect(validar({ email: "ana@example.com" }, fuente({ providerId: "google", profile }))).resolves.toEqual({
         error: "email_no_verificado",
       });
     },
@@ -72,8 +72,8 @@ describe("Google con el correo sin verificar", () => {
   it("deja pasar a Google con el correo verificado", async () => {
     await expect(
       validar(
-        { email: "ana@gmail.com" },
-        fuente({ providerId: "google", profile: { email: "ana@gmail.com", email_verified: true } }),
+        { email: "ana@example.com" },
+        fuente({ providerId: "google", profile: { email: "ana@example.com", email_verified: true } }),
       ),
     ).resolves.toBeUndefined();
   });

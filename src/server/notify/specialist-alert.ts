@@ -23,6 +23,8 @@ import { auditLog, authUsers, cases, claimMessages, tenants, users } from "@/lib
 import { isReservedTestAddress, vedadaParaAlertas } from "@/lib/email/reserved";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { nombraCulpaOLey } from "@/core/ai/nombra-culpa";
+import { EMAIL_RE } from "@/core/text/contacto";
+import { DOMINIO_RE } from "@/core/case/mensaje-tardio";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
@@ -212,10 +214,19 @@ async function recipientsFor(tenantId: string): Promise<string[]> {
 /**
  * El resumen lo escribió el modelo con lo que dijo el denunciante: si nombra la
  * culpa o cita la ley de tránsito, adelanta una opinión que sólo la ficha
- * muestra, rotulada como orientativa (B18). Se omite la línea, no se corrige.
+ * muestra, rotulada como orientativa (B18). Un renglón nuevo, un enlace o un
+ * correo adentro del resumen arman una línea «Abrir:» ajena en el aviso, y
+ * también un dominio suelto, que Gmail vuelve enlace. Se omite la línea, no se
+ * corrige.
  */
 const resumenSinOpinion = (resumen: string | null | undefined) =>
-  resumen && !nombraCulpaOLey(resumen) ? resumen : null;
+  resumen &&
+  !nombraCulpaOLey(resumen) &&
+  !/[\r\n]|https?:\/\/|www\./i.test(resumen) &&
+  resumen.search(EMAIL_RE) < 0 &&
+  !DOMINIO_RE.test(resumen)
+    ? resumen
+    : null;
 
 function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
   const kind = input.claimTypeLabel ? ` de ${input.claimTypeLabel}` : "";

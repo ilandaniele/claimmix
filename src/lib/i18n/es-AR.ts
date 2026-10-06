@@ -639,7 +639,7 @@ export const esAR = {
   "attachment.rejected.aggregate_size_exceeded": "Entre todos los archivos de ese mensaje se pasaron del tope. Pedile que los mande de a uno.",
   "attachment.rejected.decode_failed": "Llegó dañado y no se pudo leer. Pedile al asegurado que lo mande de nuevo.",
   "attachment.rejected.unknown": "No se pudo guardar. Pedile al asegurado que lo mande de nuevo.",
-  "attachment.rejected.download_failed": "No pudimos bajar el archivo de WhatsApp; pedile que lo reenvíe.",
+  "attachment.rejected.download_failed": "No pudimos bajar el archivo; pedile que lo reenvíe.",
 
   // «Qué documento pedido cerró este adjunto» — sólo se muestra cuando el
   // agente ya lo identificó (`matched_doc_key`).
@@ -902,6 +902,7 @@ export const esAR = {
   "password.confirmarPlaceholder": "Repetí la nueva contraseña",
   "password.corta": "La contraseña debe tener al menos 8 caracteres.",
   "password.errorCambio": "Error al cambiar la contraseña. Verificá que la contraseña actual sea correcta.",
+  "password.demasiadosIntentos": "Demasiados intentos. Esperá unos minutos y volvé a probar.",
   "password.errorInesperado": "Error inesperado. Intentá de nuevo.",
   "password.noCoinciden": "Las contraseñas no coinciden.",
   "password.nueva": "Nueva contraseña",

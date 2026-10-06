@@ -40,7 +40,7 @@ export {
 export type { UserRole } from "@/lib/auth/roles";
 
 export interface RoleContext {
-  user: { id: string; email?: string };
+  user: { id: string; email?: string; emailVerified?: boolean };
   userRow: { id: string; tenant_id: string; role: UserRole; plan: string; locale?: string | null };
 }
 
@@ -66,7 +66,11 @@ export async function requireRole(...roles: UserRole[]): Promise<RoleContext> {
   }
 
   return {
-    user: { id: session.user.id, email: session.user.email ?? undefined },
+    user: {
+      id: session.user.id,
+      email: session.user.email ?? undefined,
+      emailVerified: session.user.emailVerified,
+    },
     userRow: userRow as RoleContext["userRow"],
   };
 }

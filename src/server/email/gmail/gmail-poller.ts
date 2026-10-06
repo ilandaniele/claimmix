@@ -275,6 +275,15 @@ async function processMessage(
     format: "full",
   });
   const msg = msgResponse.data;
+
+  // ── b2) Lo que Gmail ya mandó a spam o a la papelera no entra ─────────────
+  // history.list no filtra por etiqueta (ver c2); sólo los dos messages.list lo hacen.
+  const etiquetas = msg.labelIds ?? [];
+  if (etiquetas.includes("SPAM") || etiquetas.includes("TRASH")) {
+    logger.info({ message_id: gmailMessageId, etiquetas }, "gmail_poller.skipped_spam");
+    return { outcome: "skipped" };
+  }
+
   const payload = msg.payload;
   const allHeaders: gmail_v1.Schema$MessagePartHeader[] =
     payload?.headers ?? [];

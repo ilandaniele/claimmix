@@ -27,7 +27,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { renderTemplate, type EmailTemplate } from "./render";
-import { isReservedTestAddress } from "@/lib/email/reserved";
+import { bareAddress, isReservedTestAddress } from "@/lib/email/reserved";
 import { getGmailAccountByEmail, getGmailAccountForTenant } from "./gmail/accounts";
 /*
  * `GmailSender` NO se importa arriba, a propósito. Ver donde se instancia.
@@ -57,12 +57,6 @@ export interface DispatchResult {
 /** Salió, o era una dirección de prueba y se anotó sin mandar. */
 export function seEntrego(r: DispatchResult): boolean {
   return !r.error || r.error === "SIMULATED_RECIPIENT_SKIPPED";
-}
-
-/** `"Santiago Jasper <s@gmail.com>"` → `"s@gmail.com"`. */
-function bareAddress(value: string): string {
-  const angled = value.match(/<([^>]+)>/);
-  return (angled ? angled[1] : value).trim().toLowerCase();
 }
 
 /**
@@ -249,7 +243,16 @@ async function finalizeOutbound(params: {
  * @param options - Dispatch options (caseId, tenantId, to, template, data, inReplyToMessageId)
  */
 export async function dispatchOutboundEmail(options: DispatchOptions): Promise<DispatchResult> {
-  const { caseId, tenantId, to, template, data, inReplyToMessageId, threadId } = options;
+  const { caseId, tenantId, template, data, inReplyToMessageId, threadId } = options;
+  // Una sola casilla, la que vio la guarda de participantes: Gmail entrega un
+  // `To:` con dos casillas a las dos.
+  const to = bareAddress(options.to);
+
+  // Una lista de direcciones no es un destinatario.
+  if (/[\s,;]/.test(to)) {
+    logger.warn({ case_id: caseId }, "dispatch.recipient_not_single");
+    return { error: "INVALID_RECIPIENT" };
+  }
 
   // Los asegurados inventados usan dominios example.*, reservados por la IANA.
   // Nunca se les entrega de verdad: el resto del flujo posterior a la

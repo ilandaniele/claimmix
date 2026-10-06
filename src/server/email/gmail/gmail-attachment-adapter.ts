@@ -33,6 +33,13 @@ import { MAX_ATTACHMENT_SIZE_BYTES, validateAttachment } from "@/server/email/at
  */
 export const TOPE_ANTES_DE_BAJAR = 4 * Math.ceil(MAX_ATTACHMENT_SIZE_BYTES / 3); // 13_981_016
 
+/**
+ * El poller tiene un solo presupuesto para todo el lote: 20 bajadas de 15 s como
+ * máximo es lo peor que le puede costar un mensaje.
+ */
+export const TOPE_DE_ADJUNTOS_POR_MENSAJE = 20;
+export const PLAZO_BAJADA_ADJUNTO_MS = 15_000;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -43,11 +50,10 @@ export interface GmailAttachmentFetcher {
   users: {
     messages: {
       attachments: {
-        get(params: {
-          userId: string;
-          messageId: string;
-          id: string;
-        }): Promise<{ data: { data?: string | null; size?: number | null } }>;
+        get(
+          params: { userId: string; messageId: string; id: string },
+          options?: { signal?: AbortSignal }
+        ): Promise<{ data: { data?: string | null; size?: number | null } }>;
       };
     };
   };
@@ -164,9 +170,26 @@ export async function adaptGmailAttachments(
     attachmentParts.push(...collectAttachmentParts(part));
   }
 
-  for (const part of attachmentParts) {
+  for (let i = 0; i < attachmentParts.length; i++) {
+    const part = attachmentParts[i];
     const filename = part.filename!; // guaranteed non-empty by isAttachmentPart
     const mimeType = part.mimeType ?? "application/octet-stream";
+
+    if (i >= TOPE_DE_ADJUNTOS_POR_MENSAJE) {
+      // Los que pasan del tope no se bajan: quedan anotados hasta el doble, el resto sólo se cuenta.
+      if (i >= 2 * TOPE_DE_ADJUNTOS_POR_MENSAJE) {
+        logger.warn({ total: attachmentParts.length }, "gmail_attachment_adapter.too_many_parts");
+        break;
+      }
+      results.push({
+        Name: filename,
+        Content: "",
+        ContentType: mimeType,
+        ContentLength: part.body?.size ?? 0,
+        rechazoPrevio: "aggregate_size_exceeded",
+      });
+      continue;
+    }
 
     let base64Data: string;
 
@@ -188,18 +211,28 @@ export async function adaptGmailAttachments(
         continue;
       }
       try {
-        const response = await gmail.users.messages.attachments.get({
-          userId: "me",
-          messageId,
-          id: part.body.attachmentId,
-        });
+        const response = await gmail.users.messages.attachments.get(
+          {
+            userId: "me",
+            messageId,
+            id: part.body.attachmentId,
+          },
+          { signal: AbortSignal.timeout(PLAZO_BAJADA_ADJUNTO_MS) }
+        );
         const rawData = response.data.data ?? "";
         base64Data = base64urlToBase64(rawData);
       } catch (err) {
         // Log error code only — no PII (filename is not PII, but body content is).
-        const code = err instanceof Error ? err.name : "UnknownError";
+        const code = err instanceof Error ? String((err as { code?: unknown }).code ?? err.name) : "UnknownError";
         logger.error({ code }, "gmail_attachment_adapter.failed_to_fetch_attachment");
-        // Skip this attachment rather than failing the whole message.
+        // No falla el mensaje entero: el adjunto queda anotado como rechazado.
+        results.push({
+          Name: filename,
+          Content: "",
+          ContentType: mimeType,
+          ContentLength: declarado,
+          rechazoPrevio: "download_failed",
+        });
         continue;
       }
     } else {

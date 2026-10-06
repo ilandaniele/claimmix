@@ -612,7 +612,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "attachment.rejected.aggregate_size_exceeded": "The files in that message were over the limit together. Ask for them one at a time.",
   "attachment.rejected.decode_failed": "It arrived damaged and could not be read. Ask the policyholder to send it again.",
   "attachment.rejected.unknown": "Could not be stored. Ask the policyholder to send it again.",
-  "attachment.rejected.download_failed": "We could not download the WhatsApp file; ask them to send it again.",
+  "attachment.rejected.download_failed": "We could not download the file; ask them to send it again.",
 
   // Which requested document this attachment closed — shown only once the
   // agent has identified it (`matched_doc_key`).
@@ -874,6 +874,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "password.confirmarPlaceholder": "Repeat the new password",
   "password.corta": "The password must be at least 8 characters long.",
   "password.errorCambio": "The password could not be changed. Check that the current password is correct.",
+  "password.demasiadosIntentos": "Too many attempts. Wait a few minutes and try again.",
   "password.errorInesperado": "Unexpected error. Try again.",
   "password.noCoinciden": "The passwords do not match.",
   "password.nueva": "New password",

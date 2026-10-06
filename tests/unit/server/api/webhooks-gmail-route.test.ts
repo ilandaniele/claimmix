@@ -23,15 +23,15 @@ import { NextRequest } from "next/server";
 
 // ── Hoist mock factories ───────────────────────────────────────────────────────
 
-const { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockGetGmailAccountByEmail } =
+const { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts } =
   vi.hoisted(() => {
     const mockVerifyIdToken = vi.fn();
     const MockOAuth2Client = vi.fn(function (this: unknown) {
       (this as Record<string, unknown>).verifyIdToken = mockVerifyIdToken;
     });
     const mockPollGmail = vi.fn();
-    const mockGetGmailAccountByEmail = vi.fn().mockResolvedValue(null);
-    return { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockGetGmailAccountByEmail };
+    const mockListEnabledGmailAccounts = vi.fn().mockResolvedValue([]);
+    return { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts };
   });
 
 // ── Module mocks (declared before any import that triggers them) ──────────────
@@ -49,7 +49,7 @@ vi.mock("@/server/email/gmail/gmail-poller", () => ({
 // Mock accounts module so @/server/email/gmail/accounts (which imports @/lib/db)
 // is not actually loaded — prevents DATABASE_URL error at module init.
 vi.mock("@/server/email/gmail/accounts", () => ({
-  getGmailAccountByEmail: mockGetGmailAccountByEmail,
+  listEnabledGmailAccounts: mockListEnabledGmailAccounts,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -142,14 +142,14 @@ describe("POST /api/webhooks/gmail", () => {
     });
 
     it("AC4: pollGmail is called with no args when no connected account is found", async () => {
-      mockGetGmailAccountByEmail.mockResolvedValue(null);
+      mockListEnabledGmailAccounts.mockResolvedValue([]);
       const { POST } = await import("@/app/api/webhooks/gmail/route");
       const req = buildRequest(buildEnvelope());
 
       await POST(req);
 
-      // getGmailAccountByEmail called with the email from envelope.
-      expect(mockGetGmailAccountByEmail).toHaveBeenCalledWith("test@example.com");
+      // Una sola consulta: la lista de casillas conectadas.
+      expect(mockListEnabledGmailAccounts).toHaveBeenCalledTimes(1);
       // pollGmail called with no args (fallback when no account found).
       expect(mockPollGmail).toHaveBeenCalledWith();
     });

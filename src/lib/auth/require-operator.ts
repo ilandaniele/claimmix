@@ -16,6 +16,9 @@
  * alguien agrega su casilla a ADMIN_EMAILS para entrar a probar algo, entra
  * como admin de su tenant y no como dueño de la lista de clientes.
  *
+ * Y la dirección tiene que estar verificada: un admin de un asegurador puede
+ * crear un usuario con cualquier mail, así que el texto solo no prueba nada.
+ *
  * Falla cerrado: sin ADMIN_EMAILS configurado no hay operador, y la pantalla no
  * la ve nadie. Una lista de clientes que se abre sola cuando falta una variable
  * es exactamente la clase de error que nadie mira hasta que ya pasó.
@@ -41,14 +44,15 @@ export function isOperatorEmail(email: string | null | undefined): boolean {
 }
 
 /**
- * Sesión de admin Y dirección de operador.
+ * Sesión de admin Y dirección de operador verificada.
  *
  * @throws AppError('MISSING_SESSION') — sin sesión
- * @throws AppError('FORBIDDEN_ROLE')  — con sesión, sin ser operador
+ * @throws AppError('FORBIDDEN_ROLE')  — con sesión, sin ser operador, o sin mail verificado
  */
 export async function requireOperator(): Promise<AdminContext> {
   const ctx = await requireAdmin();
-  if (!isOperatorEmail(ctx.user.email)) {
+  // La dirección tiene que estar probada, no sólo tipeada: mismo criterio que provision.ts.
+  if (ctx.user.emailVerified !== true || !isOperatorEmail(ctx.user.email)) {
     throw new AppError("FORBIDDEN_ROLE");
   }
   return ctx;

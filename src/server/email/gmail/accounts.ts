@@ -156,8 +156,8 @@ export async function getGmailAccountByEmail(
   } | null;
   try {
     data = firstRow(
-      // sin-inquilino: Resuelve una casilla por su dirección de correo, que es única en
-      // toda la base. Todavía no se sabe de qué inquilino es: eso sale de acá.
+      // sin-inquilino: Resuelve una casilla por su dirección. La base sólo la hace única
+      // por inquilino; si hubiera dos, gana la más vieja, siempre la misma. El inquilino sale de acá.
       await db
         .select({
           id: gmailAccounts.id,
@@ -173,6 +173,7 @@ export async function getGmailAccountByEmail(
             eq(gmailAccounts.enabled, true)
           )
         )
+        .orderBy(asc(gmailAccounts.created_at), asc(gmailAccounts.id))
         .limit(1)
     );
   } catch (err) {
@@ -195,4 +196,18 @@ export async function getGmailAccountByEmail(
     refreshToken: decryptRefreshToken(data.refresh_token_encrypted),
     enabled: data.enabled,
   };
+}
+
+/** Qué inquilino tiene conectada la casilla, apagada o no. Sólo el id: el token no hace falta. */
+export async function inquilinoDeLaCasilla(email: string): Promise<string | null> {
+  // sin-inquilino: La casilla es única entre inquilinos y eso sólo se ve desde afuera de RLS.
+  const fila = firstRow(
+    await db
+      .select({ tenant_id: gmailAccounts.tenant_id })
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.email, email.toLowerCase()))
+      .orderBy(asc(gmailAccounts.created_at), asc(gmailAccounts.id))
+      .limit(1)
+  );
+  return fila?.tenant_id ?? null;
 }

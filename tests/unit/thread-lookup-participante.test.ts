@@ -175,6 +175,83 @@ describe("threadLookup: the claimant's reply", () => {
   });
 });
 
+describe("el remitente que el servidor de correo dio por falso", () => {
+  const FALLIDA = [
+    {
+      name: "Authentication-Results",
+      value: "mx.google.com; spf=fail smtp.mailfrom=martin.sosa@example.com; dkim=fail header.i=@example.com",
+    },
+  ];
+  const APROBADA = [
+    {
+      name: "Authentication-Results",
+      value: "mx.google.com; spf=pass smtp.mailfrom=martin.sosa@example.com; dkim=pass header.i=@example.com",
+    },
+  ];
+  const SOLO_SPF_FALLIDO = [
+    { name: "Authentication-Results", value: "mx.google.com; spf=softfail smtp.mailfrom=martin.sosa@example.com" },
+  ];
+  const SOLO_DKIM_FALLIDO = [
+    { name: "Authentication-Results", value: "mx.google.com; dkim=fail header.i=@example.com" },
+  ];
+
+  it("no se pega por la respuesta a un mail nuestro aunque participe", async () => {
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com", FALLIDA);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("no se pega por el hilo del caso", async () => {
+    const r = await threadLookup(TENANT, "<18c1a2b3d4e5f6>", "", "Re: Caso", "martin.sosa@example.com", FALLIDA);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("no se pega por el asunto", async () => {
+    const r = await threadLookup(TENANT, "", "", `Re: Denuncia de siniestro — caso #${CASO_MAIL}`, ASEGURADO, FALLIDA);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("un spf=softfail solo alcanza para no pegarse", async () => {
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com", SOLO_SPF_FALLIDO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("un dkim=fail solo alcanza para no pegarse", async () => {
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com", SOLO_DKIM_FALLIDO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("un mensaje del formulario web tampoco se pega a un caso ajeno", async () => {
+    const delFormulario = [{ name: "X-ClaimMix-Origen", value: "web" }];
+    const r = await threadLookup(TENANT, "", "", `Caso #${CASO_MAIL}`, ASEGURADO, delFormulario);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("con SPF y DKIM aprobados sigue pegándose", async () => {
+    const porMensaje = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com", APROBADA);
+    const porAsunto = await threadLookup(TENANT, "", "", `Re: Denuncia de siniestro — caso #${CASO_MAIL}`, ASEGURADO, APROBADA);
+    expect(porMensaje.existingCaseId).toBe(CASO_MAIL);
+    expect(porAsunto.existingCaseId).toBe(CASO_MAIL);
+  });
+
+  it("un reenvío con softfail pero DMARC aprobado sigue pegándose", async () => {
+    const reenviado = [
+      {
+        name: "Authentication-Results",
+        value: "mx.google.com; spf=softfail smtp.mailfrom=bounce@relay.example; dkim=pass header.i=@example.com; dmarc=pass header.from=example.com",
+      },
+    ];
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com", reenviado);
+    expect(r.existingCaseId).toBe(CASO_MAIL);
+  });
+
+  it("sin la cabecera (simulado, WhatsApp) sigue pegándose", async () => {
+    for (const headers of [[], {}, undefined]) {
+      const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com", headers);
+      expect(r.existingCaseId).toBe(CASO_MAIL);
+    }
+  });
+});
+
 describe("el camino por asunto", () => {
   it("un caso de WhatsApp no se pega por el asunto ni cuando el remitente participa", async () => {
     tables.claim_messages.push({

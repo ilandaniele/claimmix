@@ -9,6 +9,11 @@
 import { stripQuotedReply } from "@/core/email/conversation";
 
 const URL = /https?:\/\/\S+/gi;
+
+export function sinEnlaces(texto: string): string {
+  return texto.replace(URL, " ");
+}
+
 // Después del signo, cualquier cosa menos una letra o un número: un emoji, una
 // coma, «...», un paréntesis. La letra pegada es la de un `?utm=` sin http.
 const TERMINA_EN_PREGUNTA = /[^.!?\n]*\?+(?![\p{L}\p{N}])/gu;
@@ -36,7 +41,7 @@ const esPregunta = (f: string) =>
 export function laPreguntaDelMensaje(texto?: string | null): string | null {
   const propio = stripQuotedReply((texto ?? "").slice(0, MAX_ENTRADA));
   const corte = propio.search(FIRMA_O_CITA);
-  const limpio = (corte >= 0 ? propio.slice(0, corte) : propio).replace(URL, " ");
+  const limpio = sinEnlaces(corte >= 0 ? propio.slice(0, corte) : propio);
   // El «¿» sin cierre se busca después del último «?»: si no, un «¿si?» corto
   // lo tapaba o lo arrastraba.
   const resto = limpio.slice(limpio.lastIndexOf("?") + 1);

@@ -36,6 +36,15 @@ export const maxDuration = 60;
  */
 const DEMO_USER_ID = null;
 
+/*
+ * Admisiones por día, contadas de a una y de forma atómica.
+ *
+ * `checkDemoBudget` suma lo que ya se gastó: una ráfaga de pedidos a la vez
+ * lee la misma suma vieja y pasa entera. Este contador es el techo de esa
+ * ráfaga; el presupuesto sigue siendo el techo del gasto.
+ */
+const TOPE_DIARIO = { limit: 100, windowMs: 86_400_000 };
+
 const AnalyzeSchema = z.object({
   subject: z.string().min(1).max(500),
   body: z.string().min(10).max(20_000),
@@ -88,6 +97,13 @@ export async function POST(request: NextRequest): Promise<Response> {
   const demoTenantId = getDemoTenantId();
   if (!demoTenantId) {
     return err(new AppError("RATE_LIMITED", "La demo no está disponible en este momento."));
+  }
+
+  const dia = await rateLimit(claveDeCupo("demo-public", "dia"), TOPE_DIARIO);
+  if (!dia.allowed) {
+    return err(new AppError("RATE_LIMITED", "La demo alcanzó su cupo diario. Volvé mañana."), undefined, {
+      "Retry-After": String(dia.retryAfterSeconds),
+    });
   }
 
   const budget = await checkDemoBudget();

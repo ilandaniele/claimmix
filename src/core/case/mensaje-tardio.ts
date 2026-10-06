@@ -50,7 +50,7 @@ El resumen no lleva nombres, teléfonos, emails, direcciones, montos, patentes, 
 ni enlaces. Si no hay nada que resumir, "resumen" va vacío.`;
 
 // Un dominio suelto, sin https://, Gmail lo vuelve enlace en el aviso.
-const DOMINIO_RE = /[a-z0-9-]\.[a-z]{2,}\b/i;
+export const DOMINIO_RE = /[a-z0-9-]\.[a-z]{2,}\b/i;
 
 /** El resumen va solo en una línea del aviso por mail: ni otra línea ni un dominio. */
 export function esResumenTardioSeguro(resumen: string): boolean {

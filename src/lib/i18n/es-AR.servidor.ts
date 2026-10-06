@@ -355,6 +355,7 @@ export const esARServidor = {
   // ── Alta y roles de los usuarios de una aseguradora ───────────────
   "usuarios.title": "Gestión de usuarios",
   "usuarios.subtitle": "Invitá usuarios y asigná roles operativos o administradores.",
+  "usuarios.error.operador": "Esa dirección es de quien opera la plataforma y no se da de alta desde una aseguradora.",
 
   // ── La consola del agente — /agente, la pantalla entera ───────────
   "consola.titulo": "Consola del agente",

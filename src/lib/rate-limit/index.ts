@@ -95,6 +95,13 @@ export const RATE_LIMIT_CONFIGS = {
    * enlace anterior sigue vivo.
    */
   AUTH_RESET: { limit: 3, windowMs: 60 * 60_000 },
+  /**
+   * Cambiar la contraseña con sesión: 5 por 10 minutos por usuario.
+   *
+   * Quien tiene una cookie robada adivina la contraseña actual acá; la
+   * persona no la cambia cinco veces en diez minutos.
+   */
+  AUTH_CAMBIO_CLAVE: { limit: 5, windowMs: 10 * 60_000 },
   /** Intake simulation: 30 per minute per user */
   INTAKE_SIMULATE: { limit: 30, windowMs: 60_000 },
   /**

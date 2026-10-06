@@ -345,6 +345,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   // ── Alta y roles de los usuarios de una aseguradora ───────────────
   "usuarios.title": "User management",
   "usuarios.subtitle": "Invite users and assign operator or administrator roles.",
+  "usuarios.error.operador": "That address belongs to the platform operator and cannot be created from an insurer account.",
 
   // ── La consola del agente — /agente, la pantalla entera ───────────
   "consola.titulo": "Agent console",

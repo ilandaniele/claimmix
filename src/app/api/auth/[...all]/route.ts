@@ -16,7 +16,9 @@
  *
  * **Qué se limita y qué no.** Sólo lo que consume un secreto: entrar y darse de
  * alta. Leer la sesión pasa en cada carga de página y ponerle techo sería
- * romper la aplicación para el que la usa bien.
+ * romper la aplicación para el que la usa bien. Cambiar la contraseña también
+ * gasta un secreto (la actual) y va por usuario; `/verify-password` no existe
+ * para esta app.
  *
  * **Por qué por IP + dirección.** Sólo por IP, una oficina entera detrás de un
  * NAT comparte el cupo y se traba sola. Sólo por dirección, el atacante rota
@@ -26,6 +28,7 @@
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { err } from "@/lib/api/respond";
 import { auth } from "@/lib/auth";
 import {
   RATE_LIMIT_CONFIGS,
@@ -45,6 +48,9 @@ const handler = toNextJsHandler(auth);
  * llama, desde una casilla en la que esa persona confia.
  */
 const CON_TECHO = ["/sign-in", "/sign-up", "/request-password-reset"];
+
+const SIN_SALIDA = "/verify-password"; // oráculo de contraseña que la app no usa
+const CAMBIO_DE_CLAVE = "/change-password";
 
 /**
  * La dirección que viene en el cuerpo, si la hay.
@@ -86,8 +92,44 @@ export async function GET(req: NextRequest) {
   return handler.GET(req);
 }
 
+function sinCupo(resetAt: number): NextResponse {
+  const esperar = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000));
+  // El formato de error del resto de la API, no el de Better Auth: quien
+  // consume estos endpoints ya sabe leer `{ error: { code } }`, y tener
+  // dos formas de decir "no" en la misma aplicación es una trampa para el
+  // que escribe el cliente.
+  return NextResponse.json(
+    {
+      error: {
+        code: "RATE_LIMITED",
+        message: "Demasiados intentos. Probá de nuevo en un momento.",
+      },
+    },
+    {
+      status: 429,
+      // Sin esto, un cliente que reintenta no sabe cuánto esperar y vuelve
+      // enseguida — que para el servidor es lo mismo que el ataque.
+      headers: { "Retry-After": String(esperar) },
+    }
+  );
+}
+
 export async function POST(req: NextRequest) {
   const ruta = new URL(req.url).pathname;
+
+  if (ruta.endsWith(SIN_SALIDA)) return err("NOT_FOUND");
+
+  if (ruta.endsWith(CAMBIO_DE_CLAVE)) {
+    const sesion = await auth.api.getSession({ headers: req.headers });
+    if (sesion) {
+      const cupo = await rateLimit(
+        claveDeCupo("user", sesion.user.id, "change-password"),
+        RATE_LIMIT_CONFIGS.AUTH_CAMBIO_CLAVE
+      );
+      if (!cupo.allowed) return sinCupo(cupo.resetAt);
+    }
+    return handler.POST(req);
+  }
 
   if (CON_TECHO.some((p) => ruta.includes(p))) {
     const ip = getClientIp(req);
@@ -127,26 +169,7 @@ export async function POST(req: NextRequest) {
 
     const permitido = await rateLimit(clave, config);
     if (!permitido.allowed || !porIp.allowed) {
-      const cual = !porIp.allowed ? porIp : permitido;
-      const esperar = Math.max(1, Math.ceil((cual.resetAt - Date.now()) / 1000));
-      // El formato de error del resto de la API, no el de Better Auth: quien
-      // consume estos endpoints ya sabe leer `{ error: { code } }`, y tener
-      // dos formas de decir "no" en la misma aplicación es una trampa para el
-      // que escribe el cliente.
-      return NextResponse.json(
-        {
-          error: {
-            code: "RATE_LIMITED",
-            message: "Demasiados intentos. Probá de nuevo en un momento.",
-          },
-        },
-        {
-          status: 429,
-          // Sin esto, un cliente que reintenta no sabe cuánto esperar y vuelve
-          // enseguida — que para el servidor es lo mismo que el ataque.
-          headers: { "Retry-After": String(esperar) },
-        }
-      );
+      return sinCupo((!porIp.allowed ? porIp : permitido).resetAt);
     }
   }
 

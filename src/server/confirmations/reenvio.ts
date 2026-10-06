@@ -36,6 +36,7 @@ import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
 import { valorLegible } from "@/core/mensajes/valor-legible";
+import { enmascararCampo } from "@/server/email/render";
 import { esValorVago } from "@/core/mensajes/lo-dicho";
 import { MEDIUM_CONFIDENCE_HIGH, MEDIUM_CONFIDENCE_LOW } from "@/server/cases/gap-analyzer";
 import { ABANDONABLE_STATUSES } from "@/server/intake/close-abandoned";
@@ -290,7 +291,7 @@ export function clavesAbiertas(
       const crudo = confirmacion?.suggested_value ?? mejor.field_value;
       if (!esValorVago(clave, crudo)) {
         const legible = valorLegible(clave, crudo, hoy);
-        if (legible) conocidos[clave] = legible;
+        if (legible) conocidos[clave] = enmascararCampo(canonicalFieldKey(clave), legible, "remitente") ?? legible;
       }
     }
   }

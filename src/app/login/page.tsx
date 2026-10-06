@@ -57,6 +57,9 @@ export const ERRORES: Record<string, string> = {
     "Ese correo ya pertenece a otra cuenta de ClaimMix, así que no pudimos darte acceso por acá. Escribinos si creés que es un error.",
   sso_fallo:
     "No pudimos completar el ingreso con el SSO de tu empresa. Revisá que el correo sea el de la empresa y probá de nuevo en un rato, o entrá con tu contraseña.",
+  // Google no probó el correo (gancho `user.validateUserInfo`): se le dice qué hacer, no por qué.
+  email_no_verificado:
+    "Google no tiene verificado ese correo, así que no podemos usarlo para entrar. Verificalo en tu cuenta de Google y probá de nuevo, o entrá con tu contraseña si tenés una.",
 };
 
 /**

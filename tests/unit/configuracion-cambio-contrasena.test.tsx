@@ -55,4 +55,13 @@ describe("ConfiguracionClient — cambio de contraseña", () => {
 
     await findByText(/contraseña actual sea correcta|current password is correct/i);
   });
+
+  it("un 429 dice que esperen, no que el cambio falló", async () => {
+    fetchMock.mockResolvedValue(new Response('{"message":"Too many requests"}', { status: 429 }));
+    const { container, findByText, queryByText } = render(<ConfiguracionClient />);
+    completar(container);
+
+    await findByText(/Demasiados intentos|Too many attempts/);
+    expect(queryByText(/contraseña actual sea correcta|current password is correct/i)).toBeNull();
+  });
 });

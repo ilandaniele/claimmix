@@ -8,7 +8,11 @@ const {
   mockDbInsert,
   mockMarcarParaResponder,
   mockMarcarAunqueSiga,
+  mockDownloadMedia,
+  mockRehost,
 } = vi.hoisted(() => ({
+  mockDownloadMedia: vi.fn(),
+  mockRehost: vi.fn(),
   mockMarcarParaResponder: vi.fn(),
   mockMarcarAunqueSiga: vi.fn(),
   mockRunEmailExtractionWorker: vi.fn(),
@@ -91,6 +95,14 @@ vi.mock("@/server/cases/para-responder", () => ({
 
 vi.mock("@/server/worker/extract", () => ({
   runEmailExtractionWorker: mockRunEmailExtractionWorker,
+}));
+
+vi.mock("@/server/whatsapp/cloud-api", () => ({
+  downloadWhatsAppMedia: mockDownloadMedia,
+}));
+
+vi.mock("@/server/email/rehost-attachments", () => ({
+  rehostAndRecordAttachments: mockRehost,
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -627,7 +639,7 @@ describe("tope por remitente (E12)", () => {
       if (dupEn.has(i)) {
         inserts.push({ rejectWith: Object.assign(new Error("dup"), { code: "23505" }) });
       } else {
-        inserts.push({ rows: [] }); // claimMessages
+        inserts.push({ rows: [{ id: `msg-${i}` }] }); // claimMessages
         inserts.push({ rows: [] }); // rawMessages
       }
     }
@@ -739,5 +751,55 @@ describe("tope por remitente (E12)", () => {
       body: "sin simular",
     });
     expect(real.excedente).toBe(false);
+  });
+
+  it("pasado el tope, los adjuntos no se bajan ni se guardan", async () => {
+    armarTanda(21);
+    mockDownloadMedia.mockResolvedValue({ data: Buffer.from("jpg"), mimeType: "image/jpeg" });
+    mockRehost.mockResolvedValue([]);
+
+    for (let i = 0; i < 20; i++) {
+      await createWhatsAppIntake({
+        tenantId: "tenant-001",
+        from: "5490000000021",
+        body: `mensaje ${i}`,
+      });
+    }
+    const r = await createWhatsAppIntake({
+      tenantId: "tenant-001",
+      from: "5490000000021",
+      body: "mensaje 20",
+      media: [{ id: "m21", mimeType: "image/jpeg", filename: "foto.jpg" }],
+    });
+
+    expect(r.excedente).toBe(true);
+    expect(mockDownloadMedia).not.toHaveBeenCalled();
+    expect(mockRehost).not.toHaveBeenCalled();
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "claim.message_not_read",
+        payload: expect.objectContaining({ motivo: "tope_por_remitente", adjuntos_omitidos: 1 }),
+      })
+    );
+  });
+
+  it("en el último mensaje bajo el tope los adjuntos sí se bajan", async () => {
+    armarTanda(20);
+    mockDownloadMedia.mockResolvedValue({ data: Buffer.from("jpg"), mimeType: "image/jpeg" });
+    mockRehost.mockResolvedValue([]);
+
+    let ultimo;
+    for (let i = 0; i < 20; i++) {
+      ultimo = await createWhatsAppIntake({
+        tenantId: "tenant-001",
+        from: "5490000000021",
+        body: `mensaje ${i}`,
+        media: i === 19 ? [{ id: "m20", mimeType: "image/jpeg", filename: "foto.jpg" }] : undefined,
+      });
+    }
+
+    expect(ultimo?.excedente).toBe(false);
+    expect(mockDownloadMedia).toHaveBeenCalledTimes(1);
+    expect(mockRehost).toHaveBeenCalledTimes(1);
   });
 });

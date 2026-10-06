@@ -78,7 +78,8 @@ export async function ingestInboundEmail(
     email.inReplyTo ?? "",
     email.references ?? "",
     email.subject,
-    email.fromAddr
+    email.fromAddr,
+    email.headers ?? []
   );
 
   if (!existingCaseId) {

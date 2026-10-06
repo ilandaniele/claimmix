@@ -11,6 +11,9 @@ import { PgDialect } from "drizzle-orm/pg-core";
 
 import { filaDeCaso, registrarMocks, type FilaDeCaso, type OpcionesDelExtractor } from "./worker-harness";
 
+// Cada caso reimporta el grafo entero del worker: ver extract.overlay.test.ts.
+vi.setConfig({ testTimeout: 30_000 });
+
 // Con fecha de creación el turno del mail hace su propio SELECT y le comería al
 // arnés el segundo lugar, que es el del mensaje crudo.
 vi.mock("@/server/intake/simulation-throttle", () => ({

@@ -678,6 +678,26 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
     expect(registro?.[0].payload).toEqual({ severity: "critical", reason: "severidad critical" });
   });
 
+  it("el motivo del agente llega tachado al registro", async () => {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "escalate",
+      askFor: [],
+      question: null,
+      reasoning: "el DNI 27.654.321 que escribió no es el del titular",
+      noteForAnalyst: null,
+      resolved: [],
+    } as never);
+
+    await derivacion({});
+
+    const registro = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
+    expect(registro?.[0].payload).toMatchObject({
+      reason: "el DNI [DNI] que escribió no es el del titular",
+    });
+  });
+
   it("con gravedad media, el motivo de la derivación es «lesiones» y no manda otro mensaje", async () => {
     const { salidas } = await derivacion({ severity: "medium", injury_severity: "minor" });
 
@@ -1006,13 +1026,11 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
     // PII check: the proposed value must NOT appear in the audit payload
     expect(JSON.stringify(confirmationAudit?.[0].payload)).not.toContain("POL-9981-C");
 
-    // A la persona se le dice como una persona; en la base queda lo del extractor.
+    // La persona ve el valor tapado (AC24); en la base queda lo del extractor.
     const ask = vi
       .mocked(dispatchOutboundEmail)
       .mock.calls.find((c) => c[0].template === "missing_information_request");
-    expect((ask?.[0].data.knownValues as Record<string, string>).policy_number).toBe(
-      "POL-9981-C"
-    );
+    expect((ask?.[0].data.knownValues as Record<string, string>).policy_number).toBe("****");
     const fila = insertSpy.mock.calls
       .flatMap((c) => [c[0]].flat() as Array<{ field_name?: string; suggested_value?: string }>)
       .find((r) => r?.field_name === "policy_number");
@@ -3361,6 +3379,36 @@ describe("orchestratePostExtraction — notes for whoever picks up the file", ()
     expect(note?.[0].payload).toMatchObject({
       note: "Dice que el otro conductor se dio a la fuga.",
     });
+  });
+
+  it("tacha el documento antes de anotar", async () => {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["dni"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: ["dni"],
+      question: null,
+      reasoning: "falta el DNI",
+      noteForAnalyst: "El DNI que dio, 25.888.101, no es el del titular.",
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const note = vi
+      .mocked(writeAuditLog)
+      .mock.calls.find((c) => c[0].event_type === "agent.note");
+    expect(note?.[0].payload).toEqual({ note: "El DNI que dio, [DNI], no es el del titular." });
   });
 });
 

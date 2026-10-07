@@ -3,7 +3,7 @@
  *
  * `recordUsage` existe desde el principio y la única que lo llamaba era la
  * extracción. Todo lo demás que habla con Gemini no dejaba rastro:
- * `deliberate` hace hasta cuatro llamadas por mensaje entrante, `composeReply`
+ * `deliberate` hace hasta tres llamadas por mensaje entrante, `composeReply`
  * hasta dos, y reconocer un adjunto una por archivo —ésa mandando la foto
  * entera adentro del prompt—. Contra una o dos de extracción, que eran las
  * únicas que se anotaban: la tabla veía entre un cuarto y un tercio del gasto.

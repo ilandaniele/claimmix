@@ -43,6 +43,7 @@ import {
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
+import { ARCHIVO_QUE_NO_ENTRO, conArchivoQueNoEntro } from "@/core/mensajes/archivo-que-no-entro";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { CUIDADO } from "@/core/mensajes/derivacion";
@@ -108,6 +109,11 @@ export const emailMessenger: AgentMessenger = {
         template: message.template,
         error: err instanceof Error ? err.name : "UnknownError",
       }, "email.messenger.compose_failed");
+    }
+
+    // Fuera del redactor: no depende de que el modelo se acuerde de decirlo.
+    if (piso !== null && message.data.archivoQueNoEntro === true) {
+      cuerpo = conArchivoQueNoEntro(cuerpo ?? piso, true);
     }
 
     // El primer mail a una dirección que escribió alguien en un formulario: la frase va siempre.
@@ -417,6 +423,8 @@ function pisoDeWhatsApp(message: AgentMessage): string | null {
       return renderNoted();
     case "confirmation_received":
       return renderClosing(message.data);
+    case "attachment_too_large":
+      return ARCHIVO_QUE_NO_ENTRO;
     default:
       return null;
   }
@@ -429,6 +437,7 @@ const WHATSAPP_TEMPLATE_NAMES: Record<string, string> = {
   missing_information_request: "wa_missing_information_request",
   data_confirmation_request: "wa_data_confirmation_request",
   confirmation_received: "wa_confirmation_received",
+  attachment_too_large: "wa_attachment_too_large",
 };
 
 /**
@@ -516,6 +525,8 @@ async function writeReply(
   fallback: string,
   channel: "email" | "whatsapp"
 ): Promise<string> {
+  // Texto fijo: el redactor lee «ahí va la foto» y agradece una foto que no entró.
+  if (message.template === "attachment_too_large") return fallback;
   return composeReply({
     // Cubre los tres mensajeros y el ensayo: los tres pasan por acá.
     tenantId: message.tenantId,
@@ -557,6 +568,7 @@ async function writeReply(
  * modelo se acuerde de decirlo.
  */
 function conPie(message: AgentMessage, texto: string): string {
+  const base = conArchivoQueNoEntro(texto, message.data.archivoQueNoEntro);
   const traspaso =
     message.template === "confirmation_received" ||
     message.template === "specialist_escalation" ||
@@ -565,7 +577,7 @@ function conPie(message: AgentMessage, texto: string): string {
     ...(message.data.yaPreguntamos === true ? [NO_HACE_FALTA_CONTESTAR] : []),
     ...(traspaso ? [SI_VOLVES_A_ESCRIBIR] : []),
   ];
-  return pie.length > 0 ? `${texto}\n\n${pie.join(" ")}` : texto;
+  return pie.length > 0 ? `${base}\n\n${pie.join(" ")}` : base;
 }
 
 /**

@@ -10,9 +10,10 @@
  * por el mismo camino que el código no prueba el código.
  *
  * Necesita DATABASE_URL_APP y dos inquilinos con datos. Sólo lee, salvo las
- * secciones 5 y 6, que escriben y borran un caso marcador (la 5) y un uso de IA
- * marcador con un usuario descartable (la 6) y por eso corren sólo en CI (contra
- * el ensayo) o con `--escribe`, y nunca contra la base de producción: nunca a
+ * secciones 5, 6 y 7, que escriben: un caso marcador (la 5), un uso de IA
+ * marcador con un usuario descartable (la 6) y un inquilino descartable con su
+ * SSO, su cola de purga y sus casos (la 7). Por eso corren sólo en CI (contra el
+ * ensayo) o con `--escribe`, y nunca contra la base de producción: nunca a
  * ciegas con el `.env.local`.
  *
  * La sección 4 corre siempre: intenta un INSERT en el inquilino de al lado que la
@@ -22,6 +23,7 @@
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
+import { randomInt, randomUUID } from "node:crypto";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { tables } from "@/lib/db";
@@ -29,6 +31,7 @@ import { eq, sql } from "drizzle-orm";
 import { consultaDeActividad } from "@/server/metrics/kpis";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import type { PuntoSerie } from "@/core/metricas/serie";
+import { proveedorDeSso } from "@/core/sso";
 import {
   ESTADOS_CERRADOS,
   ESTADOS_COMPLETADO_SIN_PERSONA,
@@ -36,6 +39,14 @@ import {
 } from "@/core/case/fsm";
 import { contarCasos, buscarCaso } from "@/server/asistente/herramientas";
 import { deleteCases } from "@/server/cases/delete";
+import { aplicarRetencion } from "@/server/cases/retencion";
+import { revisarDesvios } from "@/server/desvios/revision-nocturna";
+import { cambiarEstadoSso, guardarIdp, type CambioDeEstadoSso } from "@/server/sso/config";
+import {
+  marcar as marcarPurga,
+  vencidos as vencidosDeLaPurga,
+  type Pendiente,
+} from "@/server/storage/purgar-adjuntos";
 import {
   HOST_DE_PRODUCCION,
   codigoDe,
@@ -398,6 +409,8 @@ if (conDatos.length < 2) {
   }
 }
 
+const aislamientoRoto = problemas.length > 0; // la 7 apoya un UPDATE sin WHERE en RLS
+
 // ── 5. Borrar el caso del inquilino de al lado ─────────────────────────────
 //
 // `deleteCases` es el único camino que borra casos y encola sus adjuntos de R2
@@ -619,6 +632,447 @@ if (!escribe) {
   } finally {
     try {
       await limpiar();
+    } finally {
+      await dueno.end();
+    }
+  }
+}
+
+// ── 7. El SSO, la purga de adjuntos, la retención y la revisión nocturna ───
+//
+// Cuatro piezas cuyo SQL —un upsert con CASE, un UPDATE con EXISTS, un UPDATE …
+// FROM (VALUES …) y un INSERT … SELECT … ON CONFLICT— sólo tenía pruebas contra
+// una base simulada: nunca corrió contra un Postgres. Acá corre:
+//   · el PUT (CASE) y el PATCH (EXISTS) de /api/admin/sso con `claimmix_app`, que
+//     tiene que poder leer `account` desde el UPDATE;
+//   · la cola de purga con dos borrados del mismo objeto: manda el más nuevo, y
+//     marcar uno cierra también los más viejos;
+//   · la retención en `simular`: cuenta justo lo cerrado antes del corte;
+//   · la revisión nocturna dos veces: la segunda no repite nada.
+//
+// Va en un inquilino descartable porque el upsert del SSO pisaría el de uno real.
+// R2 es simulado: la prueba decide qué «se borró» y sólo marca filas propias, así
+// que no toca ningún objeto. La retención nunca corre en `borrar`. La limpieza es
+// por el id del inquilino y por sus dos correos, nada más. Y al arrancar barre lo
+// que dejó, hace más de una hora, una corrida cancelada de esta misma sección (el
+// CI cancela la corrida en curso). Escribe, así que sólo corre en CI (ensayo) o
+// con `--escribe`; y si las secciones de arriba fallaron no escribe, porque el
+// PATCH sin condiciones es un UPDATE sin WHERE que sólo RLS acota.
+console.log("\n▸ SSO, purga de adjuntos, retención y revisión nocturna, contra Postgres");
+if (!escribe) {
+  console.log("     (crea un inquilino descartable: sólo corre en CI o con --escribe contra el ensayo)");
+} else if (vetoDeEscritura) {
+  mal(`no se escribe: ${vetoDeEscritura}`);
+} else if (aislamientoRoto) {
+  mal("no se escribe: el aislamiento ya falló más arriba");
+} else {
+  const MARCA = "Prueba capa de datos, sección 7 ·";
+  const correosDe = (r: string) => [`capa-datos-7.${r}@example.com`, `capa-datos-7b.${r}@example.com`];
+  const corrida = randomUUID();
+  const r8 = corrida.slice(0, 8);
+  const [correo, correoAjeno] = correosDe(r8);
+  const dueno = new Pool({ connectionString: process.env.DATABASE_URL?.trim() });
+
+  const limpiar = async (ids: string[], correos: string[]) => {
+    await dueno.query(`DELETE FROM adjuntos_por_purgar WHERE tenant_id = ANY($1::uuid[])`, [ids]);
+    await dueno.query(`DELETE FROM audit_log WHERE tenant_id = ANY($1::uuid[])`, [ids]);
+    await dueno.query(`DELETE FROM "user" WHERE email = ANY($1::text[])`, [correos]);
+    await dueno.query(`DELETE FROM tenants WHERE id = ANY($1::uuid[])`, [ids]);
+  };
+  const nuevaPersona = async (email: string): Promise<string> =>
+    (
+      await dueno.query(
+        `INSERT INTO "user" (name, email) VALUES ('Prueba capa de datos', $1) RETURNING id::text AS id`,
+        [email]
+      )
+    ).rows[0].id;
+  const igual = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
+  // Un error de la base no se imprime crudo: puede traer parámetros.
+  const parte = async (nombre: string, cuerpo: () => Promise<string[]>) => {
+    try {
+      const errores = await cuerpo();
+      if (errores.length === 0) {
+        bien(nombre);
+      } else {
+        for (const e of errores) mal(`${nombre}: ${e}`);
+        problemas.push(`${nombre}: no se comporta en Postgres como se espera`);
+      }
+    } catch (e) {
+      mal(`${nombre}: falló (${codigoDe(e)})`);
+      problemas.push(`${nombre}: falla contra Postgres`);
+    }
+  };
+
+  let inquilino: string | null = null;
+  try {
+    const viejos = await dueno.query(
+      `SELECT id::text AS id, contact_email AS correo FROM tenants
+        WHERE name LIKE $1 AND contact_email LIKE 'capa-datos-7.%@example.com'
+          AND created_at < now() - interval '1 hour'`,
+      [`${MARCA} %`]
+    );
+    const sobras = (viejos.rows as Array<{ id: string; correo: string }>)
+      .map((f) => ({ id: f.id, r: f.correo.slice("capa-datos-7.".length, f.correo.indexOf("@")) }))
+      .filter((f) => /^[0-9a-f]{8}$/.test(f.r));
+    if (sobras.length > 0) {
+      await limpiar(
+        sobras.map((f) => f.id),
+        sobras.flatMap((f) => correosDe(f.r))
+      );
+      console.log(`     (se barrieron ${sobras.length} inquilino(s) descartable(s) de una corrida cortada)`);
+    }
+
+    inquilino = (
+      await dueno.query(`INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING id::text AS id`, [
+        `${MARCA} ${corrida}`,
+        correo,
+      ])
+    ).rows[0].id as string;
+    const T = inquilino;
+    const ctx = ctxDe({ id: T });
+
+    // `persona` pide el SSO y tiene cuenta propia; `ajena` es una cuenta de SSO de otro usuario.
+    const persona = await nuevaPersona(correo);
+    const ajena = await nuevaPersona(correoAjeno);
+    await dueno.query(
+      `INSERT INTO users (id, tenant_id, full_name, role) VALUES ($1, $2, 'Prueba capa de datos', 'admin')`,
+      [persona, T]
+    );
+    await dueno.query(
+      `INSERT INTO account (account_id, provider_id, user_id) VALUES ($1, 'credential', $2), ($3, $4, $5)`,
+      [`fake-cuenta-${r8}`, persona, `fake-sub-ajeno-${r8}`, proveedorDeSso(T), ajena]
+    );
+
+    await parte("el PUT y el PATCH de /api/admin/sso andan con claimmix_app", async () => {
+      const errores: string[] = [];
+      const esperar = (ok: boolean, que: string) => {
+        if (!ok) errores.push(que);
+      };
+      const issuer = "https://idp.example.com";
+      const dominio = `${r8}.capa-datos.example.com`;
+      const put = async (client_id: string, cifrado: string | null, dom = dominio) =>
+        (
+          await enTenant(ctx, (db) =>
+            guardarIdp(db, T, { issuer, client_id, dominio: dom, client_secret_cifrado: cifrado })
+          )
+        )[0];
+      const patch = async (cambio: CambioDeEstadoSso) =>
+        (await enTenant(ctx, (db) => cambiarEstadoSso(db, T, persona, cambio)))[0];
+      const secreto = async () =>
+        (await dueno.query(`SELECT client_secret_cifrado AS s FROM sso_settings WHERE tenant_id = $1`, [T])).rows[0]
+          ?.s ?? null;
+
+      let f = await put("fake-client-a", "fake-cifrado-1");
+      esperar(
+        f?.tiene_secreto === true && !f.activo && !f.exigir && f.dominio_verificado_en === null,
+        "el primer PUT no dejó un IdP con secreto, apagado y sin verificar"
+      );
+
+      esperar((await patch({ activo: true })) === undefined, "prendió el SSO con el dominio sin verificar");
+
+      // El DNS no se consulta acá: se marca como verificado, que es lo que deja POST.
+      await enTenant(ctx, (db) =>
+        db
+          .update(tables.ssoSettings)
+          .set({ dominio_verificado_en: new Date().toISOString() })
+          .where(eq(tables.ssoSettings.tenant_id, T))
+      );
+
+      f = await put("fake-client-a", null);
+      esperar(
+        f?.dominio_verificado_en !== null && (await secreto()) === "fake-cifrado-1",
+        "guardar el mismo IdP sin secreto perdió la verificación o el secreto"
+      );
+
+      f = await patch({ activo: true });
+      esperar(f?.activo === true, "no prendió el SSO con la config completa y el dominio verificado");
+
+      esperar(
+        (await patch({ exigir: true })) === undefined,
+        "exigió SSO sin que quien lo pide hubiera entrado por él (la cuenta de SSO era de otro usuario)"
+      );
+
+      await dueno.query(`INSERT INTO account (account_id, provider_id, user_id) VALUES ($1, $2, $3)`, [
+        `fake-sub-${r8}`,
+        proveedorDeSso(T),
+        persona,
+      ]);
+      f = await patch({ exigir: true });
+      esperar(
+        f?.exigir === true && f.activo === true,
+        "no exigió SSO con su propia cuenta de SSO: el EXISTS no lee account con claimmix_app"
+      );
+
+      f = await put("fake-client-b", null);
+      esperar(
+        f?.tiene_secreto === false &&
+          (await secreto()) === null &&
+          f.dominio_verificado_en !== null &&
+          !f.activo &&
+          !f.exigir,
+        "cambiar de client_id sin secreto nuevo no descartó el viejo, o no apagó el SSO, o perdió la verificación"
+      );
+
+      esperar((await patch({ activo: true })) === undefined, "prendió el SSO sin secreto");
+
+      await put("fake-client-b", "fake-cifrado-2");
+      f = await patch({ activo: true, exigir: true });
+      esperar(f?.activo === true && f.exigir === true, "no prendió y exigió el SSO de una vez con todo en orden");
+
+      f = await patch({ activo: false });
+      esperar(f?.activo === false && f.exigir === false, "apagar el SSO no apagó también «exigir»");
+
+      f = await put("fake-client-b", null, `otro.${dominio}`);
+      esperar(
+        f?.dominio_verificado_en === null && f.tiene_secreto === true && (await secreto()) === "fake-cifrado-2",
+        "cambiar de dominio no pidió verificar de nuevo, o perdió el secreto del mismo IdP"
+      );
+      return errores;
+    });
+
+    await parte("la cola de purga con dos borrados del mismo objeto (R2 simulado)", async () => {
+      const errores: string[] = [];
+      const esperar = (ok: boolean, que: string) => {
+        if (!ok) errores.push(que);
+      };
+      const base = `prueba-capa-datos/${corrida}`;
+      const P = {
+        compartido: `${base}/compartido.txt`,
+        vivo: `${base}/vivo.txt`,
+        falla: `${base}/falla.txt`,
+        cancelado: `${base}/cancelado.txt`,
+      };
+      // Un adjunto por path a la vez: lo que se borra primero se va con su caso, y el siguiente reusa el path.
+      const casoCon = async (path: string): Promise<string> => {
+        const { rows } = await dueno.query(
+          `INSERT INTO cases (tenant_id, policy_number, status, channel)
+           VALUES ($1, $2, 'recibido', 'email_sim') RETURNING id::text AS id`,
+          [T, `PRUEBA-PURGA-${r8}`]
+        );
+        await dueno.query(
+          `INSERT INTO claim_attachments (tenant_id, case_id, file_name, content_type, size_bytes, storage_path)
+           VALUES ($1, $2, 'fake-adjunto.txt', 'text/plain', 1, $3)`,
+          [T, rows[0].id, path]
+        );
+        return rows[0].id;
+      };
+      const borrar = async (id: string) => {
+        const borrados = await deleteCases(ctx, [id], { id: persona, role: "admin" });
+        esperar(borrados.length === 1, "deleteCases no borró el caso de prueba");
+      };
+
+      type FilaDeLaCola = {
+        id: string;
+        case_id: string;
+        storage_path: string;
+        purgado_en: string | null;
+        intentos: number;
+        ultimo_error: string | null;
+      };
+      const cola = async (): Promise<FilaDeLaCola[]> =>
+        (
+          await dueno.query(
+            `SELECT id::text AS id, case_id::text AS case_id, storage_path, purgado_en::text AS purgado_en,
+                    intentos::int AS intentos, ultimo_error
+               FROM adjuntos_por_purgar WHERE tenant_id = $1 ORDER BY encolado_en, storage_path`,
+            [T]
+          )
+        ).rows;
+      const de = (filas: FilaDeLaCola[], path: string) => filas.filter((f) => f.storage_path === path);
+
+      // La purga barre todos los inquilinos: se miran y se marcan sólo las filas de éste.
+      const propias = async () => (await vencidosDeLaPurga()).filter((p) => p.tenant_id === T);
+      const pasada = async (): Promise<Pendiente[]> => {
+        const filas = await propias();
+        if (filas.length > 0) {
+          await marcarPurga(
+            filas.map((p) => ({ id: p.id, ok: p.storage_path !== P.falla, storage_path: p.storage_path }))
+          );
+        }
+        return filas;
+      };
+
+      const c1 = await casoCon(P.compartido);
+      await borrar(c1);
+      const c2 = await casoCon(P.compartido);
+      await borrar(c2);
+      await borrar(await casoCon(P.vivo));
+      await casoCon(P.vivo);
+      await borrar(await casoCon(P.falla));
+      await borrar(await casoCon(P.cancelado));
+
+      const encolado = await cola();
+      esperar(
+        encolado.length === 5 && igual(de(encolado, P.compartido).map((f) => f.case_id), [c1, c2]),
+        `la cola quedó con ${encolado.length} fila(s) (esperaba 5: dos del objeto compartido, una por cada otro)`
+      );
+
+      // Todo vencido hace mucho, menos la purga cancelada (`purgar_despues` nulo).
+      await dueno.query(
+        `UPDATE adjuntos_por_purgar
+            SET purgar_despues = CASE WHEN storage_path = $2 THEN NULL ELSE '2000-01-01T00:00:00Z'::timestamptz END
+          WHERE tenant_id = $1`,
+        [T, P.cancelado]
+      );
+
+      const p1 = await pasada();
+      esperar(
+        p1.length === 2 &&
+          igual(p1.map((p) => p.storage_path).sort(), [P.compartido, P.falla].sort()) &&
+          p1.find((p) => p.storage_path === P.compartido)?.case_id === c2,
+        "la primera pasada no eligió justo el objeto compartido (por su borrado más nuevo) y el que falla"
+      );
+      const tras1 = await cola();
+      esperar(
+        de(tras1, P.compartido).every((f) => f.purgado_en !== null),
+        "marcar el objeto compartido no cerró también el borrado más viejo del mismo path"
+      );
+      const falla = de(tras1, P.falla)[0];
+      esperar(
+        falla?.purgado_en === null && falla.intentos === 1 && falla.ultimo_error === "no se pudo borrar el objeto en R2",
+        "un borrado fallido no sumó un intento con su causa, o se dio por purgado"
+      );
+      esperar(
+        [P.vivo, P.cancelado].every((p) => de(tras1, p).every((f) => f.purgado_en === null && f.intentos === 0)),
+        "la pasada tocó un objeto que un adjunto vivo apunta, o una purga cancelada"
+      );
+
+      await marcarPurga([{ id: de(tras1, P.compartido)[1].id, ok: true, storage_path: P.compartido }]);
+      esperar(igual(await cola(), tras1), "marcar de nuevo un objeto ya purgado cambió la cola");
+
+      const p2 = await pasada();
+      esperar(
+        p2.length === 1 && p2[0].storage_path === P.falla && de(await cola(), P.falla)[0]?.intentos === 2,
+        "la segunda pasada no eligió sólo al que falló, o no le sumó otro intento"
+      );
+
+      await dueno.query(`UPDATE adjuntos_por_purgar SET intentos = 5 WHERE tenant_id = $1 AND storage_path = $2`, [
+        T,
+        P.falla,
+      ]);
+      esperar((await propias()).length === 0, "una fila con cinco intentos siguió entrando a la purga");
+      return errores;
+    });
+
+    await parte("la retención en «simular» cuenta justo lo cerrado antes del corte", async () => {
+      const errores: string[] = [];
+      const esperar = (ok: boolean, que: string) => {
+        if (!ok) errores.push(que);
+      };
+      // Un corte al azar en 1971: nada real cierra ahí, y dos corridas a la par no se pisan.
+      const corte = new Date(Date.UTC(1971, 0, 1) + randomInt(360 * 86_400_000));
+      const despues = new Date(corte.getTime() + 1);
+      const marca = `PRUEBA-RETENCION-${r8}`;
+      // `no_relevante` no es un estado cerrado: no cuenta aunque tenga `closed_at`.
+      for (const [estado, cierre] of [
+        ["cerrado", corte],
+        ["rechazado", corte],
+        ["no_relevante", corte],
+        ["pagado", despues],
+      ] as const) {
+        await dueno.query(
+          `INSERT INTO cases (tenant_id, policy_number, status, channel, closed_at)
+           VALUES ($1, $2, $3, 'email_sim', $4::timestamptz)`,
+          [T, marca, estado, cierre.toISOString()]
+        );
+      }
+      // El corte de la retención es `ahora` menos los años: se le da un `ahora` que lo deje justo en `c`.
+      const ahoraPara = (c: Date) => {
+        const d = new Date(c);
+        d.setUTCFullYear(d.getUTCFullYear() + 5);
+        return d;
+      };
+
+      const [modoPrevio, aniosPrevio] = [process.env.RETENCION_MODO, process.env.RETENCION_ANIOS];
+      process.env.RETENCION_MODO = "simular"; // nunca «borrar»
+      process.env.RETENCION_ANIOS = "5";
+      let r1: Awaited<ReturnType<typeof aplicarRetencion>>;
+      let r2: Awaited<ReturnType<typeof aplicarRetencion>>;
+      try {
+        const hasta = Date.now() + 120_000;
+        r1 = await aplicarRetencion({ hasta }, ahoraPara(corte));
+        r2 = await aplicarRetencion({ hasta }, ahoraPara(despues));
+      } finally {
+        if (modoPrevio === undefined) delete process.env.RETENCION_MODO;
+        else process.env.RETENCION_MODO = modoPrevio;
+        if (aniosPrevio === undefined) delete process.env.RETENCION_ANIOS;
+        else process.env.RETENCION_ANIOS = aniosPrevio;
+      }
+
+      if (!r1 || !r2) {
+        errores.push("la retención devolvió nulo con RETENCION_MODO=simular: no corrió");
+        return errores;
+      }
+      esperar(
+        r1.modo === "simular" && r2.modo === "simular" && r1.borrados === 0 && r2.borrados === 0,
+        "la retención en «simular» no estaba en «simular» o borró algo"
+      );
+      esperar(
+        r1.corte === corte.toISOString() && r2.corte === despues.toISOString(),
+        "el corte de la retención no es el que se pidió"
+      );
+      esperar(
+        r2.candidatos - r1.candidatos === 2,
+        `mover el corte 1 ms sumó ${r2.candidatos - r1.candidatos} candidato(s) (esperaba 2: el cerrado y el rechazado de justo el corte)`
+      );
+      const quedan = await dueno.query(`SELECT count(*)::int AS n FROM cases WHERE tenant_id = $1 AND policy_number = $2`, [
+        T,
+        marca,
+      ]);
+      esperar(quedan.rows[0].n === 4, `en «simular» quedaron ${quedan.rows[0].n} de los 4 casos de prueba`);
+      return errores;
+    });
+
+    await parte("la revisión nocturna corre entera y no repite", async () => {
+      const errores: string[] = [];
+      const esperar = (ok: boolean, que: string) => {
+        if (!ok) errores.push(que);
+      };
+      const marca = `PRUEBA-DESVIOS-${r8}`;
+      // Todos con el plazo vencido en 2001: sólo el abierto y de un canal real es un desvío.
+      const sembrar = async (estado: string, canal: string, cierre: string | null): Promise<string> =>
+        (
+          await dueno.query(
+            `INSERT INTO cases (tenant_id, policy_number, status, channel, vence_en, vence_plazo, closed_at)
+             VALUES ($1, $2, $3, $4, '2001-01-01T00:00:00Z', 'prueba', $5::timestamptz) RETURNING id::text AS id`,
+            [T, marca, estado, canal, cierre]
+          )
+        ).rows[0].id;
+      const vencido = await sembrar("escalado", "email", null);
+      await sembrar("escalado", "email_sim", null);
+      await sembrar("cerrado", "email", "2001-01-02T00:00:00Z");
+
+      const desvios = async () =>
+        (
+          await dueno.query(
+            `SELECT case_id::text AS caso, regla, ancla::text AS ancla FROM case_desvios WHERE tenant_id = $1 ORDER BY 1, 2, 3`,
+            [T]
+          )
+        ).rows;
+      // Sólo lo de este inquilino: la revisión barre todos, y el total no es de la prueba.
+      const r1 = await revisarDesvios();
+      const tras1 = await desvios();
+      const r2 = await revisarDesvios();
+      const tras2 = await desvios();
+
+      const fallidas = [...new Set([...r1.fallidas, ...r2.fallidas])];
+      esperar(
+        fallidas.length === 0,
+        `no corrieron las reglas ${fallidas.join(", ")} (el código está en el log, desvios.regla_fallo)`
+      );
+      esperar(
+        tras1.length === 1 && tras1[0].caso === vencido && tras1[0].regla === "plazo_vencido",
+        `la primera corrida dejó ${tras1.length} desvío(s) del inquilino (esperaba uno: plazo_vencido del caso abierto de un canal real)`
+      );
+      esperar(igual(tras2, tras1), "la segunda corrida cambió los desvíos: no es idempotente");
+      return errores;
+    });
+  } catch (e) {
+    mal(`la sección 7 no pudo prepararse (${codigoDe(e)})`);
+    problemas.push("la sección 7 no pudo preparar su inquilino descartable");
+  } finally {
+    try {
+      if (inquilino) await limpiar([inquilino], [correo, correoAjeno]);
     } finally {
       await dueno.end();
     }

@@ -157,3 +157,57 @@ describe("el cierre también contesta lo que preguntaron", () => {
     expect(veces(sin.text)).toBe(0);
   });
 });
+
+describe("el mail de conflicto también contesta lo que preguntaron", () => {
+  const conflicto = (data: Record<string, unknown>) =>
+    renderTemplate("data_confirmation_request", {
+      caseId: CASO,
+      fields: [{ fieldKey: "full_name", proposedValue: "Pedro García", conflictWithValue: "Juan Pérez" }],
+      ...data,
+    });
+  const veces = (s: string) => s.split(RESPUESTA_PENDIENTE).length - 1;
+
+  it("con pregunta, la frase sale una vez además del pedido", () => {
+    const { html, text } = conflicto({ question: "¿Cuánto tarda?" });
+
+    expect(veces(html)).toBe(1);
+    expect(veces(text)).toBe(1);
+    // Contesta además del pedido, no en su lugar.
+    expect(text).toContain("Pedro García");
+    expect(text).toContain("Confirmo");
+    expect(text).not.toMatch(/\d+\s*(?:horas?|d[íi]as?|semanas?)/i);
+  });
+
+  it("la frase va antes de lo que tiene que hacer", () => {
+    const { text } = conflicto({ question: "¿Cuánto tarda?" });
+
+    expect(text.indexOf(RESPUESTA_PENDIENTE)).toBeLessThan(text.indexOf("Confirmo"));
+  });
+
+  it("sin pregunta sale igual que antes", () => {
+    const sin = conflicto({});
+
+    expect(conflicto({ question: null })).toEqual(sin);
+    expect(conflicto({ question: "   " })).toEqual(sin);
+    expect(veces(sin.text)).toBe(0);
+  });
+
+  it("el titular ajeno también la recibe, y sigue sin pedirle que confirme", () => {
+    const { html, text } = conflicto({ titularAjeno: true, question: "¿Cuánto tarda?" });
+
+    expect(veces(html)).toBe(1);
+    expect(veces(text)).toBe(1);
+    expect(text).not.toContain("Confirmo");
+  });
+
+  it("la prosa redactada reemplaza el cuerpo entero: la frase la garantiza el redactor", () => {
+    // `withUnansweredQuestion`, en compose-reply, se la pega a lo que redacta.
+    const { text } = conflicto({
+      question: "¿Cuánto tarda?",
+      cuerpo: "Fake prosa redactada para el test.",
+    });
+
+    expect(text).toContain("Fake prosa redactada para el test.");
+    expect(veces(text)).toBe(0);
+  });
+});

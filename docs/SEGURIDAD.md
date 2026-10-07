@@ -271,18 +271,20 @@ Okta o Google Workspace de una aseguradora. Lo prueba el piloto.
 9. **La política de privacidad pública tiene datos desactualizados** (sección
    13). No se tocó en este cambio.
 10. **Una sola región y un solo proveedor por capa**, sin failover.
-11. Las pruebas de retención y de purga se verifican con SQL dibujado y bases
-    simuladas. Falta verificarlas contra una base real después de aplicar la
-    migración 0045 (lo hace el dueño, sección 12).
+11. Las pruebas unitarias de retención y de purga usan SQL dibujado y bases
+    simuladas. El SQL real corre contra Postgres en la sección 7 de
+    `pnpm capa-datos`, en cada corrida del CI y contra la base del ensayo: el
+    `CASE` del PUT y el `EXISTS` del PATCH de `/api/admin/sso`, la cola de purga
+    con dos borrados del mismo objeto, la retención en `simular` y la revisión
+    nocturna. La migración 0045 ya está aplicada en las tres bases (30/09). Lo que
+    esa prueba no cubre, porque simula R2 y no enciende ningún modo, es del
+    dueño (sección 12).
 
 ## 12. Pendientes del dueño (no son código)
 
-- **Aplicar la migración 0045** en las tres bases (producción, staging y QA) antes
-  del check, a mano, en ese orden. Crea `sso_settings` y `adjuntos_por_purgar` y
-  un índice sobre `cases(closed_at)` sin `CONCURRENTLY`: conviene un momento
-  tranquilo. Hasta entonces `/api/health` da degradado y `pnpm check` completo
-  queda rojo.
-- Confirmar la separación de baldes de R2 entre staging y producción.
+- Confirmar la separación de baldes de R2 entre staging y producción. El SQL de
+  SSO, purga, retención y revisión nocturna ya lo prueba el CI contra Postgres
+  (sección 7 de `pnpm capa-datos`), pero con R2 simulado: no toca ningún balde.
 - Decidir cuándo pasar `RETENCION_MODO` y `PURGA_ADJUNTOS_MODO` a `simular` y
   después a `borrar`. Nacen apagadas y no se encendieron en ningún ambiente.
 - Verificar la ventana de PITR de Neon en el plan vigente y hacer una

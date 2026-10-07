@@ -116,8 +116,13 @@ export async function logAgentRun(
     // 42P01 = table missing (migration not applied yet) — degrade silently
     // so existing deployments keep extracting.
     const code = (e as { code?: string })?.code;
+    // Sin código —un NeonDbError de red— va el nombre, nunca el mensaje:
+    // «no_data» queda sólo para la rama de arriba.
     if (code !== "42P01") {
-      logger.error({ detalle: code ?? "no_data" }, "agent_runs.insert_error");
+      logger.error(
+        { detalle: code ?? (e instanceof Error ? e.name : "UnknownError") },
+        "agent_runs.insert_error"
+      );
     }
     // Never break the extraction pipeline because run logging failed.
     return null;
@@ -196,7 +201,10 @@ export async function logAgentRunError(
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code !== "42P01") {
-      logger.error({ detalle: code ?? "no_data" }, "agent_runs.error_run_insert_error");
+      logger.error(
+        { detalle: code ?? (e instanceof Error ? e.name : "UnknownError") },
+        "agent_runs.error_run_insert_error"
+      );
     }
     return null;
   }

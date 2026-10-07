@@ -13,6 +13,7 @@ vi.mock("@/server/ai/provider", () => ({
   getTenantGeminiKey: vi.fn(async () => null),
 }));
 
+import { logger } from "@/lib/observability/logger";
 import { callGemini, contarTokens, extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
 
 const ORIGINAL_GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -366,6 +367,75 @@ describe("callGemini — tokens de audio", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(geminiJsonResponse()), { status: 200 })));
     const { usage } = await callGemini("sys", "user");
     expect(usage).toEqual({ promptTokens: 10, completionTokens: 20 });
+  });
+});
+
+describe("callGemini — tokens cacheados", () => {
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    process.env.GEMINI_MIN_REQUEST_INTERVAL_MS = "0";
+    process.env.GEMINI_MAX_RETRIES = "0";
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  function conUso(usageMetadata: Record<string, unknown>) {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ...geminiJsonResponse(),
+      usageMetadata,
+    }), { status: 200 })));
+  }
+
+  it("lee cachedContentTokenCount", async () => {
+    conUso({ promptTokenCount: 10600, candidatesTokenCount: 50, cachedContentTokenCount: 8192 });
+
+    const { usage } = await callGemini("sys", "user");
+    expect(usage).toEqual({ promptTokens: 10600, completionTokens: 50, cachedTokens: 8192 });
+  });
+
+  it("con audio y caché, las dos claves", async () => {
+    conUso({
+      promptTokenCount: 900,
+      candidatesTokenCount: 50,
+      cachedContentTokenCount: 300,
+      promptTokensDetails: [{ modality: "AUDIO", tokenCount: 600 }],
+    });
+
+    const { usage } = await callGemini("sys", "user");
+    expect(usage).toEqual({ promptTokens: 900, completionTokens: 50, audioTokens: 600, cachedTokens: 300 });
+  });
+
+  it("un cero no agrega la clave", async () => {
+    conUso({ promptTokenCount: 10, candidatesTokenCount: 20, cachedContentTokenCount: 0 });
+
+    const { usage } = await callGemini("sys", "user");
+    expect(usage).not.toHaveProperty("cachedTokens");
+  });
+
+  it("el intento de extracción lo deja en el log", async () => {
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    conUso({ promptTokenCount: 10, candidatesTokenCount: 20, cachedContentTokenCount: 4096 });
+
+    await extractEmailClaimGemini({ subject: "S", body: "B", memoryHints: [], knownPatterns: [] });
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({ cached_tokens: 4096, prompt_tokens: 10 }),
+      "ai.email_extraction.attempt1"
+    );
+    info.mockRestore();
+  });
+
+  it("sin caché el log dice 0", async () => {
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(geminiJsonResponse()), { status: 200 })));
+
+    await extractEmailClaimGemini({ subject: "S", body: "B", memoryHints: [], knownPatterns: [] });
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({ cached_tokens: 0 }),
+      "ai.email_extraction.attempt1"
+    );
+    info.mockRestore();
   });
 });
 

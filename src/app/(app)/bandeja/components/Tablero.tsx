@@ -61,7 +61,7 @@ export function Tablero({ casos, totales }: TableroProps) {
 
             <div className="scroll-fino min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
               {casosDeLaColumna.length === 0 ? (
-                <p className="px-2 py-4 text-center text-[12.5px] text-slate-400">
+                <p className="px-2 py-4 text-center text-[12.5px] text-slate-500">
                   {t("tablero.vacio")}
                 </p>
               ) : (

@@ -157,6 +157,15 @@ jobs:
               if [ -n "${reaped:-}" ] && [ "${reaped}" != "0" ]; then
                 echo "::warning::Se escalaron ${reaped} caso(s) trabado(s)."
               fi
+
+              # La revisión nocturna (B22) corre con la primera llamada del día. Si una
+              # regla falló, el barrido corrió igual, pero esto se pone rojo: el log de
+              # Vercel solo no lo mira nadie. No se reintenta: el cupo del día ya se gastó.
+              fallidas=$(grep -o '"desvios_fallidas":\[[^]]*]' respuesta.json | head -1 | cut -d: -f2-)
+              if [ -n "${fallidas:-}" ] && [ "${fallidas}" != "[]" ]; then
+                echo "::error::La revisión nocturna (B22) no corrió estas reglas: ${fallidas}. El barrido sí corrió; el código está en los logs de Vercel (desvios.regla_fallo)."
+                exit 1
+              fi
               exit 0
             fi
 

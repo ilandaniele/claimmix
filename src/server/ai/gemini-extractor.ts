@@ -288,11 +288,14 @@ interface GeminiUsage {
   completionTokens: number;
   /** Part of promptTokens that came in as audio; present only when > 0. */
   audioTokens?: number;
+  /** Part of promptTokens that Vertex served from its implicit cache; present only when > 0. */
+  cachedTokens?: number;
 }
 
 type UsageMetadata = {
   promptTokenCount?: number;
   candidatesTokenCount?: number;
+  cachedContentTokenCount?: number;
   promptTokensDetails?: Array<{ modality?: string; tokenCount?: number }>;
 };
 
@@ -300,10 +303,12 @@ function usoDe(meta: UsageMetadata | undefined): GeminiUsage {
   const audio = (meta?.promptTokensDetails ?? [])
     .filter((d) => d.modality === "AUDIO")
     .reduce((s, d) => s + (d.tokenCount ?? 0), 0);
+  const cacheados = meta?.cachedContentTokenCount ?? 0;
   return {
     promptTokens: meta?.promptTokenCount ?? 0,
     completionTokens: meta?.candidatesTokenCount ?? 0,
     ...(audio > 0 ? { audioTokens: audio } : {}),
+    ...(cacheados > 0 ? { cachedTokens: cacheados } : {}),
   };
 }
 
@@ -663,6 +668,7 @@ export async function extractEmailClaimGemini(
         latency_ms: latency1,
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
+        cached_tokens: usage.cachedTokens ?? 0,
       }, "ai.email_extraction.attempt1");
   } catch (e) {
     const cortada = (e as GeminiExtractionError)?.cause as
@@ -789,6 +795,7 @@ export async function extractEmailClaimGemini(
         latency_ms: latency2,
         prompt_tokens: usage.promptTokens,
         completion_tokens: usage.completionTokens,
+        cached_tokens: usage.cachedTokens ?? 0,
       }, "ai.email_extraction.attempt2");
     } catch (e) {
       const cortada = (e as GeminiExtractionError)?.cause as
@@ -938,6 +945,7 @@ export async function runGeminiExtractor(
         model,
         prompt_tokens: usage.promptTokens,
         completion_tokens: usage.completionTokens,
+        cached_tokens: usage.cachedTokens ?? 0,
       }, `ai.extraction.attempt${attempt}`);
 
       result = parseResponse(text, claimType, model);

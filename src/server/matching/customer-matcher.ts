@@ -23,6 +23,7 @@ import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { digitsOnlyEquals, policyNumberEquals } from "@/lib/db/helpers";
 import {
+  mismoNombre,
   normalizarDni,
   normalizarEmail,
   normalizarNumeroPoliza,
@@ -431,12 +432,8 @@ function detectConflicts(
   if (!customer) return [];
   const conflicts: string[] = [];
 
-  // Check full_name conflict.
-  if (
-    extracted.full_name &&
-    customer.full_name &&
-    extracted.full_name.toLowerCase().trim() !== customer.full_name.toLowerCase().trim()
-  ) {
+  // Con `mismoNombre`, «PEREZ, Juan» es «Juan Pérez» y «Juan» no lo es.
+  if (extracted.full_name && customer.full_name && !mismoNombre(extracted.full_name, customer.full_name)) {
     conflicts.push("full_name");
   }
 

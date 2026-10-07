@@ -54,6 +54,34 @@ describe("dichoRecien", () => {
     expect(dichoRecien(valor, texto)).toBe(false);
   });
 
+  it.each([
+    ["Roberto Paz", "Soy Paz Roberto", "full_name"],
+    ["Roberto Paz", "PAZ ROBERTO, DNI 25.888.101", "full_name"],
+    ["Juan Carlos Pérez García", "Soy Pérez García Juan Carlos", "full_name"],
+    // Lo literal sigue andando.
+    ["Roberto Paz", "Soy Roberto Paz", "full_name"],
+    // El alias canoniza a full_name.
+    ["Roberto Paz", "Soy Paz Roberto", "nombre_asegurado"],
+  ])("«%s» está en «%s» (%s)", (valor, texto, clave) => {
+    expect(dichoRecien(valor, texto, clave)).toBe(true);
+  });
+
+  it.each([
+    // Sólo rotado: «José María Paz» no es «María José Paz».
+    ["María José Paz", "Soy José María Paz", "full_name"],
+    ["Roberto Paz", "No soy Paz Roberto", "full_name"],
+    ["Roberto Paz", "Soy Paz Robertino", "full_name"],
+    ["Roberto Paz", "Soy Roberto", "full_name"],
+    // Sin clave no rota.
+    ["Roberto Paz", "Soy Paz Roberto", undefined],
+    // Sólo el nombre rota.
+    ["Villa Mitre", "Choqué en Mitre Villa", "accident_location"],
+    // Inferido: el «Av.» lo puso el extractor.
+    ["Av. Alem 2300", "Choqué en Alem al 2300", "accident_location"],
+  ])("«%s» no está en «%s» (%s)", (valor, texto, clave) => {
+    expect(dichoRecien(valor, texto, clave)).toBe(false);
+  });
+
   it("sin mensaje no se dijo nada", () => {
     expect(dichoRecien("tarde", undefined)).toBe(false);
     expect(dichoRecien("tarde", "")).toBe(false);
@@ -112,6 +140,11 @@ describe("contestaSinHora", () => {
     "Late afternoon",
     "Early morning",
     "Maybe in the afternoon",
+    "Fue esta tarde",
+    "Esta mañana",
+    "Esta noche, creo",
+    "It was this afternoon",
+    "This morning",
   ])("«%s» contesta la hora sin dar una", (texto) => {
     expect(contestaSinHora(texto)).toBe(true);
   });
@@ -127,6 +160,9 @@ describe("contestaSinHora", () => {
     "I'd like to know the status",
     // Negar la franja no es contestar con ella.
     "no fue a la tarde",
+    "No fue esta tarde",
+    // «está» pierde el acento: el demostrativo sólo cuenta antes de la franja.
+    "Está seguro",
     // Otros datos, sin la hora.
     "Soy Roberto Paz, DNI 25.888.101",
     "bien, gracias",

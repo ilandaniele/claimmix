@@ -22,7 +22,7 @@ import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
 import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
-import { revisarDesvios } from "@/server/desvios/revision-nocturna";
+import { revisarDesvios, type ResultadoDeLaRevision } from "@/server/desvios/revision-nocturna";
 import { aplicarRetencion, type ResultadoRetencion } from "@/server/cases/retencion";
 import { purgarAdjuntos, type ResultadoPurga } from "@/server/storage/purgar-adjuntos";
 import { ventanaDiaria } from "@/core/retencion";
@@ -110,11 +110,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   //
   // Esta ruta la llama GitHub Actions cada quince minutos, pero la revisión es
   // una por día: un cupo de 24 h la deja pasar sólo a la primera llamada del día.
+  // Las reglas que fallaron vuelven en la respuesta: el log solo no lo mira nadie,
+  // y barrer-trabados.yml se pone rojo con ellas.
   let desviosNuevos = 0;
+  let desviosFallidas: ResultadoDeLaRevision["fallidas"] = [];
   if (Date.now() < hasta - 60_000) {
     try {
       const cupo = await rateLimit(claveDeCupo("revision-de-desvios"), RATE_LIMIT_CONFIGS.REVISION_DE_DESVIOS);
-      if (cupo.allowed) desviosNuevos = (await revisarDesvios()).nuevos;
+      if (cupo.allowed) {
+        const revision = await revisarDesvios();
+        desviosNuevos = revision.nuevos;
+        desviosFallidas = revision.fallidas;
+      }
     } catch (err) {
       logger.error({ code: errorCode(err) }, "cron_reap_stuck.desvios_fallaron");
     }
@@ -168,6 +175,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     recordatorios_salteados: recordatorios.salteados,
     avisos_de_cierre: avisosDeCierre,
     desvios_nuevos: desviosNuevos,
+    desvios_fallidas: desviosFallidas,
     purga,
     retencion,
     rate_limit_rows_purged: purged,

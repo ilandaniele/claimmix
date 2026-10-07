@@ -335,7 +335,7 @@ qué cada una:
   el alias de producción, `QA_CRON_SECRET` para el de QA y `PREVIEW_CRON_SECRET`
   para cualquier otra vista previa. Si el de Preview no coincide, ese paso recibe
   401 y el diagnóstico se pierde justo el día que sirve; si falta
-  `PREVIEW_CRON_SECRET`, el paso no interroga. Hasta #<PR> era el mismo valor que
+  `PREVIEW_CRON_SECRET`, el paso no interroga. Hasta #382 era el mismo valor que
   el de producción, y el código de una rama sin revisar corría en Preview con el
   bearer interno de producción. Los otros tres workflows con secretos
   (`deploy-checks.yml`, `post-deploy.yml` y `barrer-trabados.yml`) ya no admiten

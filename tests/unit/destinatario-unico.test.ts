@@ -73,19 +73,19 @@ describe("bareAddress — nombre visible entre comillas", () => {
 
 describe("bareAddress — comentarios RFC 5322", () => {
   it("un comentario con otra dirección adentro no gana sobre la dirección real", () => {
-    expect(bareAddress("atacante@gmail.com (<victima@gmail.com>)")).toBe("atacante@gmail.com");
-    expect(bareAddress("(<victima@gmail.com>) <atacante@gmail.com>")).toBe("atacante@gmail.com");
-    expect(bareAddress("Ana (<victima@gmail.com>) <atacante@gmail.com>")).toBe("atacante@gmail.com");
+    expect(bareAddress("atacante@example.com (<victima@example.com>)")).toBe("atacante@example.com");
+    expect(bareAddress("(<victima@example.com>) <atacante@example.com>")).toBe("atacante@example.com");
+    expect(bareAddress("Ana (<victima@example.com>) <atacante@example.com>")).toBe("atacante@example.com");
   });
 
   it("los comentarios anidados y los paréntesis escapados no cortan antes", () => {
-    expect(bareAddress("Ana (uno (dos <victima@gmail.com>) \\) <otra@gmail.com>) <ana@gmail.com>")).toBe(
-      "ana@gmail.com",
+    expect(bareAddress("Ana (uno (dos <victima@example.com>) \\) <otra@example.com>) <ana@example.com>")).toBe(
+      "ana@example.com",
     );
   });
 
   it("un comentario sin cerrar se come lo que sigue: no deja leer la dirección del comentario", () => {
-    expect(bareAddress("atacante@gmail.com (<victima@gmail.com>")).toBe("atacante@gmail.com");
+    expect(bareAddress("atacante@example.com (<victima@example.com>")).toBe("atacante@example.com");
   });
 
   it("un paréntesis entre comillas es nombre visible, no abre un comentario", () => {
@@ -94,7 +94,7 @@ describe("bareAddress — comentarios RFC 5322", () => {
   });
 
   it("unas comillas sin cerrar no dejan leer la dirección que quedó adentro", () => {
-    expect(bareAddress('"x <victima@gmail.com> <atacante@gmail.com>')).not.toBe("victima@gmail.com");
+    expect(bareAddress('"x <victima@example.com> <atacante@example.com>')).not.toBe("victima@example.com");
   });
 
   it("una dirección pelada con un comentario al lado sale sin el comentario", () => {

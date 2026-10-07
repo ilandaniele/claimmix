@@ -4506,7 +4506,7 @@ sola migración (la 0047).
   formulario web siguen como estaban. Consecuencia: quien escribe desde un dominio
   sin DMARC, SPF ni DKIM alineado abre un caso nuevo en vez de seguir el viejo.
   `bareAddress` saca los comentarios `( )` y las comillas sin cerrar antes de
-  buscar el `<...>`: un `From: atacante@gmail.com (<victima@gmail.com>)` es del
+  buscar el `<...>`: un `From: atacante@example.com (<victima@example.com>)` es del
   atacante, no de la víctima, aunque los dos dominios alineen.
 - **Alta anticipada de una dirección permitida.** `/registro` ya no pide
   contraseña: crea la cuenta con una al azar que nadie conoce, no deja sesión

@@ -91,6 +91,7 @@ const fakeDb = {
 vi.mock("@/data/scope", async () => (await import("../mocks/puente-de-alcance")).puenteDeAlcance(() => fakeDb));
 
 import { threadLookup } from "@/server/email/thread-lookup";
+import { logger } from "@/lib/observability/logger";
 
 const TENANT = "8a3f2c1e-5b6d-4e7f-9a0b-1c2d3e4f5a6b";
 const CASO_WHATSAPP = "2b8b1f0e-9c4d-4a5b-8e6f-7a8b9c0d1e2f";
@@ -249,6 +250,92 @@ describe("el remitente que el servidor de correo dio por falso", () => {
       const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", "martin.sosa@example.com", headers);
       expect(r.existingCaseId).toBe(CASO_MAIL);
     }
+  });
+});
+
+describe("canal email: el remitente se prueba contra Gmail", () => {
+  const REMITENTE = "martin.sosa@example.com";
+  const NO_ALINEADA = [
+    { name: "Authentication-Results", value: "mx.google.com; spf=pass smtp.mailfrom=bounce@otro.example" },
+  ];
+  const ALINEADA = [
+    { name: "Authentication-Results", value: `mx.google.com; spf=pass smtp.mailfrom=${REMITENTE}` },
+  ];
+  const ASUNTO = `Re: Denuncia de siniestro — caso #${CASO_MAIL}`;
+
+  it("un spf=pass que no alinea con el From no se suma al hilo", async () => {
+    const porMensaje = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", REMITENTE, NO_ALINEADA, "email");
+    const porHilo = await threadLookup(TENANT, "<18c1a2b3d4e5f6>", "", "Re: Caso", REMITENTE, NO_ALINEADA, "email");
+    const porAsunto = await threadLookup(TENANT, "", "", ASUNTO, ASEGURADO, NO_ALINEADA, "email");
+    expect(porMensaje.existingCaseId).toBeUndefined();
+    expect(porHilo.existingCaseId).toBeUndefined();
+    expect(porAsunto.existingCaseId).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith(expect.anything(), "thread_lookup.sender_not_verified");
+  });
+
+  it("sin la cabecera de Gmail tampoco se suma, aunque no haya fallado nada", async () => {
+    for (const headers of [[], {}, undefined]) {
+      const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", REMITENTE, headers, "email");
+      expect(r.existingCaseId).toBeUndefined();
+    }
+  });
+
+  it("con el spf=pass alineado se suma, por el mensaje, el hilo y el asunto", async () => {
+    const porMensaje = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", REMITENTE, ALINEADA, "email");
+    const porHilo = await threadLookup(TENANT, "<18c1a2b3d4e5f6>", "", "Re: Caso", REMITENTE, ALINEADA, "email");
+    const porAsunto = await threadLookup(TENANT, "", "", ASUNTO, ASEGURADO, ALINEADA, "email");
+    expect(porMensaje.existingCaseId).toBe(CASO_MAIL);
+    expect(porHilo.existingCaseId).toBe(CASO_MAIL);
+    expect(porAsunto.existingCaseId).toBe(CASO_MAIL);
+  });
+
+  it("un From que imita al del caso en un comentario no se suma, aunque comparta dominio y dmarc=pass", async () => {
+    // Gmail autentica la cuenta del atacante (dmarc=pass para example.com); el código no
+    // debe leer la dirección de la víctima que va entre paréntesis.
+    const delMismoDominio = [
+      { name: "Authentication-Results", value: "mx.google.com; dmarc=pass header.from=example.com" },
+    ];
+    const imitador = `atacante@example.com (<${REMITENTE}>)`;
+    const porMensaje = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", imitador, delMismoDominio, "email");
+    const porHilo = await threadLookup(TENANT, "<18c1a2b3d4e5f6>", "", "Re: Caso", imitador, delMismoDominio, "email");
+    const porAsunto = await threadLookup(TENANT, "", "", ASUNTO, imitador, delMismoDominio, "email");
+    expect(porMensaje.existingCaseId).toBeUndefined();
+    expect(porHilo.existingCaseId).toBeUndefined();
+    expect(porAsunto.existingCaseId).toBeUndefined();
+  });
+
+  it("el participante que firma con un comentario al lado de su dirección sí se suma", async () => {
+    const r = await threadLookup(
+      TENANT,
+      "<out-abc123>",
+      "",
+      "Re: Caso",
+      `${REMITENTE} (Martín)`,
+      ALINEADA,
+      "email"
+    );
+    expect(r.existingCaseId).toBe(CASO_MAIL);
+  });
+
+  it("alineado pero ajeno al caso, no se suma: verificado no es participante", async () => {
+    const delExtrano = [
+      { name: "Authentication-Results", value: "mx.google.com; dmarc=pass header.from=evil.example" },
+    ];
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", EXTRANO, delExtrano, "email");
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("el simulado, sin cabeceras, se suma, por omisión y diciéndolo", async () => {
+    const porOmision = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", REMITENTE, []);
+    const diciendolo = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", REMITENTE, [], "email_sim");
+    expect(porOmision.existingCaseId).toBe(CASO_MAIL);
+    expect(diciendolo.existingCaseId).toBe(CASO_MAIL);
+  });
+
+  it("el simulado con una falla explícita no se suma", async () => {
+    const fallida = [{ name: "Authentication-Results", value: "mx.google.com; spf=fail smtp.mailfrom=x@y" }];
+    const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", REMITENTE, fallida, "email_sim");
+    expect(r.existingCaseId).toBeUndefined();
   });
 });
 

@@ -110,9 +110,11 @@ export function dbSimulado(
         received_at,
         subject: "Siniestro",
         headers: [] as Cabecera[],
+        from_addr: undefined as string | undefined,
       }));
       if (cabecerasDelUltimo && filas.length > 0) {
-        filas[filas.length - 1] = { ...filas[filas.length - 1], headers: cabecerasDelUltimo };
+        // El From va con las cabeceras: el veredicto de Gmail se alinea contra él.
+        filas[filas.length - 1] = { ...filas[filas.length - 1], headers: cabecerasDelUltimo, from_addr: mensajeCrudo.from_addr };
       }
       orderBy.mockReturnValue(Promise.resolve(filas));
     }

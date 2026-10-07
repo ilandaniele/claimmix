@@ -14,16 +14,15 @@
  * un test de integración que lo comprobaba. Nadie lo notó porque ese test
  * llevaba meses salteado en CI.
  *
- * **Qué se limita y qué no.** Sólo lo que consume un secreto: entrar y darse de
- * alta. Leer la sesión pasa en cada carga de página y ponerle techo sería
- * romper la aplicación para el que la usa bien. Cambiar la contraseña también
- * gasta un secreto (la actual) y va por usuario; `/verify-password` no existe
- * para esta app.
+ * **Qué se limita y qué no.** Sólo lo que consume un secreto: entrar y pedir el
+ * enlace de restablecimiento. Leer la sesión pasa en cada carga de página y
+ * ponerle techo sería romper la aplicación para el que la usa bien. Cambiar la
+ * contraseña también gasta un secreto (la actual) y va por usuario;
+ * `/verify-password` y `/sign-up/email` no existen para esta app.
  *
  * **Por qué por IP + dirección.** Sólo por IP, una oficina entera detrás de un
  * NAT comparte el cupo y se traba sola. Sólo por dirección, el atacante rota
  * direcciones y no lo frena nada. Juntos, cada combinación tiene su cuenta.
- * El alta es la excepción: va sólo por IP (ver más abajo).
  */
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextResponse, type NextRequest } from "next/server";
@@ -43,13 +42,23 @@ const handler = toNextJsHandler(auth);
 /**
  * Las operaciones que gastan algo, y por eso llevan techo.
  *
- * `sign-in` y `sign-up` gastan un secreto. `request-password-reset` gasta algo
- * distinto y igual de real: manda un mail a una direccion que elige quien
- * llama, desde una casilla en la que esa persona confia.
+ * `sign-in` gasta un secreto. `request-password-reset` gasta algo distinto y
+ * igual de real: manda un mail a una direccion que elige quien llama, desde una
+ * casilla en la que esa persona confia.
  */
-const CON_TECHO = ["/sign-in", "/sign-up", "/request-password-reset"];
+const CON_TECHO = ["/sign-in", "/request-password-reset"];
 
-const SIN_SALIDA = "/verify-password"; // oráculo de contraseña que la app no usa
+/*
+ * Lo que la app no usa por HTTP.
+ *
+ * `/verify-password` es un oráculo de contraseña. `/sign-up/email` dejaría que
+ * un tercero registre una dirección permitida que todavía no tiene cuenta y
+ * elija la contraseña: el alta pública es `/registro` y la de un admin es
+ * `/api/admin/users`, que llaman a `auth.api.signUpEmail` desde el servidor, sin
+ * pasar por acá. Además contestaba distinto según la lista permitida (400 o
+ * 200), que es el padrón de empleados de la aseguradora.
+ */
+const SIN_SALIDA = ["/verify-password", "/sign-up/email"];
 const CAMBIO_DE_CLAVE = "/change-password";
 
 /**
@@ -117,7 +126,7 @@ function sinCupo(resetAt: number): NextResponse {
 export async function POST(req: NextRequest) {
   const ruta = new URL(req.url).pathname;
 
-  if (ruta.endsWith(SIN_SALIDA)) return err("NOT_FOUND");
+  if (SIN_SALIDA.some((p) => ruta.endsWith(p))) return err("NOT_FOUND");
 
   if (ruta.endsWith(CAMBIO_DE_CLAVE)) {
     const sesion = await auth.api.getSession({ headers: req.headers });
@@ -134,21 +143,9 @@ export async function POST(req: NextRequest) {
   if (CON_TECHO.some((p) => ruta.includes(p))) {
     const ip = getClientIp(req);
     const direccion = await direccionDelCuerpo(req);
-    const cual = ruta.includes("sign-up")
-      ? "up"
-      : ruta.includes("request-password-reset")
-        ? "reset"
-        : "in";
-    const clave =
-      cual === "up"
-        ? claveDeCupo("auth:up", ip)
-        : claveDeCupo(cual === "reset" ? "auth:reset" : "auth:in", ip, direccion);
-    const config =
-      cual === "up"
-        ? RATE_LIMIT_CONFIGS.AUTH_SIGN_UP
-        : cual === "reset"
-          ? RATE_LIMIT_CONFIGS.AUTH_RESET
-          : RATE_LIMIT_CONFIGS.AUTH_SIGN_IN;
+    const reset = ruta.includes("request-password-reset");
+    const clave = claveDeCupo(reset ? "auth:reset" : "auth:in", ip, direccion);
+    const config = reset ? RATE_LIMIT_CONFIGS.AUTH_RESET : RATE_LIMIT_CONFIGS.AUTH_SIGN_IN;
 
     /*
      * Dos cupos, porque son dos ataques distintos.

@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-01. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-07. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -4487,64 +4487,131 @@ Informe en `C:/Users/Ilan/security-audit-skill/claimmix/run-1/REPORT.md`, con
   de desaparecer. El texto de ese rechazo ya no dice «de WhatsApp».
 - CI: los jobs de integración y E2E de cada PR generan un `BETTER_AUTH_SECRET`
   descartable y enmascarado por corrida en vez de leer el secreto del
-  repositorio. El ensayo de producción (`deploy-checks.yml`) sigue con el suyo.
+  repositorio. El ensayo de producción (`deploy-checks.yml`) siguió con el suyo
+  hasta #382.
 
-**Quedan abiertos (decide el dueño)**
+**Resueltos en #382**
 
-- **From falsificado con autenticación neutra.** Un mail sin
-  Authentication-Results, o con none/neutral (dominio sin DMARC ni SPF), todavía
-  se suma al caso de la víctima porque `senderParticipates` compara sólo la
-  dirección. Lo que ya está: la falla nunca se suma, y la respuesta va sólo a la
-  dirección pelada de la víctima, así que el atacante no recibe datos del caso;
-  sí puede agregar mensajes o adjuntos y reabrirlo. Opciones: (a) exigir
-  `dmarc=pass` del primer encabezado de mx.google.com para el canal `email`
-  (`email_sim` y `web` quedan igual), aceptando que quien no tenga DMARC arranque
-  un caso nuevo; (b) un secreto por caso en el asunto o en el Reply-To. Ninguna
-  está elegida; sigue valiendo la decisión de no usar token por caso.
-- **Alta anticipada de una dirección permitida.** Con `requireEmailVerification:
-  false`, cualquiera que conozca una dirección de `SIGNUP_ALLOWED_EMAILS` o
-  `ADMIN_EMAILS` puede darla de alta antes que su dueña, y la dueña no la recupera
-  con «Olvidé mi contraseña» (`password_reset.sin_perfil`). No hay toma de cuenta:
-  la dirección queda bloqueada hasta que alguien borre la cuenta a mano. Con una
-  entrada `@dominio` la superficie es todo el dominio. Opciones: (1) lista sólo con
-  direcciones exactas, como hoy en producción; (2) alta con verificación previa y
-  una pasada que marque verificadas las cuentas existentes; (3) un camino de
-  reclamo para admins bajo `/api/admin/users`, que es una ruta nueva; (4) que
-  `altaBloqueadaPorSso` mire todos los inquilinos con ese dominio verificado.
-- **Gasto de IA por tráfico anónimo.** Un remitente desconocido por WhatsApp o por
-  mail gasta del tope diario de la aseguradora hasta agotarlo; el cupo por número
-  se esquiva rotando números, en mail no hay cupo por remitente y
-  `ai.budget_exceeded` no avisa a nadie. El gasto queda acotado por el tope del
-  proyecto. Opciones: (1) cubeta por inquilino y canal para remitentes sin caso
-  abierto; (2) sub-tope diario para llamadas sin `userId` en `checkBudget`;
-  (3) aviso al especialista cuando salta `ai.budget_exceeded`; (4) cupo por From
-  normalizado en mail.
-- **Casilla de Gmail repetida entre aseguradoras.** El cierre completo es un índice
-  único global en `email` de las casillas, que es una migración. Mientras tanto
-  queda un hueco: volver a habilitar desde el panel una fila deshabilitada no mira
-  si otra aseguradora conectó esa casilla después.
-- **CRON_SECRET en Preview.** La auditoría marcó que la Carga manda el secreto de
-  producción a cualquier Preview; se descartó porque Preview ya tiene ese mismo
-  valor por decisión del dueño (`docs/PROMOCION.md`). La consecuencia sigue en
-  pie: código de una rama sin revisar, o un Dependabot, corre en Preview con el
-  bearer interno de producción. Separar los valores cierra eso a costa de que el
-  diagnóstico de la Carga contra Previews deje de dar 200.
-- **El watch de Gmail sobrevive a la casilla deshabilitada.** Deshabilitar una
-  casilla no corta el watch: Google sigue mandando avisos y el webhook los ignora.
-  Cerrarlo del todo es cortar el watch al deshabilitar.
-- **Enlaces del formulario web reusados.** Un mismo enlace sirve varias veces y
-  cada uso gasta del presupuesto de IA de la aseguradora. Falta decidir un cupo
-  diario por formulario.
-- **Qué identidad desbloquea qué consulta.** Las consultas por patente o póliza
-  pueden salir en la prosa del modelo hacia quien escribe. Atar cada consulta a
-  la identidad que la habilita es una decisión de producto.
-- **Revocación por persona.** Un admin todavía no puede cortar la sesión de una
-  sola persona; con el vencimiento absoluto, el acceso dura a lo sumo 30 días.
-- **Secreto de sesión que vieron los PR.** Hasta esta rama, los jobs de PR
-  recibían el `BETTER_AUTH_SECRET` del repositorio. Si ese valor es el mismo que
-  el de producción en Vercel, rotarlo cierra la exposición pasada, a costa de
-  cerrar todas las sesiones y de invalidar los enlaces firmados en vuelo
-  (formulario web, dominio SSO). Lo decide el dueño; nada se rotó.
+Las diez decisiones que quedaban abiertas se cerraron en un solo PR, con una
+sola migración (la 0047).
+
+- **From falsificado con autenticación neutra.** Para el canal `email`,
+  `remitenteVerificado` (`src/core/email/autenticacion.ts`) pide prueba a favor:
+  `spf=pass`, `dkim=pass` o `dmarc=pass` alineados con el dominio del From (el
+  mismo dominio o un subdominio; en el `dmarc=pass` cuenta su `header.from`), leídos sólo del primer encabezado
+  `Authentication-Results` de mx.google.com, porque los de abajo los pudo escribir
+  el remitente. Sin esa prueba el mail no se suma a un caso existente
+  (`thread-lookup.ts`) y el remitente no cuenta como autenticado en el worker, en
+  la pantalla del caso ni en las confirmaciones. `email_sim`, WhatsApp y el
+  formulario web siguen como estaban. Consecuencia: quien escribe desde un dominio
+  sin DMARC, SPF ni DKIM alineado abre un caso nuevo en vez de seguir el viejo.
+  `bareAddress` saca los comentarios `( )` y las comillas sin cerrar antes de
+  buscar el `<...>`: un `From: atacante@gmail.com (<victima@gmail.com>)` es del
+  atacante, no de la víctima, aunque los dos dominios alineen.
+- **Alta anticipada de una dirección permitida.** `/registro` ya no pide
+  contraseña: crea la cuenta con una al azar que nadie conoce, no deja sesión
+  (`autoSignIn: false`) y manda el enlace de restablecimiento desde la casilla del
+  inquilino. Quien abre el enlace elige su contraseña y entra; si la cuenta no
+  tenía perfil, `on-password-reset` se lo da con el correo verificado. Todos los
+  finales (creada, ya existía, sin casilla) redirigen a
+  `/login?aviso=revisa_tu_correo`, así que tampoco se averigua qué direcciones
+  existen. El mail consume el mismo cupo `auth:reset` que `/recuperar`, y el alta
+  lo descuenta para cualquier dirección, esté o no en la lista: si no, el 429 de
+  `/recuperar` delataba quién está habilitado. Quien da
+  de alta una dirección ajena ya no la bloquea: el enlace le llega a su dueña.
+- **Gasto de IA por tráfico anónimo.** Tres frenos. `checkBudget`
+  (`src/server/ai/budget.ts`) suma un sub-tope diario para las llamadas sin
+  `userId` (`AI_ANONIMO_DAILY_TOKEN_CAP`; sin la variable, el 60 % de
+  `AI_TENANT_DAILY_TOKEN_CAP`, o sea 12 M de los 20 M de producción), así que lo
+  que gasta quien no está logueado no deja sin cupo al equipo que sí. Cuando salta
+  el tope mensual, el del inquilino o el anónimo, un correo avisa a los
+  especialistas (`avisarPresupuestoAgotado`, a lo sumo uno por día y por
+  inquilino, con el evento de auditoría `ai.budget_alerted`). Y el correo tiene
+  cupo por remitente (`EMAIL_POR_REMITENTE`: 20 en 10 minutos, con la dirección
+  hasheada): del mensaje 21 en adelante se guarda sin leerse, queda marcado para
+  que lo conteste una persona y el poller no despacha el worker.
+- **Casilla de Gmail repetida entre aseguradoras.** La migración 0047 crea el
+  índice único `gmail_accounts_email_unica` sobre `lower(email)`, global entre
+  inquilinos. Cierra la carrera entre dos callbacks de OAuth y la rehabilitación
+  desde el panel: una fila deshabilitada sigue ocupando la casilla, y para
+  liberarla hay que borrarla. Ante un 23505 el callback redirige a
+  `mailbox_taken`, como ya hacía con su chequeo previo. Se aplica a mano antes del
+  merge: ver «Waiting on you».
+- **CRON_SECRET en Preview.** El alcance Preview de Vercel lleva un `CRON_SECRET`
+  propio, distinto del de producción, y el repositorio guarda ese mismo valor como
+  `PREVIEW_CRON_SECRET`. Sólo lo usa `load-tests.yml`, que elige entre
+  `CRON_SECRET`, `QA_CRON_SECRET` y `PREVIEW_CRON_SECRET` según el destino ya
+  resuelto. `deploy-checks.yml`, `post-deploy.yml` y `barrer-trabados.yml` aceptan
+  sólo `claimmix.vercel.app` y `claimmix-qa.vercel.app`: el deploy de una rama no
+  recibe ningún secreto de producción ni de QA. Sin `PREVIEW_CRON_SECRET` el paso
+  de diagnóstico de la Carga contra un Preview no interroga y la medición sigue
+  igual.
+- **El watch de Gmail sobrevive a la casilla deshabilitada.**
+  `PATCH /api/admin/gmail-accounts` corta el watch al deshabilitar y lo vuelve a
+  pedir al habilitar; la respuesta trae `watch` (`detenido`, `registrado`,
+  `sin_cambio` o `fallo`). Un fallo no revierte el cambio de `enabled`: el cron
+  renueva sólo las habilitadas y el webhook ignora los avisos de las demás.
+- **Enlaces del formulario web reusados.** `DENUNCIA_WEB_SLUG_DIA` pone 300
+  denuncias por día por formulario, sumadas todas las IP (el tope por hora dejaba
+  pasar 4.800 al día rotando direcciones). Pasado el tope el envío abre el caso y
+  la persona ve el mismo éxito, pero lo lee una persona y no la IA
+  (`claim.message_not_read` con `tope_por_formulario`).
+- **Qué identidad desbloquea qué consulta.** Las herramientas del agente
+  (`agent-tools.ts`) ya no aceptan un DNI que escriba el modelo: `verificar_poliza`
+  y `polizas_por_dni` usan el DNI que la persona misma dio en la conversación (el
+  que el extractor sacó de lo que escribió, nunca el del padrón); sin DNI,
+  `polizas_por_dni` contesta que falta y el agente lo pide. Además
+  `compose-reply.ts` rechaza una respuesta que repita un dato del padrón que la
+  persona no escribió (`dato_del_padron`): el agente pide confirmar sin dictar el
+  número de póliza ni la patente que encontró.
+- **Revocación por persona.** `DELETE /api/admin/users/[id]/sessions` cierra todas
+  las sesiones de una persona del inquilino, con un botón en la pantalla de
+  usuarios y el evento `auth.user_sessions_revoked`. Un admin no cierra las de un
+  owner, y nadie cierra la propia por acá. La persona queda afuera dentro de los
+  60 s del `cookieCache`, y la pantalla lo dice.
+- **Secreto de sesión que vieron los PR.** Ningún workflow lee ya el
+  `BETTER_AUTH_SECRET` del repositorio: `ci.yml` y los pasos de `deploy-checks.yml`
+  que importan `@/lib/auth` generan uno propio por corrida
+  (`openssl rand -hex 32`, enmascarado), y `deploy-checks.yml` ya no lo declara
+  ni lo hereda, así que QA dejó de pasar `QA_BETTER_AUTH_SECRET`. Los dos secretos
+  del repositorio se pueden borrar. Rotar el valor de producción en Vercel no se
+  hizo: si el del repositorio era el mismo, los PR anteriores lo vieron, y rotarlo
+  cierra todas las sesiones e invalida los enlaces firmados en vuelo (formulario
+  web, dominio SSO). Sigue siendo del dueño.
+
+**Lo que quedó fuera de #382, a propósito**
+
+- `/api/auth/sign-up/email` de Better Auth no se cierra con `disableSignUp`, que
+  bloquearía también `auth.api.signUpEmail`, el que usan `/registro`,
+  `/api/admin/users` y dos scripts. Se cierra por HTTP: la ruta
+  `src/app/api/auth/[...all]/route.ts` lo contesta `NOT_FOUND` (`SIN_SALIDA`), y el
+  alta por correo queda sólo en el servidor. Aun así, una cuenta creada por ahí
+  antes de este cambio, con contraseña propia y sesiones abiertas, no recibe el
+  perfil al restablecer: `onPasswordReset` se lo da únicamente si no tenía
+  sesiones que cerrar (`auth.reset.perfil_no_dado_con_sesiones`), y un admin se lo
+  adjunta a mano.
+- El `cookieCache` de 60 s no se invalida al revocar sesiones: pide un hook de
+  Better Auth o bajar `maxAge`, y `src/lib/auth/index.ts` ya decidió que el camino
+  es invalidar y no acortar.
+- Borrar una casilla de Gmail no corta el watch: el token de refresco se va con la
+  fila y Google lo deja caer solo al revocarse el permiso.
+- `remitenteVerificado` compara «igual o subdominio», que es DMARC en modo relajado
+  y lo que Gmail ya evalúa en `dmarc=pass`; no usa la lista pública de sufijos
+  (una dependencia nueva para un caso que la cabecera ya resuelve).
+- Tope por remitente para `email_sim` (el ensayo se toparía a sí mismo) y para el
+  formulario web por dirección (ya tiene `DENUNCIA_WEB_MAIL`, 3 por hora).
+- Tabla o columna nueva para el tope anónimo, el aviso de presupuesto o los cupos:
+  todo sale de `ai_usage` (con `user_id` nulo para lo anónimo) y de
+  `rate_limit_counters`.
+- Quitar los previews de `load-tests.yml`: es el único workflow al que le sirven
+  (medir un PR antes de qa), y por eso existe `PREVIEW_CRON_SECRET`.
+- Un mail de invitación propio para el alta: el de restablecimiento ya existe,
+  sale de la casilla del inquilino y no registra el enlace.
+- Sacar el DNI de la póliza encontrada cuando la persona no lo dio: la decisión es
+  justamente que las consultas no se alimenten del padrón.
+
+**Sigue abierto**
+
 - **Notas de endurecimiento de la ola 7 (scripts de CI, no son hallazgos).**
   `scripts/prove-data-layer.mts` escribe y borra filas señuelo con el rol dueño sin
   guarda contra el host de la base viva, y su sección 4 escribe fuera del gate de
@@ -4556,6 +4623,31 @@ Informe en `C:/Users/Ilan/security-audit-skill/claimmix/run-1/REPORT.md`, con
 
 ### 🙋 Waiting on you (not code)
 
+- **Gmail: aplicar la 0047 ANTES de mergear.** Crea el índice único
+  `gmail_accounts_email_unica` sobre `lower(email)`, para que una casilla
+  pertenezca a una sola aseguradora (cierra la carrera entre dos callbacks de
+  OAuth y la rehabilitación desde el panel). Se aplica a mano, con el dueño de la
+  base y `node scripts/migrate.mjs --apply` por TCP, en este orden y repitiendo el
+  chequeo previo en cada base: QA (`ep-wispy-flower`), producción
+  (`ep-proud-resonance`) y la rama `production` de Veltra
+  (`STAGING_DATABASE_URL`). El chequeo previo es la consulta que trae el
+  encabezado de `neon/migrations/0047_una_casilla_de_gmail_una_sola_aseguradora.sql`:
+  si devuelve filas, el índice falla con 23505 y hay que decidir a mano cuál queda
+  (la habilitada o la más nueva) y borrar la otra. Sin la 0047, `--exigir-al-dia`
+  deja el CI rojo; el código tolera que falte (el callback sigue rechazando con su
+  chequeo de siempre) y sólo queda abierta la carrera. Vuelta atrás:
+  `DROP INDEX IF EXISTS public.gmail_accounts_email_unica`.
+- **Secretos del cierre de las diez decisiones.** (1) Generar un valor nuevo con
+  `openssl rand -hex 32` y cargarlo igual como `CRON_SECRET` en el alcance Preview
+  de `claimmix` (hoy tiene el de producción) y como `PREVIEW_CRON_SECRET` en el
+  repositorio. (2) Borrar `BETTER_AUTH_SECRET` y `QA_BETTER_AUTH_SECRET` del
+  repositorio: ningún workflow los lee. (3) Decidir si se rota el
+  `BETTER_AUTH_SECRET` de producción en Vercel; sólo cierra algo si ese valor es el
+  mismo que estuvo en el repositorio.
+- **Después del deploy: `pnpm check` completo y `pnpm knock`.** El mail real que
+  deposita el timbre trae el `Authentication-Results` alineado de Gmail y tiene que
+  seguir abriendo o siguiendo caso: es la única prueba de la decisión sobre el From
+  contra un correo de verdad, porque los escenarios del ensayo son `email_sim`.
 - **Carga de lectura: aplicar la 0046 ANTES de mergear.** El tablero de métricas
   hacía 1,3 s (mes) y 1,5 s (año + serie) de p95 con 20 analistas contra un tope
   de 500 ms. Dos causas: los cuellos aplanaban su lateral en un Hash Join sobre
@@ -4982,9 +5074,14 @@ public demo's own tenant — no fallback to production on purpose),
 / `MONTHLY_BUDGET_USD` (the caps that now actually fire), `RATE_LIMIT_PROVIDER`
 (postgres by default) and the `R2_*` set for attachments.
 
-⚠️ `AI_TENANT_DAILY_TOKEN_CAP` lives in **two** places and they must agree: Vercel
-(production) and the GitHub **repo variable** (the post-deploy rehearsal, which runs
-in the runner). See the post-deploy section above for what happens when they don't.
+`AI_ANONIMO_DAILY_TOKEN_CAP` (optional) caps the tokens a tenant spends per day on
+calls without a user (mail, WhatsApp, the web form); it defaults to 60 % of
+`AI_TENANT_DAILY_TOKEN_CAP`. Vercel's Preview scope has its own `CRON_SECRET`, and the
+repo keeps the same value as `PREVIEW_CRON_SECRET` (only `load-tests.yml` reads it).
+
+⚠️ `AI_TENANT_DAILY_TOKEN_CAP` (and `AI_ANONIMO_DAILY_TOKEN_CAP`, when set) lives in
+**two** places and they must agree: Vercel (production) and the GitHub **repo variable**
+(the post-deploy rehearsal, which runs in the runner). See the post-deploy section above for what happens when they don't.
 
 ## Verify / build commands
 `pnpm type-check` · `pnpm lint` · `pnpm test:unit` · `pnpm build`.

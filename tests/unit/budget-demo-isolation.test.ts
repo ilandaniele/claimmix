@@ -187,3 +187,113 @@ describe("checkBudget — el tope leído del entorno", () => {
     expect((await checkBudget(REAL)).exceeded).toBe(false);
   });
 });
+
+/**
+ * Lo que entra sin usuario —mail, WhatsApp, formulario— tiene su propio tope.
+ *
+ * Sin él, quien rota remitentes gasta modelo sin pasar por el cupo de ninguna
+ * persona, y con sólo el del inquilino agotaba el día entero también para el
+ * equipo que trabaja logueado.
+ */
+describe("checkBudget — el tope de lo que entra sin usuario", () => {
+  beforeEach(() => {
+    process.env.MONTHLY_BUDGET_USD = "200";
+    process.env.AI_TENANT_DAILY_TOKEN_CAP = "1000";
+    delete process.env.AI_ANONIMO_DAILY_TOKEN_CAP;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sin variable corta en el 60 % del tope del inquilino, con su motivo", async () => {
+    rows.push({ total: 0 }, { total: 700 }, { total: 600 }); // mensual, inquilino, sin usuario
+
+    const r = await checkBudget(REAL);
+
+    expect(r).toMatchObject({ exceeded: true, motivo: "anonimo" });
+    expect(r.reason).toContain("sin usuario");
+  });
+
+  it("un token por debajo del 60 % todavía pasa", async () => {
+    rows.push({ total: 0 }, { total: 700 }, { total: 599 });
+
+    expect((await checkBudget(REAL)).exceeded).toBe(false);
+  });
+
+  it("la variable vacía o rota cae al 60 %, no apaga el tope", async () => {
+    for (const valor of ["", "12M"]) {
+      process.env.AI_ANONIMO_DAILY_TOKEN_CAP = valor;
+      rows.push({ total: 0 }, { total: 700 }, { total: 600 });
+
+      expect(await checkBudget(REAL)).toMatchObject({ exceeded: true, motivo: "anonimo" });
+    }
+  });
+
+  it("AI_ANONIMO_DAILY_TOKEN_CAP manda sobre el 60 %", async () => {
+    process.env.AI_ANONIMO_DAILY_TOKEN_CAP = "900";
+    rows.push({ total: 0 }, { total: 700 }, { total: 800 });
+    expect((await checkBudget(REAL)).exceeded).toBe(false);
+
+    rows.push({ total: 0 }, { total: 950 }, { total: 900 });
+    expect(await checkBudget(REAL)).toMatchObject({ exceeded: true, motivo: "anonimo" });
+  });
+
+  it("con AI_ANONIMO_DAILY_TOKEN_CAP=0 corta en cero", async () => {
+    process.env.AI_ANONIMO_DAILY_TOKEN_CAP = "0";
+    rows.push({ total: 0 }, { total: 0 }, { total: 0 });
+
+    expect(await checkBudget(REAL)).toMatchObject({ exceeded: true, motivo: "anonimo" });
+  });
+
+  it("con usuario no se evalúa: el equipo logueado sigue aunque lo anónimo esté agotado", async () => {
+    process.env.AI_ANONIMO_DAILY_TOKEN_CAP = "0";
+    rows.push({ total: 0 }, { total: 700 }, { total: 10 }); // mensual, inquilino, persona
+
+    const r = await checkBudget(REAL, "user-1");
+
+    expect(r.exceeded).toBe(false);
+  });
+
+  it("la tercera consulta es la de las llamadas sin usuario", async () => {
+    rows.push({ total: 0 }, { total: 0 }, { total: 0 });
+    await checkBudget(REAL);
+    const sinUsuario = JSON.stringify(captured[2]?.where ?? {});
+
+    captured.length = 0;
+    rows.push({ total: 0 }, { total: 0 }, { total: 0 });
+    await checkBudget(REAL, "user-1");
+    const deLaPersona = JSON.stringify(captured[2]?.where ?? {});
+
+    expect(sinUsuario).toContain("is null");
+    expect(deLaPersona).not.toContain("is null");
+    expect(deLaPersona).toContain("user-1");
+  });
+
+  it("el inquilino gana sobre el anónimo cuando se pasan los dos, y avisa con su motivo", async () => {
+    rows.push({ total: 0 }, { total: 1000 }, { total: 1000 });
+
+    expect(await checkBudget(REAL)).toMatchObject({ exceeded: true, motivo: "inquilino" });
+  });
+
+  it("cada tope trae su motivo", async () => {
+    process.env.MONTHLY_BUDGET_USD = "50";
+    rows.push({ total: 50 }, { total: 0 }, { total: 0 });
+    expect(await checkBudget(REAL)).toMatchObject({ motivo: "mensual" });
+
+    process.env.MONTHLY_BUDGET_USD = "200";
+    process.env.AI_USER_DAILY_TOKEN_CAP = "100";
+    rows.push({ total: 0 }, { total: 500 }, { total: 100 });
+    expect(await checkBudget(REAL, "user-1")).toMatchObject({ motivo: "persona" });
+  });
+
+  it("si el contador se rompe, falla abierto aunque el tope esté en cero", async () => {
+    process.env.AI_ANONIMO_DAILY_TOKEN_CAP = "0";
+    const { db } = await import("@/lib/db");
+    vi.spyOn(db, "select").mockImplementation(() => {
+      throw new Error("connection reset");
+    });
+
+    expect(await checkBudget(REAL)).toEqual({ exceeded: false });
+  });
+});

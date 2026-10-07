@@ -50,6 +50,7 @@ vi.mock("@/lib/db/schema", () => ({
     created_at: "created_at",
     updated_at: "updated_at",
     extraction_pending: "extraction_pending",
+    para_responder_desde: "para_responder_desde",
   },
 }));
 
@@ -173,6 +174,18 @@ describe("el barredor ve los casos que entran de verdad", () => {
 
     // Una vez en el SELECT y otra en la guarda del UPDATE.
     expect(fuente.split("eq(cases.extraction_pending, false)").length - 1).toBe(2);
+  });
+
+  it("no escala lo que ya tiene una persona: `recibido` en «Para responder» pasado un tope", () => {
+    const fuente = readFileSync("src/server/intake/reap-stuck.ts", "utf8").replace(/\r\n/g, "\n");
+
+    // Pasado el tope por formulario o por remitente el caso queda en `recibido`
+    // sin agente, a propósito. Una vez en el SELECT y otra en la guarda del UPDATE.
+    expect(fuente.split("sinPersonaEncima()").length - 1).toBe(2);
+    // Y la exclusión se limita a `recibido`: un `procesando` marcado se barre igual.
+    expect(fuente).toContain(
+      'const sinPersonaEncima = () => or(ne(cases.status, "recibido"), isNull(cases.para_responder_desde));'
+    );
   });
 
   it("el reloj es coalesce", () => {

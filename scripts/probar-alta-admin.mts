@@ -37,6 +37,7 @@ try {
 
   const { auth } = await import("@/lib/auth");
   console.log("▸ Dando de alta como lo hace /admin/users");
+  // Con autoSignIn en false no hay token ni sesión; sólo se usa r.user.id.
   const r = await auth.api.signUpEmail({
     body: { name: "Prueba Alta", email: correo, password: "Analyst123!" },
     headers: new Headers(),

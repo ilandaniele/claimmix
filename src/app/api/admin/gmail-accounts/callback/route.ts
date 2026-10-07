@@ -5,6 +5,7 @@ import { tables } from "@/lib/db";
 import { encryptRefreshToken, inquilinoDeLaCasilla } from "@/server/email/gmail/accounts";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { enTenant } from "@/data/scope";
+import { codigoPg } from "@/server/core-sync/config";
 import { logger } from "@/lib/observability/logger";
 import {
   COOKIE_ESTADO_OAUTH,
@@ -109,7 +110,16 @@ export async function GET(request: NextRequest) {
           })
       );
     } catch (e) {
-      logger.error({ detalle: (e as { code?: string })?.code ?? "unknown" }, "gmail_accounts_callback.upsert");
+      const codigo = codigoPg(e);
+      // El único índice que puede chocar acá y no es el del ON CONFLICT es el
+      // de la casilla única (0047): otro callback ganó la carrera.
+      if (codigo === "23505") {
+        logger.warn({ motivo: "casilla_de_otro_inquilino" }, "gmail_accounts_callback.rechazado");
+        const rechazo = NextResponse.redirect(new URL("/configuracion?gmail=mailbox_taken", origin));
+        rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+        return rechazo;
+      }
+      logger.error({ detalle: codigo ?? "unknown" }, "gmail_accounts_callback.upsert");
       return NextResponse.redirect(new URL("/configuracion?gmail=save_failed", origin));
     }
 

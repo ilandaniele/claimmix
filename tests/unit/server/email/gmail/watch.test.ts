@@ -9,6 +9,9 @@
  * - Missing expiration in API response → throws.
  * - Expiration ms-epoch string is correctly converted to ISO-8601.
  *
+ * stopGmailWatch: llama users.stop y limpia la marca; un 404/400 de Google (no
+ * había watch) no tira; cualquier otro error sí y no limpia nada.
+ *
  * Strategy:
  * - Mock getGmailClient() to return a controlled gmail object.
  * - Mock setWatchState() to verify call arguments without hitting Neon.
@@ -29,6 +32,7 @@ vi.mock("@/server/email/gmail/gmail-client", () => ({
 // Mock setWatchState — we verify arguments; no real DB needed.
 vi.mock("@/server/email/gmail/poll-state", () => ({
   setWatchState: vi.fn(),
+  clearWatchState: vi.fn(),
 }));
 
 // Mock @/lib/db to prevent DATABASE_URL errors on any transitive imports.
@@ -37,9 +41,9 @@ vi.mock("@/lib/db", () => ({
   tables: {},
 }));
 
-import { setupGmailWatch } from "@/server/email/gmail/watch";
+import { setupGmailWatch, stopGmailWatch } from "@/server/email/gmail/watch";
 import { getGmailClient } from "@/server/email/gmail/gmail-client";
-import { setWatchState } from "@/server/email/gmail/poll-state";
+import { clearWatchState, setWatchState } from "@/server/email/gmail/poll-state";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -190,5 +194,67 @@ describe("setupGmailWatch", () => {
       expect(expArg).not.toBe(EXPIRATION_MS);
       expect(expArg).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     });
+  });
+});
+
+describe("stopGmailWatch", () => {
+  const CUENTA = { email: "otra@example.com", refreshToken: "fake-refresh" };
+
+  const gmailQueFalla = (error?: unknown) => {
+    const stopFn = error === undefined
+      ? vi.fn().mockResolvedValue({ data: {} })
+      : vi.fn().mockRejectedValue(error);
+    vi.mocked(getGmailClient).mockReturnValue({ users: { stop: stopFn } } as any);
+    return stopFn;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("llama users.stop con el token de la casilla y limpia la marca de esa casilla", async () => {
+    const stopFn = gmailQueFalla();
+
+    await stopGmailWatch(CUENTA);
+
+    expect(getGmailClient).toHaveBeenCalledWith("fake-refresh");
+    expect(stopFn).toHaveBeenCalledOnce();
+    expect(stopFn).toHaveBeenCalledWith({ userId: "me" });
+    expect(clearWatchState).toHaveBeenCalledOnce();
+    expect(clearWatchState).toHaveBeenCalledWith("otra@example.com");
+  });
+
+  it.each([404, 400])("un %s de Google (no había watch) no tira y limpia la marca igual", async (status) => {
+    gmailQueFalla(Object.assign(new Error("sin watch"), { status }));
+
+    await expect(stopGmailWatch(CUENTA)).resolves.toBeUndefined();
+
+    expect(clearWatchState).toHaveBeenCalledWith("otra@example.com");
+  });
+
+  it("el status también se lee de `code` y de `response.status`", async () => {
+    gmailQueFalla(Object.assign(new Error("sin watch"), { code: 404 }));
+    await expect(stopGmailWatch(CUENTA)).resolves.toBeUndefined();
+
+    gmailQueFalla(Object.assign(new Error("sin watch"), { response: { status: 400 } }));
+    await expect(stopGmailWatch(CUENTA)).resolves.toBeUndefined();
+
+    expect(clearWatchState).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([401, 500, "ECONNRESET"])("un error %s tira y no limpia la marca: el watch puede seguir vivo", async (status) => {
+    const error = Object.assign(new Error("falló"), { code: status });
+    gmailQueFalla(error);
+
+    await expect(stopGmailWatch(CUENTA)).rejects.toBe(error);
+
+    expect(clearWatchState).not.toHaveBeenCalled();
+  });
+
+  it("si limpiar la marca falla, el error llega al llamador", async () => {
+    gmailQueFalla();
+    vi.mocked(clearWatchState).mockRejectedValueOnce(new Error("[poll-state] Failed to clear watch state: 57P01"));
+
+    await expect(stopGmailWatch(CUENTA)).rejects.toThrow("Failed to clear watch state: 57P01");
   });
 });

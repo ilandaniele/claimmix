@@ -12,12 +12,13 @@
  * had simply never been told, and it was the one that mattered most.
  */
 
-const { mockSelect, mockGetAccount, mockSend, mockAudit, mockCupo } = vi.hoisted(() => ({
+const { mockSelect, mockGetAccount, mockSend, mockAudit, mockCupo, mockLiberar } = vi.hoisted(() => ({
   mockSelect: vi.fn(),
   mockGetAccount: vi.fn(),
   mockSend: vi.fn(),
   mockAudit: vi.fn(),
   mockCupo: vi.fn(),
+  mockLiberar: vi.fn(),
 }));
 
 // La capa de datos, corriendo contra el db que este test ya simula.
@@ -47,6 +48,7 @@ vi.mock("@/server/email/gmail/gmail-sender", () => ({
 vi.mock("@/lib/rate-limit/index", async (original) => ({
   ...(await original<typeof import("@/lib/rate-limit/index")>()),
   rateLimit: mockCupo,
+  liberarCupo: mockLiberar,
 }));
 
 vi.mock("@/lib/audit/log", () => ({
@@ -747,6 +749,19 @@ describe("avisarMensajeTardio", () => {
     await tardio();
 
     expect(mockCupo).not.toHaveBeenCalled();
+  });
+
+  it("un correo que no salió devuelve el tope, y uno entregado no", async () => {
+    database({ listaDelTenant: ["guardia@aseguradora.com"] });
+
+    mockSend.mockResolvedValueOnce({ error: "gmail dijo que no" });
+    await tardio();
+    expect(mockLiberar).toHaveBeenCalledWith(`aviso-tardio:${TENANT}:${CASE}`, 24 * 60 * 60_000);
+
+    mockLiberar.mockClear();
+    mockSend.mockResolvedValueOnce({ providerMessageId: "sent-1" });
+    await tardio();
+    expect(mockLiberar).not.toHaveBeenCalled();
   });
 
   // Gastarlo sin mandar dejaba al caso sin avisos el resto del día cuando

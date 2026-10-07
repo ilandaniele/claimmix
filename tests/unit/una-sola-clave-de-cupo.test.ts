@@ -48,6 +48,12 @@ describe("claveDeCupo", () => {
     expect(claveDeCupo("lectura-reclamo", "T-1", "C-1")).toBe("lectura-reclamo:t-1:c-1");
   });
 
+  it("los cupos del aviso de presupuesto, del mail y del formulario por día arman ámbito:parte en minúsculas", () => {
+    expect(claveDeCupo("aviso-presupuesto", "T-1")).toBe("aviso-presupuesto:t-1");
+    expect(claveDeCupo("email", "T-1", "ABC123")).toBe("email:t-1:abc123");
+    expect(claveDeCupo("denuncia-slug-dia", " Mi-Slug ")).toBe("denuncia-slug-dia:mi-slug");
+  });
+
   it("re-analyze es re-analyze:<caseId>:<userId>", () => {
     expect(claveDeCupo("re-analyze", "c-1", "u-1")).toBe("re-analyze:c-1:u-1");
   });
@@ -179,30 +185,29 @@ describe("el formulario y la API comparten cubeta (E21)", () => {
     expect(claveApi).toBe("auth:reset:1.2.3.4:ana@ejemplo.com");
   });
 
-  it("alta: signUp y POST /api/auth/sign-up/email arman la misma clave, y signUp también cuenta por IP sola", async () => {
+  it("alta: signUp cuenta por IP y por IP sola, y POST /api/auth/sign-up/email ya no existe", async () => {
     const { signUp } = await import("@/app/registro/actions");
     const { POST } = await import("@/app/api/auth/[...all]/route");
 
     const fd = new FormData();
     fd.set("full_name", "Ana Pérez");
     fd.set("email", "Ana@Ejemplo.com");
-    fd.set("password", "una-contraseña-larga");
     await signUp({}, fd);
     const claveFormulario = mockRateLimit.mock.calls[0][0];
 
     expect(mockTopePorIp).toHaveBeenCalledWith("1.2.3.4");
+    expect(claveFormulario).toBe("auth:up:1.2.3.4");
 
     mockRateLimit.mockClear();
-    await POST(
+    const res = await POST(
       new NextRequest("http://x/api/auth/sign-up/email", {
         method: "POST",
         body: JSON.stringify({ email: "Ana@Ejemplo.com", password: "x" }),
         headers: { "content-type": "application/json", "x-vercel-forwarded-for": "1.2.3.4" },
       })
     );
-    const claveApi = mockRateLimit.mock.calls[0][0];
 
-    expect(claveFormulario).toBe("auth:up:1.2.3.4");
-    expect(claveApi).toBe("auth:up:1.2.3.4");
+    expect(res.status).toBe(404);
+    expect(mockRateLimit).not.toHaveBeenCalled();
   });
 });

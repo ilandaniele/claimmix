@@ -1,0 +1,50 @@
+-- =============================================================================
+-- 0047 — Una casilla de Gmail pertenece a una sola aseguradora
+-- =============================================================================
+--
+-- Hasta acá la unicidad era por (tenant_id, email) (idx_gmail_accounts_tenant_email,
+-- 0001): la misma casilla conectada en dos inquilinos hacía que el timbre de
+-- Pub/Sub y las respuestas cayeran en uno solo, elegido por orden de lectura.
+-- El callback de OAuth ya rechaza al segundo inquilino antes de insertar
+-- (`inquilinoDeLaCasilla`), pero ese chequeo corre bajo RLS en dos pasos: no
+-- cubre la carrera entre dos callbacks ni rehabilitar (PATCH) una casilla que
+-- otro inquilino tiene habilitada. Este índice es lo que cierra las dos cosas.
+--
+-- Sobre lower(email): el callback guarda en minúsculas desde siempre, pero una
+-- fila vieja escrita de otra forma no debe poder convivir con su gemela.
+--
+-- No se declara en el schema de Drizzle: un índice sobre una expresión no lo
+-- usa ningún `onConflict` ni ninguna consulta del código. Lo único que lo toca
+-- es el INSERT del callback, que ante un 23505 redirige a `mailbox_taken`.
+--
+-- Hay que correr el chequeo previo ANTES de aplicar. Si devuelve filas, la
+-- creación del índice falla (23505) y hay que decidir a mano cuál queda (la
+-- habilitada, o la más nueva) y borrar la otra:
+--
+--   SELECT lower(email) AS casilla, count(*) AS filas,
+--          array_agg(tenant_id::text ORDER BY created_at) AS inquilinos,
+--          array_agg(enabled ORDER BY created_at) AS habilitadas,
+--          array_agg(created_at ORDER BY created_at) AS creadas
+--     FROM public.gmail_accounts
+--    GROUP BY lower(email)
+--   HAVING count(*) > 1;
+--
+--   DELETE FROM public.gmail_accounts WHERE id = '<id>';
+--
+-- Se aplica A MANO, con `node scripts/migrate.mjs --apply` por TCP, en este
+-- orden y repitiendo el chequeo previo en cada base:
+--   1. ep-wispy-flower (QA).
+--   2. ep-proud-resonance (la viva, y también la de los secretos DATABASE_URL del CI).
+--   3. La rama production de Veltra (STAGING_DATABASE_URL).
+-- Identificar cada base por su canal de casos, no por su nombre.
+--
+-- El código tolera que el índice todavía no esté: el callback sigue rechazando
+-- con el chequeo de siempre y sólo queda abierta la carrera. Por eso puede
+-- desplegarse antes o después. Sin CONCURRENTLY porque el runner corre todo en
+-- una sola transacción y CONCURRENTLY no puede; la tabla es chica.
+--
+-- Vuelta atrás: DROP INDEX IF EXISTS public.gmail_accounts_email_unica;
+-- =============================================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS gmail_accounts_email_unica
+  ON public.gmail_accounts (lower(email));

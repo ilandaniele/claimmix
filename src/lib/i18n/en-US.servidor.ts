@@ -55,6 +55,14 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "tardio.aviso.resumen": "Summary: {resumen}",
   "tardio.aviso.caso": "Case: {caso}",
   "tardio.aviso.abrir": "Open: {link}",
+  "presupuesto.aviso.asunto": "ClaimMix stopped analysing claims: AI budget exhausted",
+  "presupuesto.aviso.cuerpo": "Since {hora}, claims arriving by email, WhatsApp and the web form are left unanalysed {plazo}. Reason: {motivo}. Those already received stay in the inbox as escalated: re-analyse them by hand once the cap lifts.",
+  "presupuesto.aviso.motivo.anonimo": "the daily quota for channels without a user",
+  "presupuesto.aviso.motivo.inquilino": "the insurer's daily quota",
+  "presupuesto.aviso.motivo.mensual": "the project's monthly budget",
+  "presupuesto.aviso.plazo.anonimo": "until tomorrow",
+  "presupuesto.aviso.plazo.inquilino": "until tomorrow",
+  "presupuesto.aviso.plazo.mensual": "until next month starts or someone raises the cap",
   "case.detail.insuredData": "Insured data",
   "case.detail.policyholderName": "Name",
   "case.detail.policyNumber": "Policy",
@@ -500,7 +508,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   // ── Public web form (B17) ──────────────────────────────────────────────────
   "formulario.titulo": "Claims web form",
   "formulario.ayuda":
-    "Your policyholders report a claim from a public page, no account needed. Each submission opens a case in the «Web form» channel and the agent continues the conversation by email, at the address the person typed.",
+    "Your policyholders report a claim from a public page, no account needed. Each submission opens a case in the «Web form» channel and the agent continues the conversation by email, at the address the person typed. It accepts up to {porHora} submissions per hour and {porDia} per day; past the daily quota, claims are saved and left to be answered by hand.",
   "formulario.enlace": "Public link",
   "formulario.slug": "Link name",
   "formulario.slugAyuda": "Lowercase letters, numbers and hyphens, 4 to 40 characters. It cannot be changed later.",

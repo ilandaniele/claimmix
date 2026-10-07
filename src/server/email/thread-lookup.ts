@@ -26,7 +26,7 @@
 
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
-import { autenticacionFallida } from "@/core/email/autenticacion";
+import { remitenteVerificado } from "@/core/email/autenticacion";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
@@ -61,7 +61,8 @@ export interface ThreadLookupResult {
  * @param references  - Value of the References header (space-separated message-ids)
  * @param subject     - Value of the Subject header (may carry "Caso #<uuid>")
  * @param fromAddr    - Value of the From header; must already take part in the case
- * @param headers     - cabeceras del mensaje; con Authentication-Results fallida no se pega a ningún caso
+ * @param headers     - cabeceras del mensaje, de donde sale si el remitente es de quien dice
+ * @param channel     - `email` exige un Authentication-Results de Gmail alineado con el From; `email_sim` sólo que no haya fallado
  * @returns { existingCaseId?: string }
  */
 export async function threadLookup(
@@ -70,11 +71,12 @@ export async function threadLookup(
   references: string,
   subject: string,
   fromAddr: string,
-  headers: unknown = []
+  headers: unknown = [],
+  channel: "email" | "email_sim" = "email_sim"
 ): Promise<ThreadLookupResult> {
-  // El servidor de correo dijo que el remitente es falso: no entra a ningún caso, abre el suyo.
-  if (autenticacionFallida(headers)) {
-    logger.warn({ via: "authentication_results" }, "thread_lookup.sender_not_authenticated");
+  // Sin remitente verificado no entra a ningún caso: abre el suyo.
+  if (!remitenteVerificado(headers, fromAddr, channel)) {
+    logger.warn({ via: "authentication_results" }, "thread_lookup.sender_not_verified");
     return {};
   }
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.

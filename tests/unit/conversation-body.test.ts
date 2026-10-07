@@ -120,7 +120,7 @@ describe("loadInboundConversation", () => {
       },
     ]);
 
-    const out = await loadInboundConversation("case-1", { tenantId: "tenant-1" });
+    const out = await loadInboundConversation("case-1", { tenantId: "tenant-1" }, "whatsapp");
 
     expect(out?.body).toContain("Choqué en Bahía Blanca");
     expect(out?.body).toContain("[Imagen adjunta sin texto]");
@@ -131,12 +131,48 @@ describe("loadInboundConversation", () => {
 
   it("returns null when the case has no inbound messages", async () => {
     inboundRows([]);
-    expect(await loadInboundConversation("case-1", { tenantId: "tenant-1" })).toBeNull();
+    expect(await loadInboundConversation("case-1", { tenantId: "tenant-1" }, "whatsapp")).toBeNull();
   });
 
   it("returns null rather than guessing when the read gives back nonsense", async () => {
     inboundRows({ notAnArray: true });
-    expect(await loadInboundConversation("case-1", { tenantId: "tenant-1" })).toBeNull();
+    expect(await loadInboundConversation("case-1", { tenantId: "tenant-1" }, "whatsapp")).toBeNull();
+  });
+
+  describe("remitenteAutenticado según el canal del caso", () => {
+    const fila = (headers: unknown) => ({
+      id: "m1",
+      provider_message_id: "gmail-1",
+      body_text: "Choqué ayer",
+      subject: "Siniestro",
+      from_addr: "Ana <ana@example.com>",
+      received_at: "2026-08-19T23:09:44Z",
+      headers,
+    });
+    const ALINEADA = [
+      {
+        name: "Authentication-Results",
+        value: "mx.google.com; spf=pass smtp.mailfrom=ana@example.com; dkim=pass header.i=@example.com",
+      },
+    ];
+    const NO_ALINEADA = [
+      { name: "Authentication-Results", value: "mx.google.com; spf=pass smtp.mailfrom=bounce@otro.example" },
+    ];
+    const leer = async (headers: unknown, canal: string) => {
+      inboundRows([fila(headers)]);
+      return (await loadInboundConversation("case-1", { tenantId: "tenant-1" }, canal))?.remitenteAutenticado;
+    };
+
+    it("por email hace falta la cabecera de Gmail alineada con el From", async () => {
+      expect(await leer(ALINEADA, "email")).toBe(true);
+      expect(await leer(NO_ALINEADA, "email")).toBe(false);
+      expect(await leer([], "email")).toBe(false);
+    });
+
+    it("por email_sim, sin cabeceras, vale como siempre", async () => {
+      expect(await leer([], "email_sim")).toBe(true);
+      expect(await leer(NO_ALINEADA, "email_sim")).toBe(true);
+    });
   });
 });
 

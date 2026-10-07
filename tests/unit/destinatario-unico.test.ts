@@ -71,6 +71,37 @@ describe("bareAddress — nombre visible entre comillas", () => {
   });
 });
 
+describe("bareAddress — comentarios RFC 5322", () => {
+  it("un comentario con otra dirección adentro no gana sobre la dirección real", () => {
+    expect(bareAddress("atacante@gmail.com (<victima@gmail.com>)")).toBe("atacante@gmail.com");
+    expect(bareAddress("(<victima@gmail.com>) <atacante@gmail.com>")).toBe("atacante@gmail.com");
+    expect(bareAddress("Ana (<victima@gmail.com>) <atacante@gmail.com>")).toBe("atacante@gmail.com");
+  });
+
+  it("los comentarios anidados y los paréntesis escapados no cortan antes", () => {
+    expect(bareAddress("Ana (uno (dos <victima@gmail.com>) \\) <otra@gmail.com>) <ana@gmail.com>")).toBe(
+      "ana@gmail.com",
+    );
+  });
+
+  it("un comentario sin cerrar se come lo que sigue: no deja leer la dirección del comentario", () => {
+    expect(bareAddress("atacante@gmail.com (<victima@gmail.com>")).toBe("atacante@gmail.com");
+  });
+
+  it("un paréntesis entre comillas es nombre visible, no abre un comentario", () => {
+    expect(bareAddress('"Ana (ventas" <ana@x.com>')).toBe("ana@x.com");
+    expect(bareAddress('"(" <ana@x.com> (<victima@x.com>)')).toBe("ana@x.com");
+  });
+
+  it("unas comillas sin cerrar no dejan leer la dirección que quedó adentro", () => {
+    expect(bareAddress('"x <victima@gmail.com> <atacante@gmail.com>')).not.toBe("victima@gmail.com");
+  });
+
+  it("una dirección pelada con un comentario al lado sale sin el comentario", () => {
+    expect(bareAddress("Ana@X.com (Ana Pérez)")).toBe("ana@x.com");
+  });
+});
+
 function buildDbMock() {
   const inserts: Record<string, unknown[]> = {
     claim_messages: [],

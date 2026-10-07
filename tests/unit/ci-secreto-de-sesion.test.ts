@@ -20,7 +20,39 @@ describe("el secreto de sesión de producción no llega a los jobs de PR", () =>
     expect(sinComentarios("ci.yml").match(/openssl rand -hex 32/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
-  it("el ensayo de producción sigue usando el secreto de verdad", () => {
-    expect(sinComentarios("deploy-checks.yml")).toMatch(/\$\{\{\s*secrets\.BETTER_AUTH_SECRET\b/);
+  it("deploy-checks.yml no lee secrets.BETTER_AUTH_SECRET y genera el suyo", () => {
+    const yml = sinComentarios("deploy-checks.yml");
+    expect(yml).not.toMatch(/\$\{\{\s*secrets\.BETTER_AUTH_SECRET\b/);
+    expect(yml.match(/openssl rand -hex 32/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
   });
+
+  it("post-deploy.yml no lee secrets.QA_BETTER_AUTH_SECRET", () => {
+    expect(sinComentarios("post-deploy.yml")).not.toMatch(/\$\{\{\s*secrets\.QA_BETTER_AUTH_SECRET\b/);
+  });
+});
+
+describe("el disparo a mano del post-deploy de producción", () => {
+  it("sólo admite el alias de producción: `produccion` hereda los secretos de producción", () => {
+    const yml = sinComentarios("post-deploy.yml");
+    expect(yml).toContain("claimmix.vercel.app) ;;");
+    expect(yml).not.toContain("claimmix-qa.vercel.app) ;;");
+    expect(yml).not.toContain("claimmix.vercel.app|claimmix-qa.vercel.app");
+  });
+});
+
+describe("el ensayo del deploy usa los mismos topes de IA que Vercel", () => {
+  it("deploy-checks.yml pasa los dos: el del inquilino y el de lo anónimo", () => {
+    const yml = sinComentarios("deploy-checks.yml");
+    expect(yml).toContain("AI_TENANT_DAILY_TOKEN_CAP: ${{ vars.AI_TENANT_DAILY_TOKEN_CAP");
+    expect(yml).toContain("AI_ANONIMO_DAILY_TOKEN_CAP: ${{ vars.AI_ANONIMO_DAILY_TOKEN_CAP }}");
+  });
+});
+
+describe("las vistas previas no reciben el CRON_SECRET de producción", () => {
+  it.each(["deploy-checks.yml", "post-deploy.yml", "barrer-trabados.yml"])(
+    "%s no admite el sufijo de las vistas previas",
+    (nombre) => {
+      expect(sinComentarios(nombre)).not.toContain("ilandaniele-3471s-projects");
+    },
+  );
 });

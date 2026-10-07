@@ -26,6 +26,7 @@ import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { instruccionDeCampo } from "@/lib/labels/instruccion-de-campo";
 import { EMAIL_RE } from "@/core/text/contacto";
+import { repiteDatoDelPadron, tokensDelPadron } from "@/core/text/dato-del-padron";
 import { sinEnlaces } from "@/core/mensajes/pregunta";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
@@ -112,6 +113,24 @@ export interface ComposeReplyInput {
    * en una derivación por titular ajeno.
    */
   heridos?: boolean;
+  /**
+   * Lo que las consultas al padrón devolvieron en esta vuelta, sin enmascarar.
+   *
+   * No entra al prompt: sólo lo usa la guarda para rechazar un mensaje que le
+   * dicta a la persona un número que ella no escribió.
+   */
+  datosDelPadron?: string[];
+  /**
+   * Los valores que la persona dijo en toda la conversación, no sólo en el
+   * último mensaje.
+   *
+   * `datosDelPadron` incluye lo que devolvió `historial_del_caso`, que repite
+   * los datos del caso —también los que ella escribió—. Sin esto, preguntarle
+   * «¿la patente AB123CD es la del auto asegurado?» se rechazaba como dato del
+   * padrón cuando la patente la había dicho ella dos mensajes atrás. Tampoco
+   * entra al prompt.
+   */
+  escritoPorLaPersona?: string[];
   /** The claimant's most recent message, for tone only. */
   lastMessage?: string;
   /** The deterministic text. The model is asked to do better, not different. */
@@ -327,6 +346,16 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     ...(trimmed.match(EMAIL_RE) ?? []),
   ];
   if (contactos.some((c) => !permitido.includes(c.toLowerCase()))) return "contacto_inventado";
+  // Un número del padrón que la persona no escribió no se le dicta: quien
+  // mande un DNI ajeno recibiría de vuelta la póliza de otro.
+  const dato = repiteDatoDelPadron(trimmed, tokensDelPadron(input.datosDelPadron ?? []), [
+    input.fallback,
+    ...(input.lastMessage ? [input.lastMessage] : []),
+    ...(input.escritoPorLaPersona ?? []),
+    ...Object.values(input.knownValues ?? {}),
+    ...(input.conflicts ?? []).flatMap((c) => [c.proposed, c.stored]),
+  ]);
+  if (dato) return "dato_del_padron";
   // La opinión de responsabilidad es del equipo (B18). Con motivo propio: el
   // reintento no puede explicarlo como una promesa de cobertura.
   if (nombraCulpaOLey(trimmed)) return "nombra_culpa";
@@ -529,6 +558,9 @@ function explain(problem: string): string {
   }
   if (problem === "contacto_inventado") {
     return "pusiste un enlace o un correo que no te pasé. No inventes formas de contacto: la persona contesta este mismo mensaje.";
+  }
+  if (problem === "dato_del_padron") {
+    return "dijiste un número que sólo figura en nuestro padrón y que la persona no escribió. No se lo dictes: pedile que confirme sus datos sin repetirlos.";
   }
   if (problem === "invented_field") {
     return "la lista tiene más ítems que los que te pasé. Pedí sólo lo que está en DATOS A PEDIR, ni uno más.";

@@ -192,6 +192,7 @@ try {
       console.log(`   ✓ ${rol}: contraseña puesta al día`);
     } else {
       const { auth } = await import("@/lib/auth");
+      // Con autoSignIn en false no hay token ni sesión; sólo se usa r.user.id.
       const r = await auth.api.signUpEmail({
         body: { name: nombre, email: correo, password: clave },
         headers: new Headers(),

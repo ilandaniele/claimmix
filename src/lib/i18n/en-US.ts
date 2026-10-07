@@ -55,6 +55,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "auth.signIn.error.invalid": "Invalid credentials. Please try again.",
   "auth.signIn.error.rateLimited": "Too many attempts. Please wait before retrying.",
   "auth.signIn.error.generic": "Sign in error. Please try again.",
+  "login.aviso.revisaTuCorreo": "If that address can sign in, we sent you a link to choose your password.",
+  "registro.sinContraseña.ayuda": "You choose your password from the link we email you.",
 
   // ── Status labels ──────────────────────────────────────────────────────────
   "status.procesando": "Processing",
@@ -346,6 +348,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   // ── Audit log event types ──────────────────────────────────────────────────
   "audit.auth.success": "Successful sign in",
   "audit.auth.rate_limited": "Access attempts blocked (rate limit)",
+  "audit.auth.user_sessions_revoked": "An admin closed the person's sessions",
   "audit.case.created": "Case created",
   "audit.case.web_recibida": "Received through the web form",
   "audit.case.closed": "Case closed",
@@ -391,6 +394,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "audit.case.plan_step": "A work plan step was updated",
   "audit.tenant.work_settings_updated": "Team work settings changed (assignment, deadlines, plan or score)",
   "audit.ai.budget_exceeded": "Not analysed: AI budget exhausted",
+  "audit.ai.budget_alerted": "Specialists notified: AI budget exhausted",
   "audit.training.example_approved": "Approved as a reference example",
   "audit.training.example_rejected": "Rejected as a reference example",
   "audit.doc.received": "Document received",
@@ -592,7 +596,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "case.detail.motivo.severidad": "Severity: {nivel}",
   "case.detail.motivo.lesiones": "Injuries or health data mentioned",
   "case.detail.motivo.entregadoPorFuera": "Delivered to the insurer outside the app",
-  "case.detail.motivo.topePorRemitente": "More than 20 messages in 10 minutes from the same number: stored, not read.",
+  "case.detail.motivo.topePorRemitente": "Not analysed: the sender exceeded their quota",
+  "case.detail.motivo.topePorFormulario": "Not analysed: the form exceeded its daily quota",
 
   // ── Why an attachment was not stored ───────────────────────────────────────
   // These lead with the CAUSE because they are read in two places: the amber
@@ -748,6 +753,9 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "usuarios.cambiarRol": "Change role for",
   "usuarios.cancelar": "Cancel",
   "usuarios.cargando": "Loading...",
+  "usuarios.cerrandoSesiones": "Closing...",
+  "usuarios.cerrarSesiones": "Close their sessions",
+  "usuarios.cerrarSesionesConfirmar": "Close all of {nombre}'s sessions? They will have to sign in again.",
   "usuarios.col.creado": "Created",
   "usuarios.col.email": "Email",
   "usuarios.col.estado": "Status",
@@ -758,6 +766,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "usuarios.error.crear": "Could not create the user. Please try again.",
   "usuarios.error.red": "Network error. Please try again.",
   "usuarios.error.rol": "Could not update the role.",
+  "usuarios.error.sesiones": "Could not close the sessions.",
   "usuarios.form.email": "Email address",
   "usuarios.form.emailPlaceholder": "analyst@company.com",
   "usuarios.form.nombre": "Full name",
@@ -773,6 +782,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "usuarios.rol.viewerSoloLectura": "Viewer (read-only)",
   "usuarios.toast.creado": "User created. An invitation email will be sent.",
   "usuarios.toast.rolActualizado": "Role updated.",
+  "usuarios.toast.sesionCerrada": "1 session closed.",
+  "usuarios.toast.sesionesCerradas": "{n} sessions closed.",
   "usuarios.vacio": "No users on record.",
 
 

@@ -69,6 +69,11 @@ export function checkRateLimit(
   };
 }
 
+/** Devuelve el último intento que se contó para la clave. */
+export function liberarIntento(key: string): void {
+  store.get(key)?.timestamps.pop();
+}
+
 /**
  * Reset the rate-limit counter for a key. Useful in tests.
  */

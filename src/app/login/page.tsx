@@ -22,6 +22,9 @@
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
+
 import { signInSso } from "./actions";
 import { SignInForm } from "./SignInForm";
 
@@ -83,6 +86,9 @@ export default async function LoginPage({
   searchParams: Promise<{ aviso?: string; error?: string | string[] }>;
 }) {
   const { aviso, error } = await searchParams;
+  // Fuera del LocaleProvider: el idioma se resuelve acá, en el servidor.
+  const locale = await getServerLocale();
+  const t = getT(locale);
   const codigo = codigoDeError(error);
   const mensajeError = codigo
     ? (ERRORES[codigo] ??
@@ -119,21 +125,14 @@ export default async function LoginPage({
             </div>
           )}
 
-          {/*
-            El aviso que deja el alta.
-
-            Dice lo mismo para una cuenta recién creada que para una dirección
-            que ya tenía una. Es a propósito: si el alta contestara distinto en
-            cada caso, alcanzaría con probar direcciones para averiguar quién
-            trabaja acá.
-          */}
-          {aviso === "usa_tu_cuenta" && (
+          {/* El alta no abre sesión: manda el enlace y acá se avisa. */}
+          {aviso === "revisa_tu_correo" && (
             <p
               role="status"
+              lang={locale}
               className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600"
             >
-              Si la dirección es válida, ya podés entrar con tu contraseña. Si no
-              la recordás, pedí un enlace abajo.
+              {t("login.aviso.revisaTuCorreo")}
             </p>
           )}
 

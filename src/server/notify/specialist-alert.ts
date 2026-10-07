@@ -32,8 +32,10 @@ import { isSendSuccess } from "@/server/email/provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 import { t, type TranslationKey } from "@/lib/i18n";
-import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { liberarCupo, rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+import type { MotivoDelTope } from "@/server/ai/budget";
 import type { TipoMensajeTardio } from "@/core/case/mensaje-tardio";
 
 /**
@@ -249,14 +251,20 @@ function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
 
 /** Un aviso a los especialistas: a quién, cómo se audita y qué dice. */
 interface Aviso {
-  caseId: string;
+  /** El caso del que se avisa. Sin él el aviso es del inquilino entero (el presupuesto): no hay simulado, marca previa ni enlace. */
+  caseId?: string;
   tenantId: string;
-  evento: typeof AuditEvent.SPECIALIST_ALERTED | typeof AuditEvent.LATE_MESSAGE_ALERTED;
+  evento:
+    | typeof AuditEvent.SPECIALIST_ALERTED
+    | typeof AuditEvent.LATE_MESSAGE_ALERTED
+    | typeof AuditEvent.AI_BUDGET_ALERTED;
   /** Lo que distingue a este aviso de otro del mismo caso: el mensaje, en el tardío. */
   marca?: { message_id: string };
+  /** Datos que van a la auditoría junto a la marca. */
+  payload?: Record<string, string>;
   /** Prefijo de los registros. */
   log: string;
-  /** Tope de correos, contado sólo cuando el aviso de verdad iba a salir. */
+  /** Tope de correos, contado sólo cuando el aviso de verdad iba a salir y devuelto si no salió. */
   cupo?: { clave: string; config: { limit: number; windowMs: number } };
   render: (caseUrl: string) => { subject: string; text: string };
 }
@@ -322,49 +330,95 @@ export async function avisarMensajeTardio(input: MensajeTardioInput): Promise<vo
   });
 }
 
+export interface PresupuestoAgotadoInput {
+  tenantId: string;
+  /** El cupo de una persona no frena al intake: no es motivo de aviso. */
+  motivo: Exclude<MotivoDelTope, "persona">;
+}
+
+/**
+ * Avisa que el presupuesto de IA se agotó y las denuncias dejaron de analizarse.
+ *
+ * No es de un caso: el worker deja sin analizar cada mensaje que llega, y sin
+ * aviso la única huella es un warn por mensaje. Un correo por día y por
+ * inquilino. El cupo se gasta sólo si hay a quién y desde dónde mandar, y se
+ * devuelve si el correo no salió: un día sin destinatarios o con Gmail caído no
+ * puede dejar sin aviso a las 24 horas siguientes.
+ */
+export async function avisarPresupuestoAgotado(input: PresupuestoAgotadoInput): Promise<void> {
+  const { tenantId, motivo } = input;
+
+  await avisar({
+    tenantId,
+    evento: AuditEvent.AI_BUDGET_ALERTED,
+    payload: { motivo },
+    log: "presupuesto_alert",
+    cupo: {
+      clave: claveDeCupo("aviso-presupuesto", tenantId),
+      config: RATE_LIMIT_CONFIGS.AVISO_PRESUPUESTO_POR_INQUILINO,
+    },
+    render: () => ({
+      subject: t("presupuesto.aviso.asunto"),
+      text: t("presupuesto.aviso.cuerpo")
+        .replace(
+          "{hora}",
+          new Date().toLocaleTimeString("es-AR", {
+            timeZone: ZONA_ARGENTINA,
+            hour: "2-digit",
+            minute: "2-digit",
+            hourCycle: "h23",
+          })
+        )
+        .replace("{plazo}", t(`presupuesto.aviso.plazo.${motivo}` as TranslationKey))
+        .replace("{motivo}", t(`presupuesto.aviso.motivo.${motivo}` as TranslationKey)),
+    }),
+  });
+}
+
 async function avisar(aviso: Aviso): Promise<void> {
   const { caseId, tenantId } = aviso;
+  const contexto = caseId ? { case_id: caseId } : { tenant_id: tenantId };
+  let cupoGastado: Aviso["cupo"];
+  let entregado = false;
 
   try {
-    if (await isSimulatedCase(tenantId, caseId)) {
-      // Logged rather than passed over: an operator watching a rehearsal
-      // should be able to see the alert was deliberately withheld, not
-      // wonder whether it silently failed.
-      logger.info({
-        case_id: caseId,
-      }, `${aviso.log}.skipped_simulated`);
-      return;
-    }
+    if (caseId) {
+      if (await isSimulatedCase(tenantId, caseId)) {
+        // Logged rather than passed over: an operator watching a rehearsal
+        // should be able to see the alert was deliberately withheld, not
+        // wonder whether it silently failed.
+        logger.info(contexto, `${aviso.log}.skipped_simulated`);
+        return;
+      }
 
-    if (await alreadyAlerted(aviso)) return;
+      if (await alreadyAlerted({ ...aviso, caseId })) return;
+    }
 
     const recipients = await recipientsFor(tenantId);
     if (recipients.length === 0) {
       // Worth an error, not a shrug: the promise made to the claimant has no
       // owner, and the only way to find that out is to look for this line.
-      logger.error({
-        case_id: caseId,
-        tenant_id: tenantId,
-      }, `${aviso.log}.no_recipients`);
+      logger.error({ ...contexto, tenant_id: tenantId }, `${aviso.log}.no_recipients`);
       return;
     }
 
     const account = await getGmailAccountForTenant(tenantId);
     if (!account) {
-      logger.error({
-        case_id: caseId,
-      }, `${aviso.log}.no_mailbox`);
+      logger.error(contexto, `${aviso.log}.no_mailbox`);
       return;
     }
 
     // El cupo se gasta sólo si hay a quién y desde dónde mandar.
-    if (aviso.cupo && !(await rateLimit(aviso.cupo.clave, aviso.cupo.config)).allowed) {
-      logger.warn({ case_id: caseId }, `${aviso.log}.tope`);
-      return;
+    if (aviso.cupo) {
+      if (!(await rateLimit(aviso.cupo.clave, aviso.cupo.config)).allowed) {
+        logger.warn(contexto, `${aviso.log}.tope`);
+        return;
+      }
+      cupoGastado = aviso.cupo;
     }
 
     const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "";
-    const { subject, text } = aviso.render(base ? `${base}/casos/${caseId}` : "");
+    const { subject, text } = aviso.render(caseId && base ? `${base}/casos/${caseId}` : "");
 
     const sender = new GmailSender(account.refreshToken);
     const result = await sender.send({
@@ -375,27 +429,32 @@ async function avisar(aviso: Aviso): Promise<void> {
     });
 
     const delivered = isSendSuccess(result);
+    entregado = delivered;
 
     await writeAuditLog({
       tenant_id: tenantId,
       actor_id: null,
       event_type: aviso.evento,
-      target_type: "case",
-      target_id: caseId,
+      target_type: caseId ? "case" : "tenant",
+      target_id: caseId ?? tenantId,
       // Recipient count, not addresses: an audit trail should prove someone
       // was told without becoming a list of staff emails.
-      payload: { ...aviso.marca, recipients: recipients.length, delivered },
+      payload: { ...aviso.marca, ...aviso.payload, recipients: recipients.length, delivered },
     });
 
-    logger.info({
-        case_id: caseId,
-        recipients: recipients.length,
-      }, delivered ? `${aviso.log}.sent` : `${aviso.log}.send_failed`);
+    logger.info(
+      { ...contexto, recipients: recipients.length },
+      delivered ? `${aviso.log}.sent` : `${aviso.log}.send_failed`
+    );
   } catch (err) {
     logger.error({
-        case_id: caseId,
+        ...contexto,
         error: err instanceof Error ? err.name : "UnknownError",
       }, `${aviso.log}.error`);
+  } finally {
+    // Un correo que no salió no gasta el tope: con uno por día, el siguiente intento es el único que hay.
+    // `liberarCupo` ya anota y traga la falla de la base: no hace falta un catch acá.
+    if (cupoGastado && !entregado) await liberarCupo(cupoGastado.clave, cupoGastado.config.windowMs);
   }
 }
 
@@ -423,7 +482,7 @@ async function avisar(aviso: Aviso): Promise<void> {
  * correcto del error, y en la base de hoy no hay ninguna: los 28 avisos que hay
  * llevan `delivered: true`.
  */
-async function alreadyAlerted({ caseId, tenantId, evento, marca }: Aviso): Promise<boolean> {
+async function alreadyAlerted({ caseId, tenantId, evento, marca }: Aviso & { caseId: string }): Promise<boolean> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   try {

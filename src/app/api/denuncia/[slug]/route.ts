@@ -7,6 +7,8 @@
  * del cuerpo, campo trampa, token firmado por la página (con hora mínima y
  * máxima), tope por formulario y tope por dirección de correo. Un bot que
  * llena la trampa recibe el mismo éxito que una persona y no se crea nada.
+ * Pasado el tope diario del formulario el envío abre caso igual, pero lo lee
+ * una persona en vez de la IA.
  * Nunca se cuelga de un caso existente: cada envío abre uno, y un envío
  * repetido (mismo token, correo y relato) abre uno solo.
  *
@@ -24,7 +26,9 @@ import { z } from "zod";
 import { sinControlNiAngulares } from "@/core/text/sin-control";
 import { PATRON_DE_CORREO, PATRON_DE_TELEFONO, slugValido } from "@/core/web/formulario";
 import { ok, err } from "@/lib/api/respond";
+import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import {
   getClientIp,
@@ -32,6 +36,7 @@ import {
   RATE_LIMIT_CONFIGS,
 } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { marcarParaResponderAunqueSigaElAgente } from "@/server/cases/para-responder";
 import { faltaLa0044 } from "@/server/core-sync/config";
 import { dispatchExtractionWorker } from "@/server/worker/despachar-extraccion";
 import { inquilinoDelFormulario } from "@/server/web/formulario";
@@ -182,6 +187,32 @@ async function recibir(
       return ok({ recibida: true });
     }
     const { caseId } = ingreso;
+
+    // Cuenta acá y no con los otros topes: sólo un envío que abrió caso gasta cupo del día, y los repetidos y la trampa no llegan. Del tope en adelante el caso queda guardado y lo lee una persona, no la IA.
+    const porDia = await rateLimit(
+      claveDeCupo("denuncia-slug-dia", slug),
+      RATE_LIMIT_CONFIGS.DENUNCIA_WEB_SLUG_DIA
+    );
+    if (!porDia.allowed) {
+      await marcarParaResponderAunqueSigaElAgente(caseId, tenantId).catch((error) =>
+        logger.error(
+          { case_id: caseId, error_code: errorCode(error) },
+          "denuncia_web.tope_diario.no_se_pudo_marcar"
+        )
+      );
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.MESSAGE_NOT_READ,
+        target_type: "case",
+        target_id: caseId,
+        payload: { motivo: "tope_por_formulario", channel: "web" },
+      });
+      logger.info({ case_id: caseId }, "denuncia_web.tope_diario");
+      // La persona no distingue: su denuncia quedó recibida.
+      return ok({ recibida: true });
+    }
+
     await dispatchExtractionWorker(caseId, tenantId);
     logger.info({ case_id: caseId }, "denuncia_web.recibida");
 

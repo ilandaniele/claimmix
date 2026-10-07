@@ -19,7 +19,11 @@ const execute = vi.fn();
 vi.mock("@/lib/db", () => ({ db: { execute: (...a: unknown[]) => execute(...a) } }));
 vi.mock("server-only", () => ({}));
 
-import { checkRateLimitPostgres, purgeExpiredRateLimits } from "@/lib/rate-limit/postgres";
+import {
+  checkRateLimitPostgres,
+  liberarIntentoPostgres,
+  purgeExpiredRateLimits,
+} from "@/lib/rate-limit/postgres";
 import { resolveProvider } from "@/lib/rate-limit/index";
 
 
@@ -90,6 +94,24 @@ describe("checkRateLimitPostgres", () => {
     execute.mockResolvedValueOnce({ rows: [] });
     const r = await checkRateLimitPostgres("k", 5, 10_000);
     expect(r.allowed).toBe(true);
+  });
+});
+
+describe("liberarIntentoPostgres", () => {
+  it("resta uno a la ventana en curso, con una sola sentencia", async () => {
+    execute.mockResolvedValueOnce({ rowCount: 1 });
+
+    await liberarIntentoPostgres("k", 60_000);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const sentencia = JSON.stringify(execute.mock.calls[0][0]);
+    expect(sentencia).toContain("hits - 1");
+    expect(sentencia).toContain("greatest");
+  });
+
+  it("no rompe a quien la llama si la base no contesta", async () => {
+    execute.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(liberarIntentoPostgres("k", 60_000)).resolves.toBeUndefined();
   });
 });
 

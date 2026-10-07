@@ -160,6 +160,9 @@ async function attackSurface(): Promise<void> {
         body: "{}",
       });
     }
+    // Una ruta que sólo exporta DELETE (cerrar las sesiones de una persona)
+    // contesta 405 a los dos y esa sonda no probaba nada de su candado.
+    if (res.status === 405) res = await head(url, { method: "DELETE" });
 
     /*
      * Un 307 al login también es un "no".
@@ -1067,7 +1070,7 @@ async function attackTenantWall(): Promise<void> {
     const byPolicy = await runTool(
       "verificar_poliza",
       { numero_poliza: victim.policy_number },
-      { tenantId: TENANT_B, caseId: victim.id }
+      { tenantId: TENANT_B, caseId: victim.id, remitente: { dni: null } }
     );
     probe(
       "verificar_poliza no cruza la pared",
@@ -1088,14 +1091,19 @@ async function attackTenantWall(): Promise<void> {
 
   const dni = customer?.dni;
   if (dni) {
-    const byDni = await runTool(
+    // El DNI ya no es un argumento: lo trae quien escribe. Se prueba con el DNI
+    // de la otra cartera como remitente, que es lo peor que puede pasar.
+    const byDni = (await runTool(
       "polizas_por_dni",
-      { dni },
-      { tenantId: TENANT_B, caseId: victim.id }
-    );
+      {},
+      { tenantId: TENANT_B, caseId: victim.id, remitente: { dni } }
+    )) as { encontradas?: number; sin_datos?: boolean };
+    // La respuesta nunca trae el DNI, así que buscarlo en el texto no probaba
+    // nada: el veredicto es la forma. Si la pared aguanta, la cartera de B no
+    // encuentra ninguna póliza (o no tiene padrón); un error tampoco aprueba.
     probe(
       "polizas_por_dni no cruza la pared",
-      !JSON.stringify(byDni).includes(dni),
+      byDni.encontradas === 0 || byDni.sin_datos === true,
       "buscar personas por DNI en la cartera del otro"
     );
   }
@@ -1103,7 +1111,7 @@ async function attackTenantWall(): Promise<void> {
   const history = await runTool(
     "historial_del_caso",
     {},
-    { tenantId: TENANT_B, caseId: victim.id }
+    { tenantId: TENANT_B, caseId: victim.id, remitente: { dni: null } }
   );
   // Sin marcador que buscar —no se escribió nada—, así que el veredicto es la
   // forma de la respuesta: si la pared aguanta, ninguna fila cruza y las dos

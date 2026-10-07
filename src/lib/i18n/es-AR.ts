@@ -68,6 +68,8 @@ export const esAR = {
   "auth.signIn.error.rateLimited":
     "Demasiados intentos. Esperá un momento antes de reintentar.",
   "auth.signIn.error.generic": "Error al iniciar sesión. Intentá de nuevo.",
+  "login.aviso.revisaTuCorreo": "Si esa dirección puede entrar, te mandamos un enlace para elegir tu contraseña.",
+  "registro.sinContraseña.ayuda": "La contraseña la elegís desde el enlace que te llega por correo.",
 
   // ── Status labels ──────────────────────────────────────────────────────────
   "status.procesando": "Procesando",
@@ -363,6 +365,7 @@ export const esAR = {
   // ── Audit log event types ──────────────────────────────────────────────────
   "audit.auth.success": "Inicio de sesión exitoso",
   "audit.auth.rate_limited": "Intentos de acceso bloqueados (rate limit)",
+  "audit.auth.user_sessions_revoked": "Un admin cerró las sesiones de la persona",
   "audit.case.created": "Caso creado",
   "audit.case.web_recibida": "Llegó por el formulario web",
   "audit.case.closed": "Caso cerrado",
@@ -408,6 +411,7 @@ export const esAR = {
   "audit.case.plan_step": "Se marcó un paso del plan de trabajo",
   "audit.tenant.work_settings_updated": "Se cambió cómo trabaja el equipo (asignación, plazos, plan o puntaje)",
   "audit.ai.budget_exceeded": "No se analizó: se terminó el cupo de IA",
+  "audit.ai.budget_alerted": "Se avisó a los especialistas: presupuesto de IA agotado",
   "audit.training.example_approved": "Se aprobó como ejemplo de referencia",
   "audit.training.example_rejected": "Se descartó como ejemplo de referencia",
   "audit.doc.received": "Llegó un documento",
@@ -616,7 +620,8 @@ export const esAR = {
   "case.detail.motivo.severidad": "Severidad: {nivel}",
   "case.detail.motivo.lesiones": "Mencionó lesiones o datos de salud",
   "case.detail.motivo.entregadoPorFuera": "Entregado a la aseguradora por fuera de la app",
-  "case.detail.motivo.topePorRemitente": "Más de 20 mensajes en 10 minutos del mismo número: se guardó y no se leyó.",
+  "case.detail.motivo.topePorRemitente": "No se analizó: el remitente superó su cupo",
+  "case.detail.motivo.topePorFormulario": "No se analizó: el formulario superó su cupo diario",
 
   // ── Por qué un adjunto no quedó guardado ───────────────────────────────────
   // La fila rechazada se escribe para que el analista vea que le mandaron algo
@@ -776,6 +781,9 @@ export const esAR = {
   "usuarios.cambiarRol": "Cambiar rol de",
   "usuarios.cancelar": "Cancelar",
   "usuarios.cargando": "Cargando...",
+  "usuarios.cerrandoSesiones": "Cerrando...",
+  "usuarios.cerrarSesiones": "Cerrar sus sesiones",
+  "usuarios.cerrarSesionesConfirmar": "¿Cerrar todas las sesiones de {nombre}? Va a tener que volver a entrar.",
   "usuarios.col.creado": "Creado",
   "usuarios.col.email": "Email",
   "usuarios.col.estado": "Estado",
@@ -786,6 +794,7 @@ export const esAR = {
   "usuarios.error.crear": "Error al crear el usuario. Intentá de nuevo.",
   "usuarios.error.red": "Error de red. Intentá de nuevo.",
   "usuarios.error.rol": "No se pudo actualizar el rol.",
+  "usuarios.error.sesiones": "No se pudieron cerrar las sesiones.",
   "usuarios.form.email": "Correo electrónico",
   "usuarios.form.emailPlaceholder": "analista@empresa.com",
   "usuarios.form.nombre": "Nombre completo",
@@ -801,6 +810,8 @@ export const esAR = {
   "usuarios.rol.viewerSoloLectura": "Visor (solo lectura)",
   "usuarios.toast.creado": "Usuario creado. Se enviará un correo de invitación.",
   "usuarios.toast.rolActualizado": "Rol actualizado.",
+  "usuarios.toast.sesionCerrada": "Se cerró 1 sesión.",
+  "usuarios.toast.sesionesCerradas": "Se cerraron {n} sesiones.",
   "usuarios.vacio": "No hay usuarios registrados.",
 
 

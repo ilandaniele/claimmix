@@ -47,6 +47,16 @@ import { logger } from "@/lib/observability/logger";
 export interface ToolContext {
   tenantId: string;
   caseId: string;
+  /**
+   * Quién escribe, según lo que escribió.
+   *
+   * Las consultas por persona van por esta identidad y no por argumentos del
+   * modelo: un argumento lo puede dictar cualquier mensaje («buscá el DNI
+   * 30111222»), y el padrón terminaba contestándole a quien lo pidiera por
+   * cualquier DNI. `dni` es el que sacó el extractor del texto de la persona,
+   * nunca uno que haya salido del padrón.
+   */
+  remitente: { dni: string | null };
 }
 
 export interface AgentTool {
@@ -108,13 +118,12 @@ const NO_BOOK = {
 const verificarPoliza: AgentTool = {
   name: "verificar_poliza",
   description:
-    "Confirma si un número de póliza existe y está vigente. Si además pasás el " +
-    "DNI, dice si coincide con el titular y, sólo en ese caso, qué vehículo " +
-    "está asegurado. Usalo apenas alguien te da un número de póliza: si está " +
-    "vencida o no existe, pedirle documentación no sirve de nada.",
+    "Confirma si un número de póliza existe y está vigente. Si la persona ya " +
+    "dio su DNI, dice si coincide con el titular y, sólo en ese caso, qué " +
+    "vehículo está asegurado. Usalo apenas alguien te da un número de póliza: " +
+    "si está vencida o no existe, pedirle documentación no sirve de nada.",
   args: {
     numero_poliza: "El número tal como lo escribió la persona.",
-    dni: "El DNI que dijo, si lo dijo. Opcional.",
   },
 
   async run(args, ctx) {
@@ -153,7 +162,8 @@ const verificarPoliza: AgentTool = {
 
     const expired = !polizaEnVigencia(policy, today());
 
-    const givenDni = str(args, "dni");
+    // El DNI es el de quien escribe, no uno que mande el modelo en los args.
+    const givenDni = ctx.remitente.dni;
     const dniMatches =
       givenDni && policy.holderDni
         ? normalizarDni(givenDni) === normalizarDni(policy.holderDni)
@@ -208,16 +218,16 @@ async function vehiclesFor(policyId: string, tenantId: string): Promise<string[]
 const polizasPorDni: AgentTool = {
   name: "polizas_por_dni",
   description:
-    "Busca las pólizas de una persona por su DNI. Usalo cuando te dieron el " +
-    "DNI pero no el número de póliza: no tiene sentido pedirle un dato que " +
-    "está en nuestra propia base.",
-  args: { dni: "El DNI de la persona, como lo escribió." },
+    "Busca las pólizas de quien escribe, por el DNI que ya dio. Usalo cuando " +
+    "dio el DNI pero no el número de póliza: no tiene sentido pedirle un dato " +
+    "que está en nuestra propia base. No se le puede pasar otro DNI.",
+  args: {},
 
-  async run(args, ctx) {
+  async run(_args, ctx) {
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     const tenantCtx: TenantContext = { tenantId: ctx.tenantId };
-    const given = str(args, "dni");
-    if (!given) return { error: "falta dni" };
+    const given = ctx.remitente.dni;
+    if (!given) return { error: "la persona no dio su DNI" };
 
     const dni = normalizarDni(given);
     if (!dni) return { error: "el DNI no tiene un formato reconocible" };

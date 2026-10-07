@@ -1,5 +1,6 @@
 import { PATRON_DE_SLUG, slugAlAzar } from "@/core/web/formulario";
 import type { TranslationKey } from "@/lib/i18n";
+import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import type { FormularioDelInquilino } from "@/server/web/formulario-del-inquilino";
 
 import { FormularioApi } from "@/components/FormularioApi";
@@ -17,13 +18,18 @@ export function FormularioWebPanel({
   formulario: FormularioDelInquilino | null;
   pendiente: boolean;
 }) {
+  // Los topes salen de la misma tabla que los aplica: el texto no se desfasa si alguien los cambia.
+  const ayuda = t("formulario.ayuda")
+    .replace("{porHora}", String(RATE_LIMIT_CONFIGS.DENUNCIA_WEB_SLUG.limit))
+    .replace("{porDia}", String(RATE_LIMIT_CONFIGS.DENUNCIA_WEB_SLUG_DIA.limit));
+
   if (pendiente) return <p className="text-sm text-amber-700">{t("migracion.pendiente")}</p>;
 
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t("formulario.titulo")}</h2>
-        <p className="mt-1 text-sm text-slate-500">{t("formulario.ayuda")}</p>
+        <p className="mt-1 text-sm text-slate-500">{ayuda}</p>
       </div>
 
       {formulario ? (

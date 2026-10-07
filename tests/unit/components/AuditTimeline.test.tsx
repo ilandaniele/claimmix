@@ -140,7 +140,8 @@ describe("AuditTimeline", () => {
     ["conflict", "Un dato no coincide con lo que teníamos"],
     ["lesiones", "Mencionó lesiones o datos de salud"],
     ["tomar_el_control", "Tomar el control"],
-    ["tope_por_remitente", "Más de 20 mensajes en 10 minutos del mismo número: se guardó y no se leyó."],
+    ["tope_por_remitente", "No se analizó: el remitente superó su cupo"],
+    ["tope_por_formulario", "No se analizó: el formulario superó su cupo diario"],
     ["devolver_al_agente", "Devolver al agente"],
     // Los salteos del recordatorio (B4) guardan el motivo de `decidirReenvio` tal cual.
     ["plantilla_sin_aprobar", "La plantilla para escribirle después de 24 h todavía no está aprobada por Meta"],

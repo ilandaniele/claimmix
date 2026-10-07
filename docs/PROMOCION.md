@@ -93,7 +93,6 @@ el ensayo.
 | `QA_DATABASE_URL_APP`                                                          | la misma rama, con el rol `claimmix_app`     | ídem                                |
 | `QA_CRON_SECRET`                                                               | el `CRON_SECRET` cargado en `claimmix-qa`    | ídem: el smoke no puede preguntar   |
 | `QA_GMAIL_TENANT_ID`                                                           | el inquilino de QA                           | el ensayo no corre                  |
-| `QA_BETTER_AUTH_SECRET`                                                        | el de `claimmix-qa`                          | el ensayo no corre                  |
 | `QA_R2_ACCOUNT_ID`, `QA_R2_ACCESS_KEY_ID`, `QA_R2_SECRET_ACCESS_KEY`, `QA_R2_BUCKET` | el balde propio de QA, `claimmix-qa-attachments` (misma cuenta de Cloudflare que producción, otro token) | el ensayo no corre |
 
 ⛔ **`QA_DATABASE_URL` no es la de producción, nunca.** `qa_secretos` compara
@@ -240,6 +239,16 @@ Los cuatro `R2_*` sostienen el smoke de almacenamiento; `GOOGLE_CLIENT_ID` y
 `GOOGLE_CLIENT_SECRET`, el login con Google; `ADMIN_EMAILS`, que esa primera
 entrada por Google quede de admin (`src/lib/auth/provision.ts:36-39`).
 
+No hace falta una variable más para el tope de IA de lo anónimo mientras no se
+defina en Vercel: `AI_ANONIMO_DAILY_TOKEN_CAP`, sin definir, vale el 60 % de
+`AI_TENANT_DAILY_TOKEN_CAP` (12 M con los 20 M de QA), y un ensayo completo gasta
+alrededor de 1,5 M. El ensayo entra sin `userId`, así que es el tope que lo
+frenaría primero. El runner lee los dos topes de las variables del repositorio
+(`deploy-checks.yml`): `AI_TENANT_DAILY_TOKEN_CAP` y, si se define,
+`AI_ANONIMO_DAILY_TOKEN_CAP`. Si un día se define en Vercel, definila también
+como variable del repo con el mismo valor; sin ella el runner usa el 60 % y no el
+de Vercel.
+
 **`NEXT_PUBLIC_SITE_URL` no es cosmética: sin ella no se entra a QA.** Better
 Auth sólo acepta pedidos cuyo origen sea su propia `baseURL`, y esa URL sale de
 `NEXT_PUBLIC_SITE_URL`; si falta, cae al host del deploy, que es la URL con hash
@@ -317,11 +326,22 @@ qué cada una:
   the default secret`. El comentario de `src/lib/auth/index.ts:26-50` explica
   por qué better-auth no rompe solo y por qué la comprobación vive en
   `instrumentation.ts`.
-- `CRON_SECRET`, con el mismo valor que el secreto del repositorio. No cambia lo
-  que se mide: lo usa el paso de diagnóstico `¿Qué dependencia del deploy no
-  contesta?`, que corre con `if: failure()` e interroga `/api/health` con
-  `Bearer`. Si no coincide, ese paso recibe 401 y el diagnóstico se pierde justo
-  el día que sirve.
+- `CRON_SECRET`, con un valor **propio de Preview**, distinto del de `Production`
+  y del de QA, que se guarda también en el repositorio como `PREVIEW_CRON_SECRET`
+  (`openssl rand -hex 32`, el mismo en los dos lados). No cambia lo que se mide:
+  lo usa el paso de diagnóstico `¿Qué dependencia del deploy no contesta?`, que
+  corre con `if: failure()` e interroga `/api/health` con `Bearer`.
+  `load-tests.yml` elige el secreto por el destino ya resuelto: `CRON_SECRET` para
+  el alias de producción, `QA_CRON_SECRET` para el de QA y `PREVIEW_CRON_SECRET`
+  para cualquier otra vista previa. Si el de Preview no coincide, ese paso recibe
+  401 y el diagnóstico se pierde justo el día que sirve; si falta
+  `PREVIEW_CRON_SECRET`, el paso no interroga. Hasta #<PR> era el mismo valor que
+  el de producción, y el código de una rama sin revisar corría en Preview con el
+  bearer interno de producción. Los otros tres workflows con secretos
+  (`deploy-checks.yml`, `post-deploy.yml` y `barrer-trabados.yml`) ya no admiten
+  vistas previas: aceptan sólo `claimmix.vercel.app` y `claimmix-qa.vercel.app`.
+  El valor propio de Preview todavía hay que cargarlo (ver «Waiting on you» de
+  `docs/PROJECT_STATUS.md`).
 
 **Y una cuenta con el rol correcto.** Con las cuatro variables cargadas la
 corrida seguía roja: `32.9% fallidos · 79 pedidos`, 26 fallos exactos = 13
@@ -446,7 +466,7 @@ done | grep -E '^(Peso del bundle|Aislamiento de tenants|Pen test local)' | sort
 
 ### 10. Los secretos `QA_*` del repositorio — HECHO
 
-Los nueve existen desde el 2026-09-20, y el deploy de QA de esa noche corrió
+Los ocho existen desde el 2026-09-20, y el deploy de QA de esa noche corrió
 todos sus chequeos, ensayo incluido, en verde. Van en
 Settings → Secrets and variables → Actions del repositorio, y la tabla de
 «Después del deploy» dice qué apaga cada ausencia.
@@ -462,15 +482,21 @@ correr no se muestra como verde.
 ninguna de las dos y falla si coinciden, porque el ensayo escribe y borra casos
 donde apunte. La comparación es la última red, no el permiso para probar.
 
-Los otros seis —`QA_GMAIL_TENANT_ID`, `QA_BETTER_AUTH_SECRET` y los cuatro
-`QA_R2_*`— son opcionales y encienden el ensayo de conversaciones. El inquilino
-ya existe: como fila en la rama `qa` de Neon y como `GOOGLE_DEFAULT_TENANT_ID`
-en `claimmix-qa` —no como `GMAIL_TENANT_ID`, que ahí queda vacía—; el secreto
-de Better Auth también existe en `claimmix-qa`. Los de R2 son los del balde
+Los otros cinco —`QA_GMAIL_TENANT_ID` y los cuatro `QA_R2_*`— son opcionales y
+encienden el ensayo de conversaciones. El inquilino ya existe: como fila en la
+rama `qa` de Neon y como `GOOGLE_DEFAULT_TENANT_ID` en `claimmix-qa` —no como
+`GMAIL_TENANT_ID`, que ahí queda vacía—. Los de R2 son los del balde
 propio de QA, `claimmix-qa-attachments`. Pasarle los de producción haría
 que el ensayo de QA suba y borre adjuntos en el balde de los clientes: sin los
 cuatro el ensayo queda apagado, y el job `alcance` lo nombra como no verificado
 en cada corrida.
+
+Dos secretos del repositorio no son de QA. `PREVIEW_CRON_SECRET` es el
+`CRON_SECRET` del alcance Preview de `claimmix` (paso 5): un valor propio,
+distinto del de producción y del de QA, que sólo lee `load-tests.yml`. Y
+`BETTER_AUTH_SECRET` y `QA_BETTER_AUTH_SECRET` ya no se leen en ningún workflow
+—cada job que importa `@/lib/auth` genera el suyo por corrida—, así que se pueden
+borrar del repositorio.
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 

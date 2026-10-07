@@ -93,6 +93,20 @@ const DEL_HILO_SIN_AUTENTICAR = {
   headers: [{ name: "Authentication-Results", value: "mx.google.com; spf=fail smtp.mailfrom=x@y" }],
 };
 
+const DEL_HILO_ALINEADO = {
+  ...DEL_HILO,
+  headers: [
+    { name: "Authentication-Results", value: "mx.google.com; spf=pass smtp.mailfrom=asegurado@ejemplo.com" },
+  ],
+};
+
+const DEL_HILO_OTRO_DOMINIO = {
+  ...DEL_HILO,
+  headers: [
+    { name: "Authentication-Results", value: "mx.google.com; spf=pass smtp.mailfrom=bounce@atacante.example" },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -147,6 +161,48 @@ describe("mensajesEntrantes — la cascada", () => {
     mockEnTenant.mockRejectedValue(new Error("se cayó la base"));
 
     await expect(mensajesEntrantes(CTX, CASO)).resolves.toEqual([]);
+  });
+});
+
+describe("mensajesEntrantes — el canal del caso", () => {
+  it("en email, un SPF alineado con el From sale autenticado", async () => {
+    conRespuestas([], [DEL_HILO_ALINEADO]);
+
+    const res = await mensajesEntrantes(CTX, CASO, { channel: "email" });
+
+    expect(res[0].autenticado).toBe(true);
+  });
+
+  it("en email, un SPF que pasa de otro dominio sale sin autenticar", async () => {
+    conRespuestas([], [DEL_HILO_OTRO_DOMINIO]);
+
+    const res = await mensajesEntrantes(CTX, CASO, { channel: "email" });
+
+    expect(res[0].autenticado).toBe(false);
+  });
+
+  it("en email, sin la cabecera de Gmail sale sin autenticar", async () => {
+    conRespuestas([], [DEL_HILO]);
+
+    const res = await mensajesEntrantes(CTX, CASO, { channel: "email" });
+
+    expect(res[0].autenticado).toBe(false);
+  });
+
+  it("sin canal vale como email_sim: lo mismo que sin cabeceras", async () => {
+    conRespuestas([], [DEL_HILO_OTRO_DOMINIO]);
+
+    const res = await mensajesEntrantes(CTX, CASO);
+
+    expect(res[0].autenticado).toBe(true);
+  });
+
+  it("de raw_messages sigue siendo true en cualquier canal: no guarda cabeceras", async () => {
+    conRespuestas([CRUDO]);
+
+    const res = await mensajesEntrantes(CTX, CASO, { channel: "email" });
+
+    expect(res[0].autenticado).toBe(true);
   });
 });
 

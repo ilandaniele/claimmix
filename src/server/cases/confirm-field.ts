@@ -65,7 +65,7 @@ export type ActorDeConfirmacion = Pick<UserRow, "id" | "role">;
 /** El caso tal como lo lee la confirmación: lo suyo y lo que el equipo configuró. */
 type CasoLeido = Pick<
   CaseRow,
-  "id" | "status" | "assigned_to" | "claim_type" | "severity" | "fraud_risk_level" | "injury_severity" | "monto_estimado"
+  "id" | "status" | "assigned_to" | "claim_type" | "severity" | "fraud_risk_level" | "injury_severity" | "monto_estimado" | "channel"
 > &
   ConfiguracionGuardada & { pesos_puntaje: unknown };
 
@@ -135,6 +135,7 @@ export async function resolveFieldConfirmation(
             fraud_risk_level: cases.fraud_risk_level,
             injury_severity: cases.injury_severity,
             monto_estimado: cases.monto_estimado,
+            channel: cases.channel,
             ...columnasDeTrabajo,
           })
           .from(cases)
@@ -335,7 +336,7 @@ async function confirmar(
    * eso queda en la memoria, el error se propaga a todos los siniestros
    * siguientes de esa persona.
    */
-  const senderEmail = await getSenderEmail(ctx, caseId);
+  const senderEmail = await getSenderEmail(ctx, caseId, caso.channel);
   let memoryUpdated = false;
   if (senderEmail) {
     await updateMemoryFromConfirmation(
@@ -434,7 +435,8 @@ async function rechazar(a: ContextoAccion): Promise<FieldConfirmationResult> {
  */
 async function getSenderEmail(
   ctx: TenantContext,
-  caseId: string
+  caseId: string,
+  channel: string
 ): Promise<string | null> {
   /*
    * Se lee por `mensajesEntrantes`, que mira `raw_messages` Y `claim_messages`.
@@ -451,6 +453,7 @@ async function getSenderEmail(
   const [primero] = await mensajesEntrantes(ctx, caseId, {
     orden: "viejos",
     tope: 1,
+    channel,
   });
   if (primero?.autenticado === false) {
     // La clave de la memoria es la dirección: si no está autenticada, lo que

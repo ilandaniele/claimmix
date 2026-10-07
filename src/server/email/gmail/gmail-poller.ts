@@ -354,9 +354,11 @@ async function processMessage(
     return { outcome: "skipped" };
   }
 
-  const { caseId, claimMessageId } = ingested;
+  const { caseId, claimMessageId, excedente } = ingested;
 
   // ── g) Rehost attachments ──────────────────────────────────────────────────
+  // También pasado el tope por remitente: el mail se marca leído abajo y no
+  // vuelve, y quien lo conteste necesita los adjuntos. Lo que se ahorra es el modelo.
   if (payload?.parts && payload.parts.length > 0) {
     await processAttachments(gmail, {
       tenantId,
@@ -373,7 +375,9 @@ async function processMessage(
   // La auditoría EMAIL_RECEIVED la escribe ingestInboundEmail, que es el único
   // que sabe si esto abrió un caso o se sumó a uno.
 
-  await dispatchExtractionWorker(caseId, tenantId);
+  // Pasado el tope por remitente el mensaje quedó guardado y marcado «Para
+  // responder»: no se despacha el modelo (E12).
+  if (!excedente) await dispatchExtractionWorker(caseId, tenantId);
 
   return { outcome: "processed", caseId };
 }

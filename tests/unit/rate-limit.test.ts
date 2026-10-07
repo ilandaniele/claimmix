@@ -112,6 +112,25 @@ describe("in-memory rate limiter", () => {
     expect(checkRateLimit(key, limit, windowMs).allowed).toBe(true);
   });
 
+  it("liberarCupo devuelve el último intento contado y deja pasar el siguiente", async () => {
+    const { rateLimit, liberarCupo } = await import("@/lib/rate-limit/index");
+    const key = "test:liberar:user@example.com";
+    const config = { limit: 1, windowMs: 10_000 };
+
+    expect((await rateLimit(key, config)).allowed).toBe(true);
+    expect((await rateLimit(key, config)).allowed).toBe(false);
+
+    await liberarCupo(key, config.windowMs);
+    expect((await rateLimit(key, config)).allowed).toBe(true);
+    // Devolver uno no abre más de uno: sólo resta lo que se contó.
+    expect((await rateLimit(key, config)).allowed).toBe(false);
+  });
+
+  it("liberarCupo sobre una clave sin uso no rompe", async () => {
+    const { liberarCupo } = await import("@/lib/rate-limit/index");
+    await expect(liberarCupo("test:liberar:nunca-usada", 10_000)).resolves.toBeUndefined();
+  });
+
   it("remaining is never negative", () => {
     const key = "test:negative:user@example.com";
     const limit = 2;

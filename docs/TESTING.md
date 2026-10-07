@@ -557,6 +557,10 @@ su motivo, y esa lista tiene que seguir siendo corta. Además:
   Así se encontró que un `viewer` podía apagar la casilla de entrada.
 - **El header interno.** Tres rutas confiaban en un `X-Internal-Worker: true`
   que manda cualquiera. La sonda comprueba que ya no alcanza.
+- **Rutas que sólo exportan DELETE.** El barrido pide GET y, ante un 405, POST; si
+  también da 405, prueba con DELETE. Así entra `DELETE /api/admin/users/[id]/sessions`
+  (cerrar las sesiones de otra persona): sin sesión tiene que dar 401, no 405, y el
+  candado por rol de arriba comprueba que exige admin.
 - Firmas de webhook falsificadas, las seis cabeceras, CORS, y que un error no
   devuelva el stack.
 
@@ -882,10 +886,13 @@ Sin eso el chequeo puede interrogar al build anterior y darlo por bueno — la
 respuesta más peligrosa posible, porque tapa justo el deploy que se está
 preguntando.
 
-Usa quince secretos del repositorio, pero el único que existe **sólo** para
-esto es `CRON_SECRET`: los otros catorce —la base, R2, Vertex, Gmail, la firma
-de WhatsApp— ya estaban. Lo que el chequeo mira de verdad vive en el deploy, no
-en el runner, que es exactamente el punto.
+Usa catorce secretos del repositorio, pero el único que existe **sólo** para
+esto es `CRON_SECRET`: los otros trece —la base, R2, Vertex, Gmail, la firma
+de WhatsApp— ya estaban. `BETTER_AUTH_SECRET` dejó de estar entre ellos: cada job
+que importa `@/lib/auth` genera el suyo por corrida (`openssl rand -hex 32`,
+enmascarado), así que el de verdad no sale de Vercel hacia un runner. Lo que el
+chequeo mira de verdad vive en el deploy, no en el runner, que es exactamente el
+punto.
 
 **Contra QA corre menos, y lo que no corre queda escrito.** El caller de
 producción hereda los secretos del repositorio; el de QA no puede —eso

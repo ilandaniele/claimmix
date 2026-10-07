@@ -332,3 +332,33 @@ export async function setWatchState(
     );
   }
 }
+
+/**
+ * Borra la marca del watch de una casilla: `watch_expiration` y
+ * `watch_history_id` quedan en null y la fila sigue. Es lo que deja
+ * `stopGmailWatch` al apagar el aviso, para que el cron no vea un vencimiento
+ * futuro de algo que Google ya dejó de mandar.
+ *
+ * Es un UPDATE y no un DELETE: `history_id` y los pendientes son del poller y
+ * tienen que sobrevivir a un apagado y prendido de la casilla.
+ */
+export async function clearWatchState(gmailEmail: string): Promise<void> {
+  try {
+    // sin-inquilino: `gmail_poll_state` no tiene columna de inquilino: es estado del
+    // poller, uno por casilla, del sistema y no de un inquilino.
+    await db
+      .update(gmailPollState)
+      .set({
+        watch_expiration: null,
+        watch_history_id: null,
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(gmailPollState.gmail_account_email, gmailEmail));
+  } catch (err) {
+    // Log code only — no PII (gmailEmail is PII-adjacent).
+    const code = (err as { code?: string })?.code ?? "unknown";
+    throw new Error(
+      `[poll-state] Failed to clear watch state: ${code}`
+    );
+  }
+}

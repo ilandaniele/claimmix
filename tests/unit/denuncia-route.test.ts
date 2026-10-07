@@ -14,6 +14,8 @@ const m = vi.hoisted(() => ({
   inquilinoDelFormulario: vi.fn(),
   ingresarDenunciaWeb: vi.fn(),
   dispatchExtractionWorker: vi.fn(),
+  marcarParaResponderAunqueSigaElAgente: vi.fn(),
+  writeAuditLog: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -27,6 +29,13 @@ vi.mock("@/server/web/formulario", () => ({ inquilinoDelFormulario: m.inquilinoD
 vi.mock("@/server/web/ingreso", () => ({ ingresarDenunciaWeb: m.ingresarDenunciaWeb }));
 vi.mock("@/server/worker/despachar-extraccion", () => ({
   dispatchExtractionWorker: m.dispatchExtractionWorker,
+}));
+vi.mock("@/server/cases/para-responder", () => ({
+  marcarParaResponderAunqueSigaElAgente: m.marcarParaResponderAunqueSigaElAgente,
+}));
+vi.mock("@/lib/audit/log", async (original) => ({
+  ...(await original<typeof import("@/lib/audit/log")>()),
+  writeAuditLog: m.writeAuditLog,
 }));
 
 import { POST } from "@/app/api/denuncia/[slug]/route";
@@ -62,6 +71,8 @@ beforeEach(() => {
   m.inquilinoDelFormulario.mockResolvedValue({ tenantId: TENANT_ID, nombre: "Aseguradora" });
   m.ingresarDenunciaWeb.mockResolvedValue({ caseId: CASE_ID });
   m.dispatchExtractionWorker.mockResolvedValue(undefined);
+  m.marcarParaResponderAunqueSigaElAgente.mockResolvedValue(undefined);
+  m.writeAuditLog.mockResolvedValue(undefined);
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -249,11 +260,11 @@ describe("POST /api/denuncia/[slug]", () => {
   });
 
   describe("topes por formulario y por dirección", () => {
-    it("después de la trampa y el token cuenta por formulario y por sha256 de la dirección", async () => {
+    it("después de la trampa y el token cuenta por formulario y por sha256 de la dirección, y abierto el caso por día", async () => {
       await enviar({ ...DENUNCIA, email: "  Ana@Ejemplo.com ", t: tokenViejo() });
 
       const claves = m.rateLimit.mock.calls.map(([clave]) => String(clave));
-      expect(claves).toHaveLength(3);
+      expect(claves).toHaveLength(4);
       expect(claves[1]).toBe(`denuncia-slug:${SLUG}`);
       const huella = createHash("sha256").update("ana@ejemplo.com").digest("hex");
       expect(claves[2]).toBe(`denuncia-mail:${huella}`);
@@ -261,6 +272,8 @@ describe("POST /api/denuncia/[slug]", () => {
       expect(claves.join("|")).not.toContain("ana@");
       expect(m.rateLimit.mock.calls[1]![1]).toEqual({ limit: 200, windowMs: 3_600_000 });
       expect(m.rateLimit.mock.calls[2]![1]).toEqual({ limit: 3, windowMs: 3_600_000 });
+      expect(claves[3]).toBe(`denuncia-slug-dia:${SLUG}`);
+      expect(m.rateLimit.mock.calls[3]![1]).toEqual({ limit: 300, windowMs: 86_400_000 });
     });
 
     it("con el tope del formulario gastado contesta 429 y no abre el caso", async () => {
@@ -289,6 +302,96 @@ describe("POST /api/denuncia/[slug]", () => {
     it("un envío sin token no gasta el cupo del formulario ni el de la dirección", async () => {
       await enviar(DENUNCIA);
       expect(m.rateLimit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("tope diario del formulario", () => {
+    const conElDiaGastado = () =>
+      m.rateLimit.mockImplementation(async (clave: string) =>
+        String(clave).startsWith("denuncia-slug-dia:")
+          ? { allowed: false, remaining: 0, retryAfterSeconds: 80_000 }
+          : { allowed: true, remaining: 9, retryAfterSeconds: 0 }
+      );
+
+    it("el envío que pasa el tope abre el caso, lo marca para responder, audita el motivo y no despacha la extracción", async () => {
+      conElDiaGastado();
+      const res = await enviar({ ...DENUNCIA, t: tokenViejo() });
+
+      // La persona no distingue: mismo éxito, sin Retry-After.
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ recibida: true });
+      expect(res.headers.get("Retry-After")).toBeNull();
+      expect(m.ingresarDenunciaWeb).toHaveBeenCalledTimes(1);
+      expect(m.marcarParaResponderAunqueSigaElAgente).toHaveBeenCalledWith(CASE_ID, TENANT_ID);
+      expect(m.writeAuditLog).toHaveBeenCalledTimes(1);
+      expect(m.writeAuditLog).toHaveBeenCalledWith({
+        tenant_id: TENANT_ID,
+        actor_id: null,
+        event_type: "claim.message_not_read",
+        target_type: "case",
+        target_id: CASE_ID,
+        payload: { motivo: "tope_por_formulario", channel: "web" },
+      });
+      expect(m.dispatchExtractionWorker).not.toHaveBeenCalled();
+    });
+
+    it("bajo el tope no marca, no audita y despacha como siempre", async () => {
+      await enviar({ ...DENUNCIA, t: tokenViejo() });
+
+      expect(m.marcarParaResponderAunqueSigaElAgente).not.toHaveBeenCalled();
+      expect(m.writeAuditLog).not.toHaveBeenCalled();
+      expect(m.dispatchExtractionWorker).toHaveBeenCalledWith(CASE_ID, TENANT_ID);
+    });
+
+    it("un envío repetido no consume cupo del día", async () => {
+      m.ingresarDenunciaWeb.mockResolvedValue(null);
+      await enviar({ ...DENUNCIA, t: tokenViejo() });
+
+      const claves = m.rateLimit.mock.calls.map(([clave]) => String(clave));
+      expect(claves.some((c) => c.startsWith("denuncia-slug-dia:"))).toBe(false);
+      expect(m.writeAuditLog).not.toHaveBeenCalled();
+    });
+
+    it("la trampa llena no consume cupo del día", async () => {
+      await enviar({ ...DENUNCIA, t: tokenViejo(), sitio: "http://spam.example" });
+      expect(m.rateLimit).toHaveBeenCalledTimes(1);
+    });
+
+    it("el tope por hora sigue rechazando con 429 antes de abrir caso", async () => {
+      m.rateLimit
+        .mockResolvedValueOnce({ allowed: true, remaining: 9, retryAfterSeconds: 0 })
+        .mockResolvedValueOnce({ allowed: false, remaining: 0, retryAfterSeconds: 60 });
+      const res = await enviar({ ...DENUNCIA, t: tokenViejo() });
+
+      expect(res.status).toBe(429);
+      expect(m.ingresarDenunciaWeb).not.toHaveBeenCalled();
+      expect(m.rateLimit.mock.calls.map(([c]) => String(c))).not.toContain(`denuncia-slug-dia:${SLUG}`);
+    });
+
+    it("si marcar el caso falla, igual audita y contesta el éxito", async () => {
+      conElDiaGastado();
+      m.marcarParaResponderAunqueSigaElAgente.mockRejectedValue(new Error("se cayó la base"));
+      const res = await enviar({ ...DENUNCIA, t: tokenViejo() });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ recibida: true });
+      expect(m.writeAuditLog).toHaveBeenCalledTimes(1);
+      expect(m.dispatchExtractionWorker).not.toHaveBeenCalled();
+    });
+
+    it("por el formulario HTML vuelve con ?r=enviada", async () => {
+      conElDiaGastado();
+      const res = await POST(
+        new NextRequest(`http://localhost/api/denuncia/${SLUG}`, {
+          method: "POST",
+          body: new URLSearchParams({ ...DENUNCIA, t: tokenViejo() }).toString(),
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+        }),
+        { params: Promise.resolve({ slug: SLUG }) }
+      );
+
+      expect(res.headers.get("Location")).toBe(`/denuncia/${SLUG}?r=enviada`);
+      expect(m.dispatchExtractionWorker).not.toHaveBeenCalled();
     });
   });
 

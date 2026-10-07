@@ -22,19 +22,55 @@
  */
 
 /**
+ * Saca los comentarios RFC 5322 —`(...)`, anidados y con `\` de escape— de un
+ * encabezado de dirección. Lo de adentro de unas comillas es nombre visible y
+ * no abre comentarios. Un comentario sin cerrar se come hasta el final: no se
+ * sabe dónde termina, y leer lo que sigue como dirección es lo que quiere quien
+ * lo escribió.
+ */
+function sinComentarios(value: string): string {
+  let salida = "";
+  let anidados = 0;
+  let citado = false;
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charAt(i);
+    if (anidados > 0) {
+      if (c === "\\") i++;
+      else if (c === "(") anidados++;
+      else if (c === ")" && --anidados === 0) salida += " ";
+    } else if (citado) {
+      salida += c;
+      if (c === "\\") salida += value.charAt(++i);
+      else citado = c !== '"';
+    } else if (c === "(") {
+      anidados = 1;
+    } else {
+      salida += c;
+      citado = c === '"';
+    }
+  }
+  return salida;
+}
+
+/**
  * La dirección que hay adentro de un encabezado.
  *
  * `Nombre <a@b.com>` → `a@b.com`. Sin ángulos, se devuelve lo que haya, sin
  * espacios. No pretende ser un parser de RFC 5322: alcanza con quedarse con lo
  * de adentro de los ángulos, que es donde todos los clientes ponen la
  * dirección. Lo que va entre comillas es nombre visible y no cuenta: en
- * `"<a@b.com>" <c@d.com>` la dirección es la segunda, no la del nombre.
+ * `"<a@b.com>" <c@d.com>` la dirección es la segunda, no la del nombre. Los
+ * comentarios tampoco: en `c@d.com (<a@b.com>)` la dirección es `c@d.com`. Es
+ * lo que lee el servidor de correo al autenticar el From, y leer otra cosa
+ * acá deja que un remitente se pegue a la dirección de otro. Unas comillas sin
+ * cerrar se comen hasta el final, igual que un comentario.
  */
 export function bareAddress(value: string | null | undefined): string {
   if (!value) return "";
-  const sinComillas = value.replace(/"(?:[^"\\]|\\.)*"/g, " ");
+  const limpio = sinComentarios(value);
+  const sinComillas = limpio.replace(/"(?:[^"\\]|\\.)*(?:"|$)/g, " ");
   const angled = /<([^>]+)>/.exec(sinComillas);
-  return (angled?.[1] ?? value).trim().toLowerCase();
+  return (angled?.[1] ?? limpio).trim().toLowerCase();
 }
 
 /** `example.com`, `example.org`, `example.net` y cualquier subdominio suyo, sobre la dirección pelada. */

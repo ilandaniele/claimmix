@@ -76,7 +76,13 @@ import { runTool, describeTools, AGENT_TOOLS } from "@/server/ai/agent-tools";
 const CTX = {
   tenantId: "10000000-0000-0000-0000-000000000001",
   caseId: "11111111-1111-1111-1111-111111111111",
+  remitente: { dni: null as string | null },
 };
+
+/** La misma vuelta, con el DNI que escribió quien nos escribe. */
+function conDni(dni: string) {
+  return { ...CTX, remitente: { dni } };
+}
 
 const FUTURE = "2099-01-01";
 const PAST = "2020-01-01";
@@ -189,8 +195,8 @@ describe("verificar_poliza", () => {
 
     const out = (await runTool(
       "verificar_poliza",
-      { numero_poliza: "POL-4471-A", dni: "99999999" },
-      CTX
+      { numero_poliza: "POL-4471-A" },
+      conDni("99999999")
     )) as Record<string, unknown>;
 
     expect(out.titular_coincide).toBe(false);
@@ -204,12 +210,43 @@ describe("verificar_poliza", () => {
 
     const out = (await runTool(
       "verificar_poliza",
-      { numero_poliza: "POL-4471-A", dni: "30.145.882" },
-      CTX
+      { numero_poliza: "POL-4471-A" },
+      conDni("30.145.882")
     )) as Record<string, unknown>;
 
     expect(out.titular_coincide).toBe(true);
     expect(out.vehiculos).toEqual(["Fiat Uno 2015 patente AB123CD"]);
+  });
+
+  it("ignores a DNI the model sends in the arguments", async () => {
+    // El DNI del titular lo puede escribir cualquiera en un mensaje y el modelo
+    // lo copia a los args. Sólo vale el de quien escribe, que acá no dio ninguno.
+    policyOnFile();
+    rows.insured_assets = [{ make: "Fiat", model: "Uno", year: 2015, plate: "AB123CD" }];
+
+    const out = (await runTool(
+      "verificar_poliza",
+      { numero_poliza: "POL-4471-A", dni: "30145882" },
+      CTX
+    )) as Record<string, unknown>;
+
+    expect(out.titular_coincide).toBeNull();
+    expect(out.vehiculos).toBeUndefined();
+    expect(JSON.stringify(out)).not.toContain("AB123CD");
+  });
+
+  it("compares the holder against the sender, not against the arguments", async () => {
+    policyOnFile();
+    rows.insured_assets = [{ make: "Fiat", model: "Uno", year: 2015, plate: "AB123CD" }];
+
+    const out = (await runTool(
+      "verificar_poliza",
+      { numero_poliza: "POL-4471-A", dni: "30145882" },
+      conDni("99999999")
+    )) as Record<string, unknown>;
+
+    expect(out.titular_coincide).toBe(false);
+    expect(out.vehiculos).toBeUndefined();
   });
 
   it("reads a DNI however the person punctuated it", async () => {
@@ -218,8 +255,8 @@ describe("verificar_poliza", () => {
     for (const written of ["30.145.882", "30145882", "DNI 30 145 882"]) {
       const out = (await runTool(
         "verificar_poliza",
-        { numero_poliza: "POL-4471-A", dni: written },
-        CTX
+        { numero_poliza: "POL-4471-A" },
+        conDni(written)
       )) as Record<string, unknown>;
       expect(out.titular_coincide, written).toBe(true);
     }
@@ -237,7 +274,7 @@ describe("polizas_por_dni", () => {
     // the only move used to be asking for something we already hold.
     rows.policies = [{ number: "POL-3311-B", status: "active", type: "auto", endDate: FUTURE }];
 
-    const out = (await runTool("polizas_por_dni", { dni: "25.888.101" }, CTX)) as {
+    const out = (await runTool("polizas_por_dni", {}, conDni("25.888.101"))) as {
       encontradas: number;
       polizas: Array<{ numero: string; vigente: boolean }>;
     };
@@ -249,7 +286,7 @@ describe("polizas_por_dni", () => {
   it("distinguishes 'not on file' from 'wrong DNI'", async () => {
     rows.policies = [];
 
-    const out = (await runTool("polizas_por_dni", { dni: "11111111" }, CTX)) as Record<
+    const out = (await runTool("polizas_por_dni", {}, conDni("11111111"))) as Record<
       string,
       unknown
     >;
@@ -258,8 +295,23 @@ describe("polizas_por_dni", () => {
     expect(out.nota).toBeTruthy();
   });
 
+  it("does not query when the person gave no DNI", async () => {
+    // Ni con un DNI en los args: un argumento lo dicta cualquier mensaje, y el
+    // padrón terminaría contestándole a quien lo pida por el DNI de otro.
+    rows.policies = [{ number: "POL-3311-B", status: "active", type: "auto", endDate: FUTURE }];
+    const { db } = await import("@/lib/db");
+
+    const out = (await runTool("polizas_por_dni", { dni: "25.888.101" }, CTX)) as Record<
+      string,
+      unknown
+    >;
+
+    expect(out).toEqual({ error: "la persona no dio su DNI" });
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
   it("refuses a DNI with no digits in it", async () => {
-    const out = (await runTool("polizas_por_dni", { dni: "no me acuerdo" }, CTX)) as Record<
+    const out = (await runTool("polizas_por_dni", {}, conDni("no me acuerdo"))) as Record<
       string,
       unknown
     >;
@@ -303,6 +355,14 @@ describe("the tool menu", () => {
     ]);
   });
 
+  it("does not offer a DNI argument: the lookups go by who is writing", () => {
+    for (const name of ["verificar_poliza", "polizas_por_dni"]) {
+      const tool = AGENT_TOOLS.find((t) => t.name === name);
+      expect(Object.keys(tool?.args ?? {}), name).not.toContain("dni");
+    }
+    expect(describeTools()).not.toMatch(/^s+dni:/m);
+  });
+
   it("tells the model what each one is for", () => {
     const menu = describeTools();
     for (const tool of AGENT_TOOLS) {
@@ -338,7 +398,7 @@ describe("an insurer that has not loaded its policies yet", () => {
     rows.policies = [];
     policiesOnFile = 0;
 
-    const out = (await runTool("polizas_por_dni", { dni: "30145882" }, CTX)) as Record<
+    const out = (await runTool("polizas_por_dni", {}, conDni("30145882"))) as Record<
       string,
       unknown
     >;

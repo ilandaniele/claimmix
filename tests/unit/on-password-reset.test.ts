@@ -13,14 +13,20 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockDb, mockWriteAuditLog } = vi.hoisted(() => ({
+const { mockDb, mockWriteAuditLog, mockAltaNueva, mockProvision } = vi.hoisted(() => ({
   mockDb: { delete: vi.fn(), select: vi.fn(), update: vi.fn() },
   mockWriteAuditLog: vi.fn(),
+  mockAltaNueva: vi.fn(),
+  mockProvision: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/lib/db", () => ({ db: mockDb, tables: {} }));
+
+vi.mock("@/lib/auth/alta-nueva", () => ({ inquilinoDeAltaNueva: mockAltaNueva }));
+
+vi.mock("@/lib/auth/provision", () => ({ provisionUserProfile: mockProvision }));
 
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockWriteAuditLog,
@@ -30,16 +36,18 @@ vi.mock("@/lib/audit/log", () => ({
 import { onPasswordReset } from "@/lib/auth/on-password-reset";
 import { authUsers, sessions } from "@/lib/db/schema";
 
-const USER = { id: "user-001" };
+const USER = { id: "user-001", email: "ana@example.com", name: "Ana Pérez" };
 
 /** El `delete` devuelve las filas que borró; el `select`, el perfil. */
 function conBase(opciones: {
   sesionesBorradas?: unknown[];
   borrarFalla?: boolean;
   perfil?: unknown[];
+  /** Lo que devuelve la segunda búsqueda de perfil, la de después de crearlo. */
+  perfilTrasCrear?: unknown[];
   marcarFalla?: boolean;
 } = {}) {
-  const { sesionesBorradas = [{ id: "s-1" }, { id: "s-2" }], borrarFalla = false, perfil = [{ tenant_id: "tenant-1" }], marcarFalla = false } =
+  const { sesionesBorradas = [{ id: "s-1" }, { id: "s-2" }], borrarFalla = false, perfil = [{ tenant_id: "tenant-1" }], perfilTrasCrear, marcarFalla = false } =
     opciones;
 
   const tablasBorradas: unknown[] = [];
@@ -67,13 +75,15 @@ function conBase(opciones: {
     };
   });
 
-  mockDb.select.mockReturnValue({
+  const buscar = (filas: unknown[]) => ({
     from: vi.fn().mockReturnValue({
       where: vi.fn().mockReturnValue({
-        limit: vi.fn().mockResolvedValue(perfil),
+        limit: vi.fn().mockResolvedValue(filas),
       }),
     }),
   });
+  mockDb.select.mockReturnValue(buscar(perfil));
+  if (perfilTrasCrear) mockDb.select.mockReturnValueOnce(buscar(perfil)).mockReturnValue(buscar(perfilTrasCrear));
 
   return { tablasBorradas, marcados };
 }
@@ -81,6 +91,9 @@ function conBase(opciones: {
 beforeEach(() => {
   vi.clearAllMocks();
   mockWriteAuditLog.mockResolvedValue(undefined);
+  // Por omisión la dirección no está habilitada para el alta: sin perfil, nada que crear.
+  mockAltaNueva.mockResolvedValue(null);
+  mockProvision.mockResolvedValue(undefined);
 });
 
 describe("onPasswordReset", () => {
@@ -149,6 +162,114 @@ describe("onPasswordReset", () => {
 
     expect(mockDb.delete).toHaveBeenCalledTimes(1);
     expect(mockWriteAuditLog).not.toHaveBeenCalled();
+    expect(mockProvision).not.toHaveBeenCalled();
+  });
+
+  /*
+   * El alta sin contraseña crea la cuenta sin perfil, con el correo sin probar.
+   * Abrir el enlace es esa prueba: ahí recién se le da el perfil, y la
+   * auditoría queda en el inquilino que le tocó.
+   */
+  describe("quien se dio de alta sin contraseña", () => {
+    it("sin perfil y con el alta habilitada, se lo provisiona con el correo verificado", async () => {
+      // Sin sesiones: quien se dio de alta sin contraseña nunca entró.
+      conBase({ sesionesBorradas: [], perfil: [], perfilTrasCrear: [{ tenant_id: "tenant-alta" }] });
+      mockAltaNueva.mockResolvedValue("tenant-alta");
+
+      await onPasswordReset(USER);
+
+      expect(mockAltaNueva).toHaveBeenCalledWith("ana@example.com");
+      expect(mockProvision).toHaveBeenCalledTimes(1);
+      expect(mockProvision).toHaveBeenCalledWith({
+        id: "user-001",
+        name: "Ana Pérez",
+        email: "ana@example.com",
+        emailVerified: true,
+      });
+      const entrada = mockWriteAuditLog.mock.calls[0][0];
+      expect(entrada.tenant_id).toBe("tenant-alta");
+      expect(entrada.payload).toEqual({ sesiones_cerradas: 0, perfil_creado: true });
+    });
+
+    /*
+     * Un pre-registro: alguien eligió la contraseña de una dirección permitida
+     * que todavía no tenía cuenta, entró (sin perfil no hay bloqueo) y su cookie
+     * firmada vale hasta 60 s después de borrada la sesión. Darle el perfil al
+     * dueño real en ese momento se lo daría también a esa cookie.
+     */
+    it("sin perfil pero con sesiones abiertas no provisiona y deja el aviso", async () => {
+      const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+      conBase({ sesionesBorradas: [{ id: "s-1" }], perfil: [] });
+      mockAltaNueva.mockResolvedValue("tenant-alta");
+
+      await onPasswordReset(USER);
+
+      expect(mockDb.delete).toHaveBeenCalledTimes(1);
+      expect(mockAltaNueva).not.toHaveBeenCalled();
+      expect(mockProvision).not.toHaveBeenCalled();
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+      const lineas = aviso.mock.calls.map((c) => String(c[0]));
+      expect(lineas.some((l) => l.includes("auth.reset.perfil_no_dado_con_sesiones"))).toBe(true);
+      aviso.mockRestore();
+    });
+
+    it("sin perfil y sin poder contar las sesiones tampoco provisiona", async () => {
+      const grito = vi.spyOn(console, "error").mockImplementation(() => {});
+      const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+      conBase({ borrarFalla: true, perfil: [] });
+      mockAltaNueva.mockResolvedValue("tenant-alta");
+
+      await expect(onPasswordReset(USER)).resolves.toBeUndefined();
+
+      expect(mockProvision).not.toHaveBeenCalled();
+      grito.mockRestore();
+      aviso.mockRestore();
+    });
+
+    it("con perfil no vuelve a provisionar", async () => {
+      conBase();
+      mockAltaNueva.mockResolvedValue("tenant-alta");
+
+      await onPasswordReset(USER);
+
+      expect(mockProvision).not.toHaveBeenCalled();
+      expect(mockWriteAuditLog.mock.calls[0][0].payload).toEqual({ sesiones_cerradas: 2 });
+    });
+
+    it("sin la dirección habilitada no provisiona, aunque abra el enlace", async () => {
+      conBase({ sesionesBorradas: [], perfil: [] });
+      mockAltaNueva.mockResolvedValue(null);
+
+      await onPasswordReset(USER);
+
+      expect(mockProvision).not.toHaveBeenCalled();
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+    });
+
+    it("si no se puede crear el perfil, igual cierra las sesiones y no tira", async () => {
+      const grito = vi.spyOn(console, "error").mockImplementation(() => {});
+      conBase({ sesionesBorradas: [], perfil: [] });
+      mockAltaNueva.mockResolvedValue("tenant-alta");
+      mockProvision.mockRejectedValue(new Error("se cayó la base"));
+
+      await expect(onPasswordReset(USER)).resolves.toBeUndefined();
+
+      expect(mockDb.delete).toHaveBeenCalledTimes(1);
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+      const lineas = grito.mock.calls.map((c) => String(c[0]));
+      expect(lineas.some((l) => l.includes("auth.reset.no_se_pudo_dar_perfil"))).toBe(true);
+      grito.mockRestore();
+    });
+
+    it("sin correo en el usuario no intenta darle perfil", async () => {
+      conBase({ sesionesBorradas: [], perfil: [] });
+      mockAltaNueva.mockResolvedValue("tenant-alta");
+
+      await onPasswordReset({ id: "user-001" });
+
+      expect(mockAltaNueva).not.toHaveBeenCalled();
+      expect(mockProvision).not.toHaveBeenCalled();
+    });
   });
 
   /*

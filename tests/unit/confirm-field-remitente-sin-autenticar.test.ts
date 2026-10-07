@@ -41,14 +41,14 @@ import { updateMemoryFromConfirmation } from "@/server/memory/update";
 import { logger } from "@/lib/observability/logger";
 import { db } from "@/lib/db";
 
-const CASO = { id: "case-1", status: "listo", assigned_to: "user-analyst-1" };
+const CASO = { id: "case-1", status: "listo", assigned_to: "user-analyst-1", channel: "email_sim" };
 const analista = { id: "user-analyst-1", role: "analyst" as const };
 
-function setupSelectMocks() {
+function setupSelectMocks(caso: typeof CASO = CASO) {
   const caseChain: any = {
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockResolvedValue([CASO]),
+    limit: vi.fn().mockResolvedValue([caso]),
   };
   const confirmationChain: any = {
     from: vi.fn().mockReturnThis(),
@@ -122,5 +122,21 @@ describe("resolveFieldConfirmation — remitente sin autenticar (E17)", () => {
       undefined
     );
     expect(res.claim_memory_updated).toBe(true);
+  });
+
+  it.each(["email", "email_sim"])("le pasa a mensajesEntrantes el canal del caso (%s)", async (channel) => {
+    setupSelectMocks({ ...CASO, channel });
+    setupInsertMock();
+    setupUpdateMock();
+    vi.mocked(mensajesEntrantes).mockResolvedValue([]);
+
+    const input = { field_key: "policy_number", value: "AR-000111", action: "correct" as const };
+    await resolveFieldConfirmation({ tenantId: "tenant-1" }, "case-1", input, analista);
+
+    expect(mensajesEntrantes).toHaveBeenCalledWith(
+      { tenantId: "tenant-1" },
+      "case-1",
+      expect.objectContaining({ channel })
+    );
   });
 });

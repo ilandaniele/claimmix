@@ -1,6 +1,5 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -21,20 +20,7 @@ import { runEmailExtractionWorker } from "@/server/worker/extract";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
-import { claveDeCupo } from "@/lib/rate-limit/clave";
-
-/** Cubeta por (inquilino, canal, teléfono) sin el teléfono en claro. */
-function claveDelRemitente(
-  tenantId: string,
-  channel: "whatsapp" | "whatsapp_sim",
-  threadId: string
-): string {
-  const huella = createHash("sha256")
-    .update(`${tenantId}:${channel}:${threadId}`)
-    .digest("hex")
-    .slice(0, 32);
-  return claveDeCupo("whatsapp", huella);
-}
+import { claveDelRemitente } from "@/lib/rate-limit/remitente";
 
 type IntakeChannel = "email" | "email_sim" | "whatsapp" | "whatsapp_sim" | "web";
 
@@ -271,7 +257,7 @@ export async function createWhatsAppIntake(
     !guardado.duplicado &&
     !(
       await rateLimit(
-        claveDelRemitente(input.tenantId, channel, threadId),
+        claveDelRemitente("whatsapp", input.tenantId, channel, threadId),
         RATE_LIMIT_CONFIGS.WHATSAPP_POR_REMITENTE
       )
     ).allowed;

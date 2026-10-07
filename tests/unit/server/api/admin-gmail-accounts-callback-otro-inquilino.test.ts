@@ -6,6 +6,11 @@
  * dos aseguradoras, y el timbre y las respuestas caían en la que devolviera el
  * heap. Lo que se prueba es que el callback mire antes, con el lector que sí ve
  * a todos, y rechace sin escribir ni pedir aviso.
+ *
+ * Ese chequeo no cubre la carrera entre dos callbacks: la que la cierra es el
+ * índice único sobre lower(email) de la 0047, y lo que le toca al callback es
+ * tratar su 23505 como un rechazo (`mailbox_taken`) y no como un fallo al
+ * guardar (`save_failed`).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -176,5 +181,66 @@ describe("GET /api/admin/gmail-accounts/callback — casilla de otra aseguradora
     await GET(makeRequest());
 
     expect(mockInquilinoDeLaCasilla).toHaveBeenCalledWith("otra@example.com");
+  });
+});
+
+describe("GET /api/admin/gmail-accounts/callback — el índice único de la casilla", () => {
+  beforeEach(() => {
+    process.env.GMAIL_CLIENT_ID = "client-id";
+    process.env.GMAIL_CLIENT_SECRET = "fake-client-secret";
+    process.env.PUBSUB_TOPIC = TOPIC;
+
+    mockRequireRole.mockResolvedValue({
+      db: (baseSimulada.actual = { insert: mockInsert }),
+      user: { id: USER },
+      userRow: { tenant_id: TENANT },
+    });
+    mockGetToken.mockResolvedValue({ tokens: { refresh_token: REFRESH } });
+    mockGetProfile.mockResolvedValue({ data: { emailAddress: EMAIL } });
+    mockInquilinoDeLaCasilla.mockResolvedValue(null);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    delete process.env.GMAIL_CLIENT_ID;
+    delete process.env.GMAIL_CLIENT_SECRET;
+    delete process.env.PUBSUB_TOPIC;
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  const insertQueFalla = (error: unknown) =>
+    mockInsert.mockReturnValue({
+      values: () => ({ onConflictDoUpdate: () => Promise.reject(error) }),
+    });
+
+  it("un 23505 del INSERT (otro callback ganó la carrera) redirige a mailbox_taken y borra la cookie", async () => {
+    insertQueFalla(Object.assign(new Error("duplicate key"), { code: "23505" }));
+
+    const res = await GET(makeRequest());
+
+    expect(destino(res)).toBe("mailbox_taken");
+    expect(res.headers.get("set-cookie")).toMatch(/gmail_oauth_state=;/);
+    expect(mockSetupGmailWatch).not.toHaveBeenCalled();
+  });
+
+  it("el 23505 envuelto por Drizzle en `cause` también cuenta", async () => {
+    insertQueFalla(new Error("Failed query", { cause: { code: "23505" } }));
+
+    const res = await GET(makeRequest());
+
+    expect(destino(res)).toBe("mailbox_taken");
+    expect(res.headers.get("set-cookie")).toMatch(/gmail_oauth_state=;/);
+    expect(mockSetupGmailWatch).not.toHaveBeenCalled();
+  });
+
+  it.each(["40001", "42P01", undefined])("cualquier otro error del INSERT (%s) sigue siendo save_failed", async (codigo) => {
+    insertQueFalla(Object.assign(new Error("falló"), { code: codigo }));
+
+    const res = await GET(makeRequest());
+
+    expect(destino(res)).toBe("save_failed");
+    expect(mockSetupGmailWatch).not.toHaveBeenCalled();
   });
 });

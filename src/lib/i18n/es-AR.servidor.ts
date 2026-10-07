@@ -57,6 +57,14 @@ export const esARServidor = {
   "tardio.aviso.resumen": "Resumen: {resumen}",
   "tardio.aviso.caso": "Caso: {caso}",
   "tardio.aviso.abrir": "Abrir: {link}",
+  "presupuesto.aviso.asunto": "ClaimMix dejó de analizar denuncias: presupuesto de IA agotado",
+  "presupuesto.aviso.cuerpo": "Desde las {hora} las denuncias que entran por correo, WhatsApp y el formulario quedan sin analizar {plazo}. Motivo: {motivo}. Las que ya entraron quedan en la bandeja como escaladas: reanalizalas a mano cuando se levante el tope.",
+  "presupuesto.aviso.motivo.anonimo": "el cupo diario de los canales sin usuario",
+  "presupuesto.aviso.motivo.inquilino": "el cupo diario de la aseguradora",
+  "presupuesto.aviso.motivo.mensual": "el presupuesto mensual del proyecto",
+  "presupuesto.aviso.plazo.anonimo": "hasta mañana",
+  "presupuesto.aviso.plazo.inquilino": "hasta mañana",
+  "presupuesto.aviso.plazo.mensual": "hasta que empiece el mes que viene o alguien suba el tope",
   "case.detail.insuredData": "Datos del asegurado",
   "case.detail.policyholderName": "Nombre",
   "case.detail.policyNumber": "Póliza",
@@ -510,7 +518,7 @@ export const esARServidor = {
   // ── Formulario web público (B17) ───────────────────────────────────────────
   "formulario.titulo": "Formulario web de denuncias",
   "formulario.ayuda":
-    "Tus asegurados denuncian un siniestro desde una página pública, sin cuenta. Cada envío abre un caso en el canal «Formulario web» y el agente sigue la conversación por correo, a la dirección que la persona escribió.",
+    "Tus asegurados denuncian un siniestro desde una página pública, sin cuenta. Cada envío abre un caso en el canal «Formulario web» y el agente sigue la conversación por correo, a la dirección que la persona escribió. Acepta hasta {porHora} envíos por hora y {porDia} por día; pasado el cupo diario las denuncias se guardan y quedan para responder a mano.",
   "formulario.enlace": "Enlace público",
   "formulario.slug": "Nombre del enlace",
   "formulario.slugAyuda": "Minúsculas, números y guiones, de 4 a 40 caracteres. No se puede cambiar después.",

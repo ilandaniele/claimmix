@@ -26,8 +26,11 @@ import { classifyInboundEmailForIntake, isBulkHeader } from "@/server/email/rele
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { enTenant, enTenantVarias } from "@/data/scope";
 import { reabrirSiEraNoRelevante } from "@/server/cases/reabrir-no-relevante";
-import { marcarParaResponder } from "@/server/cases/para-responder";
+import { marcarParaResponder, marcarParaResponderAunqueSigaElAgente } from "@/server/cases/para-responder";
 import { ESTADOS_DEL_AGENTE_TERMINADO } from "@/core/case/para-responder";
+import { bareAddress } from "@/lib/email/reserved";
+import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
+import { claveDelRemitente } from "@/lib/rate-limit/remitente";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
@@ -53,7 +56,14 @@ export interface InboundEmail {
 }
 
 export type InboundEmailResult =
-  | { outcome: "processed"; caseId: string; claimMessageId: string; isNewCase: boolean }
+  | {
+      outcome: "processed";
+      caseId: string;
+      claimMessageId: string;
+      isNewCase: boolean;
+      /** Pasó el tope por remitente: quedó guardado y marcado, sin despachar la extracción. */
+      excedente: boolean;
+    }
   | { outcome: "skipped"; reason: string };
 
 /**
@@ -79,7 +89,8 @@ export async function ingestInboundEmail(
     email.references ?? "",
     email.subject,
     email.fromAddr,
-    email.headers ?? []
+    email.headers ?? [],
+    channel
   );
 
   if (!existingCaseId) {
@@ -183,6 +194,46 @@ export async function ingestInboundEmail(
   if (!claimMessageId) throw new Error("claim_message_insert_failed");
 
   /*
+   * Tope por remitente (E12): del mail 21 en 10 minutos, el mismo remitente deja
+   * de pasar por el modelo. Quien manda sin parar gasta extracción y un caso
+   * por mensaje; la persona del equipo lo lee igual, marcado «Para responder».
+   *
+   * Sólo en el canal real: el ensayo escribe como remitentes de prueba y no
+   * puede toparse a sí mismo. Cuenta lo que entró de verdad, después de guardar:
+   * un duplicado salta antes y no suma.
+   *
+   * La cubeta lleva la dirección hasheada, no en claro: `rate_limit_counters`
+   * no tiene RLS por inquilino.
+   */
+  const excedente =
+    channel === "email" &&
+    !(
+      await rateLimit(
+        claveDelRemitente("email", tenantId, channel, bareAddress(email.fromAddr)),
+        RATE_LIMIT_CONFIGS.EMAIL_POR_REMITENTE
+      )
+    ).allowed;
+
+  if (excedente) {
+    // El mensaje ya está guardado: tirar sólo perdería el aviso, porque el
+    // reintento del poller lo saltearía por duplicado.
+    await marcarParaResponderAunqueSigaElAgente(caseId, tenantId).catch((err) =>
+      logger.error(
+        { case_id: caseId, error_code: errorCode(err) },
+        "inbound_email.tope_por_remitente.no_se_pudo_marcar"
+      )
+    );
+    await writeAuditLog({
+      tenant_id: tenantId,
+      actor_id: null,
+      event_type: AuditEvent.MESSAGE_NOT_READ,
+      target_type: "case",
+      target_id: caseId,
+      payload: { motivo: "tope_por_remitente", channel },
+    });
+  }
+
+  /*
    * Si el caso estaba dado por «no es una denuncia», vuelve al flujo.
    *
    * Alguien escribe «hola», queda clasificado como no-denuncia, y después manda
@@ -192,8 +243,11 @@ export async function ingestInboundEmail(
    *
    * Va acá y no en el worker a propósito: el disparador tiene que ser que una
    * PERSONA mandó un mensaje, no que algo despachó una extracción.
+   *
+   * Pasado el tope no: reabrirlo lo devolvería al agente, que es lo que el tope
+   * evita, y el caso ya quedó marcado para una persona.
    */
-  if (existingCaseId) {
+  if (existingCaseId && !excedente) {
     const status = await reabrirSiEraNoRelevante(caseId, tenantId);
     // Un fuera de oficina o una lista en el hilo no es alguien esperando respuesta.
     // De un `cerrado`, sólo el cierre por silencio con aviso: eso lo decide la base.
@@ -226,6 +280,7 @@ export async function ingestInboundEmail(
     caseId,
     claimMessageId,
     isNewCase: !existingCaseId,
+    excedente,
   };
 }
 

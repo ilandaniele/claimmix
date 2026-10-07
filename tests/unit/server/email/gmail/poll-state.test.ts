@@ -8,6 +8,9 @@
  * setWatchState: upsert (insert + onConflictDoUpdate) is called with correct fields
  * (gmail_account_email, watch_expiration, watch_history_id, updated_at).
  *
+ * clearWatchState: UPDATE (no DELETE) que deja watch_expiration y
+ * watch_history_id en null, filtrado por la casilla.
+ *
  * Strategy: mock @/lib/db at the module level so no real DB is required.
  * Functions use the module-level db singleton (no injected client).
  */
@@ -44,6 +47,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { db } from "@/lib/db";
 
 import {
+  clearWatchState,
   getWatchExpiration,
   setWatchState,
 } from "@/server/email/gmail/poll-state";
@@ -253,5 +257,47 @@ describe("setWatchState", () => {
         setWatchState(GMAIL_EMAIL, EXPIRATION_ISO, HISTORY_ID)
       ).resolves.toBeUndefined();
     });
+  });
+});
+
+// ── clearWatchState ───────────────────────────────────────────────────────────
+
+describe("clearWatchState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("hace un UPDATE que pone la marca del watch en null, filtrado por casilla", async () => {
+    let capturedSet: Record<string, unknown> = {};
+    const whereMock = vi.fn().mockResolvedValue(undefined);
+    const setMock = vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+      capturedSet = payload;
+      return { where: whereMock };
+    });
+    vi.mocked(db.update).mockReturnValue({ set: setMock } as any);
+
+    await clearWatchState(GMAIL_EMAIL);
+
+    expect(db.update).toHaveBeenCalledOnce();
+    expect(whereMock).toHaveBeenCalledOnce();
+    expect(capturedSet.watch_expiration).toBeNull();
+    expect(capturedSet.watch_history_id).toBeNull();
+    expect(typeof capturedSet.updated_at).toBe("string");
+    // history_id y los pendientes son del poller: no se tocan.
+    expect(Object.keys(capturedSet).sort()).toEqual(["updated_at", "watch_expiration", "watch_history_id"]);
+    expect(db.delete).not.toHaveBeenCalled();
+  });
+
+  it("tira con el código de Postgres y sin la dirección cuando el UPDATE falla", async () => {
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockRejectedValue({ code: "57P01", message: GMAIL_EMAIL }),
+      }),
+    } as any);
+
+    const error = await clearWatchState(GMAIL_EMAIL).catch((e: Error) => e);
+
+    expect((error as Error).message).toBe("[poll-state] Failed to clear watch state: 57P01");
+    expect((error as Error).message).not.toContain(GMAIL_EMAIL);
   });
 });

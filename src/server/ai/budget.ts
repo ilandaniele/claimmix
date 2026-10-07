@@ -6,6 +6,8 @@
  * Spec:
  *   - Per-user: 2M tokens/day (AI_USER_DAILY_TOKEN_CAP env)
  *   - Per-tenant: 5M tokens/day (AI_TENANT_DAILY_TOKEN_CAP env)
+ *   - Sin usuario (mail, WhatsApp, formulario): 60 % del inquilino por omisión
+ *     (AI_ANONIMO_DAILY_TOKEN_CAP env)
  *   - Monthly project cap: $200 (MONTHLY_BUDGET_USD env, default 200)
  *
  * AC10 (budget guard): Returns { exceeded: true, reason } when any cap is hit.
@@ -18,7 +20,7 @@
  */
 
 import "server-only";
-import { and, eq, gte, ne, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { db, tables } from "@/lib/db";
 import { logger } from "@/lib/observability/logger";
 import {
@@ -100,10 +102,14 @@ export function computeCostUsd(
  * costo de un entrenamiento, que se escriba con precios medidos.
  */
 
+/** Qué tope cortó. `reason` es el texto para una persona; esto, para decidir qué hacer. */
+export type MotivoDelTope = "mensual" | "inquilino" | "anonimo" | "persona";
+
 export interface BudgetCheckResult {
   /** True if any cap (monthly or daily) has been exceeded. */
   exceeded: boolean;
   reason?: string;
+  motivo?: MotivoDelTope;
 }
 
 /**
@@ -215,7 +221,8 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
  *   1. Monthly project-level cost cap ($200 by default), excluding the public
  *      demo — see the comment inside.
  *   2. Per-tenant daily token cap
- *   3. Per-user daily token cap (if userId provided)
+ *   3. Daily token cap of the calls with no user (only when userId is absent)
+ *   4. Per-user daily token cap (if userId provided)
  *
  * @param tenantId - Tenant whose budget to check.
  * @param userId   - Optional user ID for per-user cap.
@@ -255,8 +262,24 @@ export async function checkBudget(
    * `AI_USER_DAILY_TOKEN_CAP` lo baja cuando haga falta.
    */
   const userDailyTokenCap = readCap(process.env.AI_USER_DAILY_TOKEN_CAP, 2_000_000);
+  /*
+   * Lo que gastan los canales sin persona —mail, WhatsApp, formulario— no puede
+   * quedarse con todo el cupo del inquilino.
+   *
+   * Entran sin autenticar: quien rota remitentes o direcciones gasta modelo sin
+   * pasar por el cupo de ninguna persona, y con sólo el del inquilino agotaba el
+   * día entero para el equipo que sí trabaja logueado (re-análisis, asistente).
+   *
+   * Sin variable, el 60 % del tope del inquilino: en producción, 12 M de los
+   * 20 M. Derivado y no fijo a propósito, así producción no se frena por una
+   * variable que falta.
+   */
+  const anonimoDailyTokenCap = readCap(
+    process.env.AI_ANONIMO_DAILY_TOKEN_CAP,
+    Math.floor(tenantDailyTokenCap * 0.6)
+  );
 
-  // ── Los tres cupos: mensual del proyecto, diario del inquilino, diario de la persona ──
+  // ── Los cupos: mensual del proyecto, diario del inquilino, diario sin persona y diario de la persona ──
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -290,11 +313,11 @@ export async function checkBudget(
    * tres en fila.
    *
    * El ORDEN en que se evalúan no cambia: mensual, después inquilino, después
-   * persona. Quien se pase de dos cupos a la vez recibe el mismo motivo que
-   * recibía antes. Lo único que se paga de más es cuando el mensual ya está
-   * agotado: ahí las dos sumas del día se piden igual y no se miran. Es el
-   * caso terminal, y a cambio el camino normal —el de siempre— pasa de tres
-   * latencias a una.
+   * sin persona, después persona. Quien se pase de dos cupos a la vez recibe el
+   * mismo motivo que recibía antes. Lo único que se paga de más es cuando el
+   * mensual ya está agotado: ahí las dos sumas del día se piden igual y no se
+   * miran. Es el caso terminal, y a cambio el camino normal —el de siempre—
+   * pasa de tres latencias a una.
    */
   const [mensual, delDia] = await Promise.all([
     sumaMensualDelProyecto(monthStart, demoTenantId),
@@ -308,6 +331,7 @@ export async function checkBudget(
   if (monthlyCostUsd >= monthlyCapUsd) {
     return {
       exceeded: true,
+      motivo: "mensual",
       reason: `Presupuesto mensual de IA agotado ($${monthlyCostUsd.toFixed(2)} / $${monthlyCapUsd}).`,
     };
   }
@@ -315,13 +339,23 @@ export async function checkBudget(
   if (delDia.inquilino >= tenantDailyTokenCap) {
     return {
       exceeded: true,
+      motivo: "inquilino",
       reason: `Presupuesto diario de tokens agotado para el tenant (${delDia.inquilino.toLocaleString()} / ${tenantDailyTokenCap.toLocaleString()}).`,
+    };
+  }
+
+  if (!userId && delDia.anonimo >= anonimoDailyTokenCap) {
+    return {
+      exceeded: true,
+      motivo: "anonimo",
+      reason: `Presupuesto diario de tokens agotado para los canales sin usuario (${delDia.anonimo.toLocaleString()} / ${anonimoDailyTokenCap.toLocaleString()}).`,
     };
   }
 
   if (userId && delDia.persona >= userDailyTokenCap) {
     return {
       exceeded: true,
+      motivo: "persona",
       reason: `Presupuesto diario de tokens agotado para el usuario (${delDia.persona.toLocaleString()} / ${userDailyTokenCap.toLocaleString()}).`,
     };
   }
@@ -366,46 +400,47 @@ async function sumaMensualDelProyecto(
 }
 
 /**
- * Los tokens del día: los del inquilino y los de la persona, en un lote.
+ * Los tokens del día: los del inquilino y, en el mismo lote, los de la persona
+ * o —sin `userId`— los de las llamadas sin usuario.
  *
- * Sin `userId` se pide igual la del inquilino y la otra se salta: mandar una
- * consulta cuyo resultado no se va a mirar es pagar por nada, y el camino sin
- * persona lo usan los crons.
+ * Sólo se pide la segunda que se va a mirar: mandar una consulta cuyo
+ * resultado no se usa es pagar por nada, y el camino sin persona lo usan los
+ * crons, el worker y el webhook.
  */
 async function sumasDelDia(
   ctx: TenantContext,
   desde: Date,
   userId?: string | null
-): Promise<{ ok: boolean; inquilino: number; persona: number }> {
+): Promise<{ ok: boolean; inquilino: number; anonimo: number; persona: number }> {
   try {
-    if (!userId) {
-      const [fila] = await enTenant<Array<{ total: number }>>(ctx, (db) =>
-        consultaTokensDelDia(db, desde)
-      );
-      return { ok: true, inquilino: fila?.total ?? 0, persona: 0 };
-    }
-
-    const [[inquilino], [persona]] = await enTenantVarias<[
+    const [[inquilino], [otra]] = await enTenantVarias<[
       Array<{ total: number }>,
       Array<{ total: number }>,
     ]>(ctx, (db) => [
       consultaTokensDelDia(db, desde),
-      consultaTokensDelDia(db, desde, userId),
+      consultaTokensDelDia(db, desde, userId || null),
     ]);
 
+    const total = otra?.total ?? 0;
     return {
       ok: true,
       inquilino: inquilino?.total ?? 0,
-      persona: persona?.total ?? 0,
+      anonimo: userId ? 0 : total,
+      persona: userId ? total : 0,
     };
   } catch (e) {
     logger.error({ detalle: (e as { code?: string })?.code }, "budget.daily_check_error");
-    return { ok: false, inquilino: 0, persona: 0 };
+    return { ok: false, inquilino: 0, anonimo: 0, persona: 0 };
   }
 }
 
-/** La consulta sola, para poder mandarla en un lote. Ver `sumasDelDia`. */
-function consultaTokensDelDia(db: ClienteDatos, desde: Date, userId?: string) {
+/**
+ * La consulta sola, para poder mandarla en un lote. Ver `sumasDelDia`.
+ *
+ * `usuario`: sin pasar, todo el inquilino; `null`, sólo lo que no tiene usuario;
+ * un id, sólo esa persona.
+ */
+function consultaTokensDelDia(db: ClienteDatos, desde: Date, usuario?: string | null) {
   return db
     .select({
       total: sql<number>`coalesce(sum(${tables.aiUsage.prompt_tokens} + ${tables.aiUsage.completion_tokens}), 0)::float8`,
@@ -414,7 +449,11 @@ function consultaTokensDelDia(db: ClienteDatos, desde: Date, userId?: string) {
     .where(
       and(
         gte(tables.aiUsage.created_at, desde.toISOString()),
-        userId ? eq(tables.aiUsage.user_id, userId) : undefined
+        usuario === undefined
+          ? undefined
+          : usuario === null
+            ? isNull(tables.aiUsage.user_id)
+            : eq(tables.aiUsage.user_id, usuario)
       )
     );
 }

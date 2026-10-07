@@ -1117,3 +1117,114 @@ describe("composeReply — el aviso de traspaso", () => {
     expect(prompt).toContain(AVISO_DE_TRASPASO);
   });
 });
+
+describe("composeReply — no dicta lo que sólo sabemos por el padrón", () => {
+  /**
+   * El agente busca por el DNI que escribió la persona. Si el mensaje repite el
+   * número de póliza que devolvió esa consulta, quien tipee un DNI ajeno recibe
+   * el contrato de otro. El dato queda en la denuncia; el texto no lo dicta.
+   */
+  const PADRON = ['{"encontradas":1,"polizas":[{"numero":"POL-8812-R","vigente":true}]}'];
+  const DICTA = "Cecilia, encontramos tu póliza POL-8812-R. Ya tomamos nota de lo que nos contaste.";
+  const LIMPIO = "Cecilia, ya tomamos nota de lo que nos contaste. Cualquier novedad te escribimos por acá.";
+  const ENTRADA = {
+    intent: "acknowledgement" as const,
+    datosDelPadron: PADRON,
+    lastMessage: "Soy Cecilia Ferrari, DNI 27.654.321, choqué ayer en Rivadavia",
+  };
+
+  it("un mensaje que dicta la póliza del padrón no sale", async () => {
+    responde(DICTA, DICTA);
+
+    expect(await composeReply(base(ENTRADA))).toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("el reintento recibe el motivo, sin el número", async () => {
+    responde(DICTA, LIMPIO);
+
+    expect(await composeReply(base(ENTRADA))).toBe(LIMPIO);
+    const reintento = mockCall.mock.calls[1][0] as string;
+    expect(reintento).toContain("sólo figura en nuestro padrón");
+    expect(reintento).not.toContain("POL-8812-R");
+  });
+
+  it("el número del padrón no entra al prompt del redactor", async () => {
+    responde(LIMPIO);
+
+    await composeReply(base(ENTRADA));
+
+    expect(mockCall.mock.calls[0][0] as string).not.toContain("POL-8812-R");
+  });
+
+  it("la misma póliza, ya en lo que mostramos, sale", async () => {
+    responde(DICTA);
+
+    const out = await composeReply(base({ ...ENTRADA, knownValues: { policy_number: "POL-8812-R" } }));
+
+    expect(out).toBe(DICTA);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("la misma póliza, escrita por la persona, sale", async () => {
+    responde(DICTA);
+
+    const out = await composeReply(
+      base({ ...ENTRADA, lastMessage: "Mi póliza es POL-8812-R, choqué ayer en Rivadavia" })
+    );
+
+    expect(out).toBe(DICTA);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "Cecilia, tu póliza termina en 8812, ¿es esa? Contanos qué pasó.",
+    "Cecilia, ¿es la 8812-R? Contanos qué pasó.",
+  ])("la parte numérica de la póliza tampoco sale: %s", async (dicta) => {
+    responde(dicta, dicta);
+
+    expect(await composeReply(base(ENTRADA))).toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  describe("un dato de un mensaje anterior de la persona, que vuelve en el historial del caso", () => {
+    const HISTORIAL = ['{"datos":[{"campo":"patente","valor":"AB123CD","certeza":0.9}]}'];
+    const PREGUNTA = "Cecilia, ¿la patente AB123CD es la del auto asegurado? Contanos qué pasó.";
+
+    it("se rechaza si no consta que la escribió ella: es lo mismo que un dato del padrón", async () => {
+      responde(PREGUNTA, PREGUNTA);
+
+      expect(await composeReply(base({ ...ENTRADA, datosDelPadron: HISTORIAL }))).toBe(FALLBACK);
+    });
+
+    it("sale si la escribió ella en algún mensaje de la conversación", async () => {
+      responde(PREGUNTA);
+
+      const out = await composeReply(
+        base({ ...ENTRADA, datosDelPadron: HISTORIAL, escritoPorLaPersona: ["AB123CD"] })
+      );
+
+      expect(out).toBe(PREGUNTA);
+      expect(mockCall).toHaveBeenCalledTimes(1);
+    });
+
+    it("pero lo que dijo ella no deja pasar la póliza del padrón", async () => {
+      responde(DICTA, DICTA);
+
+      const out = await composeReply(
+        base({ ...ENTRADA, datosDelPadron: [...PADRON, ...HISTORIAL], escritoPorLaPersona: ["AB123CD"] })
+      );
+
+      expect(out).toBe(FALLBACK);
+    });
+  });
+
+  it("sin datos del padrón no cambia nada", async () => {
+    responde(DICTA);
+
+    const out = await composeReply(base({ ...ENTRADA, datosDelPadron: undefined }));
+
+    expect(out).toBe(DICTA);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+});

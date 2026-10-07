@@ -10,6 +10,7 @@
  * estuvo verde todo el día. Se consulta cada quince minutos.
  */
 
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockExecute } = vi.hoisted(() => ({ mockExecute: vi.fn() }));
@@ -42,6 +43,18 @@ describe("casos trabados", () => {
     const c = await chequearCasosTrabados();
     expect(c.status).toBe("down");
     expect(c.detail).toContain("1 caso");
+  });
+
+  it("no cuenta los `recibido` marcados «Para responder», pero sí un `procesando` marcado", async () => {
+    // Sin lo primero, cada denuncia que pasa el tope por formulario o por remitente
+    // ponía la salud en `down` a los 20 minutos, con una persona ya avisada. Lo
+    // segundo es un worker caído a mitad de corrida: la marca no lo desmiente.
+    mockExecute.mockReturnValue(filas([{ n: 0 }]));
+    await chequearCasosTrabados();
+
+    const consulta = new PgDialect().sqlToQuery(mockExecute.mock.calls[0][0]).sql;
+    expect(consulta).toContain("(status = 'procesando' or para_responder_desde is null)");
+    expect(consulta).toContain("'recibido'");
   });
 });
 

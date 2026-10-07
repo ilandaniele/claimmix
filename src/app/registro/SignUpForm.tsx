@@ -2,8 +2,8 @@
  * SignUpForm — client component for the /registro page.
  *
  * Mirrors SignInForm (React 19 useActionState + useTransition).
- * Submits to the signUp server action; on success the action redirects
- * to /bandeja with the session cookie already set.
+ * Submits to the signUp server action; the action always redirects to /login
+ * with the "revisá tu correo" notice (no session, no password here).
  */
 
 "use client";
@@ -77,7 +77,7 @@ export function SignUpForm() {
       </div>
 
       {/* Email */}
-      <div className="mb-4">
+      <div className="mb-6">
         <label
           htmlFor="email"
           className="mb-1.5 block text-sm font-medium text-slate-700"
@@ -100,34 +100,6 @@ export function SignUpForm() {
         {state.fieldErrors?.email && (
           <p id="email-error" role="alert" className="mt-1 text-xs text-red-600">
             {state.fieldErrors.email[0]}
-          </p>
-        )}
-      </div>
-
-      {/* Password */}
-      <div className="mb-6">
-        <label
-          htmlFor="password"
-          className="mb-1.5 block text-sm font-medium text-slate-700"
-        >
-          Contraseña
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          aria-required="true"
-          aria-describedby={state.fieldErrors?.password ? "password-error" : undefined}
-          aria-invalid={!!state.fieldErrors?.password}
-          className={inputClass}
-          placeholder="Mínimo 8 caracteres"
-          disabled={isPending}
-        />
-        {state.fieldErrors?.password && (
-          <p id="password-error" role="alert" className="mt-1 text-xs text-red-600">
-            {state.fieldErrors.password[0]}
           </p>
         )}
       </div>

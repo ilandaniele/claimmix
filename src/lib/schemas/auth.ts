@@ -25,7 +25,12 @@ export const SignInSchema = z.object({
 
 export type SignInInput = z.infer<typeof SignInSchema>;
 
-/** /registro sign-up form */
+/**
+ * /registro sign-up form.
+ *
+ * Sin contraseña: la elige quien abre el enlace que le llega por correo. Pedirla
+ * acá dejaba una cuenta usable con un correo que nadie probó que fuera suyo.
+ */
 export const SignUpSchema = z.object({
   full_name: z
     .string({ required_error: "El nombre es requerido." })
@@ -38,10 +43,6 @@ export const SignUpSchema = z.object({
     .toLowerCase()
     .max(254, "El correo electrónico es demasiado largo.")
     .email("El correo electrónico no es válido."),
-  password: z
-    .string({ required_error: "La contraseña es requerida." })
-    .min(8, "La contraseña debe tener al menos 8 caracteres.")
-    .max(128, "La contraseña es demasiado larga."),
 });
 
 export type SignUpInput = z.infer<typeof SignUpSchema>;

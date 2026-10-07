@@ -72,7 +72,7 @@ Optional seed data lives in `neon/seed.sql`.
 | `GMAIL_TENANT_ID` | email | Fallback tenant for fixed-inbox mode |
 | `GMAIL_USER_EMAIL` | email | Fallback fixed inbox address |
 | `GMAIL_FROM_ADDRESS` | email | Outbound Gmail sender |
-| `CRON_SECRET` | prod | Cron/internal route secret |
+| `CRON_SECRET` | prod | Cron/internal route secret; the Preview scope uses its own value (repo secret `PREVIEW_CRON_SECRET`) |
 | `PUBSUB_TOPIC` | push | Gmail push topic |
 | `PUBSUB_AUDIENCE` | push | Expected Pub/Sub OIDC audience |
 | `PUBSUB_SERVICE_ACCOUNT` | push | Service account of our push subscription; the token's `email` must match it. Required wherever `PUBSUB_AUDIENCE` is set |

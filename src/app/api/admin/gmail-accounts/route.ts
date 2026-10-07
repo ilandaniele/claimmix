@@ -8,6 +8,9 @@ import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/observability/logger";
+import { errorCode } from "@/lib/observability/error-code";
+import { decryptRefreshToken } from "@/server/email/gmail/accounts";
+import { setupGmailWatch, stopGmailWatch } from "@/server/email/gmail/watch";
 
 const UpdateGmailAccountSchema = z.object({
   id: z.string().uuid(),
@@ -24,6 +27,30 @@ const ACCOUNT_COLUMNS = {
   last_error: t.last_error,
   created_at: t.created_at,
 };
+
+/**
+ * Acomoda el aviso de Gmail al nuevo `enabled`: apagado, Google deja de mandar
+ * avisos de una casilla que el poller ya no lee; prendido, se vuelve a pedir
+ * (el watch vence a la semana y el cron sólo renueva las habilitadas).
+ *
+ * Las dos llamadas son idempotentes, así que no hace falta saber si `enabled`
+ * cambió. Un fallo no revierte el UPDATE: la casilla queda como se pidió y el
+ * cron la alcanza o la deja de leer.
+ */
+async function ajustarElWatch(email: string, tokenCifrado: string, enabled: boolean): Promise<void> {
+  const topic = process.env.PUBSUB_TOPIC;
+  if (enabled && !topic) return;
+  try {
+    const cuenta = { email, refreshToken: decryptRefreshToken(tokenCifrado) };
+    if (enabled && topic) {
+      await setupGmailWatch(topic, cuenta);
+      return;
+    }
+    await stopGmailWatch(cuenta);
+  } catch (e) {
+    logger.error({ detalle: errorCode(e) }, "gmail_accounts.watch_no_cambiado");
+  }
+}
 
 export async function GET() {
   try {
@@ -80,7 +107,8 @@ export async function PATCH(request: NextRequest) {
               updated_at: new Date().toISOString(),
             })
             .where(eq(t.id, parsed.data.id))
-            .returning(ACCOUNT_COLUMNS)
+            // El token cifrado es sólo para el servidor: no sale en la respuesta.
+            .returning({ ...ACCOUNT_COLUMNS, refresh_token_encrypted: t.refresh_token_encrypted })
         )
       );
     } catch (e) {
@@ -92,7 +120,10 @@ export async function PATCH(request: NextRequest) {
       throw new AppError("NOT_FOUND");
     }
 
-    return ok({ account: data });
+    const { refresh_token_encrypted, ...account } = data;
+    await ajustarElWatch(account.email, refresh_token_encrypted, parsed.data.enabled);
+
+    return ok({ account });
   } catch (e) {
     return err(e);
   }

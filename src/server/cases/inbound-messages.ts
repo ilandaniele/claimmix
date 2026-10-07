@@ -24,7 +24,7 @@ import "server-only";
 
 import { and, asc, desc, eq } from "drizzle-orm";
 
-import { autenticacionFallida } from "@/core/email/autenticacion";
+import { remitenteVerificado } from "@/core/email/autenticacion";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimMessages, rawMessages } from "@/lib/db/schema";
 import { errorCode } from "@/lib/observability/error-code";
@@ -35,7 +35,7 @@ export interface MensajeEntrante {
   body: string;
   from_addr: string;
   received_at: string;
-  /** Falso si el mensaje falló SPF/DKIM; `raw_messages` no tiene cabeceras y vale true. */
+  /** Falso si el remitente no está verificado (`remitenteVerificado`); `raw_messages` no tiene cabeceras y vale true. */
   autenticado: boolean;
 }
 
@@ -43,6 +43,8 @@ export interface OpcionesDeLectura {
   /** `nuevos` para el más reciente primero; `viejos` para leer la conversación. */
   orden?: "nuevos" | "viejos";
   tope?: number;
+  /** El canal del caso: por `email` el remitente se verifica contra Gmail. Sin él, vale como `email_sim`. */
+  channel?: string;
 }
 
 /**
@@ -54,7 +56,7 @@ export interface OpcionesDeLectura {
 export async function mensajesEntrantes(
   ctx: TenantContext,
   caseId: string,
-  { orden = "nuevos", tope = 1 }: OpcionesDeLectura = {}
+  { orden = "nuevos", tope = 1, channel = "email_sim" }: OpcionesDeLectura = {}
 ): Promise<MensajeEntrante[]> {
   const porFecha = orden === "nuevos" ? desc : asc;
 
@@ -105,7 +107,7 @@ export async function mensajesEntrantes(
       body: m.body_text ?? "",
       from_addr: m.from_addr ?? "",
       received_at: m.received_at,
-      autenticado: !autenticacionFallida(m.headers),
+      autenticado: remitenteVerificado(m.headers, m.from_addr ?? "", channel),
     }));
   } catch (err) {
     // Degrada a propósito —la pantalla no se cae porque falle una consulta—

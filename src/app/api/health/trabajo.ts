@@ -69,7 +69,14 @@ function noSePudo(name: string, err: unknown): ChequeoDeTrabajo {
   return flojo(name, `no se pudo medir (${errorCode(err)})`);
 }
 
-/** Casos que entraron y que nadie levantó. Cada uno es una denuncia sin leer. */
+/**
+ * Casos que entraron y que nadie levantó. Cada uno es una denuncia sin leer.
+ *
+ * Los `recibido` marcados «Para responder» no cuentan: pasado el tope por
+ * formulario o por remitente el caso se guarda así a propósito, sin agente, y ya
+ * lo tiene una persona. Contarlos pondría la salud en rojo cada vez que alguien
+ * pasa el tope. Un `procesando` marcado sí cuenta: el worker pudo caerse.
+ */
 export async function chequearCasosTrabados(): Promise<ChequeoDeTrabajo> {
   const name = "casos trabados";
   try {
@@ -78,6 +85,7 @@ export async function chequearCasosTrabados(): Promise<ChequeoDeTrabajo> {
       select count(*)::int as n from cases
        where status in ('recibido', 'procesando')
          and created_at < now() - interval '${sql.raw(String(MINUTOS_TRABADO))} minutes'
+         and (status = 'procesando' or para_responder_desde is null)
     `);
     const n = Number(filas.rows?.[0]?.n ?? 0);
     return n === 0

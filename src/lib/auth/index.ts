@@ -9,10 +9,10 @@ import { accounts, authUsers, sessions, verifications } from "@/lib/db/schema";
 
 import { resolveBaseURL } from "./base-url";
 import { provisionUserProfile, resolveDefaultTenantId } from "./provision";
-import { altaHabilitada } from "./registro-permitido";
+import { rechazoDeAlta } from "./alta-nueva";
 import { ssoInquilino } from "./sso-inquilino";
 import { logger } from "@/lib/observability/logger";
-import { altaBloqueadaPorSso, revisarSesionNueva } from "@/server/sso/exigir";
+import { revisarSesionNueva } from "@/server/sso/exigir";
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
@@ -79,6 +79,16 @@ export const auth = betterAuth({
     enabled: true,
     // Parity with the previous Neon setup (admin.createUser email_confirm: true).
     requireEmailVerification: false,
+
+    /*
+     * El alta no deja sesión: nadie entra sin pasar por el correo.
+     *
+     * El alta pública (`/registro`) crea la cuenta con una contraseña que nadie
+     * conoce, y quien la quiere usar la elige desde el enlace que le llega por
+     * mail. Con `autoSignIn` prendido, `signUpEmail` abriría la sesión de un
+     * correo que nadie probó que fuera suyo.
+     */
+    autoSignIn: false,
 
     /*
      * Cuánto dura el enlace de recuperación: una hora, dicho a propósito.
@@ -221,14 +231,11 @@ export const auth = betterAuth({
          */
         before: async (user) => {
           const email = typeof user.email === "string" ? user.email : "";
-          if (altaHabilitada(email)) {
-            if (!(await altaBloqueadaPorSso(email, resolveDefaultTenantId()))) return;
-            logger.warn({ motivo: "dominio_exige_sso" }, "auth.registro.rechazado");
-            return false;
-          }
+          const motivo = await rechazoDeAlta(email, resolveDefaultTenantId());
+          if (!motivo) return;
           logger.warn({
         dominio: email.slice(email.lastIndexOf("@") + 1) || "(sin dominio)",
-        motivo: "fuera_de_signup_allowed_emails",
+        motivo,
       }, "auth.registro.rechazado");
           return false;
         },

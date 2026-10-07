@@ -7,14 +7,17 @@
  * distinto según exista o no la cuenta.
  */
 
-const { mockSelect, mockGetAccount, mockSend, mockAudit } = vi.hoisted(() => ({
+const { mockSelect, mockGetAccount, mockSend, mockAudit, mockAltaNueva } = vi.hoisted(() => ({
   mockSelect: vi.fn(),
   mockGetAccount: vi.fn(),
   mockSend: vi.fn(),
   mockAudit: vi.fn(),
+  mockAltaNueva: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: { select: mockSelect } }));
+
+vi.mock("@/lib/auth/alta-nueva", () => ({ inquilinoDeAltaNueva: mockAltaNueva }));
 
 vi.mock("@/server/email/gmail/accounts", () => ({
   getGmailAccountForTenant: mockGetAccount,
@@ -73,6 +76,8 @@ beforeEach(() => {
     })
   );
   conPerfil(true);
+  // Por omisión la dirección no está habilitada para el alta: sin perfil, no hay inquilino.
+  mockAltaNueva.mockResolvedValue(null);
   mockGetAccount.mockResolvedValue({
     email: "siniestros@aseguradora.com",
     refreshToken: "refresh",
@@ -162,6 +167,53 @@ describe("cuando no se puede", () => {
     // casilla desde donde escribirle, y tampoco tiene acceso que recuperar.
     expect(mockSend).not.toHaveBeenCalled();
     expect(logs.join("\n")).toContain("password_reset.sin_perfil");
+  });
+
+  it("sin perfil y con el alta habilitada sale por la casilla del inquilino por omisión", async () => {
+    // El alta sin contraseña crea la cuenta sin perfil; el perfil lo recibe quien
+    // abre este mismo enlace, así que el mail no puede depender de que ya exista.
+    conPerfil(false);
+    mockAltaNueva.mockResolvedValue(TENANT);
+
+    await sendPasswordResetEmail(ENTRADA);
+
+    expect(mockAltaNueva).toHaveBeenCalledWith("analista@aseguradora.com");
+    expect(mockGetAccount).toHaveBeenCalledWith(TENANT);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0][0].to).toBe("analista@aseguradora.com");
+    expect(mockAudit.mock.calls[0][0]).toMatchObject({ tenant_id: TENANT, actor_id: null });
+    expect(logs.join("\n")).not.toContain("password_reset.sin_perfil");
+  });
+
+  it("el alta sin perfil recibe un mail de activación, no el de recuperación", async () => {
+    conPerfil(false);
+    mockAltaNueva.mockResolvedValue(TENANT);
+
+    await sendPasswordResetEmail(ENTRADA);
+
+    const enviado = mockSend.mock.calls[0][0];
+    const cuerpo = enviado.textBody as string;
+    expect(enviado.subject).toMatch(/activar/i);
+    expect(cuerpo).toContain(URL_RESET);
+    // La contraseña de una cuenta nueva no la conoce nadie: decirle que la
+    // actual sigue funcionando es falso.
+    expect(cuerpo).not.toMatch(/contraseña actual/i);
+    expect(cuerpo).not.toMatch(/volver a entrar/i);
+  });
+
+  it("con perfil sigue siendo el mail de recuperación", async () => {
+    await sendPasswordResetEmail(ENTRADA);
+
+    const enviado = mockSend.mock.calls[0][0];
+    expect(enviado.subject).toMatch(/recuperar/i);
+    expect(enviado.textBody).toMatch(/contraseña actual/i);
+  });
+
+  it("con perfil usa el inquilino del perfil y no consulta el alta", async () => {
+    await sendPasswordResetEmail(ENTRADA);
+
+    expect(mockGetAccount).toHaveBeenCalledWith(TENANT);
+    expect(mockAltaNueva).not.toHaveBeenCalled();
   });
 
   it("sin casilla igual queda asentado el pedido, como no entregado", async () => {

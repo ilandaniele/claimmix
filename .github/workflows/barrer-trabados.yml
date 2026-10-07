@@ -96,7 +96,8 @@ jobs:
       # El `if:` de más abajo y la elección del secreto miran el SUFIJO de la
       # URL (`endsWith(..., '-qa.vercel.app')`), no si el host es de verdad uno
       # de los nuestros. Este paso es lo que hace que el `CRON_SECRET` sólo
-      # viaje a un despliegue de este proyecto.
+      # viaje a uno de los dos alias: una vista previa no entra, porque su
+      # `CRON_SECRET` no es el de producción.
       - name: ¿A dónde apunta esto?
         env:
           URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
@@ -111,7 +112,7 @@ jobs:
             *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
           esac
           case "$HOST" in
-            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app) ;;
+            claimmix.vercel.app|claimmix-qa.vercel.app) ;;
             *) echo "::error::Host fuera de la lista: ${HOST}"; exit 1 ;;
           esac
 
@@ -179,7 +180,8 @@ jobs:
       # El `if:` de más abajo y la elección del secreto miran el SUFIJO de la
       # URL (`endsWith(..., '-qa.vercel.app')`), no si el host es de verdad uno
       # de los nuestros. Este paso es lo que hace que el `CRON_SECRET` sólo
-      # viaje a un despliegue de este proyecto.
+      # viaje a uno de los dos alias: una vista previa no entra, porque su
+      # `CRON_SECRET` no es el de producción.
       - name: ¿A dónde apunta esto?
         env:
           URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
@@ -194,7 +196,7 @@ jobs:
             *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
           esac
           case "$HOST" in
-            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app) ;;
+            claimmix.vercel.app|claimmix-qa.vercel.app) ;;
             *) echo "::error::Host fuera de la lista: ${HOST}"; exit 1 ;;
           esac
 

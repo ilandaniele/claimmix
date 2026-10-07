@@ -103,6 +103,20 @@ export async function checkRateLimitPostgres(
   }
 }
 
+/** Resta un intento a la ventana en curso; si ya cambió de ventana no hay nada que devolver. */
+export async function liberarIntentoPostgres(key: string, windowMs: number): Promise<void> {
+  const windowStart = new Date(Math.floor(Date.now() / windowMs) * windowMs);
+  try {
+    // sin-inquilino: el mismo contador por clave que `checkRateLimitPostgres`.
+    await db.execute(sql`
+      update rate_limit_counters set hits = greatest(hits - 1, 0)
+      where bucket_key = ${key} and window_start = ${windowStart.toISOString()}
+    `);
+  } catch {
+    logger.warn({}, "rate_limit.la_base_no_devolvio_el_intento");
+  }
+}
+
 /**
  * Borrar las ventanas que ya vencieron.
  *

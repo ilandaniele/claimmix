@@ -2,10 +2,10 @@
  * E17, del lado del worker: sin SPF/DKIM del remitente, no se heredan pistas.
  *
  * `loadInboundConversation` ya resuelve `remitenteAutenticado` a partir de las
- * cabeceras del último entrante (`@/core/email/autenticacion`). Acá se prueba
- * que el worker lea ese campo: con `spf=fail` no llama a `loadMemoryHints`, y
- * con cabeceras limpias (o sin conversación, atrás compatible) sigue
- * llamándolo como siempre.
+ * cabeceras del último entrante y del canal del caso (`remitenteVerificado`,
+ * en `@/core/email/autenticacion`). Acá se prueba que el worker lea ese campo:
+ * por `email` hace falta el veredicto alineado de Gmail; por `email_sim` sólo
+ * que no haya una falla explícita.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -27,14 +27,18 @@ const SPF_FAIL: Cabecera[] = [
   { name: "Authentication-Results", value: "mx.google.com; spf=fail smtp.mailfrom=x@y" },
 ];
 
+const DMARC_PASS: Cabecera[] = [
+  { name: "Authentication-Results", value: "mx.google.com; dmarc=pass header.from=ejemplo.com" },
+];
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function correr(cabecerasDelUltimo?: Cabecera[]) {
+async function correr(cabecerasDelUltimo?: Cabecera[], channel = "email_sim") {
   vi.resetModules();
   registrarMocks({
-    fila: filaDeCaso(CASE_ID, TENANT_ID),
+    fila: filaDeCaso(CASE_ID, TENANT_ID, { channel }),
     espiaDeUpdate: vi.fn(),
     conversacion: CONVERSACION,
     cabecerasDelUltimo,
@@ -52,7 +56,19 @@ describe("runEmailExtractionWorker — memoria y remitente sin autenticar (E17)"
     expect(await correr(SPF_FAIL)).toBe(0);
   });
 
-  it("con cabeceras limpias, pide pistas de memoria como siempre", async () => {
+  it("en email_sim, con cabeceras limpias, pide pistas de memoria como siempre", async () => {
     expect(await correr()).toBe(1);
+  });
+
+  it("en email, con el dmarc=pass de Gmail, pide pistas de memoria", async () => {
+    expect(await correr(DMARC_PASS, "email")).toBe(1);
+  });
+
+  it("en email, sin la cabecera de Gmail, no pide pistas de memoria", async () => {
+    expect(await correr(undefined, "email")).toBe(0);
+  });
+
+  it("en email, con spf=fail, no pide pistas de memoria", async () => {
+    expect(await correr(SPF_FAIL, "email")).toBe(0);
   });
 });

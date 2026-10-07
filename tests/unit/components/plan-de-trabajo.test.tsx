@@ -110,7 +110,8 @@ describe("PlanDeTrabajo", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Pedir el presupuesto" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo actualizar el paso.");
-    expect(screen.getByRole("checkbox", { name: "Pedir el presupuesto" })).not.toBeChecked();
+    // useOptimistic revierte cuando termina la transición, que puede ser después del aviso.
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Pedir el presupuesto" })).not.toBeChecked());
     expect(refresh).toHaveBeenCalled();
   });
 

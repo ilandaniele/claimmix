@@ -7,7 +7,7 @@
  *  - Inline vs attachment detection (filename presence)
  *  - Inline images without data skipped
  *  - attachmentId fallback fetch (large attachments)
- *  - attachmentId fetch failure → part skipped gracefully
+ *  - attachmentId fetch failure → part recorded as download_failed
  *  - Empty body parts skipped
  *  - ContentLength approximation from base64 length
  *
@@ -322,11 +322,10 @@ describe("adaptGmailAttachments — attachmentId fallback fetch", () => {
 
     const result = await adaptGmailAttachments(parts, "msg-99", gmail);
 
-    expect(gmail.users.messages.attachments.get).toHaveBeenCalledWith({
-      userId: "me",
-      messageId: "msg-99",
-      id: "attach-id-001",
-    });
+    expect(gmail.users.messages.attachments.get).toHaveBeenCalledWith(
+      { userId: "me", messageId: "msg-99", id: "attach-id-001" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
 
     expect(result).toHaveLength(1);
     expect(result[0].Name).toBe("large.pdf");
@@ -335,7 +334,7 @@ describe("adaptGmailAttachments — attachmentId fallback fetch", () => {
     ).toBe("fetched from API");
   });
 
-  it("skips the attachment (does not throw) when attachmentId fetch fails", async () => {
+  it("anota el adjunto como download_failed cuando la bajada falla", async () => {
     const gmail: GmailAttachmentFetcher = {
       users: {
         messages: {
@@ -354,9 +353,9 @@ describe("adaptGmailAttachments — attachmentId fallback fetch", () => {
       }),
     ];
 
-    // Should NOT throw — failed attachment is skipped.
     const result = await adaptGmailAttachments(parts, "msg-1", gmail);
-    expect(result).toHaveLength(0);
+    expect(result).toHaveLength(1);
+    expect(result[0].rechazoPrevio).toBe("download_failed");
   });
 
   it("skips parts with neither data nor attachmentId", async () => {

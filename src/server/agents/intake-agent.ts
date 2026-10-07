@@ -276,7 +276,8 @@ export async function createWhatsAppIntake(
       )
     ).allowed;
 
-  if (guardado.claimMessageId && input.media?.length) {
+  // Pasado el tope tampoco se bajan los adjuntos: es el viaje caro, y el mensaje igual queda guardado.
+  if (guardado.claimMessageId && input.media?.length && !excedente) {
     await storeWhatsAppMedia(input.tenantId, caseId, guardado.claimMessageId, input.media);
   }
 
@@ -299,7 +300,11 @@ export async function createWhatsAppIntake(
       event_type: AuditEvent.MESSAGE_NOT_READ,
       target_type: "case",
       target_id: caseId,
-      payload: { status: existente?.status ?? "recibido", motivo: "tope_por_remitente" },
+      payload: {
+        status: existente?.status ?? "recibido",
+        motivo: "tope_por_remitente",
+        adjuntos_omitidos: input.media?.length ?? 0,
+      },
     });
   } else if (existente && (ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(existente.status)) {
     await marcarParaResponder(

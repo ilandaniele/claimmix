@@ -935,8 +935,8 @@ async function attackTenantWall(): Promise<void> {
   console.log("LA PARED ENTRE TENANTS — con la base de verdad, sólo lectura\n");
 
   const { db } = await import("@/lib/db");
-  const { cases, customers } = await import("@/lib/db/schema");
-  const { and, desc, eq, isNotNull } = await import("drizzle-orm");
+  const { cases, claimMessages, customers } = await import("@/lib/db/schema");
+  const { and, desc, eq, isNotNull, isNull, like, notExists, notInArray, notLike, or } = await import("drizzle-orm");
   const { listCases, listCasesForExport } = await import("@/server/cases/list");
   const { getCaseDetail } = await import("@/server/cases/get");
   const { runTool } = await import("@/server/ai/agent-tools");
@@ -955,7 +955,27 @@ async function attackTenantWall(): Promise<void> {
         policy_number: cases.policy_number,
       })
       .from(cases)
-      .where(eq(cases.tenant_id, TENANT_A))
+      .where(
+        and(
+          eq(cases.tenant_id, TENANT_A),
+          // Ni los del ensayo ni los del timbre: `pnpm knock` y el ensayo los crean
+          // y borran mientras esto corre, y un caso que se borra a mitad no prueba nada.
+          notInArray(cases.channel, ["whatsapp_sim", "email_sim"]),
+          // El timbre por WhatsApp entra como `whatsapp` de verdad, con el bloque reservado de hilo.
+          or(isNull(cases.email_thread_id), notLike(cases.email_thread_id, "5490000%")),
+          notExists(
+            db
+              .select({ id: claimMessages.id })
+              .from(claimMessages)
+              .where(
+                and(
+                  eq(claimMessages.case_id, cases.id),
+                  like(claimMessages.from_addr, "%timbre.%@example.com%")
+                )
+              )
+          )
+        )
+      )
       .orderBy(desc(cases.created_at))
       .limit(1);
     if (!victim) return null;
@@ -966,13 +986,7 @@ async function attackTenantWall(): Promise<void> {
     };
   };
 
-  /*
-   * El más nuevo puede estar de paso. En el Post-deploy, `pnpm knock` y el
-   * ensayo corren a la vez que esto, crean casos en este mismo tenant y los
-   * borran al terminar. Si el elegido se borra entre el detalle y el listado,
-   * el control de abajo da rojo sin que la pared tenga nada que ver (26/09,
-   * sobre a1154f3). Un caso que ya no existe no prueba nada: se elige otro.
-   */
+  // Segunda línea de defensa: si el elegido igual se borró, se elige otro.
   let elegido = await elegir();
   for (let intento = 1; elegido && intento < 3; intento++) {
     const [sigue] = await db

@@ -11,6 +11,9 @@ import { PgDialect } from "drizzle-orm/pg-core";
 
 import { filaDeCaso, registrarMocks, type OpcionesDelExtractor } from "./worker-harness";
 
+// Cada caso reimporta el grafo entero del worker: ver extract.overlay.test.ts.
+vi.setConfig({ testTimeout: 30_000 });
+
 const CASE_ID = "monto-test-0000-0000-000000000001";
 const TENANT_ID = "monto-test-0000-0000-000000000002";
 const PROPIOS = { choque: { medium: { minimo: 111_000, maximo: 222_000 } } };

@@ -21,6 +21,9 @@ import { describe, it, expect, vi, afterEach , type Mock } from "vitest";
 
 import { filaDeCaso, registrarMocks } from "./worker-harness";
 
+// Cada caso reimporta el grafo entero del worker: ver extract.overlay.test.ts.
+vi.setConfig({ testTimeout: 30_000 });
+
 const CASE_ID   = "claimtype-test-0000-0000-000000000001";
 const TENANT_ID = "claimtype-test-0000-0000-000000000002";
 

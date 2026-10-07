@@ -20,6 +20,9 @@ const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 /** Una hora. Ver el comentario en `resetPasswordTokenExpiresIn`. */
 const RESET_DURA_SEGUNDOS = 60 * 60;
 
+/** Treinta días desde el ingreso, sin renovación: ver usuarios.ts. */
+const SESION_DURA_SEGUNDOS = 60 * 60 * 24 * 30;
+
 /**
  * El secreto de sesión, o nada.
  *
@@ -155,7 +158,26 @@ export const auth = betterAuth({
      */
     encryptOAuthTokens: true,
   },
+  user: {
+    /*
+     * Google es proveedor de confianza para enlazar, y Better Auth no mira
+     * `email_verified` del perfil cuando confía. Sin la marca, no entra.
+     */
+    validateUserInfo({ source }) {
+      if (source.oauth?.providerId !== "google") return;
+      if (source.oauth.profile?.email_verified !== true) return { error: "email_no_verificado" };
+    },
+  },
   session: {
+    /*
+     * Sin esto Better Auth renueva la sesión en cada uso, y una sesión activa
+     * —o una cookie robada— no vence nunca. Treinta días desde el ingreso es lo
+     * que el resto del código ya da por hecho (ver `usuarios.ts`); pasado ese
+     * momento la persona vuelve a entrar.
+     */
+    expiresIn: SESION_DURA_SEGUNDOS,
+    disableSessionRefresh: true,
+
     /*
      * Caché de sesión en cookie firmada: evita un viaje a Neon en cada
      * `getSession`. El número es el techo de cuánto sobrevive una sesión que ya

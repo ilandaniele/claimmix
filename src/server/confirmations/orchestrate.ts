@@ -49,7 +49,7 @@ import {
   policies,
 } from "@/lib/db/schema";
 import { mismoNombre, normalizarDni, normalizarNumeroPoliza } from "@/core/matching/normalizar";
-import { maskFullName } from "@/server/email/render";
+import { enmascararCampo, maskFullName } from "@/server/email/render";
 import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
@@ -91,7 +91,7 @@ import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contesta
 import { lastAskedKeys } from "@/server/confirmations/ultimo-pedido";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
-import { redactObject } from "@/lib/audit/redact";
+import { redactObject, redactString } from "@/lib/audit/redact";
 import { errorCode } from "@/lib/observability/error-code";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { logger } from "@/lib/observability/logger";
@@ -770,7 +770,8 @@ export async function orchestratePostExtraction(
         event_type: AuditEvent.AGENT_NOTE,
         target_type: "case",
         target_id: caseId,
-        payload: { note: plan.noteForAnalyst },
+        // Texto del modelo: por el mismo filtro que los demás payloads.
+        payload: redactObject({ note: plan.noteForAnalyst }),
       });
     }
   }
@@ -1327,7 +1328,8 @@ function buildAskList(
       : (opts.held?.[key] ?? opts.held?.[canon]);
     // Una franja del día no se confirma: se pide la hora, siempre igual.
     const legible = esValorVago(key, crudo) ? null : valorLegible(key, crudo, hoy);
-    if (legible !== null) knownValues[key] = legible;
+    // AC24: documento y póliza salen tapados también en el pedido.
+    if (legible !== null) knownValues[key] = enmascararCampo(canon, legible, "remitente") ?? legible;
   }
 
   return { fields, knownValues };
@@ -1618,7 +1620,7 @@ async function escalate(opts: {
   if (!(await setStatus(caseId, tenantId, "requiere_especialista", opts.trabajo))) {
     // Otra mano ya movió el caso: ni el mensaje al asegurado, ni la auditoría,
     // ni el aviso al especialista corresponden a un traspaso que no ocurrió.
-    logger.warn({ case_id: caseId, reason: opts.reason }, "escalation.skipped_case_moved");
+    logger.warn({ case_id: caseId, reason: redactString(opts.reason) }, "escalation.skipped_case_moved");
     return;
   }
 
@@ -1669,7 +1671,7 @@ async function escalate(opts: {
     event_type: AuditEvent.SPECIALIST_REQUIRED,
     target_type: "case",
     target_id: caseId,
-    payload: { severity, reason: opts.reason },
+    payload: redactObject({ severity, reason: opts.reason }),
   });
 
   await alertSpecialists({

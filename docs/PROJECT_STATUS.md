@@ -4426,6 +4426,134 @@ la 1.1.18 que traía eslint por `minimatch` 3 tenía dos alertas altas de Depend
 (GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p) y una media (GHSA-q2hr-2g5m-vwhr), sólo
 en desarrollo.
 
+### 🔐 Auditoría con el skill de Cloudflare (security-audit-skill, 2026-10)
+
+Corrida `run-1` del skill `security-audit` de Cloudflare sobre ec6b2fa (perfil
+standard), sólo lectura de código: el host Windows no tiene sandbox, así que no se
+ejecutó nada del repo. Siete olas de búsqueda con libro de cobertura (54 unidades),
+tres votos independientes por candidato y un verificador fresco por registro final.
+La séptima ola no trajo candidatos y el crítico final no pidió más trabajo. Quedaron
+cuatro hallazgos confirmados (uno medio y tres bajos), diecinueve pistas para que
+confirme el dueño y ningún hallazgo alto ni crítico.
+Informe en `C:/Users/Ilan/security-audit-skill/claimmix/run-1/REPORT.md`, con
+`FINDINGS-DETAIL.md` y `NEEDS-VALIDATION.md` al lado.
+
+**Arreglado en este PR**
+
+- Correo entrante: `dmarc=fail` cuenta como falla, y el `dmarc=pass` del primer
+  encabezado de mx.google.com gana sobre spf softfail o dkim=fail
+  (`src/core/email/autenticacion.ts`). Un mail con autenticación fallida nunca se
+  suma a un caso existente (`thread-lookup.ts`). El poller saltea SPAM y TRASH.
+- Respuestas: el destinatario se reduce a una sola dirección pelada
+  (`bareAddress`); una lista de direcciones da `INVALID_RECIPIENT`
+  (`src/server/email/dispatch.ts`).
+- AC24 también en los ecos: el pedido de datos y el recordatorio repiten el
+  documento y la póliza tapados (`orchestrate.ts`, `reenvio.ts`).
+- La respuesta redactada por el modelo no puede traer enlaces ni direcciones de
+  mail inventadas (`compose-reply.ts`, `pregunta.ts`); el resumen de la alerta al
+  especialista se descarta si trae salto de línea, enlace, mail o dominio suelto
+  (`specialist-alert.ts`, `mensaje-tardio.ts`).
+- Sesiones con vencimiento absoluto de 30 días: ya no se renuevan con el uso
+  (`src/lib/auth/index.ts`, `disableSessionRefresh`). Quien entró por contraseña
+  vuelve a entrar al mes aunque la use todos los días.
+- `/api/auth/verify-password` contesta 404 (la app no lo usa) y
+  `/api/auth/change-password` tiene cupo en Postgres por persona
+  (`AUTH_CAMBIO_CLAVE`, 5 cada 10 min); la pantalla de configuración muestra el
+  aviso de demasiados intentos en es-AR y en-US.
+- Casilla de Gmail: no se puede conectar una casilla que ya conectó otra
+  aseguradora (`mailbox_taken`), y la lectura global por dirección ordena por
+  `(created_at, id)`.
+- Demo pública: un tope global de 100 admisiones por día, atómico, corre antes de
+  `checkDemoBudget`, así que una ráfaga ya no desborda el gasto.
+- WhatsApp: volver a alojar los medios respeta el tope de excedente E12
+  (`intake-agent.ts`).
+- Memoria del caso: los valores confirmados pasan por `sinCentinelas` antes de
+  entrar en las pistas del prompt (`prompt.ts`).
+- `audit_log`: `agent.note` y `specialist_required` se guardan redactados.
+- Webhook de Gmail: un aviso de una casilla que no está conectada se confirma y se
+  ignora (`listEnabledGmailAccounts`); antes caía al sondeo de la casilla de
+  entorno.
+- Operadores: `requireOperator` también exige `emailVerified`, así que un
+  operador sin verificar pierde `/admin/cartera`. `POST /api/admin/users` no da
+  de alta direcciones de `ADMIN_EMAILS` (`usuarios.error.operador`, es-AR y
+  en-US).
+- Google: una identidad cuyo perfil no trae `email_verified` en true no entra, no
+  se enlaza a una cuenta existente y no da de alta (`user.validateUserInfo`).
+  `/login` explica el error `email_no_verificado`. Antes, como Google es
+  proveedor de confianza, Better Auth enlazaba sin mirar la marca.
+- Adjuntos de Gmail: se bajan a lo sumo 20 partes por mensaje; las 20 siguientes
+  quedan como rechazadas y el resto sólo se anota en el log. Cada bajada tiene
+  un plazo de 15 s, y una bajada que falla deja una fila `download_failed` en vez
+  de desaparecer. El texto de ese rechazo ya no dice «de WhatsApp».
+- CI: los jobs de integración y E2E de cada PR generan un `BETTER_AUTH_SECRET`
+  descartable y enmascarado por corrida en vez de leer el secreto del
+  repositorio. El ensayo de producción (`deploy-checks.yml`) sigue con el suyo.
+
+**Quedan abiertos (decide el dueño)**
+
+- **From falsificado con autenticación neutra.** Un mail sin
+  Authentication-Results, o con none/neutral (dominio sin DMARC ni SPF), todavía
+  se suma al caso de la víctima porque `senderParticipates` compara sólo la
+  dirección. Lo que ya está: la falla nunca se suma, y la respuesta va sólo a la
+  dirección pelada de la víctima, así que el atacante no recibe datos del caso;
+  sí puede agregar mensajes o adjuntos y reabrirlo. Opciones: (a) exigir
+  `dmarc=pass` del primer encabezado de mx.google.com para el canal `email`
+  (`email_sim` y `web` quedan igual), aceptando que quien no tenga DMARC arranque
+  un caso nuevo; (b) un secreto por caso en el asunto o en el Reply-To. Ninguna
+  está elegida; sigue valiendo la decisión de no usar token por caso.
+- **Alta anticipada de una dirección permitida.** Con `requireEmailVerification:
+  false`, cualquiera que conozca una dirección de `SIGNUP_ALLOWED_EMAILS` o
+  `ADMIN_EMAILS` puede darla de alta antes que su dueña, y la dueña no la recupera
+  con «Olvidé mi contraseña» (`password_reset.sin_perfil`). No hay toma de cuenta:
+  la dirección queda bloqueada hasta que alguien borre la cuenta a mano. Con una
+  entrada `@dominio` la superficie es todo el dominio. Opciones: (1) lista sólo con
+  direcciones exactas, como hoy en producción; (2) alta con verificación previa y
+  una pasada que marque verificadas las cuentas existentes; (3) un camino de
+  reclamo para admins bajo `/api/admin/users`, que es una ruta nueva; (4) que
+  `altaBloqueadaPorSso` mire todos los inquilinos con ese dominio verificado.
+- **Gasto de IA por tráfico anónimo.** Un remitente desconocido por WhatsApp o por
+  mail gasta del tope diario de la aseguradora hasta agotarlo; el cupo por número
+  se esquiva rotando números, en mail no hay cupo por remitente y
+  `ai.budget_exceeded` no avisa a nadie. El gasto queda acotado por el tope del
+  proyecto. Opciones: (1) cubeta por inquilino y canal para remitentes sin caso
+  abierto; (2) sub-tope diario para llamadas sin `userId` en `checkBudget`;
+  (3) aviso al especialista cuando salta `ai.budget_exceeded`; (4) cupo por From
+  normalizado en mail.
+- **Casilla de Gmail repetida entre aseguradoras.** El cierre completo es un índice
+  único global en `email` de las casillas, que es una migración. Mientras tanto
+  queda un hueco: volver a habilitar desde el panel una fila deshabilitada no mira
+  si otra aseguradora conectó esa casilla después.
+- **CRON_SECRET en Preview.** La auditoría marcó que la Carga manda el secreto de
+  producción a cualquier Preview; se descartó porque Preview ya tiene ese mismo
+  valor por decisión del dueño (`docs/PROMOCION.md`). La consecuencia sigue en
+  pie: código de una rama sin revisar, o un Dependabot, corre en Preview con el
+  bearer interno de producción. Separar los valores cierra eso a costa de que el
+  diagnóstico de la Carga contra Previews deje de dar 200.
+- **El watch de Gmail sobrevive a la casilla deshabilitada.** Deshabilitar una
+  casilla no corta el watch: Google sigue mandando avisos y el webhook los ignora.
+  Cerrarlo del todo es cortar el watch al deshabilitar.
+- **Enlaces del formulario web reusados.** Un mismo enlace sirve varias veces y
+  cada uso gasta del presupuesto de IA de la aseguradora. Falta decidir un cupo
+  diario por formulario.
+- **Qué identidad desbloquea qué consulta.** Las consultas por patente o póliza
+  pueden salir en la prosa del modelo hacia quien escribe. Atar cada consulta a
+  la identidad que la habilita es una decisión de producto.
+- **Revocación por persona.** Un admin todavía no puede cortar la sesión de una
+  sola persona; con el vencimiento absoluto, el acceso dura a lo sumo 30 días.
+- **Secreto de sesión que vieron los PR.** Hasta esta rama, los jobs de PR
+  recibían el `BETTER_AUTH_SECRET` del repositorio. Si ese valor es el mismo que
+  el de producción en Vercel, rotarlo cierra la exposición pasada, a costa de
+  cerrar todas las sesiones y de invalidar los enlaces firmados en vuelo
+  (formulario web, dominio SSO). Lo decide el dueño; nada se rotó.
+- **Notas de endurecimiento de la ola 7 (scripts de CI, no son hallazgos).**
+  `scripts/prove-data-layer.mts` escribe y borra filas señuelo con el rol dueño sin
+  guarda contra el host de la base viva, y su sección 4 escribe fuera del gate de
+  CI o `--escribe`; `explicar()` y `prove-tenancy.mts` pasan mensajes crudos
+  del driver al log del paso; `prove-tenancy.mts` cae en silencio de
+  `DATABASE_URL_APP` a `DATABASE_URL` (falla cerrado igual); y el job imprime
+  nombres de inquilinos de staging en un log que se puede leer. Detalle en
+  `REPORT.md`, sección «Hardening notes».
+
 ### 🙋 Waiting on you (not code)
 
 - **Carga de lectura: aplicar la 0046 ANTES de mergear.** El tablero de métricas

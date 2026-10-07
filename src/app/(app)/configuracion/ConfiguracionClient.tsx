@@ -57,7 +57,7 @@ export function ConfiguracionClient() {
       });
 
       if (!res.ok) {
-        setErrorMsg(t("password.errorCambio"));
+        setErrorMsg(t(res.status === 429 ? "password.demasiadosIntentos" : "password.errorCambio"));
         setState("error");
         return;
       }

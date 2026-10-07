@@ -29,7 +29,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { OAuth2Client } from "google-auth-library";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
-import { getGmailAccountByEmail } from "@/server/email/gmail/accounts";
+import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
 import { logger } from "@/lib/observability/logger";
 
 /** Required: prevent Vercel from statically optimising this dynamic route. */
@@ -256,9 +256,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // and next push event will catch up.
 
   try {
-    const connectedAccount = pushPayload.emailAddress
-      ? await getGmailAccountByEmail(pushPayload.emailAddress)
+    const casillas = await listEnabledGmailAccounts();
+    const direccion = pushPayload.emailAddress?.toLowerCase();
+    const connectedAccount = direccion
+      ? (casillas.find((c) => c.email === direccion) ?? null)
       : null;
+    // Misma regla que pollAllGmailAccounts: con casillas conectadas, la del .env
+    // ya no cuenta y un aviso por otra dirección se acusa y se tira.
+    if (!connectedAccount && casillas.length > 0) {
+      logger.warn({ message_id: messageId }, "webhooks_gmail.mailbox_not_connected");
+      return NextResponse.json({ ok: true, ignored: true });
+    }
     const result = connectedAccount
       ? await pollGmail({
           tenantId: connectedAccount.tenantId,

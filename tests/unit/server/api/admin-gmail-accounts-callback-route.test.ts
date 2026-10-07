@@ -49,6 +49,7 @@ vi.mock("@/server/email/gmail/watch", () => ({
 
 vi.mock("@/server/email/gmail/accounts", () => ({
   encryptRefreshToken: (t: string) => `cifrado:${t}`,
+  inquilinoDeLaCasilla: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/auth/require-role", () => ({

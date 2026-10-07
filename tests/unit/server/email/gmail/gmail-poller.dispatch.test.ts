@@ -589,6 +589,67 @@ describe("Gmail relevance prefilter", () => {
   });
 });
 
+describe("Gmail: spam y papelera", () => {
+  function gmailConEtiquetas(labelIds: string[]) {
+    const gmailMock = makeGmailMock();
+    (gmailMock.users.messages.get as any).mockResolvedValue({
+      data: {
+        id: MSG_ID,
+        threadId: "thread-spam-001",
+        historyId: "99999",
+        labelIds,
+        payload: {
+          headers: [
+            { name: "From", value: "sender@example.com" },
+            { name: "To", value: "claims@claimmix.com" },
+            { name: "Subject", value: "Choqué el auto, les paso los datos" },
+            { name: "In-Reply-To", value: "" },
+            { name: "References", value: "" },
+          ],
+          mimeType: "text/plain",
+          body: {
+            data: Buffer.from("Choqué en Alem al 500, les mando la denuncia").toString("base64url"),
+          },
+          parts: [],
+        },
+      },
+    });
+    mockGetGmailClient.mockReturnValue(gmailMock);
+    return gmailMock;
+  }
+
+  it.each([[["SPAM", "UNREAD"]], [["TRASH"]]])(
+    "no ingiere el mail con etiquetas %j ni lo marca como leído",
+    async (labelIds) => {
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+      globalThis.fetch = mockFetch;
+      const gmailMock = gmailConEtiquetas(labelIds);
+
+      const result = await pollGmail();
+
+      expect(result.processed).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(mockThreadLookup).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(gmailMock.users.messages.modify).not.toHaveBeenCalled();
+    }
+  );
+
+  it("el mismo mail en la bandeja de entrada sí se procesa", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+    gmailConEtiquetas(["INBOX", "UNREAD"]);
+
+    setupDbMock();
+    const result = await pollGmail();
+
+    expect(result.processed).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+});
+
 describe("NB3 — initial case insert uses claim_type: null", () => {
   it("inserts the new case row with claim_type: null (not a hard-coded string)", async () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true });

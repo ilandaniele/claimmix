@@ -385,16 +385,17 @@ export function buildEmailClaimPrompt(
       : asuntoLimpio;
 
   // Format memory hints for injection.
+  // Valores de la memoria y de los patrones: datos escritos por gente, mismo trato que el cuerpo.
   const memoryHintsJson =
     memoryHints.length > 0
-      ? JSON.stringify(memoryHints, null, 2)
+      ? sinCentinelas(JSON.stringify(memoryHints, null, 2))
       : "[]";
 
   // Filter patterns to only include severity-relevant ones for prompt.
   const severityPatterns = knownPatterns
     .filter((p) => p.severity_hint && ["critical", "high", "medium", "low"].includes(p.severity_hint))
     .map((p) => ({ pattern: p.pattern_text, type: p.pattern_type, severity: p.severity_hint }));
-  const severityPatternsJson = JSON.stringify(severityPatterns, null, 2);
+  const severityPatternsJson = sinCentinelas(JSON.stringify(severityPatterns, null, 2));
 
   // Sender hint (non-PII logging label — not echoed in response fields).
   //

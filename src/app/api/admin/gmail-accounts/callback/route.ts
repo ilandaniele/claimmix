@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as google from "@googleapis/gmail";
 import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
-import { encryptRefreshToken } from "@/server/email/gmail/accounts";
+import { encryptRefreshToken, inquilinoDeLaCasilla } from "@/server/email/gmail/accounts";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
@@ -66,6 +66,16 @@ export async function GET(request: NextRequest) {
     const email = profile.data.emailAddress?.toLowerCase();
     if (!email) {
       return NextResponse.redirect(new URL("/configuracion?gmail=missing_email", origin));
+    }
+
+    // La unicidad en la base es por inquilino: la misma casilla en dos
+    // aseguradoras haría que el timbre y las respuestas cayeran en una sola.
+    const duena = await inquilinoDeLaCasilla(email);
+    if (duena && duena !== userRow.tenant_id) {
+      logger.warn({ motivo: "casilla_de_otro_inquilino" }, "gmail_accounts_callback.rechazado");
+      const rechazo = NextResponse.redirect(new URL("/configuracion?gmail=mailbox_taken", origin));
+      rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+      return rechazo;
     }
 
     const t = tables.gmailAccounts;

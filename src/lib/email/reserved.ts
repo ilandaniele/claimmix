@@ -27,11 +27,13 @@
  * `Nombre <a@b.com>` → `a@b.com`. Sin ángulos, se devuelve lo que haya, sin
  * espacios. No pretende ser un parser de RFC 5322: alcanza con quedarse con lo
  * de adentro de los ángulos, que es donde todos los clientes ponen la
- * dirección.
+ * dirección. Lo que va entre comillas es nombre visible y no cuenta: en
+ * `"<a@b.com>" <c@d.com>` la dirección es la segunda, no la del nombre.
  */
 export function bareAddress(value: string | null | undefined): string {
   if (!value) return "";
-  const angled = /<([^>]+)>/.exec(value);
+  const sinComillas = value.replace(/"(?:[^"\\]|\\.)*"/g, " ");
+  const angled = /<([^>]+)>/.exec(sinComillas);
   return (angled?.[1] ?? value).trim().toLowerCase();
 }
 

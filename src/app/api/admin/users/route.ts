@@ -14,6 +14,9 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { ALL_ROLES } from "@/lib/auth/roles";
 import { auth } from "@/lib/auth";
 import { enAltaDeAdmin } from "@/lib/auth/registro-permitido";
+import { isOperatorEmail } from "@/lib/auth/require-operator";
+import { getT } from "@/lib/i18n";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
@@ -85,6 +88,12 @@ export async function POST(request: NextRequest) {
         "FORBIDDEN_ROLE",
         "Solo un owner puede crear usuarios owner."
       );
+    }
+
+    // Las direcciones de ADMIN_EMAILS abren la cartera de todas las aseguradoras: no se dan de alta desde un inquilino.
+    if (isOperatorEmail(email)) {
+      const t = getT(await resolveAccountLocale(adminRow.locale));
+      throw new AppError("VALIDATION_FAILED", t("usuarios.error.operador"));
     }
 
     // Generate a temporary password if none provided

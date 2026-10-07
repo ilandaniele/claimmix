@@ -333,12 +333,29 @@ jobs:
         env:
           ENSAYO_URL: ${{ secrets.STAGING_DATABASE_URL }}
 
+      # Un secreto de sesión sólo para esta corrida.
+      #
+      # Acá iba `secrets.BETTER_AUTH_SECRET`, el mismo que `deploy-checks.yml`
+      # usa en el ensayo de producción, repartido a tres pasos que corren el
+      # código de la rama y de sus dependencias en cada PR interno. Nada de lo
+      # que estos pasos leen de la base del ensayo depende de ese valor: las
+      # contraseñas van con scrypt, los tokens de Gmail con
+      # GMAIL_TOKEN_ENCRYPTION_KEY, y los tokens HKDF se firman y se verifican
+      # en la misma corrida. Un valor nuevo por corrida alcanza, y producción
+      # no se entera. Va por GITHUB_ENV porque sembrado, servidor y tests
+      # tienen que firmar lo mismo; después de este paso no corre ninguna
+      # acción de terceros en este job.
+      - name: Secreto de sesión de esta corrida
+        run: |
+          SECRETO="$(openssl rand -hex 32)"
+          echo "::add-mask::$SECRETO"
+          echo "BETTER_AUTH_SECRET=$SECRETO" >> "$GITHUB_ENV"
+
       - name: Sembrar la base del ensayo
         if: env.HAY_ENSAYO != ''
         run: pnpm sembrar
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           # Las mismas contrasenas que reciben los e2e, y por eso estan aca.
           #
           # Sin ellas el sembrado cae a su valor por omision y PISA la clave de
@@ -380,7 +397,6 @@ jobs:
           # sola si le dan un rol con BYPASSRLS, y este job lo comprueba de
           # punta a punta.
           DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           MOCK_AI: "true"
 
       # Antes, sin el secreto, esto avisaba y el job quedaba VERDE sin importar
@@ -408,7 +424,6 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           MOCK_AI: "true"
           # Las mismas contrasenas que uso el sembrado, y por eso estan aca.
           #
@@ -638,8 +653,13 @@ jobs:
         if: env.HAY_E2E != ''
         run: test -f .next/BUILD_ID && test -d .next/static/chunks
 
+      # El secreto de sesión se genera acá y no va a GITHUB_ENV: lo usa un solo
+      # paso, y la acción que sube el informe no tiene por qué verlo. El porqué
+      # está en el job de integración, en «Secreto de sesión de esta corrida».
       - name: Run E2E tests
         run: |
+          export BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$BETTER_AUTH_SECRET"
           if [ -n "$HAY_E2E" ]; then
             pnpm test:e2e --project=chromium
           elif [ "$ES_FORK" = "true" ]; then
@@ -684,7 +704,6 @@ jobs:
           # la base de ensayo eso es lo que tiene que pasar.
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
           DATABASE_URL_APP: ${{ secrets.E2E_DATABASE_URL_APP || 'postgresql://placeholder:placeholder@placeholder/placeholder' }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'placeholder-secret' }}
           # Las cuentas y los casos que viven en la base de ensayo.
           #
           # Sin esto, catorce tests se salteaban con un mensaje claro — no era

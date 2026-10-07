@@ -26,6 +26,7 @@
 
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
+import { autenticacionFallida } from "@/core/email/autenticacion";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { cases, claimMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
@@ -60,6 +61,7 @@ export interface ThreadLookupResult {
  * @param references  - Value of the References header (space-separated message-ids)
  * @param subject     - Value of the Subject header (may carry "Caso #<uuid>")
  * @param fromAddr    - Value of the From header; must already take part in the case
+ * @param headers     - cabeceras del mensaje; con Authentication-Results fallida no se pega a ningún caso
  * @returns { existingCaseId?: string }
  */
 export async function threadLookup(
@@ -67,8 +69,14 @@ export async function threadLookup(
   inReplyTo: string,
   references: string,
   subject: string,
-  fromAddr: string
+  fromAddr: string,
+  headers: unknown = []
 ): Promise<ThreadLookupResult> {
+  // El servidor de correo dijo que el remitente es falso: no entra a ningún caso, abre el suyo.
+  if (autenticacionFallida(headers)) {
+    logger.warn({ via: "authentication_results" }, "thread_lookup.sender_not_authenticated");
+    return {};
+  }
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   // Collect candidate thread IDs from both headers (angle brackets stripped).

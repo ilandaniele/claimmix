@@ -25,6 +25,8 @@ import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { instruccionDeCampo } from "@/lib/labels/instruccion-de-campo";
+import { EMAIL_RE } from "@/core/text/contacto";
+import { sinEnlaces } from "@/core/mensajes/pregunta";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
 import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
@@ -264,14 +266,14 @@ denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y 
 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}${llevaCuidado(input) ? ` Abrí (después del saludo, si saludás) con una sola frase breve de cuidado: «${CUIDADO}». No repitas ni comentes lo que contó de las heridas, la internación o la salud de nadie, no diagnostiques, no prometas nada.` : ""}
-${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(sinNumerosEnteros(input.question))}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(sinNumerosEnteros(sinEnlaces(input.question)))}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
 
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}\n\n${COMO_VA_LA_LISTA}` : ""}
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}
-${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${sinCentinelas(sinNumerosEnteros(input.lastMessage)).slice(0, 600)}"""` : ""}
+${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${sinCentinelas(sinNumerosEnteros(sinEnlaces(input.lastMessage))).slice(0, 600)}"""` : ""}
 
 ${channelBrief}
 
@@ -310,6 +312,21 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   for (const pattern of FORBIDDEN) {
     if (pattern.test(trimmed)) return `forbidden:${pattern.source.slice(0, 24)}`;
   }
+  // El último mensaje lo escribe cualquiera: un enlace o un correo en lo que
+  // sale por nuestro buzón es un phishing con nuestra firma. Sólo salen los que
+  // pasamos nosotros. `match` y no `test`: EMAIL_RE es global.
+  const permitido = [
+    input.fallback,
+    ...Object.values(input.knownValues ?? {}),
+    ...(input.conflicts ?? []).flatMap((c) => [c.proposed, c.stored]),
+  ]
+    .join("\n")
+    .toLowerCase();
+  const contactos = [
+    ...(trimmed.match(/(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\/\S*/gi) ?? []),
+    ...(trimmed.match(EMAIL_RE) ?? []),
+  ];
+  if (contactos.some((c) => !permitido.includes(c.toLowerCase()))) return "contacto_inventado";
   // La opinión de responsabilidad es del equipo (B18). Con motivo propio: el
   // reintento no puede explicarlo como una promesa de cobertura.
   if (nombraCulpaOLey(trimmed)) return "nombra_culpa";
@@ -509,6 +526,9 @@ function explain(problem: string): string {
   }
   if (problem === "nombra_culpa") {
     return "nombraste quién tuvo la culpa o citaste una ley o un artículo de tránsito. Eso lo decide una persona del equipo: no lo adelantes ni lo insinúes.";
+  }
+  if (problem === "contacto_inventado") {
+    return "pusiste un enlace o un correo que no te pasé. No inventes formas de contacto: la persona contesta este mismo mensaje.";
   }
   if (problem === "invented_field") {
     return "la lista tiene más ítems que los que te pasé. Pedí sólo lo que está en DATOS A PEDIR, ni uno más.";

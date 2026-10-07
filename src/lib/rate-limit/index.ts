@@ -22,6 +22,7 @@
 
 import {
   checkRateLimit as checkMemory,
+  liberarIntento,
   resetRateLimit,
   clearAllRateLimits,
 } from "./memory";
@@ -183,6 +184,20 @@ export const RATE_LIMIT_CONFIGS = {
   WHATSAPP_POR_REMITENTE: { limit: 20, windowMs: 10 * 60_000 },
 
   /**
+   * EMAIL_POR_REMITENTE: 20 mails por 10 minutos por remitente y casilla. Mismo
+   * techo que WHATSAPP_POR_REMITENTE: del 21 en adelante el mail se guarda sin
+   * leerse. La cubeta lleva la dirección hasheada.
+   */
+  EMAIL_POR_REMITENTE: { limit: 20, windowMs: 10 * 60_000 },
+
+  /**
+   * AVISO_PRESUPUESTO_POR_INQUILINO: 1 correo por día a los especialistas cuando
+   * se agota el presupuesto de IA. Sin tope, cada mensaje sin analizar repite el
+   * aviso a la guardia.
+   */
+  AVISO_PRESUPUESTO_POR_INQUILINO: { limit: 1, windowMs: 24 * 60 * 60_000 },
+
+  /**
    * AVISO_TARDIO_POR_CASO: 3 correos a los especialistas por día y por caso.
    * Cada mensaje tardío avisa una vez; sin tope, quien escribe veinte veces a
    * un caso cerrado le manda veinte correos a la guardia.
@@ -279,6 +294,13 @@ export const RATE_LIMIT_CONFIGS = {
    * mediana recibe una fracción de eso en su hora pico.
    */
   DENUNCIA_WEB_SLUG: { limit: 200, windowMs: 60 * 60_000 },
+
+  /**
+   * DENUNCIA_WEB_SLUG_DIA: 300 denuncias por día por formulario, sumadas todas
+   * las IP. El tope por hora deja pasar 4800 al día rotando direcciones; éste
+   * acota lo que ese formulario le puede gastar al presupuesto de IA en un día.
+   */
+  DENUNCIA_WEB_SLUG_DIA: { limit: 300, windowMs: 24 * 60 * 60_000 },
 
   /**
    * DENUNCIA_WEB_MAIL: 3 denuncias por hora hacia la misma dirección (la clave
@@ -384,6 +406,22 @@ export async function rateLimit(
     ...result,
     retryAfterSeconds,
   };
+}
+
+/**
+ * Devuelve el intento que acaba de contar `rateLimit`, para cuando lo que el
+ * cupo cuida no llegó a pasar (un correo que no salió): sin esto, un envío
+ * fallido deja sin aviso al resto de la ventana. Upstash es un stub sin esta
+ * operación, y los perfiles con `lote` reservan por adelantado: no aplica.
+ */
+export async function liberarCupo(key: string, windowMs: number): Promise<void> {
+  const provider = resolveProvider();
+  if (provider === "postgres") {
+    const { liberarIntentoPostgres } = await import("./postgres");
+    await liberarIntentoPostgres(key, windowMs);
+  } else if (provider === "memory") {
+    liberarIntento(key);
+  }
 }
 
 /**

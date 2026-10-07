@@ -8,6 +8,10 @@
  * AC1: setupGmailWatch calls gmail.users.watch, returns {historyId, expiration},
  *      and persists the watch state via setWatchState().
  *
+ * stopGmailWatch() is the reverse: gmail.users.stop + clearWatchState(). Se usa
+ * al deshabilitar una casilla, para que Google deje de mandar avisos de una
+ * casilla que el poller ya no lee.
+ *
  * Security:
  * - Topic name is NOT logged — it may encode environment or project identifiers.
  * - GMAIL_USER_EMAIL is NOT logged — it is PII-adjacent.
@@ -16,7 +20,8 @@
 
 import "server-only";
 import { getGmailClient } from "@/server/email/gmail/gmail-client";
-import { setWatchState } from "@/server/email/gmail/poll-state";
+import { clearWatchState, setWatchState } from "@/server/email/gmail/poll-state";
+import { logger } from "@/lib/observability/logger";
 
 export interface GmailWatchAccount {
   email: string;
@@ -76,4 +81,27 @@ export async function setupGmailWatch(
   await setWatchState(gmailEmail, expirationIso, historyId);
 
   return { historyId, expiration: expirationIso };
+}
+
+/**
+ * Apaga el aviso de Gmail de una casilla y borra su marca de vencimiento.
+ *
+ * Idempotente: si Google contesta 404 o 400 es que no había watch (nunca se
+ * registró, o ya venció o se revocó el permiso), y eso es lo que se quería
+ * lograr. Se loguea y se sigue, borrando la marca igual. Cualquier otro error
+ * —red, 401, 5xx— tira, porque el watch puede seguir vivo.
+ */
+export async function stopGmailWatch(account: GmailWatchAccount): Promise<void> {
+  const gmail = getGmailClient(account.refreshToken);
+
+  try {
+    await gmail.users.stop({ userId: "me" });
+  } catch (err: unknown) {
+    const e = err as { status?: number; code?: number | string; response?: { status?: number } };
+    const status = e?.status ?? e?.response?.status ?? e?.code;
+    if (status !== 404 && status !== 400) throw err;
+    logger.info({ status }, "gmail_watch.stop.sin_watch");
+  }
+
+  await clearWatchState(account.email);
 }

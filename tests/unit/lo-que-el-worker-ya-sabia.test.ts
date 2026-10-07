@@ -92,7 +92,10 @@ describe("lo que ya averiguamos", () => {
 
 describe("el cableado", () => {
   it("el plan lo recibe y el prompt lo muestra", () => {
-    expect(ORQ).toContain("yaAveriguado: loQueYaAveriguamos(customerMatches, extractedOutput.polizas)");
+    expect(ORQ).toContain(
+      "const yaAveriguado = loQueYaAveriguamos(customerMatches, extractedOutput.polizas)"
+    );
+    expect(ORQ).toContain("yaAveriguado,");
     expect(DEL).toContain("LO QUE YA AVERIGUAMOS");
   });
 

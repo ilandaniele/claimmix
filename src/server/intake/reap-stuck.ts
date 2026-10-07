@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
@@ -59,6 +59,14 @@ import { logger } from "@/lib/observability/logger";
  */
 const ESTADOS_TRABABLES = ["procesando", "recibido"] as const;
 
+/**
+ * «Para responder» en `recibido` es lo que deja el tope por formulario o por
+ * remitente: el caso se guarda sin agente, a propósito, y ya lo tiene una
+ * persona. En `procesando` la marca no dice que el agente terminó: ahí el
+ * worker pudo caerse a mitad de corrida, y el caso sigue trabado.
+ */
+const sinPersonaEncima = () => or(ne(cases.status, "recibido"), isNull(cases.para_responder_desde));
+
 const DEFAULT_STUCK_AFTER_MS = 20 * 60_000; // 20 minutes
 const MAX_STUCK_AFTER_MS = 2 * 60 * 60_000; // 2 hours
 const DEFAULT_REAP_LIMIT = 200;
@@ -104,6 +112,7 @@ export async function reapStuckProcessingCases(opts?: {
           // Pendiente es de retomar-pendientes, no de este barrido: escalarlo
           // mientras hay una corrida por venir le pisa el trabajo.
           eq(cases.extraction_pending, false),
+          sinPersonaEncima(),
           // `updated_at` queda NULL al insertar; coalesce cae a `created_at`
           // para ese caso, y de paso le da 20 minutos frescos a un caso
           // reabierto (`reabrir-no-relevante.ts`) o que el worker tocó.
@@ -134,7 +143,8 @@ export async function reapStuckProcessingCases(opts?: {
         and(
           inArray(cases.id, ids),
           inArray(cases.status, ESTADOS_TRABABLES),
-          eq(cases.extraction_pending, false)
+          eq(cases.extraction_pending, false),
+          sinPersonaEncima()
         )
       )
       .returning({ id: cases.id, tenant_id: cases.tenant_id });

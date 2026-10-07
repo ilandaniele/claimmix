@@ -4,16 +4,26 @@
  * New accounts are created in the default tenant with the "analyst" role
  * (same provisioning rule as Google sign-in). Admins can change roles later
  * from /admin/users.
+ *
+ * No pide contraseña: se elige desde el enlace que le llega a la persona.
  */
 
 import Link from "next/link";
+
+import { getT } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
+
 import { SignUpForm } from "./SignUpForm";
 
 export const metadata = {
   title: "Crear cuenta — ClaimMix",
 };
 
-export default function RegistroPage() {
+export default async function RegistroPage() {
+  // Fuera del LocaleProvider: el idioma se resuelve acá, en el servidor.
+  const locale = await getServerLocale();
+  const t = getT(locale);
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-sm">
@@ -32,6 +42,9 @@ export default function RegistroPage() {
           <h2 className="mb-6 text-lg font-medium text-slate-800">
             Crear cuenta
           </h2>
+          <p lang={locale} className="mb-4 text-sm text-slate-600">
+            {t("registro.sinContraseña.ayuda")}
+          </p>
           <SignUpForm />
         </div>
 

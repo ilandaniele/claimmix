@@ -114,6 +114,15 @@ describe("ingestInboundEmail — «Para responder»", () => {
     await expect(ingestInboundEmail(CORREO)).resolves.toMatchObject({ outcome: "processed" });
   });
 
+  it("le pasa a threadLookup el canal del correo, que decide cómo se verifica el remitente", async () => {
+    mockThreadLookup.mockResolvedValue({ existingCaseId: "caso-viejo" });
+
+    await ingestInboundEmail(CORREO);
+    await ingestInboundEmail({ ...CORREO, channel: "email" });
+
+    expect(mockThreadLookup.mock.calls.map((c) => c[6])).toEqual(["email_sim", "email"]);
+  });
+
   it("un correo que abre un caso nuevo no marca nada: lo contesta el agente", async () => {
     mockThreadLookup.mockResolvedValue({ existingCaseId: null });
 

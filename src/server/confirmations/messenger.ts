@@ -541,6 +541,12 @@ async function writeReply(
     claimantName:
       typeof message.data.claimantName === "string" ? message.data.claimantName : null,
     question: typeof message.data.question === "string" ? message.data.question : null,
+    datosDelPadron: Array.isArray(message.data.datosDelPadron)
+      ? (message.data.datosDelPadron as unknown[]).map(String)
+      : undefined,
+    escritoPorLaPersona: Array.isArray(message.data.escritoPorLaPersona)
+      ? (message.data.escritoPorLaPersona as unknown[]).map(String)
+      : undefined,
     lastMessage: message.lastMessage,
     fallback,
   });

@@ -8,6 +8,10 @@
  *
  * `/verify-password` la app no lo usa: se niega. `/change-password` lleva un
  * cupo en Postgres por usuario, no por IP: la cookie robada es un usuario.
+ *
+ * `/sign-up/email` tampoco se usa por HTTP (el alta es `/registro`, que llama a
+ * Better Auth desde el servidor): se niega, y con eso nadie pre-registra una
+ * dirección permitida ni lee la lista por la forma de la respuesta.
  */
 
 import { NextRequest } from "next/server";
@@ -69,6 +73,19 @@ describe("POST /api/auth/verify-password", () => {
     expect((await res.json()).error.code).toBe("NOT_FOUND");
     expect(handlerPost).not.toHaveBeenCalled();
     expect(mockGetSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/auth/sign-up/email", () => {
+  it("el alta es /registro, desde el servidor: por HTTP es 404, sin cupo ni Better Auth", async () => {
+    const { POST } = await cargarRuta();
+
+    const res = await POST(pedido("sign-up/email", { name: "Ana", email: "ana@example.com", password: "fake-pass" }));
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("NOT_FOUND");
+    expect(handlerPost).not.toHaveBeenCalled();
+    expect(mockRateLimit).not.toHaveBeenCalled();
   });
 });
 

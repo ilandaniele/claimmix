@@ -131,6 +131,11 @@ export interface DeliberationInput {
    * quiere preguntar, y el plan se valida igual que siempre.
    */
   yaAveriguado?: string;
+  /**
+   * Quién escribe, según lo que escribió: el DNI que sacó el extractor de su
+   * texto. Las herramientas buscan por esto y no por lo que pida el modelo.
+   */
+  remitente?: { dni: string | null };
 }
 
 /** The deterministic tree remains the fallback, and the switch to reach it. */
@@ -223,7 +228,11 @@ async function think(
   toolCalls: AgentPlan["toolCalls"];
   lookupResults: string[];
 }> {
-  const ctx: ToolContext = { caseId: input.caseId, tenantId: input.tenantId };
+  const ctx: ToolContext = {
+    caseId: input.caseId,
+    tenantId: input.tenantId,
+    remitente: input.remitente ?? { dni: null },
+  };
   const toolCalls: AgentPlan["toolCalls"] = [];
   const transcript: string[] = [];
   // Sólo lo que DEVOLVIÓ cada consulta, para `lookupResults` — `transcript`

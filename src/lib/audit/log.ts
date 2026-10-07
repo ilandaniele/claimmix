@@ -101,6 +101,11 @@ export const AuditEvent = {
   USER_ROLE_CHANGED: "auth.user_role_changed",
   PASSWORD_RESET_REQUESTED: "auth.password_reset_requested",
   PASSWORD_RESET_COMPLETED: "auth.password_reset_completed",
+  /**
+   * USER_SESSIONS_REVOKED: un admin cerró todas las sesiones de otra persona.
+   * Payload: { sesiones_cerradas }. El actor es el admin; el objetivo, el usuario.
+   */
+  USER_SESSIONS_REVOKED: "auth.user_sessions_revoked",
 
   // ── Case lifecycle ─────────────────────────────────────────────────────────
   CASE_CREATED: "case.created",
@@ -132,6 +137,13 @@ export const AuditEvent = {
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",
   AI_BUDGET_EXCEEDED: "ai.budget_exceeded",
+  /**
+   * AI_BUDGET_ALERTED: se avisó a los especialistas de que el presupuesto de IA
+   * se agotó y las denuncias dejaron de analizarse. Va aparte de
+   * AI_BUDGET_EXCEEDED, que es uno por mensaje sin analizar; éste, uno por aviso.
+   * Payload: { motivo, recipients, delivered }. El objetivo es el inquilino.
+   */
+  AI_BUDGET_ALERTED: "ai.budget_alerted",
   AI_PROVIDER_CHANGED: "ai.provider_changed",
 
   // ── Document / gap analysis ────────────────────────────────────────────────
@@ -207,7 +219,9 @@ export const AuditEvent = {
 
   /**
    * MESSAGE_NOT_READ: llegó un mensaje a un caso del que el worker no vuelve a
-   * arrancar, así que no se leyó. Payload: { status, motivo }.
+   * arrancar, así que no se leyó. Payload: { status, motivo }; el mail pasado el
+   * tope por remitente lleva { motivo: "tope_por_remitente", channel }, y el
+   * formulario web pasado su tope diario, { motivo: "tope_por_formulario", channel: "web" }.
    *
    * `no_relevante` y `listo_para_core` no son estados de arranque del worker
    * —`no_relevante` a propósito, bajo LLM08: la IA no saca un caso de ahí; de

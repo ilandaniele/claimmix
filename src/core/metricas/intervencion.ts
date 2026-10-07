@@ -24,6 +24,7 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "auth.user_role_changed": false,
   "auth.password_reset_requested": false,
   "auth.password_reset_completed": false,
+  "auth.user_sessions_revoked": false,
 
   "case.created": false,
   "case.status_changed": true,
@@ -37,6 +38,7 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
 
   "ai.extracted": false,
   "ai.budget_exceeded": false,
+  "ai.budget_alerted": false,
   "ai.provider_changed": false,
 
   "doc.received": false,

@@ -16,6 +16,7 @@ import { useFormStatus } from "react-dom";
 
 import { useDialogoModal } from "../../_components/dialogo-modal";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
+import { textoDeSesionesCerradas } from "@/lib/i18n/sesiones-cerradas";
 import { formatDate } from "@/lib/utils";
 
 interface UserRow {
@@ -303,6 +304,7 @@ export function AdminUsersClient({
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [changingUserId, setChangingUserId] = useState<string | null>(null);
+  const [closingSessionsId, setClosingSessionsId] = useState<string | null>(null);
 
   // Fetch full user list (with emails) from the API route on mount
   const refreshUsers = useCallback(async () => {
@@ -355,6 +357,29 @@ export function AdminUsersClient({
       setError(err instanceof Error ? err.message : t("usuarios.error.rol"));
     } finally {
       setChangingUserId(null);
+    }
+  }
+
+  async function handleCloseSessions(user: UserRow) {
+    if (!window.confirm(t("usuarios.cerrarSesionesConfirmar").replace("{nombre}", user.full_name))) {
+      return;
+    }
+    setError(null);
+    setClosingSessionsId(user.id);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/sessions`, { method: "DELETE" });
+
+      if (!res.ok) {
+        throw new Error(await readApiError(res, t("usuarios.error.sesiones")));
+      }
+
+      const data = await res.json().catch(() => null);
+      setToast(textoDeSesionesCerradas(t, data?.sesiones_cerradas ?? 0));
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("usuarios.error.sesiones"));
+    } finally {
+      setClosingSessionsId(null);
     }
   }
 
@@ -470,6 +495,18 @@ export function AdminUsersClient({
                           <span className="text-xs text-slate-500">
                             {isSelf ? t("usuarios.propio") : t("usuarios.bloqueado")}
                           </span>
+                        )}
+                        {canChangeRole && (
+                          <button
+                            type="button"
+                            onClick={() => void handleCloseSessions(user)}
+                            disabled={closingSessionsId === user.id}
+                            className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+                          >
+                            {closingSessionsId === user.id
+                              ? t("usuarios.cerrandoSesiones")
+                              : t("usuarios.cerrarSesiones")}
+                          </button>
                         )}
                       </div>
                     </td>

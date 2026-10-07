@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { remitenteVerificado } from "@/core/email/autenticacion";
 
 // ── Mocks (must be declared before any imports that load the modules) ─────────
 
@@ -274,8 +275,11 @@ function buildGmailMessage(opts: {
   from?: string;
   bodyText?: string;
   parts?: unknown[];
+  /** Valor de la Authentication-Results que Gmail antepone al mensaje. */
+  authResults?: string;
 }) {
   const headers = [
+    ...(opts.authResults ? [{ name: "Authentication-Results", value: opts.authResults }] : []),
     { name: "From", value: opts.from ?? "claimant@example.com" },
     { name: "To", value: "claims@company.com" },
     { name: "Subject", value: opts.subject ?? "Insurance Claim" },
@@ -314,6 +318,23 @@ function buildGmailMessage(opts: {
     },
   };
 }
+
+/**
+ * `threadLookup` real en lo que importa acá: por `email` el remitente se suma al
+ * hilo sólo si `remitenteVerificado` lo prueba contra la cabecera de Gmail.
+ */
+const threadLookupQueVerifica =
+  (existingCaseId: string) =>
+  async (
+    _tenantId: string,
+    _inReplyTo: string,
+    _references: string,
+    _subject: string,
+    fromAddr: string,
+    headers: unknown,
+    channel: string
+  ) =>
+    remitenteVerificado(headers, fromAddr, channel) ? { existingCaseId } : {};
 
 // ── Test setup ────────────────────────────────────────────────────────────────
 
@@ -534,10 +555,12 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
 
       setupGmailHistoryMock([MSG_ID_2]);
 
+      // Gmail verificó que el From es de quien dice: SPF alineado con el dominio del From.
       const gmailMessage = buildGmailMessage({
         id: MSG_ID_2,
         threadId: THREAD_ID_1,
         inReplyTo: "<" + MSG_ID_1 + "@mail.gmail.com>",
+        authResults: "mx.google.com; spf=pass smtp.mailfrom=claimant@example.com",
       });
       mockMessagesGet.mockResolvedValue({ data: gmailMessage });
 
@@ -546,9 +569,9 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
 
       // threadLookup returns existing case
       const { threadLookup } = await import("@/server/email/thread-lookup");
-      (threadLookup as ReturnType<typeof vi.fn>).mockResolvedValue({
-        existingCaseId: EXISTING_CASE_ID,
-      });
+      (threadLookup as ReturnType<typeof vi.fn>).mockImplementation(
+        threadLookupQueVerifica(EXISTING_CASE_ID)
+      );
 
       const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
       const result = await pollGmail();
@@ -563,6 +586,58 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       // No new case should be created
       const caseInserts = dbInserts.filter((r) => r.table === "cases");
       expect(caseInserts).toHaveLength(0);
+
+      // El canal real y las cabeceras de Gmail llegan a threadLookup
+      const [, , , , fromAddr, headers, channel] = (threadLookup as ReturnType<typeof vi.fn>).mock
+        .calls[0];
+      expect(fromAddr).toBe("claimant@example.com");
+      expect(channel).toBe("email");
+      expect(headers).toContainEqual({
+        name: "Authentication-Results",
+        value: "mx.google.com; spf=pass smtp.mailfrom=claimant@example.com",
+      });
+    });
+
+    it.each([
+      ["sin Authentication-Results de Gmail", undefined],
+      ["con un SPF que pasa pero de otro dominio", "mx.google.com; spf=pass smtp.mailfrom=bounce@atacante.example"],
+      ["con un DMARC que falla", "mx.google.com; spf=pass smtp.mailfrom=claimant@example.com; dmarc=fail"],
+    ])("AC3: un From que Gmail no verificó (%s) no se suma al caso existente", async (_caso, authResults) => {
+      const { getOrCreatePollState } = await import("@/server/email/gmail/poll-state");
+      (getOrCreatePollState as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "poll-state-uuid",
+        historyId: HISTORY_ID_START,
+      });
+
+      setupGmailHistoryMock([MSG_ID_2]);
+
+      const gmailMessage = buildGmailMessage({
+        id: MSG_ID_2,
+        threadId: THREAD_ID_1,
+        inReplyTo: "<" + MSG_ID_1 + "@mail.gmail.com>",
+        authResults,
+      });
+      mockMessagesGet.mockResolvedValue({ data: gmailMessage });
+
+      const { checkDuplicate } = await import("@/server/email/dedupe");
+      (checkDuplicate as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+      const { threadLookup } = await import("@/server/email/thread-lookup");
+      (threadLookup as ReturnType<typeof vi.fn>).mockImplementation(
+        threadLookupQueVerifica("existing-case-uuid-001")
+      );
+
+      const { pollGmail } = await import("@/server/email/gmail/gmail-poller");
+      const result = await pollGmail();
+
+      expect(result.processed).toBe(1);
+
+      // Abre un caso nuevo y el mensaje cuelga de ése, no del existente
+      const caseInserts = dbInserts.filter((r) => r.table === "cases");
+      expect(caseInserts).toHaveLength(1);
+      const claimMsgInserts = dbInserts.filter((r) => r.table === "claim_messages");
+      expect(claimMsgInserts).toHaveLength(1);
+      expect(claimMsgInserts[0].values.case_id).toBe("case-uuid-test-001");
     });
 
     it("AC3: in_reply_to stored without angle brackets", async () => {

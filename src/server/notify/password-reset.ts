@@ -25,6 +25,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
+import { inquilinoDeAltaNueva } from "@/lib/auth/alta-nueva";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
@@ -46,9 +47,30 @@ export interface PasswordResetEmail {
   duraMinutos: number;
 }
 
-function redactar(input: PasswordResetEmail) {
+function redactar(input: PasswordResetEmail, esAlta: boolean) {
   const nombre = input.name?.trim().split(/\s+/)[0] ?? null;
   const saludo = nombre ? `Hola ${nombre},` : "Hola,";
+
+  if (esAlta) {
+    // La contraseña de una cuenta recién creada no la conoce nadie: el enlace
+    // es la única forma de entrar, así que no se le dice que la actual sigue sirviendo.
+    return {
+      subject: "Activar tu cuenta de ClaimMix",
+      text: [
+        saludo,
+        "",
+        "Alguien creó una cuenta de ClaimMix con esta dirección. Si fuiste vos,",
+        "abrí este enlace para elegir tu contraseña y entrar:",
+        "",
+        input.url,
+        "",
+        `El enlace vence en ${input.duraMinutos} minutos y sirve una sola vez.`,
+        "",
+        "Si no fuiste vos, no hace falta que hagas nada: la cuenta no se activa",
+        "hasta que alguien abre el enlace, y este vence solo.",
+      ].join("\n"),
+    };
+  }
 
   return {
     subject: "Recuperar el acceso a ClaimMix",
@@ -90,11 +112,19 @@ export async function sendPasswordResetEmail(
       .where(eq(users.id, input.userId))
       .limit(1);
 
-    if (!perfil) {
+    /*
+     * El alta sin contraseña crea la cuenta SIN perfil: el perfil lo recibe quien
+     * abre este enlace (ver on-password-reset.ts). Si la dirección está habilitada
+     * para el alta, el mail sale por la casilla del inquilino por omisión, que es
+     * donde va a caer el perfil.
+     */
+    const tenantId = perfil?.tenant_id ?? (await inquilinoDeAltaNueva(input.email));
+
+    if (!tenantId) {
       /*
-       * Cuenta sin perfil: existe en Better Auth y no está atada a ninguna
-       * aseguradora. Pasa con quien se dio de alta sin estar en la lista
-       * permitida — el alta crea la cuenta y NO crea el perfil, a propósito.
+       * Cuenta sin perfil y sin alta habilitada: existe en Better Auth y no está
+       * atada a ninguna aseguradora. Pasa con quien se dio de alta antes de estar
+       * en la lista permitida.
        *
        * No hay casilla desde donde escribirle, y tampoco corresponde: no tiene
        * acceso a nada que recuperar.
@@ -106,10 +136,10 @@ export async function sendPasswordResetEmail(
       return;
     }
 
-    const account = await getGmailAccountForTenant(perfil.tenant_id);
+    const account = await getGmailAccountForTenant(tenantId);
     if (!account) {
       logger.error({
-        tenant_id: perfil.tenant_id,
+        tenant_id: tenantId,
         nota: "Nadie puede recuperar su contraseña en esta aseguradora hasta que haya una casilla conectada.",
       }, "password_reset.sin_casilla");
       /*
@@ -121,7 +151,7 @@ export async function sendPasswordResetEmail(
        * la respuesta a esa pregunta es «no hay nada», que suena a que no pidió.
        */
       await writeAuditLog({
-        tenant_id: perfil.tenant_id,
+        tenant_id: tenantId,
         actor_id: null,
         event_type: AuditEvent.PASSWORD_RESET_REQUESTED,
         target_type: "user",
@@ -131,7 +161,7 @@ export async function sendPasswordResetEmail(
       return;
     }
 
-    const { subject, text } = redactar(input);
+    const { subject, text } = redactar(input, !perfil);
     const sender = new GmailSender(account.refreshToken);
     const result = await sender.send({
       to: input.email,
@@ -143,7 +173,7 @@ export async function sendPasswordResetEmail(
     const entregado = isSendSuccess(result);
 
     await writeAuditLog({
-      tenant_id: perfil.tenant_id,
+      tenant_id: tenantId,
       actor_id: null,
       event_type: AuditEvent.PASSWORD_RESET_REQUESTED,
       target_type: "user",

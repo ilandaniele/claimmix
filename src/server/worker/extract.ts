@@ -43,6 +43,7 @@ import {
 import type { CaseInsert, CaseRow } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { checkBudget } from "@/server/ai/budget";
+import { avisarPresupuestoAgotado } from "@/server/notify/specialist-alert";
 import { runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { resolveExtractionEngine } from "@/server/ai/provider";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
@@ -137,7 +138,7 @@ import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle"
 import { anclarPolizaAlTexto, mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
-import { autenticacionFallida } from "@/core/email/autenticacion";
+import { remitenteVerificado } from "@/core/email/autenticacion";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
@@ -787,7 +788,7 @@ export async function runEmailExtractionWorker(
       )
     );
 
-    let conversation = await loadInboundConversation(caseId, tenantCtx);
+    let conversation = await loadInboundConversation(caseId, tenantCtx, caseRow.channel);
     leidos = conversation?.entrantes.map((m) => m.id) ?? null;
 
     if (conversation) {
@@ -812,7 +813,7 @@ export async function runEmailExtractionWorker(
     // ── b) Load memory hints from claim_memory ───────────────────────────────
     let memoryHints: ReturnType<typeof toPromptMemoryHints> = [];
     if (conversation?.remitenteAutenticado === false) {
-      // El remitente no pasó SPF/DKIM: con su dirección no se hereda nada.
+      // El remitente no está verificado (SPF/DKIM/DMARC): con su dirección no se hereda nada.
       logger.warn({ case_id: caseId }, "email_worker.memoria_omitida_remitente_sin_autenticar");
     } else {
       memoryHints = toPromptMemoryHints(await loadClaimMemoryHints(tenantId, senderEmail, undefined, caseId));
@@ -846,6 +847,11 @@ export async function runEmailExtractionWorker(
         target_id: caseId,
         payload: { reason: budgetResult.reason },
       });
+      // El cupo de una persona no frena al canal: sólo los topes que dejan sin
+      // analizar a todos le avisan al equipo (uno por día, no uno por mensaje).
+      if (budgetResult.motivo && budgetResult.motivo !== "persona") {
+        await avisarPresupuestoAgotado({ tenantId, motivo: budgetResult.motivo });
+      }
       // Escalate so a human can re-trigger once budget resets — never leave the case in procesando.
       await enTenant(tenantCtx, (db) =>
         db
@@ -873,7 +879,8 @@ export async function runEmailExtractionWorker(
       });
       if (nuevos.size > 0) {
         conversation = armarConversacion(
-          conversation.filas.map((f) => ({ ...f, body_text: nuevos.get(f.id) ?? f.body_text }))
+          conversation.filas.map((f) => ({ ...f, body_text: nuevos.get(f.id) ?? f.body_text })),
+          caseRow.channel
         );
         emailBody = conversation?.body ?? emailBody;
         latestInboundText = conversation?.latestText ?? latestInboundText;
@@ -2171,7 +2178,7 @@ interface LoadedConversation {
   entrantes: Array<{ id: string; texto: string; recibido: string }>;
   claimMessageId: string | null;
   providerMessageId: string | null;
-  /** Falso cuando el último entrante falló SPF/DKIM (E17). */
+  /** Falso cuando el último entrante no pasó SPF/DKIM/DMARC (E17); ver `remitenteVerificado` por canal. */
   remitenteAutenticado: boolean;
   /** Las filas tal cual: la transcripción rearma la conversación con ellas. */
   filas: FilaEntrante[];
@@ -2196,7 +2203,8 @@ type FilaEntrante = {
  */
 export async function loadInboundConversation(
   caseId: string,
-  tenantCtx: TenantContext
+  tenantCtx: TenantContext,
+  channel: string
 ): Promise<LoadedConversation | null> {
   const inbound = await enTenant(tenantCtx, (db) =>
     db
@@ -2223,10 +2231,10 @@ export async function loadInboundConversation(
   // Defensive: anything other than a row list means we cannot read the
   // conversation, and the raw-message path is the honest fallback.
   if (!Array.isArray(inbound)) return null;
-  return armarConversacion(inbound as FilaEntrante[]);
+  return armarConversacion(inbound as FilaEntrante[], channel);
 }
 
-export function armarConversacion(inbound: FilaEntrante[]): LoadedConversation | null {
+export function armarConversacion(inbound: FilaEntrante[], channel: string): LoadedConversation | null {
   const latest = inbound[inbound.length - 1];
   if (!latest) return null;
 
@@ -2245,7 +2253,7 @@ export function armarConversacion(inbound: FilaEntrante[]): LoadedConversation |
     })),
     claimMessageId: latest.id ?? null,
     providerMessageId: latest.provider_message_id ?? null,
-    remitenteAutenticado: !autenticacionFallida(latest.headers),
+    remitenteAutenticado: remitenteVerificado(latest.headers, latest.from_addr ?? "", channel),
     filas: inbound,
   };
 }

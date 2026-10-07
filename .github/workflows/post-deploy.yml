@@ -126,8 +126,41 @@ permissions:
   contents: read
 
 jobs:
+  # ── Un disparo a mano no elige adónde van los secretos ──────────────────────
+  #
+  # `produccion` llama a deploy-checks.yml con `secrets: inherit`, y la URL del
+  # disparo a mano llega hasta ahí. El reusable la vuelve a comprobar en su
+  # primer paso, pero este job corta antes de que nada reciba un secreto: sólo
+  # el alias de producción. El de QA tampoco entra: ese ensayo correría con la
+  # base y el CRON_SECRET de producción contra un deploy que no es el suyo (QA
+  # tiene su propio job, con sus secretos). Una vista previa no entra, ni un
+  # host ajeno. Por deployment_status la URL es fija y el job no corre.
+  validar_url:
+    name: ¿A dónde apunta esto?
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: ¿A dónde apunta esto?
+        env:
+          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+        run: |
+          set -u
+          case "$URL" in
+            https://*) ;;
+            *) echo "::error::La URL tiene que empezar con https://"; exit 1 ;;
+          esac
+          HOST="${URL#https://}"
+          case "$HOST" in
+            *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
+          esac
+          case "$HOST" in
+            claimmix.vercel.app) ;;
+            *) echo "::error::Este disparo sólo admite claimmix.vercel.app, no ${HOST}"; exit 1 ;;
+          esac
+
   produccion:
     name: Producción
+    needs: [validar_url]
     # El proyecto, no sólo el entorno: el deploy del proyecto de QA también
     # llega con un entorno que empieza con `Production` —así se llama SU
     # entorno de producción, en SU proyecto— y sin distinguirlo esto correría
@@ -147,11 +180,17 @@ jobs:
     # Contra QA corre el job `qa`, acá abajo, con sus propios secretos y sus
     # propios interruptores. Lo que QA no puede correr queda nombrado en el
     # resumen del run por el job `alcance` de deploy-checks.yml.
+    #
+    # `validar_url` sólo corre en el disparo a mano, así que por
+    # deployment_status queda `skipped`: `!cancelled()` deja pasar eso y
+    # `!= 'failure'` frena una URL rechazada. Sin la función de estado, un
+    # `needs` salteado saltearía este job también.
     if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.deployment_status.state == 'success' &&
-       startsWith(github.event.deployment.environment, 'Production') &&
-       !endsWith(github.event.deployment.environment, '-qa'))
+      !cancelled() && needs.validar_url.result != 'failure' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.deployment_status.state == 'success' &&
+        startsWith(github.event.deployment.environment, 'Production') &&
+        !endsWith(github.event.deployment.environment, '-qa')))
     permissions:
       contents: read
       # Techo para el job `rehearse` de deploy-checks.yml: un workflow
@@ -211,7 +250,6 @@ jobs:
           BASE_PROD: ${{ secrets.DATABASE_URL }}
           BASE_APP_PROD: ${{ secrets.DATABASE_URL_APP }}
           INQUILINO: ${{ secrets.QA_GMAIL_TENANT_ID }}
-          AUTH: ${{ secrets.QA_BETTER_AUTH_SECRET }}
           R2_CUENTA: ${{ secrets.QA_R2_ACCOUNT_ID }}
           R2_LLAVE: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
           R2_SECRETO: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
@@ -271,12 +309,12 @@ jobs:
           # El ensayo sube adjuntos de verdad, y desde el 20/09 QA tiene balde
           # propio para eso: claimmix-qa-attachments, con su propio token. Sin
           # los cuatro QA_R2_* no hay dónde subirlos y el ensayo no corre.
-          if [ -n "$INQUILINO" ] && [ -n "$AUTH" ] && [ -n "$R2_CUENTA" ] &&
+          if [ -n "$INQUILINO" ] && [ -n "$R2_CUENTA" ] &&
              [ -n "$R2_LLAVE" ] && [ -n "$R2_SECRETO" ] && [ -n "$R2_BALDE" ]; then
             echo "ensayo=1" >> "$GITHUB_OUTPUT"
           else
             echo "ensayo=0" >> "$GITHUB_OUTPUT"
-            echo "::notice title=QA sin ensayo::Faltan QA_GMAIL_TENANT_ID, QA_BETTER_AUTH_SECRET o los QA_R2_* - el ensayo no corre."
+            echo "::notice title=QA sin ensayo::Faltan QA_GMAIL_TENANT_ID o los QA_R2_* - el ensayo no corre."
           fi
 
   # ── QA: lo que sí puede correr ──────────────────────────────────────────────
@@ -331,7 +369,6 @@ jobs:
       DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
       DATABASE_URL_APP: ${{ secrets.QA_DATABASE_URL_APP }}
       GMAIL_TENANT_ID: ${{ secrets.QA_GMAIL_TENANT_ID }}
-      BETTER_AUTH_SECRET: ${{ secrets.QA_BETTER_AUTH_SECRET }}
       R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}

@@ -3460,6 +3460,128 @@ describe("orchestratePostExtraction — what the lookup found", () => {
     expect(ask?.[0].data?.missingFields).toEqual(["hora_siniestro"]);
   });
 
+  it("looks up by the DNI the person wrote, not by one that came from the padrón", async () => {
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    const claim = extractEmailClaimMock();
+    claim.fields = [
+      ...claim.fields,
+      { field_key: "dni_asegurado", field_value: "27.654.321", confidence: 0.9, source: "ai" },
+      { field_key: "dni", field_value: "30111222", confidence: 0.99, source: "canal" },
+    ];
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(vi.mocked(deliberate)).toHaveBeenCalledWith(
+      expect.objectContaining({ remitente: { dni: "27.654.321" } })
+    );
+  });
+
+  it("looks up with no DNI when the person gave none", async () => {
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    expect(vi.mocked(deliberate)).toHaveBeenCalledWith(
+      expect.objectContaining({ remitente: { dni: null } })
+    );
+  });
+
+  it("hands the writer what the lookup returned so the message does not dictate it", async () => {
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number", "hora_siniestro"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    const devolvio = '{"encontradas":1,"polizas":[{"numero":"POL-8812-R","vigente":true}]}';
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: ["hora_siniestro"],
+      question: null,
+      reasoning: "la póliza la encontré por DNI",
+      noteForAnalyst: null,
+      resolved: [{ field: "policy_number", value: "POL-8812-R" }],
+      toolCalls: [{ tool: "polizas_por_dni", args: {} }],
+      lookupResults: [devolvio],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask?.[0].data?.datosDelPadron).toEqual(expect.arrayContaining([devolvio]));
+  });
+
+  it("also hands the writer what the person said in the whole conversation, so the history does not forbid it", async () => {
+    // `historial_del_caso` devuelve los datos que ella escribió y los del padrón
+    // sin distinguirlos: lo que ella dijo viaja aparte para poder repetírselo.
+    setupDbMocks();
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["policy_number", "hora_siniestro"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    const historial = '{"datos":[{"campo":"patente","valor":"AB123CD","certeza":0.9}]}';
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "ask",
+      askFor: ["hora_siniestro"],
+      question: null,
+      reasoning: "",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [{ tool: "historial_del_caso", args: {} }],
+      lookupResults: [historial],
+    } as never);
+    const claim = extractEmailClaimMock();
+    claim.fields = [
+      ...claim.fields,
+      { field_key: "patente", field_value: "AB123CD", confidence: 0.9, source: "ai" },
+    ];
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const ask = vi
+      .mocked(dispatchOutboundEmail)
+      .mock.calls.find((c) => c[0].template === "missing_information_request");
+    expect(ask?.[0].data?.datosDelPadron).toEqual(expect.arrayContaining([historial]));
+    expect(ask?.[0].data?.escritoPorLaPersona).toEqual(expect.arrayContaining(["AB123CD"]));
+  });
+
   it("does not let the keep-asking rule drag it back onto the list", async () => {
     // We asked for the policy number last round; this round we found it. The
     // rule that keeps outstanding items on the list must not resurrect it.
@@ -4508,6 +4630,33 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
 
     expect(titularWhereSpy.mock.calls.flat().join(" ")).toContain("POL-3390-F");
     expect(derivacion?.data).toMatchObject({ titularIniciales: "R*** P***" });
+  });
+
+  it("el documento es el de quien escribe: uno que el modelo mande en la llamada no cuenta", async () => {
+    // `verificar_poliza` ya no recibe un `dni` y compara con el de quien escribe. Si acá
+    // se leyera el de los args, un modelo que dictara el del titular taparía el conflicto.
+    setupDbMocks({ titularRows: [{ nombre: "Roberto Paz", dni: "26.880.140" }] });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "escalate",
+      reasoning: "el titular de la póliza no es quien escribe",
+      askFor: [],
+      resolved: [],
+      toolCalls: [{ tool: "verificar_poliza", args: { numero_poliza: "POL-3390-F", dni: "26880140" } }],
+    } as unknown as Awaited<ReturnType<typeof deliberate>>);
+
+    const derivacion = await derivacionDe(familiarConDni());
+
+    expect(derivacion?.data).toMatchObject({ titularIniciales: "R*** P***" });
+  });
+
+  it("sin documento propio no hay con qué comparar: no nombra ningún padrón", async () => {
+    setupDbMocks({ titularRows: [{ nombre: "Roberto Paz", dni: "26.880.140" }] });
+    const claim = familiarConDni();
+    claim.fields = claim.fields.filter((f) => f.field_key !== "dni");
+
+    const derivacion = await derivacionDe(claim);
+
+    expect(derivacion?.data).toMatchObject({ titularIniciales: null });
   });
 });
 

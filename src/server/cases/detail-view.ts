@@ -530,7 +530,7 @@ export async function cargarDetalleDeCaso(
       fetchAuditLog(ctx, caseId),
       esDeCorreo ? fetchConfirmaciones(ctx, caseId) : Promise.resolve([]),
       fetchAdjuntos(ctx, caseId),
-      mensajesEntrantes(ctx, caseId, { orden: "viejos", tope: MENSAJES_A_MOSTRAR }),
+      mensajesEntrantes(ctx, caseId, { orden: "viejos", tope: MENSAJES_A_MOSTRAR, channel: caseRow.channel }),
       leerPlanYAsignacion(ctx, caseId, rol, caseRow),
       caseRow.policy_id ? fetchPoliza(ctx, caseRow.policy_id) : Promise.resolve(null),
     ]);

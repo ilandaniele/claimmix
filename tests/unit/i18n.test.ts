@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { t, getT, esAR, enUS } from "@/lib/i18n/index";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locale-shared";
+import { textoDeSesionesCerradas } from "@/lib/i18n/sesiones-cerradas";
 import { RESULTADOS_SSO } from "@/app/(app)/configuracion/sso-resultados";
 import { enUS as enUSCliente } from "@/lib/i18n/en-US";
 import { enUSServidor } from "@/lib/i18n/en-US.servidor";
@@ -327,5 +328,58 @@ describe("las claves del SSO", () => {
   it("todo resultado que la página puede pintar tiene su texto, y nada sobra", () => {
     const deResultados = claves.filter((k) => k.startsWith("configuracion.sso.r.")).map((k) => k.slice("configuracion.sso.r.".length));
     expect([...deResultados].sort()).toEqual([...RESULTADOS_SSO].sort());
+  });
+});
+
+/**
+ * Las claves del lote de decisiones de la auditoría: las que llevan marcas
+ * `{…}` las rellena el código con `.replace`, así que una marca que cambie de
+ * nombre en un solo idioma deja la llave a la vista en esa interfaz.
+ */
+describe("las claves con marcas del lote de decisiones", () => {
+  const marcas = (texto: string) => (texto.match(/\{\w+\}/g) ?? []).sort();
+  const DE_CLIENTE = {
+    "usuarios.cerrarSesionesConfirmar": ["{nombre}"],
+    "usuarios.toast.sesionesCerradas": ["{n}"],
+    "usuarios.toast.sesionCerrada": [],
+  } as const;
+  const DE_SERVIDOR = {
+    "presupuesto.aviso.cuerpo": ["{hora}", "{motivo}", "{plazo}"],
+    "formulario.ayuda": ["{porDia}", "{porHora}"],
+  } as const;
+
+  it("las de cliente llevan las mismas marcas en los dos idiomas", () => {
+    for (const [clave, esperadas] of Object.entries(DE_CLIENTE)) {
+      expect(marcas(esAR[clave as keyof typeof DE_CLIENTE]), clave).toEqual([...esperadas].sort());
+      expect(marcas(enUS[clave as keyof typeof DE_CLIENTE]), clave).toEqual([...esperadas].sort());
+    }
+  });
+
+  it("las de servidor llevan las mismas marcas en los dos idiomas", () => {
+    for (const [clave, esperadas] of Object.entries(DE_SERVIDOR)) {
+      expect(marcas(esARServidor[clave as keyof typeof DE_SERVIDOR]), clave).toEqual([...esperadas].sort());
+      expect(marcas(enUSServidor[clave as keyof typeof DE_SERVIDOR]), clave).toEqual([...esperadas].sort());
+    }
+  });
+
+  it("con una sola sesión cerrada el aviso va en singular, en los dos idiomas", () => {
+    for (const idioma of ["es-AR", "en-US"] as const) {
+      const traducir = getT(idioma) as (clave: keyof typeof esARCliente) => string;
+      const una = textoDeSesionesCerradas(traducir, 1);
+      expect(una, idioma).not.toMatch(/sesiones|sessions/);
+      expect(una, idioma).toContain("1");
+      for (const n of [0, 2, 5]) {
+        expect(textoDeSesionesCerradas(traducir, n), idioma).toContain(String(n));
+        expect(textoDeSesionesCerradas(traducir, n), idioma).not.toContain("{n}");
+      }
+    }
+  });
+  it("los motivos y plazos del aviso de presupuesto existen en los dos idiomas", () => {
+    for (const motivo of ["anonimo", "inquilino", "mensual"] as const) {
+      for (const clave of [`presupuesto.aviso.motivo.${motivo}`, `presupuesto.aviso.plazo.${motivo}`] as const) {
+        expect(esARServidor[clave], clave).toBeTruthy();
+        expect(enUSServidor[clave], clave).toBeTruthy();
+      }
+    }
   });
 });

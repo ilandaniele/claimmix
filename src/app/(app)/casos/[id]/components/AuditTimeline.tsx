@@ -56,6 +56,7 @@ const MOTIVOS_DEL_CASO: Record<string, ClaveDelCliente> = {
   lesiones: "case.detail.motivo.lesiones",
   tomar_el_control: "case.detail.tomarElControl",
   tope_por_remitente: "case.detail.motivo.topePorRemitente",
+  tope_por_formulario: "case.detail.motivo.topePorFormulario",
   devolver_al_agente: "case.detail.devolverAlAgente",
   entregado_por_fuera: "case.detail.motivo.entregadoPorFuera",
   plantilla_sin_aprobar: "reenvio.motivo.plantilla_sin_aprobar",

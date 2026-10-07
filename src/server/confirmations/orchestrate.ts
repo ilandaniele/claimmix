@@ -697,6 +697,7 @@ export async function orchestratePostExtraction(
   // outstanding, and is never consulted at all on an escalation. A plan that
   // fails is discarded whole and this falls back to the table below, so the
   // worst case is the behaviour we already had.
+  const yaAveriguado = loQueYaAveriguamos(customerMatches, extractedOutput.polizas);
   const plan = await deliberate({
     caseId,
     tenantId,
@@ -707,8 +708,22 @@ export async function orchestratePostExtraction(
     claimTypeLabel: labelForClaimType(claimTypeValue),
     isHighSeverity: derivaSola,
     isComplete: everythingOutstanding.fields.length === 0,
-    yaAveriguado: loQueYaAveriguamos(customerMatches, extractedOutput.polizas),
+    yaAveriguado,
+    remitente: { dni: dniDeQuienEscribe(extractedClaim.fields) },
   });
+
+  /*
+   * Lo que salió del padrón en esta vuelta, para que el redactor no lo dicte.
+   * Sólo viaja hasta `composeReply`: las plantillas no lo leen ni se guarda.
+   */
+  const datosDelPadron = [...(plan?.lookupResults ?? []), ...(yaAveriguado ? [yaAveriguado] : [])];
+  /*
+   * Lo que dijo la persona, de toda la conversación: el extractor lee todos
+   * sus mensajes. `historial_del_caso` devuelve esos mismos datos junto con los
+   * que salieron del padrón y no distingue unos de otros, así que sin esto la
+   * guarda rechazaba que el redactor repitiera algo que ella escribió antes.
+   */
+  const escritoPorLaPersona = extractedClaim.fields.flatMap((f) => (f.field_value ? [f.field_value] : []));
 
   if (plan) {
     await writeAuditLog({
@@ -811,6 +826,8 @@ export async function orchestratePostExtraction(
       severity: extractedClaim.severity,
       claimantName,
       titularIniciales,
+      datosDelPadron,
+      escritoPorLaPersona,
       claimTypeValue,
       reason: plan.reasoning,
       // Aunque el conflicto ya haya salido: ése le pidió que conteste por acá, y
@@ -959,6 +976,8 @@ export async function orchestratePostExtraction(
         claimantName,
         // What they asked, so the reply answers it instead of talking past it.
         question: pregunta,
+        datosDelPadron,
+        escritoPorLaPersona,
         // Fourth message in, the reply still opened with "gracias por
         // contactarnos". Thanking someone for getting in touch three rounds
         // after they did is the tell that nobody is really reading.
@@ -1029,6 +1048,8 @@ export async function orchestratePostExtraction(
         // pedido otra vez. Una lista de campos en el prompt es una lista de
         // cosas para pedir, diga lo que diga la instrucción de al lado.
         isFollowUp: true,
+        datosDelPadron,
+        escritoPorLaPersona,
       },
       inReplyToMessageId,
     });
@@ -1083,6 +1104,8 @@ export async function orchestratePostExtraction(
         isFollowUp,
         claimantName,
         question: pregunta,
+        datosDelPadron,
+        escritoPorLaPersona,
       },
       inReplyToMessageId,
     });
@@ -1503,6 +1526,9 @@ async function inicialesDelTitularAjeno(
 
   /*
    * Los mismos dos valores que comparó `verificar_poliza`, no los extraídos.
+   * El DNI es el de quien escribe, el mismo que le llega a la herramienta como
+   * `ctx.remitente`: lo que el modelo mande en los args no cuenta, y no puede
+   * ser lo que decide a quién se le muestran las iniciales de un titular.
    *
    * En el ensayo la herramienta la buscó como «POL-3390-F» y la encontró,
    * mientras el emparejador —que usa el campo extraído— devolvía cero
@@ -1518,7 +1544,7 @@ async function inicialesDelTitularAjeno(
     typeof v === "string" && v.trim() !== "" ? v.trim() : null;
 
   const numero = texto(verificada.numero_poliza) ?? dicho("policy_number");
-  const dni = texto(verificada.dni) ?? dicho("dni");
+  const dni = dniDeQuienEscribe(extractedClaim.fields);
   if (!numero || !dni || !nombreQueDijo) return null;
 
   try {
@@ -1588,6 +1614,10 @@ async function escalate(opts: {
    * contestar. Nunca el nombre entero: ver `inicialesDelTitularAjeno`.
    */
   titularIniciales?: string | null;
+  /** Lo que salió del padrón en esta vuelta: el redactor no lo puede dictar. */
+  datosDelPadron?: string[];
+  /** Lo que dijo la persona en toda la conversación: lo único del padrón que sí se le puede repetir. */
+  escritoPorLaPersona?: string[];
   claimTypeValue: string | null;
   summary?: string | null;
   reason: string;
@@ -1658,6 +1688,8 @@ async function escalate(opts: {
         severity,
         claimantName: opts.claimantName ?? null,
         titularIniciales: opts.titularIniciales ?? null,
+        datosDelPadron: opts.datosDelPadron ?? [],
+        escritoPorLaPersona: opts.escritoPorLaPersona ?? [],
         ...(opts.heridos ? { heridos: true } : {}),
         ...(opts.yaPreguntamos ? { yaPreguntamos: true } : {}),
       },
@@ -1714,6 +1746,18 @@ function keepAskingForWhatIsStillNeeded(
   const added = chosen.filter((k) => outstanding.has(k) && !seen.has(k));
 
   return [...carried, ...added].slice(0, MAX_ASK_ITEMS);
+}
+
+/**
+ * El DNI que escribió quien nos escribe, para que las consultas del agente
+ * busquen por él y no por lo que dicte el modelo.
+ *
+ * Sale de los campos que extrajo el modelo del texto de la persona: ni del
+ * padrón ni del sobre (`canal`), que sirve para saludar y no para decir quién es.
+ */
+function dniDeQuienEscribe(fields: ExtractedClaim["fields"]): string | null {
+  const held = valuesWeHold(fields.filter((f) => f.source !== "canal"));
+  return held[canonicalFieldKey("dni")] ?? null;
 }
 
 /**

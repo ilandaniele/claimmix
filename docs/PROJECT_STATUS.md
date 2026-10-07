@@ -4535,8 +4535,9 @@ sola migración (la 0047).
   inquilinos. Cierra la carrera entre dos callbacks de OAuth y la rehabilitación
   desde el panel: una fila deshabilitada sigue ocupando la casilla, y para
   liberarla hay que borrarla. Ante un 23505 el callback redirige a
-  `mailbox_taken`, como ya hacía con su chequeo previo. Se aplica a mano antes del
-  merge: ver «Waiting on you».
+  `mailbox_taken`, como ya hacía con su chequeo previo. Se aplicó a mano antes del
+  merge en QA, producción y staging, sin duplicados previos; vuelta atrás:
+  `DROP INDEX IF EXISTS public.gmail_accounts_email_unica`.
 - **CRON_SECRET en Preview.** El alcance Preview de Vercel lleva un `CRON_SECRET`
   propio, distinto del de producción, y el repositorio guarda ese mismo valor como
   `PREVIEW_CRON_SECRET`. Sólo lo usa `load-tests.yml`, que elige entre
@@ -4574,10 +4575,12 @@ sola migración (la 0047).
   que importan `@/lib/auth` generan uno propio por corrida
   (`openssl rand -hex 32`, enmascarado), y `deploy-checks.yml` ya no lo declara
   ni lo hereda, así que QA dejó de pasar `QA_BETTER_AUTH_SECRET`. Los dos secretos
-  del repositorio se pueden borrar. Rotar el valor de producción en Vercel no se
-  hizo: si el del repositorio era el mismo, los PR anteriores lo vieron, y rotarlo
-  cierra todas las sesiones e invalida los enlaces firmados en vuelo (formulario
-  web, dominio SSO). Sigue siendo del dueño.
+  del repositorio se borran después del merge. En la promoción se rotaron
+  `BETTER_AUTH_SECRET` (sólo Vercel Production) y el `CRON_SECRET` de producción
+  (Vercel, secreto del repositorio y `.env.local`): se cerraron todas las sesiones
+  y los formularios web abiertos en ese momento piden recargar. No había dominios
+  SSO pendientes de verificar, y los tokens de las casillas de Gmail se cifran con
+  `GMAIL_TOKEN_ENCRYPTION_KEY`, que no cambió.
 
 **Lo que quedó fuera de #382, a propósito**
 
@@ -4623,27 +4626,6 @@ sola migración (la 0047).
 
 ### 🙋 Waiting on you (not code)
 
-- **Gmail: aplicar la 0047 ANTES de mergear.** Crea el índice único
-  `gmail_accounts_email_unica` sobre `lower(email)`, para que una casilla
-  pertenezca a una sola aseguradora (cierra la carrera entre dos callbacks de
-  OAuth y la rehabilitación desde el panel). Se aplica a mano, con el dueño de la
-  base y `node scripts/migrate.mjs --apply` por TCP, en este orden y repitiendo el
-  chequeo previo en cada base: QA (`ep-wispy-flower`), producción
-  (`ep-proud-resonance`) y la rama `production` de Veltra
-  (`STAGING_DATABASE_URL`). El chequeo previo es la consulta que trae el
-  encabezado de `neon/migrations/0047_una_casilla_de_gmail_una_sola_aseguradora.sql`:
-  si devuelve filas, el índice falla con 23505 y hay que decidir a mano cuál queda
-  (la habilitada o la más nueva) y borrar la otra. Sin la 0047, `--exigir-al-dia`
-  deja el CI rojo; el código tolera que falte (el callback sigue rechazando con su
-  chequeo de siempre) y sólo queda abierta la carrera. Vuelta atrás:
-  `DROP INDEX IF EXISTS public.gmail_accounts_email_unica`.
-- **Secretos del cierre de las diez decisiones.** (1) Generar un valor nuevo con
-  `openssl rand -hex 32` y cargarlo igual como `CRON_SECRET` en el alcance Preview
-  de `claimmix` (hoy tiene el de producción) y como `PREVIEW_CRON_SECRET` en el
-  repositorio. (2) Borrar `BETTER_AUTH_SECRET` y `QA_BETTER_AUTH_SECRET` del
-  repositorio: ningún workflow los lee. (3) Decidir si se rota el
-  `BETTER_AUTH_SECRET` de producción en Vercel; sólo cierra algo si ese valor es el
-  mismo que estuvo en el repositorio.
 - **Después del deploy: `pnpm check` completo y `pnpm knock`.** El mail real que
   deposita el timbre trae el `Authentication-Results` alineado de Gmail y tiene que
   seguir abriendo o siguiendo caso: es la única prueba de la decisión sobre el From

@@ -122,7 +122,7 @@ describe("PlanDeTrabajo", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Pedir el presupuesto" }));
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Pedir el presupuesto" })).not.toBeChecked();
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Pedir el presupuesto" })).not.toBeChecked());
   });
 
   it("lo que se tocó acá no tapa un cambio que llega después de otra persona", async () => {

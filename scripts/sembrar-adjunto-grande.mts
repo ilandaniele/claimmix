@@ -14,6 +14,7 @@
  * viven denuncias reales es exactamente lo que no hay que hacer.
  */
 import * as dotenv from "dotenv";
+import { HOST_DE_PRODUCCION, hostDe } from "../tests/e2e/base-de-ensayo";
 dotenv.config({ path: ".env.local" });
 
 const destino = process.env.SEED_DATABASE_URL?.trim() ?? process.env.STAGING_DATABASE_URL?.trim();
@@ -51,10 +52,13 @@ if (produccion && destino === produccion) {
   process.exit(2);
 }
 
-// El host-only idiom de `src/lib/db/index.ts` y `sembrar-para-integracion.mts`:
-// nunca la cadena entera, siempre el host.
-const host = new URL(destino.replace(/^postgres(ql)?:/, "https:")).host;
-if (host.includes("ep-proud-resonance")) {
+// Nunca la cadena entera, siempre el host.
+const host = hostDe(destino);
+if (!host) {
+  console.error("✗ La cadena de destino no es una URL válida.");
+  process.exit(2);
+}
+if (host.includes(HOST_DE_PRODUCCION)) {
   console.error(`✗ ${host} es la base de PRODUCCIÓN. Los e2e no corren ahí.`);
   process.exit(2);
 }

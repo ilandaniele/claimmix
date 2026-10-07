@@ -33,6 +33,14 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { resumenDe, taparEnElLog } from "../tests/e2e/base-de-ensayo";
+
+// Lo que se escapa sin atrapar sale con el mensaje crudo, que puede traer la
+// cadena con la contraseña: al log va sólo el resumen.
+process.on("uncaughtException", (e) => {
+  console.error(`\n✗ Error sin atrapar (${resumenDe(e)}).`);
+  process.exit(2);
+});
 
 // Node 22+ trae WebSocket nativo. Se usa el driver WebSocket y no el HTTP
 // porque hace falta una transacción de verdad para poner el contexto y leer
@@ -53,6 +61,10 @@ const esperadoAbierto = args.includes("--esperado-abierto");
 if (!url) {
   console.error("Falta DATABASE_URL_APP (o pasá --url).");
     process.exit(2);
+}
+if (urlArg < 0 && process.env.DATABASE_URL_APP === undefined) {
+  console.warn("⚠ Falta DATABASE_URL_APP: se prueba con DATABASE_URL, que suele ser el rol dueño.");
+  console.warn("  Si el chequeo del rol falla por BYPASSRLS, la causa es ésta y no la base.");
 }
 
 const titulo = (t: string) => console.log(`\n▸ ${t}`);
@@ -191,7 +203,10 @@ try {
     // búsqueda corre con el contexto de cada inquilino, más abajo.
     const inquilinos = (
       await cx.query(`SELECT id::text AS id, name FROM tenants ORDER BY created_at LIMIT 2`)
-    ).rows;
+    ).rows.map((t: { id: string; name: string }) => ({ ...t, name: t.name?.replace(/[\r\n]+/g, " ") }));
+    // En CI los nombres de los inquilinos se tapan en el log del job, por si el
+    // ensayo se siembra algún día desde datos reales.
+    taparEnElLog(inquilinos.map((t) => t.name));
 
     if (inquilinos.length < 2) {
       nota("Hay menos de dos inquilinos: no se puede cruzar nada. Se salta.");
@@ -303,7 +318,7 @@ try {
     cx.release();
   }
 } catch (e) {
-  console.error(`\n✗ no se pudo verificar: ${(e as Error).message.slice(0, 200)}`);
+  console.error(`\n✗ no se pudo verificar (${resumenDe(e)})`);
   await pool.end();
   process.exit(2);
 }

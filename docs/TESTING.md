@@ -780,7 +780,7 @@ dominio privado se saltea con `--solo-superficie` porque necesita la base) y tre
 sondas de `cualesBorra` en la pared entre inquilinos. No escribe ni abre sesiones:
 en producción es de sólo lectura. La sección 5 de `scripts/prove-data-layer.mts`
 (borrar el caso del inquilino de al lado) sí escribe, y por eso sólo corre en CI
-o con `--escribe`.
+o con `--escribe`, y nunca contra `ep-proud-resonance`: ahí el chequeo falla.
 
 ---
 

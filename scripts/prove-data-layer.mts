@@ -12,7 +12,12 @@
  * Necesita DATABASE_URL_APP y dos inquilinos con datos. Sólo lee, salvo las
  * secciones 5 y 6, que escriben y borran un caso marcador (la 5) y un uso de IA
  * marcador con un usuario descartable (la 6) y por eso corren sólo en CI (contra
- * el ensayo) o con `--escribe`: nunca a ciegas con el `.env.local`.
+ * el ensayo) o con `--escribe`, y nunca contra la base de producción: nunca a
+ * ciegas con el `.env.local`.
+ *
+ * La sección 4 corre siempre: intenta un INSERT en el inquilino de al lado que la
+ * política tiene que rechazar. Sólo si la base lo deja pasar queda una fila, y se
+ * borra enseguida con el rol dueño.
  */
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
@@ -31,6 +36,21 @@ import {
 } from "@/core/case/fsm";
 import { contarCasos, buscarCaso } from "@/server/asistente/herramientas";
 import { deleteCases } from "@/server/cases/delete";
+import {
+  HOST_DE_PRODUCCION,
+  codigoDe,
+  hostDe,
+  resumenDe,
+  taparEnElLog,
+} from "../tests/e2e/base-de-ensayo";
+
+// Lo que se escapa sin atrapar (una consulta fuera de `explicar`, un TypeError del
+// driver) sale con el mensaje crudo, que puede traer parámetros o la cadena con la
+// contraseña: al log va sólo el resumen.
+process.on("uncaughtException", (e) => {
+  console.error(`\n✗ Error sin atrapar (${resumenDe(e)}).`);
+  process.exit(2);
+});
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 
@@ -61,12 +81,38 @@ function explicar(e: unknown): never {
     console.error("     vercel env add DATABASE_URL_APP production");
     process.exit(2);
   }
-  throw e;
+  console.error(`\n✗ No se pudo leer la base (${resumenDe(e)}).`);
+  process.exit(2);
 }
 
 const bien = (t: string) => console.log(`   ✓ ${t}`);
 const mal = (t: string) => console.log(`   ✗ ${t}`);
 const problemas: string[] = [];
+
+// El gate de las secciones que escriben mira cómo se corrió el script, no a dónde
+// apunta, y los nombres de los secretos no dicen qué base hay detrás. Por eso se
+// mira también el host: contra la base de producción, con una cadena que no es
+// URL o con el dueño y la app en bases distintas (la 5 sembraría en una y borraría
+// en la otra, un verde falso), no se escribe y el chequeo falla.
+const escribe = process.env.CI === "true" || process.argv.includes("--escribe");
+const hosts = [process.env.DATABASE_URL, url].map(hostDe);
+const endpointDe = (h: string) => h.split(".")[0].replace(/-pooler$/, "");
+// Con una cadena inválida el driver tira un TypeError que imprime la cadena entera,
+// contraseña incluida.
+if (!hosts[1]) {
+  console.error("✗ DATABASE_URL_APP no es una URL válida.");
+  process.exit(2);
+}
+const vetoDeEscritura = !escribe
+  ? null
+  : !hosts[0]
+    ? "DATABASE_URL no es una URL válida"
+    : hosts.some((h) => h.includes(HOST_DE_PRODUCCION))
+      ? "la base es la de PRODUCCIÓN"
+      : endpointDe(hosts[0]) !== endpointDe(hosts[1])
+        ? "DATABASE_URL y DATABASE_URL_APP apuntan a bases distintas"
+        : null;
+if (vetoDeEscritura) problemas.push(`las secciones que escriben no corrieron: ${vetoDeEscritura}`);
 
 console.log("═".repeat(70));
 console.log("CAPA DE DATOS — ¿usa bien el aislamiento que la base ofrece?");
@@ -81,10 +127,13 @@ try {
     await pool
       .query(`SELECT id::text AS id, name FROM tenants ORDER BY created_at`)
       .catch(explicar)
-  ).rows;
+  ).rows.map((t: { id: string; name: string }) => ({ ...t, name: t.name?.replace(/[\r\n]+/g, " ") }));
 } finally {
   await pool.end();
 }
+// En CI los nombres de los inquilinos se tapan en el log del job, por si el
+// ensayo se siembra algún día desde datos reales.
+taparEnElLog(inquilinos.map((t) => t.name));
 
 if (inquilinos.length < 2) {
   console.log("\n⚠ Hacen falta dos inquilinos para cruzar. Hay", inquilinos.length);
@@ -363,8 +412,10 @@ if (conDatos.length < 2) {
 console.log("\n▸ Borrar el caso del inquilino de al lado");
 if (conDatos.length < 2) {
   console.log("     (hace falta un segundo inquilino: se saltea)");
-} else if (process.env.CI !== "true" && !process.argv.includes("--escribe")) {
+} else if (!escribe) {
   console.log("     (escribe un caso marcador: sólo corre en CI o con --escribe contra el ensayo)");
+} else if (vetoDeEscritura) {
+  mal(`no se escribe: ${vetoDeEscritura}`);
 } else {
   const otro = conDatos[1];
   const marca = `PRUEBA-BORRADO-${a.id.slice(0, 8)}`;
@@ -419,8 +470,10 @@ if (conDatos.length < 2) {
 // descartable: nunca se usa un usuario real. Escribe, así que sólo corre en CI
 // (ensayo) o con `--escribe`. La limpieza corre al empezar y siempre al terminar.
 console.log("\n▸ El uso de IA suma en el acumulador del tablero");
-if (process.env.CI !== "true" && !process.argv.includes("--escribe")) {
+if (!escribe) {
   console.log("     (escribe uso de IA marcador: sólo corre en CI o con --escribe contra el ensayo)");
+} else if (vetoDeEscritura) {
+  mal(`no se escribe: ${vetoDeEscritura}`);
 } else {
   const modelo = `prueba-capa-datos-${a.id.slice(0, 8)}`;
   const correo = `capa-datos.${a.id.slice(0, 8)}@capa-datos.invalid`;
@@ -477,7 +530,7 @@ if (process.env.CI !== "true" && !process.argv.includes("--escribe")) {
       }
     } catch (e) {
       entro = false;
-      const codigo = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "error");
+      const codigo = codigoDe(e);
       mal(`un INSERT de ai_usage como claimmix_app falla (${codigo}): el trigger del acumulador está roto`);
       problemas.push("el INSERT de ai_usage falla por el trigger del acumulador");
     }
@@ -542,7 +595,7 @@ if (process.env.CI !== "true" && !process.argv.includes("--escribe")) {
         await dueno.query(`DELETE FROM "user" WHERE id = $1`, [persona]);
       } catch (e) {
         borrado = false;
-        const codigo = (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "error");
+        const codigo = codigoDe(e);
         mal(`borrar a un usuario con uso de IA falla (${codigo}): el trigger rompe la cascada`);
         problemas.push("borrar un usuario con uso de IA falla por el trigger del acumulador");
       }

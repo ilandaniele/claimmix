@@ -4613,16 +4613,42 @@ sola migración (la 0047).
 - Sacar el DNI de la póliza encontrada cuando la persona no lo dio: la decisión es
   justamente que las consultas no se alimenten del padrón.
 
-**Sigue abierto**
+**Cerrado después de #383**
 
-- **Notas de endurecimiento de la ola 7 (scripts de CI, no son hallazgos).**
-  `scripts/prove-data-layer.mts` escribe y borra filas señuelo con el rol dueño sin
-  guarda contra el host de la base viva, y su sección 4 escribe fuera del gate de
-  CI o `--escribe`; `explicar()` y `prove-tenancy.mts` pasan mensajes crudos
-  del driver al log del paso; `prove-tenancy.mts` cae en silencio de
-  `DATABASE_URL_APP` a `DATABASE_URL` (falla cerrado igual); y el job imprime
-  nombres de inquilinos de staging en un log que se puede leer. Detalle en
-  `REPORT.md`, sección «Hardening notes».
+- **Dependabot #11 (`braces` <= 3.0.3, sin versión arreglada).** El único camino era
+  eslint-config-next → `@next/eslint-plugin-next` → `fast-glob` 3.3.1 → micromatch →
+  braces, y upstream sigue fijando fast-glob 3.3.1. El override
+  `"@next/eslint-plugin-next>fast-glob": "npm:tinyglobby@^0.2.17"` saca 16 paquetes
+  del lockfile, braces incluido (#384 a qa, #385 a main). Vale mientras nadie ponga
+  `settings.next.rootDir` en la config de ESLint: tinyglobby expande un directorio sin
+  glob a todo el árbol y con rutas absolutas de Windows devuelve []. Al subir
+  eslint-config-next, mirar si el plugin dejó fast-glob y sacar el override. El mismo
+  PR estabilizó el test «sin red» de plan-de-trabajo con `waitFor`.
+- **Dependabot #375-#379, en lote.** Los cinco rangos suben en un solo PR a qa, porque
+  sueltos no pasan el CI. El lockfile resuelve `@sentry/nextjs` 11.5.0, `jose` 6.2.12,
+  `@testing-library/react` 16.3.3, `dotenv` 18.0.6 y `drizzle-kit` 0.31.11. Peso del
+  bundle 299 kB.
+- **Notas de endurecimiento de la ola 7 (scripts de CI, no eran hallazgos).**
+  - `scripts/prove-data-layer.mts`: las secciones 5 y 6, que escriben y borran filas
+    marcador, ya no corren si `DATABASE_URL` o `DATABASE_URL_APP` apuntan a
+    `ep-proud-resonance` (la base de producción), si `DATABASE_URL` no es una URL o si
+    las dos apuntan a bases distintas (la 5 sembraría en una y borraría en la otra);
+    en ese caso el chequeo falla en vez de saltearse. Una `DATABASE_URL_APP` que no es
+    URL corta antes de crear el pool, porque el TypeError del driver imprimía la
+    cadena entera con la contraseña.
+  - El host se lee con `hostDe()` de `tests/e2e/base-de-ensayo.ts`, el mismo que usan
+    la guarda de los e2e y `sembrar-adjunto-grande.mts`: en minúsculas y con el
+    `?host=` que el driver de Neon prefiere al de la URL, así un esquema en mayúsculas
+    o un `?host=` no esquivan el veto.
+  - La sección 4 se quedó fuera del gate a propósito: sólo escribe si la política la
+    deja pasar, y en ese caso borra la fila enseguida. La cabecera del script ahora
+    lo dice.
+  - `explicar()`, el catch de `prove-tenancy.mts` y un manejador de
+    `uncaughtException` en los dos scripts imprimen el código y la primera línea del
+    mensaje con las URLs tapadas (`resumenDe()`), no el mensaje crudo del driver.
+  - `prove-tenancy.mts` avisa cuando cae de `DATABASE_URL_APP` a `DATABASE_URL`.
+  - En GitHub Actions los dos scripts tapan los nombres de los inquilinos con
+    `::add-mask::` (`taparEnElLog()`, que escapa `%` y los saltos de línea).
 
 ### 🙋 Waiting on you (not code)
 

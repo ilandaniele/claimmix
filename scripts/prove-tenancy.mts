@@ -44,7 +44,8 @@ dotenv.config({ path: ".env.local" });
 import { randomInt, randomUUID } from "node:crypto";
 
 import { Pool, neonConfig, type PoolClient } from "@neondatabase/serverless";
-import { HOST_DE_PRODUCCION, hostDe, resumenDe, taparEnElLog } from "../tests/e2e/base-de-ensayo";
+import { hostDe, resumenDe, taparEnElLog } from "../tests/e2e/base-de-ensayo";
+import { vetadoBase } from "./lib/hosts-vetados.mjs";
 
 // Lo que se escapa sin atrapar sale con el mensaje crudo, que puede traer la
 // cadena con la contraseña: al log va sólo el resumen.
@@ -498,7 +499,7 @@ try {
           nota(`${que} no se prueba: falta DATABASE_URL con el rol dueño.`);
           return;
         }
-        if (hostDe(urlDueno ?? "").includes(HOST_DE_PRODUCCION)) {
+        if (vetadoBase(urlDueno)) {
           nota(`${que} no se prueba en la base viva, ni siquiera con ROLLBACK: va contra QA o el ensayo.`);
           return;
         }

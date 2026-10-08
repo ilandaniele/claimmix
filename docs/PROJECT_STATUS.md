@@ -2118,10 +2118,11 @@ Vale anotarlos para que no vuelvan a la lista:
 
 #### Lo que NO se hizo, por otras razones
 
-- **`--config=auto` de semgrep** sigue bajándose las reglas de semgrep.dev en cada
-  corrida, y de paso le manda la URL del repositorio. Se pineó la HERRAMIENTA,
-  que es por donde se ejecuta código; fijar el conjunto de reglas pide
-  vendorearlo y cambia qué reglas corren.
+- **Las reglas de semgrep** se siguen bajando del registro en cada corrida. Se
+  pineó la HERRAMIENTA, que es por donde se ejecuta código, y después se cambió
+  `--config=auto` por `p/typescript`, `p/owasp-top-ten` y `p/secrets` con
+  `--metrics=off`, de modo que ya no le manda la URL del repositorio. Fijar el
+  conjunto de reglas pide vendorearlo y cambia qué reglas corren.
 - **Los CHECK que aceptan `'openai'`** en `tenant_ai_settings` se dejaron: son
   permisivos, no incorrectos, y apretarlos sobre datos vivos es otra
   conversación.

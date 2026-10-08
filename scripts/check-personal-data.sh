@@ -36,7 +36,7 @@ allowed() {
 # saltear, y este chequeo existe para correrlo antes de commitear.
 archivos() {
   git ls-files -z --cached --others --exclude-standard \
-    -- '*.ts' '*.tsx' '*.md' '*.yml' 2>/dev/null
+    -- '*.ts' '*.tsx' '*.md' '*.yml' '*.mts' '*.mjs' '*.js' '*.sql' '*.json' '*.yaml' '*.csv' '*.txt' 2>/dev/null
 }
 
 scan() {

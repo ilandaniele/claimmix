@@ -15,7 +15,7 @@
  *   { raw_text: "..." }          → ad-hoc text; el modelo clasifica el tipo
  */
 
-import { type NextRequest, after } from "next/server";
+import { type NextRequest, after } from "next/server.js";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, rawMessages } from "@/lib/db/schema";
 import {

@@ -11,7 +11,7 @@
  * Every query filters explicitly by the caller's tenant_id (enTenant, backed by RLS).
  */
 
-import { type NextRequest, after } from "next/server";
+import { type NextRequest, after } from "next/server.js";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";

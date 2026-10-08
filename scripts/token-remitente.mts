@@ -17,7 +17,7 @@
  * `http://127.0.0.1:<puerto>/` entre las URI de redireccionamiento y pasá ese
  * puerto con `--puerto`.
  *
- * Uso:  pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts [--puerto N] [--correo casilla@gmail.com]
+ * Uso:  pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts [--puerto N] [--correo casilla@example.com]
  *
  * Sólo pide el permiso de enviar (`gmail.send`): esta casilla no lee ni borra
  * nada. El flujo es el de loopback con PKCE; el token se imprime y no se

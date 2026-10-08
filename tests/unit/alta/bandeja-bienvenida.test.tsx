@@ -53,7 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.ALTA_PRUEBA_DIAS;
   m.locale.mockResolvedValue("es-AR");
-  m.listCases.mockResolvedValue({ cases: [], total: 0 });
+  m.listCases.mockResolvedValue({ data: [], meta: { total: 0 } });
   m.contarPorEstado.mockResolvedValue([]);
   m.cargarRamos.mockResolvedValue([]);
 });
@@ -83,7 +83,7 @@ describe("la bandeja con ?bienvenida=1", () => {
     await textoDeLaPagina({});
     const sin = [m.listCases.mock.calls.length, m.contarPorEstado.mock.calls.length, m.cargarRamos.mock.calls.length];
     vi.clearAllMocks();
-    m.listCases.mockResolvedValue({ cases: [], total: 0 });
+    m.listCases.mockResolvedValue({ data: [], meta: { total: 0 } });
     m.contarPorEstado.mockResolvedValue([]);
     m.cargarRamos.mockResolvedValue([]);
     m.locale.mockResolvedValue("es-AR");

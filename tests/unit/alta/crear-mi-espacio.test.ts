@@ -2,7 +2,7 @@
  * `crearMiEspacio`: la acción de /alta.
  *
  * Se prueba con la función de `crearInquilino` de verdad; lo único que se
- * sustituye es la base (`enTenant`), el limitador, el mail y la sesión. Lo que
+ * sustituye es la base (`enControl`), el limitador, el mail y la sesión. Lo que
  * importa acá no es que cree el espacio sino el orden de lo que se hace antes y
  * lo que se devuelve después:
  *   - nada de esto gasta un cupo hasta haber visto que hay algo que crear;
@@ -17,7 +17,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   sesion: vi.fn(),
   fila: vi.fn(),
-  enTenant: vi.fn(),
+  enControl: vi.fn(),
+  iniciarBase: vi.fn(),
   rateLimit: vi.fn(),
   liberarCupo: vi.fn(),
   borrarCookie: vi.fn(),
@@ -61,8 +62,9 @@ vi.mock("@/lib/auth/require-operator", () => ({
   operatorEmails: () => ["ops@example.com"],
   isOperatorEmail: (e: string | null | undefined) => e === "ops@example.com",
 }));
-vi.mock("@/data/scope", () => ({ enTenant: h.enTenant }));
+vi.mock("@/data/scope", () => ({ enControl: h.enControl }));
 vi.mock("@/server/alta/cookie", () => ({ borrarCookieDeAlta: h.borrarCookie }));
+vi.mock("@/server/bases/iniciar", () => ({ iniciarBase: h.iniciarBase }));
 vi.mock("@/server/notify/remitente-sistema", () => ({
   remitenteDelSistema: h.remitente,
   enviarCorreoDelSistema: h.enviar,
@@ -124,7 +126,7 @@ async function crear(campos: Record<string, string> = CAMPOS_BUENOS): Promise<st
 
 /** Lo que la base recibió: el contexto y la consulta ya armada, con sus parámetros. */
 async function llamadaALaBase() {
-  const [contexto, armar] = h.enTenant.mock.calls[0];
+  const [contexto, armar] = h.enControl.mock.calls[0];
   let consulta: Parameters<PgDialect["sqlToQuery"]>[0] | undefined;
   await armar({
     execute: (q: typeof consulta) => {
@@ -146,6 +148,9 @@ beforeEach(() => {
   delete process.env.SIGNUP_ALLOWED_EMAILS;
   delete process.env.ALTA_TOPE_IP_DIA;
   delete process.env.ALTA_TOPE_GLOBAL_DIA;
+  delete process.env.ALTA_TOPE_BASES;
+  delete process.env.ALTA_TOPE_MB;
+  delete process.env.BASE_POR_CLIENTE;
   delete process.env.ALTA_PRUEBA_DIAS;
   sesion();
   h.fila.mockResolvedValue(null);
@@ -153,8 +158,9 @@ beforeEach(() => {
   h.liberarCupo.mockResolvedValue(undefined);
   h.borrarCookie.mockResolvedValue(undefined);
   h.remitente.mockReturnValue("alta@example.com");
+  h.iniciarBase.mockResolvedValue(undefined);
   h.enviar.mockResolvedValue({ enviado: true });
-  h.enTenant.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+  h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
     armar({ execute: async () => respuesta({ resultado: "ok", creadas_24h: 3, tope: 20 }) })
   );
 });
@@ -165,7 +171,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
 
     expect(await crear()).toBe("/login");
     expect(h.rateLimit).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
   });
 
   it("con el correo sin verificar vuelve a /alta, que se lo dice", async () => {
@@ -174,7 +180,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
     expect(await crear()).toBe("/alta");
     expect(h.fila).not.toHaveBeenCalled();
     expect(h.rateLimit).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
   });
 
   it("una cuenta de operación recibe el rechazo", async () => {
@@ -182,7 +188,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
 
     expect(await crear()).toBe("/alta");
     expect(h.rateLimit).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
   });
 
   it("con el alta cerrada para esa dirección no hace nada", async () => {
@@ -190,7 +196,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
 
     expect(await crear()).toBe("/alta");
     expect(h.rateLimit).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
   });
 
   it("con el alta apagada, una dirección de la lista sí crea", async () => {
@@ -206,7 +212,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
     expect(await crear()).toBe("/bandeja");
     expect(h.rateLimit).not.toHaveBeenCalled();
     expect(h.liberarCupo).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
   });
 
   it("si la base no deja leer el perfil, no cuenta nada y no crea", async () => {
@@ -214,7 +220,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
 
     expect(await crear()).toBe("/alta?e=falla");
     expect(h.rateLimit).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
     expect(h.error).toHaveBeenCalled();
   });
 
@@ -227,7 +233,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
   ])("%s vuelve con «datos» y no cuenta nada", async (_caso, campos) => {
     expect(await crear(campos)).toBe("/alta?e=datos");
     expect(h.rateLimit).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
   });
 });
 
@@ -250,7 +256,7 @@ describe("el cupo por IP", () => {
     h.rateLimit.mockResolvedValue(cupo({ allowed: false, remaining: 0 }));
 
     expect(await crear()).toBe("/alta?e=intentos");
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
     expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
@@ -258,7 +264,7 @@ describe("el cupo por IP", () => {
     h.rateLimit.mockResolvedValue(cupo({ allowed: false, remaining: 0, ventana: 0 }));
 
     expect(await crear()).toBe("/alta?e=falla");
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
   });
 });
 
@@ -270,7 +276,9 @@ describe("crear el espacio", () => {
     expect(sql).toContain("claimmix_crear_inquilino");
     expect(contexto.tenantId).toMatch(UUID);
     expect(contexto.tenantId).not.toBe(USUARIO);
-    expect(params).toEqual([contexto.tenantId, USUARIO, "Seguros del Sur", "+5492916426930", 30, 20, IP]);
+    // Los dos topes (bases y MB) se pasan dos veces cada uno; en 0 no cuentan.
+    expect(params.slice(0, 4)).toEqual([0, 0, 0, 0]);
+    expect(params.slice(4)).toEqual([contexto.tenantId, USUARIO, "Seguros del Sur", "+5492916426930", 30, 20, IP]);
   });
 
   it("el tope global y los días de prueba salen del entorno", async () => {
@@ -279,7 +287,7 @@ describe("crear el espacio", () => {
     await crear();
 
     const { params } = await llamadaALaBase();
-    expect(params.slice(4, 6)).toEqual([14, 7]);
+    expect(params.slice(8, 10)).toEqual([14, 7]);
   });
 
   it("una IP que no es una IP llega como null, no tira el alta", async () => {
@@ -288,11 +296,11 @@ describe("crear el espacio", () => {
     await crear();
 
     const { params } = await llamadaALaBase();
-    expect(params[6]).toBeNull();
+    expect(params[10]).toBeNull();
   });
 
   it.each(["ok", "ok_numero_en_revision"])("%s: borra la cookie y va a la bienvenida", async (resultado) => {
-    h.enTenant.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+    h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
       armar({ execute: async () => respuesta({ resultado, creadas_24h: 3, tope: 20 }) })
     );
 
@@ -303,8 +311,33 @@ describe("crear el espacio", () => {
     expect(h.error).not.toHaveBeenCalled();
   });
 
+  it("con una base por cliente lanza la base del espacio nuevo y va a /preparando", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+
+    expect(await crear()).toBe("/preparando");
+    const { contexto } = await llamadaALaBase();
+    expect(h.iniciarBase).toHaveBeenCalledTimes(1);
+    expect(h.iniciarBase).toHaveBeenCalledWith(contexto.tenantId);
+    expect(h.borrarCookie).toHaveBeenCalledTimes(1);
+  });
+
+  it("con una base por cliente, sin espacio no lanza nada", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+    h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+      armar({ execute: async () => respuesta({ resultado: "alta_cerrada", creadas_24h: 20, tope: 20 }) })
+    );
+
+    expect(await crear()).toBe("/alta?e=cerrada");
+    expect(h.iniciarBase).not.toHaveBeenCalled();
+  });
+
+  it("apagada la bandera no lanza nada", async () => {
+    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(h.iniciarBase).not.toHaveBeenCalled();
+  });
+
   it("el resultado puede llegar como texto JSON", async () => {
-    h.enTenant.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+    h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
       armar({
         execute: async () => ({ rows: [{ r: JSON.stringify({ resultado: "ok", creadas_24h: 1, tope: 20 }) }] }),
       })
@@ -323,7 +356,7 @@ describe("lo que se libera", () => {
   ];
 
   it.each(SIN_ESPACIO)("%s: libera sólo `alta:ip`, con su ventana, y va a %s", async (resultado, destino) => {
-    h.enTenant.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+    h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
       armar({ execute: async () => respuesta({ resultado, creadas_24h: 20, tope: 20 }) })
     );
 
@@ -337,7 +370,7 @@ describe("lo que se libera", () => {
   it.each(["42883", "42P01", "42703", "23505"])(
     "el código %s de la base cierra el alta y devuelve el cupo",
     async (code) => {
-      h.enTenant.mockRejectedValue(errorDePg(code));
+      h.enControl.mockRejectedValue(errorDePg(code));
 
       expect(await crear()).toBe("/alta?e=cerrada");
       expect(h.liberarCupo).toHaveBeenCalledTimes(1);
@@ -347,13 +380,13 @@ describe("lo que se libera", () => {
   );
 
   it("el código de Postgres también se lee del `cause` que pone Drizzle", async () => {
-    h.enTenant.mockRejectedValue(new Error("Failed query", { cause: errorDePg("42883") }));
+    h.enControl.mockRejectedValue(new Error("Failed query", { cause: errorDePg("42883") }));
 
     expect(await crear()).toBe("/alta?e=cerrada");
   });
 
   it("cualquier otra falla de la base dice «falla», la anota y devuelve el cupo", async () => {
-    h.enTenant.mockRejectedValue(errorDePg("08006"));
+    h.enControl.mockRejectedValue(errorDePg("08006"));
 
     expect(await crear()).toBe("/alta?e=falla");
     expect(h.liberarCupo).toHaveBeenCalledWith(CLAVE_IP, DIA_MS, VENTANA);
@@ -361,7 +394,7 @@ describe("lo que se libera", () => {
   });
 
   it("un resultado que la función no debería dar es una falla, no un cierre silencioso", async () => {
-    h.enTenant.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+    h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
       armar({ execute: async () => respuesta({ resultado: "otra_cosa" }) })
     );
 
@@ -370,7 +403,7 @@ describe("lo que se libera", () => {
   });
 
   it("si devolver el cupo falla, igual contesta", async () => {
-    h.enTenant.mockRejectedValue(errorDePg("42883"));
+    h.enControl.mockRejectedValue(errorDePg("42883"));
     h.liberarCupo.mockRejectedValue(new Error("sin base"));
 
     expect(await crear()).toBe("/alta?e=cerrada");
@@ -380,7 +413,7 @@ describe("lo que se libera", () => {
 
 describe("el aviso al operador", () => {
   const conteo = (creadas_24h: number, tope: number) =>
-    h.enTenant.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+    h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
       armar({ execute: async () => respuesta({ resultado: "ok", creadas_24h, tope }) })
     );
 

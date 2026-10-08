@@ -14,7 +14,7 @@
  *   2. Cobertura: cuántas tablas con tenant_id tienen RLS, FORCE y política.
  *   3. La prueba de verdad: con el contexto de una aseguradora, ¿se pueden ver
  *      filas de otra? Y sin contexto, ¿se ve algo?
- *   4. `tenants` y la función que da de alta (0048): cada aseguradora ve y
+ *   4. `tenants` y las funciones del alta (0048 y 0049): cada aseguradora ve y
  *      toca sólo su fila, y sólo la configuración.
  *
  * No deja nada escrito. Lo único que intenta escribir va dentro de una
@@ -41,9 +41,9 @@
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 
-import { Pool, neonConfig } from "@neondatabase/serverless";
+import { Pool, neonConfig, type PoolClient } from "@neondatabase/serverless";
 import { HOST_DE_PRODUCCION, hostDe, resumenDe, taparEnElLog } from "../tests/e2e/base-de-ensayo";
 
 // Lo que se escapa sin atrapar sale con el mensaje crudo, que puede traer la
@@ -492,45 +492,172 @@ try {
         problemas.push("claimmix_crear_inquilino no exige un usuario verificado");
       }
 
-      // 'alta_cerrada' necesita un usuario verificado y el rol de la app no puede
-      // crearlo: va con el rol dueño, en una transacción que se deshace, y nunca
-      // en la base viva. Con el tope en 0 corta antes de insertar nada.
-      if (!poolDueno) {
-        nota("'alta_cerrada' no se prueba: falta DATABASE_URL con el rol dueño.");
-      } else if (hostDe(urlDueno ?? "").includes(HOST_DE_PRODUCCION)) {
-        nota("'alta_cerrada' no se prueba en la base viva, ni siquiera con ROLLBACK: va contra QA o el ensayo.");
-      } else {
+      // Lo que necesita el rol dueño va en una transacción que se deshace, y nunca en la base viva.
+      const enRollbackDelDueno = async (que: string, correr: (d: PoolClient) => Promise<void>) => {
+        if (!poolDueno) {
+          nota(`${que} no se prueba: falta DATABASE_URL con el rol dueño.`);
+          return;
+        }
+        if (hostDe(urlDueno ?? "").includes(HOST_DE_PRODUCCION)) {
+          nota(`${que} no se prueba en la base viva, ni siquiera con ROLLBACK: va contra QA o el ensayo.`);
+          return;
+        }
         const d = await poolDueno.connect();
         try {
-          const usuario = randomUUID();
-          const inquilino = randomUUID();
           await d.query("BEGIN");
           try {
-            await d.query(
-              `INSERT INTO "user" (id, name, email, email_verified) VALUES ($1, 'Prueba de tenencia', $2, true)`,
-              [usuario, `tenencia-${usuario}@example.com`]
-            );
-            await d.query("SELECT set_config('claimmix.tenant_id', $1, true)", [inquilino]);
-            const r = (await d.query(LLAMADA, [inquilino, usuario, 0])).rows[0].r as { resultado?: string };
-            const creados = (await d.query(`SELECT count(*)::int AS n FROM tenants WHERE id = $1`, [inquilino])).rows[0]
-              .n as number;
-            if (r.resultado === "alta_cerrada" && creados === 0) bien("con el tope en 0: 'alta_cerrada' y no se crea nada");
-            else {
-              mal(`con el tope en 0 contestó '${r.resultado}' y quedaron ${creados} inquilino(s)`);
-              problemas.push("claimmix_crear_inquilino ignora el tope diario");
-            }
-          } catch (e) {
-            if ((e as { code?: string }).code === "42883") {
-              mal("claimmix_crear_inquilino no existe: falta aplicar la 0048");
-              problemas.push("la 0048 no está aplicada en esta base");
-            } else throw e;
+            await correr(d);
           } finally {
             await d.query("ROLLBACK");
           }
         } finally {
           d.release();
         }
+      };
+
+      // La función del número por código (0049). Los ids de prueba son inventados: con ellos no hay a quién tocar.
+      const ID_PLATAFORMA = "100000000000001";
+      const NUMERO_INVENTADO = "100000000000999";
+      const LLAMADA_NUMERO = `SELECT public.claimmix_numero_automatico($1::uuid, $2::uuid, $3::text, $4::text, '200000000000001'::text, $5::text, NULL::inet) AS r`;
+      const paraNumero = (tenant: string, usuario: string, paso = "agregado", id = NUMERO_INVENTADO) => [
+        tenant,
+        usuario,
+        paso,
+        id,
+        ID_PLATAFORMA,
+      ];
+
+      const numeroAjeno = await intentar(a.id, LLAMADA_NUMERO, paraNumero(randomUUID(), randomUUID()));
+      const sinNumero = !numeroAjeno.ok && numeroAjeno.codigo === "42883";
+      if (sinNumero) {
+        mal("claimmix_numero_automatico no existe: falta aplicar la 0049");
+        problemas.push("la 0049 no está aplicada en esta base");
+      } else if (!numeroAjeno.ok && numeroAjeno.codigo === "42501") {
+        bien("el número por código con un id distinto del contexto: denegado (42501)");
+      } else {
+        mal(
+          `el número por código con un id distinto del contexto: ${numeroAjeno.ok ? "contestó" : `falló con ${numeroAjeno.codigo}`}`
+        );
+        problemas.push("claimmix_numero_automatico acepta un id que no es el del contexto");
       }
+
+      if (!sinNumero) {
+        const resultadoNumero = (r: Awaited<ReturnType<typeof intentar>>) =>
+          r.ok ? ((r.devuelve[0]?.r as { resultado?: string } | undefined)?.resultado ?? null) : null;
+
+        // El guardia del id va antes de cualquier puerta: no hace falta un inquilino del alta ni un admin.
+        const delaPlataforma = await intentar(a.id, LLAMADA_NUMERO, paraNumero(a.id, randomUUID(), "agregado", ID_PLATAFORMA));
+        if (resultadoNumero(delaPlataforma) === "id_de_la_plataforma") {
+          bien("el número por código con el id de la plataforma: 'id_de_la_plataforma'");
+        } else {
+          mal("el número por código con el id de la plataforma no contestó 'id_de_la_plataforma'");
+          problemas.push("claimmix_numero_automatico deja asignar el número de la plataforma");
+        }
+
+        // Ojo: esto sólo prueba que se cierra la puerta. Si `a` no es del alta automática, el 'no_aplica'
+        // sale de ahí y no de la falta de admin; esa se prueba abajo, con un inquilino armado a medida.
+        const sinAdmin = await intentar(a.id, LLAMADA_NUMERO, paraNumero(a.id, randomUUID()));
+        if (resultadoNumero(sinAdmin) === "no_aplica") {
+          bien("el número por código con un usuario que no es del inquilino: 'no_aplica'");
+        } else {
+          mal("el número por código con un usuario que no es del inquilino no contestó 'no_aplica'");
+          problemas.push("claimmix_numero_automatico no cierra la puerta a un usuario que no es del inquilino");
+        }
+
+        // Un inquilino del alta, con prueba vigente, un admin, un analista y un número en 'pedido':
+        // sólo cambia una cosa por vez, así que cada 'no_aplica' tiene una sola causa posible.
+        if (!sinFuncion) {
+          await enRollbackDelDueno("la puerta del admin del número por código", async (d) => {
+            const inquilino = randomUUID();
+            const admin = randomUUID();
+            const analista = randomUUID();
+            const esperar = (que: string, obtenido: unknown, esperado: unknown, motivo: string) => {
+              if (obtenido === esperado) bien(`${que}: '${esperado}'`);
+              else {
+                mal(`${que}: contestó '${obtenido}', no '${esperado}'`);
+                problemas.push(`claimmix_numero_automatico ${motivo}`);
+              }
+            };
+            const llamar = async (usuario: string, paso = "agregado", id = NUMERO_INVENTADO) =>
+              ((await d.query(LLAMADA_NUMERO, paraNumero(inquilino, usuario, paso, id))).rows[0].r as { resultado?: string })
+                .resultado;
+            const fila = async () =>
+              (await d.query(`SELECT estado, phone_number_id FROM whatsapp_numeros WHERE tenant_id = $1`, [inquilino]))
+                .rows[0] as { estado: string; phone_number_id: string | null };
+
+            await d.query(
+              `INSERT INTO tenants (id, name, plan, billing_status, trial_ends_at, autoalta)
+               VALUES ($1, 'Prueba de tenencia', 'piloto', 'trial', now() + interval '1 day', true)`,
+              [inquilino]
+            );
+            for (const [id, rol] of [
+              [admin, "admin"],
+              [analista, "analyst"],
+            ]) {
+              await d.query(`INSERT INTO "user" (id, name, email, email_verified) VALUES ($1, 'Prueba de tenencia', $2, true)`, [
+                id,
+                `tenencia-${id}@example.com`,
+              ]);
+              await d.query(`INSERT INTO users (id, tenant_id, full_name, role) VALUES ($1, $2, 'Prueba de tenencia', $3)`, [
+                id,
+                inquilino,
+                rol,
+              ]);
+            }
+            await d.query(`INSERT INTO whatsapp_numeros (tenant_id, numero_e164) VALUES ($1, $2)`, [
+              inquilino,
+              `+5491100${String(randomInt(0, 1_000_000)).padStart(6, "0")}`,
+            ]);
+            await d.query("SELECT set_config('claimmix.tenant_id', $1, true)", [inquilino]);
+
+            esperar("un analista", await llamar(analista), "no_aplica", "no exige un admin del inquilino");
+            esperar("  y la fila", (await fila()).phone_number_id, null, "escribe para quien no es admin");
+
+            await d.query(`UPDATE tenants SET autoalta = false WHERE id = $1`, [inquilino]);
+            esperar("un admin, fuera del alta", await llamar(admin), "no_aplica", "no exige que el inquilino sea del alta");
+            await d.query(`UPDATE tenants SET autoalta = true, billing_status = 'suspended' WHERE id = $1`, [inquilino]);
+            esperar("un admin, suspendido", await llamar(admin), "no_aplica", "no exige prueba vigente o plan activo");
+            await d.query(`UPDATE tenants SET billing_status = 'trial' WHERE id = $1`, [inquilino]);
+
+            esperar("un admin, id sin forma", await llamar(admin, "agregado", "no-es-un-id"), "datos_invalidos", "acepta un id sin forma");
+            esperar("un admin, 'agregado'", await llamar(admin), "ok", "no deja pasar a un admin");
+            esperar("  y la fila", (await fila()).phone_number_id, NUMERO_INVENTADO, "no guarda el id");
+            esperar("el mismo 'agregado' otra vez", await llamar(admin), "ok", "falla si se repite 'agregado'");
+            esperar("un analista, 'conectado'", await llamar(analista, "conectado"), "no_aplica", "conecta para quien no es admin");
+            esperar("  y la fila", (await fila()).estado, "pedido", "cambia el estado para quien no es admin");
+            esperar("un admin, 'conectado'", await llamar(admin, "conectado"), "ok", "no deja conectar a un admin");
+            esperar("  y la fila", (await fila()).estado, "conectado", "no deja la fila conectada");
+            esperar("el mismo 'conectado' otra vez", await llamar(admin, "conectado"), "ok", "falla si se repite 'conectado'");
+          });
+        }
+      }
+
+      // 'alta_cerrada' necesita un usuario verificado y el rol de la app no puede
+      // crearlo. Con el tope en 0 corta antes de insertar nada.
+      await enRollbackDelDueno("'alta_cerrada'", async (d) => {
+        const usuario = randomUUID();
+        const inquilino = randomUUID();
+        try {
+          await d.query(
+            `INSERT INTO "user" (id, name, email, email_verified) VALUES ($1, 'Prueba de tenencia', $2, true)`,
+            [usuario, `tenencia-${usuario}@example.com`]
+          );
+          await d.query("SELECT set_config('claimmix.tenant_id', $1, true)", [inquilino]);
+          const r = (await d.query(LLAMADA, [inquilino, usuario, 0])).rows[0].r as { resultado?: string };
+          const creados = (await d.query(`SELECT count(*)::int AS n FROM tenants WHERE id = $1`, [inquilino])).rows[0]
+            .n as number;
+          if (r.resultado === "alta_cerrada" && creados === 0) bien("con el tope en 0: 'alta_cerrada' y no se crea nada");
+          else {
+            mal(`con el tope en 0 contestó '${r.resultado}' y quedaron ${creados} inquilino(s)`);
+            problemas.push("claimmix_crear_inquilino ignora el tope diario");
+          }
+        } catch (e) {
+          if ((e as { code?: string }).code === "42883") {
+            mal("claimmix_crear_inquilino no existe: falta aplicar la 0048");
+            problemas.push("la 0048 no está aplicada en esta base");
+          } else throw e;
+        }
+      });
     }
   } finally {
     cx.release();

@@ -22,6 +22,12 @@ export interface PruebaDelEspacio {
    */
   dias: number | null;
   numero: EstadoDelNumero;
+  /**
+   * El espacio puede conectar su número con un código: la 0049 está aplicada y el
+   * espacio está en prueba o paga. Sin esto la bandera sola prendería formularios
+   * que no pueden andar, o que nadie atiende (suspendido, dado de baja).
+   */
+  porCodigo: boolean;
 }
 
 export interface ParaAdmin {
@@ -61,6 +67,7 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
     billing_status?: string | null;
     trial_ends_at?: string | null;
     autoalta?: boolean | null;
+    funcion_del_numero?: boolean | null;
   };
   // La prueba suma dos lecturas al lote: los datos de la prueba y el número, que por RLS es
   // el del inquilino. De `whatsapp_numeros` sólo sale el estado, ni el número ni los ids.
@@ -77,6 +84,8 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
                 trial_ends_at: tenants.trial_ends_at,
                 // `to_jsonb` y no la columna: antes de la 0048 `tenants.autoalta` tira 42703.
                 autoalta: sql<boolean | null>`(to_jsonb(${tenants}.*) ->> 'autoalta')::boolean`,
+                // La 0049 es una función: sin ella `to_regprocedure` da null y esto, false, sin tirar.
+                funcion_del_numero: sql<boolean>`to_regprocedure('public.claimmix_numero_automatico(uuid, uuid, text, text, text, text, inet)') is not null`,
               }
             : {}),
         })
@@ -110,6 +119,8 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
             prueba: {
               dias: diasDeLaPrueba(fila, new Date()),
               numero: estado === "conectado" || estado === "suspendido" ? estado : "pedido",
+              porCodigo:
+                fila.funcion_del_numero === true && (fila.billing_status === "trial" || fila.billing_status === "active"),
             } satisfies PruebaDelEspacio,
           }
         : {}),

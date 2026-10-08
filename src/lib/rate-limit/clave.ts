@@ -20,9 +20,17 @@ export type AmbitoDeCupo =
   | "alta:aviso80"
   | "alta:correos"
   | "alta:destinatario"
+  | "alta:aviso-numero"
   | "usuarios:inquilino"
   | "ia:prueba"
   | "wa:plantilla"
+  | "wa:codigo"
+  | "wa:codigo-ip"
+  | "wa:codigos"
+  | "wa:alta-numero"
+  | "wa:altas-numero"
+  | "wa:verificar"
+  | "wa:registrar"
   | "demo-public"
   | "denuncia-web"
   | "denuncia-slug"
@@ -47,8 +55,8 @@ export type AmbitoDeCupo =
 
 /** El prefijo de IPv6 con el que se cuenta: un /64 es lo que un proveedor le da a una sola máquina. */
 const PREFIJO_IPV6 = 64;
-/** El alta es el cupo más caro de regalar: se cuenta por /56, que es lo que se le da a un sitio entero. */
-const PREFIJO_POR_AMBITO: Partial<Record<AmbitoDeCupo, number>> = { "alta:ip": 56, "alta:correo-ip": 56 };
+/** El alta y el pedido de código son los cupos más caros de regalar: se cuentan por /56, que es lo que se le da a un sitio entero. */
+const PREFIJO_POR_AMBITO: Partial<Record<AmbitoDeCupo, number>> = { "alta:ip": 56, "alta:correo-ip": 56, "wa:codigo-ip": 56 };
 
 const HEXTETO = /^[0-9a-f]{1,4}$/;
 

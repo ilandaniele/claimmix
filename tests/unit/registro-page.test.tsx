@@ -43,6 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.TURNSTILE_SITE_KEY;
   delete process.env.TURNSTILE_SECRET_KEY;
+  delete process.env.ALTA_NUMERO_AUTOMATICO;
   h.locale.mockResolvedValue("es-AR");
   h.remitente.mockReturnValue(null);
 });
@@ -50,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.TURNSTILE_SITE_KEY;
   delete process.env.TURNSTILE_SECRET_KEY;
+  delete process.env.ALTA_NUMERO_AUTOMATICO;
   scriptDeTurnstile()?.remove();
 });
 
@@ -65,6 +67,33 @@ describe("/registro: los campos", () => {
     expect(screen.getByRole("checkbox")).toBeRequired();
     expect(screen.getByRole("link", { name: "términos de uso" })).toHaveAttribute("href", "/terms");
     expect(screen.getByRole("link", { name: "política de privacidad" })).toHaveAttribute("href", "/privacy");
+  });
+
+  it("con el número por código prendido, la ayuda del WhatsApp suma que tiene que recibir SMS o llamada", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    const { container } = await pintar();
+
+    const ayuda = container.querySelector("#registro-whatsapp-ayuda");
+    expect(ayuda).toHaveTextContent("Con código de país, por ejemplo +54 9 11 5555 0000.");
+    expect(ayuda).toHaveTextContent("Tiene que poder recibir un SMS o una llamada y no puede estar en uso en la app de WhatsApp ni en WhatsApp Business.");
+    expect(screen.getByLabelText("WhatsApp de tu empresa")).toHaveAccessibleDescription(/Tiene que poder recibir un SMS/);
+  });
+
+  it("con el número por código prendido, en inglés", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    h.locale.mockResolvedValue("en-US");
+    const { container } = await pintar();
+
+    expect(container.querySelector("#registro-whatsapp-ayuda")).toHaveTextContent(
+      "It must be able to receive an SMS or a phone call, and it can't be in use in the WhatsApp or WhatsApp Business app."
+    );
+  });
+
+  it.each([undefined, "0", "true", ""])("con ALTA_NUMERO_AUTOMATICO=%j la ayuda del WhatsApp es la de hoy", async (valor) => {
+    if (valor !== undefined) process.env.ALTA_NUMERO_AUTOMATICO = valor;
+    const { container } = await pintar();
+
+    expect(container.querySelector("#registro-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
   });
 
   it("los campos van por los nombres que leen las acciones", async () => {

@@ -52,6 +52,7 @@ async function textoDeLaPagina(params: Record<string, string>): Promise<string> 
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.ALTA_PRUEBA_DIAS;
+  delete process.env.ALTA_NUMERO_AUTOMATICO;
   m.locale.mockResolvedValue("es-AR");
   m.listCases.mockResolvedValue({ data: [], meta: { total: 0 } });
   m.contarPorEstado.mockResolvedValue([]);
@@ -77,6 +78,35 @@ describe("la bandeja con ?bienvenida=1", () => {
     m.locale.mockResolvedValue("en-US");
 
     expect(await textoDeLaPagina({ bienvenida: "1" })).toContain("Your workspace is ready. The trial lasts 30 days.");
+  });
+
+  it("con el número por código prendido manda a conectarlo desde Configuración", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+
+    const texto = await textoDeLaPagina({ bienvenida: "1" });
+
+    expect(texto).toContain(
+      "Tu espacio está listo. La prueba dura 30 días. Conectá tu WhatsApp desde Configuración con un código que te llega por SMS o llamada."
+    );
+    expect(texto).not.toContain("lo conectamos nosotros");
+  });
+
+  it("con el número por código prendido, en inglés", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    m.locale.mockResolvedValue("en-US");
+
+    const texto = await textoDeLaPagina({ bienvenida: "1" });
+
+    expect(texto).toContain(
+      "Your workspace is ready. The trial lasts 30 days. Connect your WhatsApp from Settings with a code sent by SMS or phone call."
+    );
+    expect(texto).not.toContain("we connect it ourselves");
+  });
+
+  it.each(["0", "true", "", "si"])("con ALTA_NUMERO_AUTOMATICO=%j sigue diciendo lo de hoy", async (valor) => {
+    process.env.ALTA_NUMERO_AUTOMATICO = valor;
+
+    expect(await textoDeLaPagina({ bienvenida: "1" })).toContain("lo conectamos nosotros y te avisamos");
   });
 
   it("no suma ninguna consulta a la base", async () => {

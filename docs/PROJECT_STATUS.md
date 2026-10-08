@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-07. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-08. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -4688,8 +4688,54 @@ sola migración (la 0047).
   - En GitHub Actions los dos scripts tapan los nombres de los inquilinos con
     `::add-mask::` (`taparEnElLog()`, que escapa `%` y los saltos de línea).
 
+### 📞 El número de WhatsApp por código, y la retoma tras un corte (2026-10-08)
+
+Un PR con dos partes que no se tocan.
+
+- **Número por código (apagado).** Desde Configuración, el owner o el admin de un
+  espacio del alta automática pide el código por SMS o llamada, lo escribe, y Meta
+  suma su número a la WABA de la plataforma (`src/server/alta/numero-automatico.ts`,
+  cliente de Graph en `src/server/whatsapp/alta-de-numero.ts`). Sólo corre con
+  `ALTA_NUMERO_AUTOMATICO=1`, que no está en ningún ambiente: sin ella, o sin la
+  0049, nada llama a Graph. Sólo móviles argentinos (`+549` y diez dígitos), y el
+  nombre visible es el del número de la plataforma. Cualquier caso raro termina en
+  «revisión» con un mail al operador; `/admin/altas` sigue de respaldo. El número de
+  la plataforma no se toca y nada borra números de la WABA. Los pasos, los topes y
+  qué hacer con cada aviso están en `docs/whatsapp-setup.md`, parte F.
+- **Tope de Meta.** Sin verificar la empresa, 2 números por portfolio y el de la
+  plataforma ya ocupa uno: hoy entra un solo número automático. Es lo que dice la
+  documentación, no se midió.
+- **Retoma tras un corte.** Si una extracción anterior del caso falló por algo
+  pasajero (`intentos_de_extraccion > 0`), la corrida siguiente lleva la corrección
+  de concisión desde el primer intento y los dos intentos van a temperatura 0,3.
+  Ojo con lo que mide la señal: `reintentarPorTimeout` suma por plazo, por 429 y por
+  red caída (`esPasajero`), no sólo por una salida desbocada, y el contador no se
+  reinicia nunca. O sea que vale para toda extracción posterior de ese caso, también
+  la de un turno nuevo de la conversación, y no sólo para el reintento inmediato.
+  Sin columna nueva; `maxOutputTokens`, el `thinkingBudget`, el plazo de 30 s y el
+  no-reintento tras TIMEOUT quedan como estaban. Que esto corte las salidas
+  desbocadas es una hipótesis: se valida con `pnpm rehearse <escenario>` y
+  `pnpm smoke`, leyendo el transcripto.
+- **Riesgos aceptados.** Las ventanas de 24 h de los cupos son fijas (en el borde del
+  día se duplica el tope) y los cupos globales se comparten entre espacios; hoy manda
+  el tope de Meta, así que no pesa. Los cupos de código no se devuelven una vez que
+  se tocó Graph (el recorrido de la WABA también cuesta), y los de alta sólo cuando
+  Meta pide aflojar: ante un timeout al agregar, el número pudo entrar y lo mira el
+  operador (aviso `incierto`). La bienvenida de la bandeja depende sólo de la
+  bandera, no de que la 0049 exista: por eso la 0049 se aplica antes de prenderla.
+
 ### 🙋 Waiting on you (not code)
 
+- **Número por código: aplicar la 0049 ANTES de mergear.** Es sólo la función
+  `claimmix_numero_automatico` (`0049_numero_por_codigo.sql`), aditiva e
+  idempotente. Se aplica a mano, con el dueño de la base (necesita `BYPASSRLS`), en
+  este orden: QA (`ep-wispy-flower`), producción (`ep-proud-resonance`) y la rama
+  `production` de Veltra. Después, en cada una con su `DATABASE_URL_APP`,
+  `pnpm permisos && pnpm tenancy`. Sin ella el CI queda rojo por `--exigir-al-dia`.
+  Pendiente aparte: la prueba real en QA con una SIM libre que no esté en la app de
+  WhatsApp (receta en `docs/whatsapp-setup.md`), decidir si se verifica la empresa
+  en Meta para subir el tope de números, y no prender la bandera en producción
+  hasta que QA salga bien. La retoma tras un corte no necesita migración.
 - **Después del deploy: `pnpm check` completo y `pnpm knock`.** El mail real que
   deposita el timbre trae el `Authentication-Results` alineado de Gmail y tiene que
   seguir abriendo o siguiendo caso: es la única prueba de la decisión sobre el From

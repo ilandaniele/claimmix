@@ -58,6 +58,13 @@ export function getGmailAuth(refreshToken?: string): OAuth2Client {
   return _auth;
 }
 
+/** ¿Tiene este ambiente la casilla del .env? Sin ella `getGmailAuth()` sin token tira. */
+export function hayCasillaDelEntorno(): boolean {
+  return Boolean(
+    process.env.GMAIL_REFRESH_TOKEN && process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET
+  );
+}
+
 /**
  * Resets the auth singleton — for test isolation only.
  * Call in afterEach / afterAll.

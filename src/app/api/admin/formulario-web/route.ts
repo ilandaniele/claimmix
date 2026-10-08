@@ -16,6 +16,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { firstRow } from "@/lib/db/helpers";
 import { AppError } from "@/lib/errors";
+import { esSlugDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 import { codigoPg, faltaLa0044 } from "@/server/core-sync/config";
 import {
   consultaFormularioWeb,
@@ -23,6 +24,8 @@ import {
 } from "@/server/web/formulario-del-inquilino";
 
 export const dynamic = "force-dynamic";
+
+const ENLACE_EN_USO = "Ese enlace ya está en uso.";
 
 const FormularioSchema = z
   .object({
@@ -51,6 +54,8 @@ export async function PUT(request: NextRequest) {
 
     const tenantId = userRow.tenant_id;
     const slug = parsed.data.slug ?? slugAlAzar();
+    // Ese enlace ya es de un formulario de dev, y acá sólo redirige: se contesta igual que uno ocupado.
+    if (esSlugDeOtroAmbiente(slug)) throw new AppError("VALIDATION_FAILED", ENLACE_EN_USO);
     let guardado;
     try {
       guardado = firstRow(
@@ -60,7 +65,7 @@ export async function PUT(request: NextRequest) {
       );
     } catch (e) {
       // El único índice único que puede saltar sin ser el propio inquilino es el del enlace.
-      if (codigoPg(e) === "23505") throw new AppError("VALIDATION_FAILED", "Ese enlace ya está en uso.");
+      if (codigoPg(e) === "23505") throw new AppError("VALIDATION_FAILED", ENLACE_EN_USO);
       throw e;
     }
     if (!guardado) throw new AppError("INTERNAL_ERROR");

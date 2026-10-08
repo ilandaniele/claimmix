@@ -16,6 +16,8 @@ vi.mock("@/server/ai/budget", () => ({
   recordUsage: vi.fn(),
 }));
 
+vi.mock("@/server/ai/provider-usage", () => ({ logProviderUsage: vi.fn() }));
+
 vi.mock("@/server/ai/provider", () => ({
   getDefaultGeminiModel: vi.fn(() => "gemini-2.5-flash"),
   getTenantGeminiModel: vi.fn(async () => "gemini-2.5-flash"),

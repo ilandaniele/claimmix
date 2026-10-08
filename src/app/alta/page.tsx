@@ -18,7 +18,9 @@
  *
  * Qué se muestra, en orden: con perfil va a /bandeja; sin el correo verificado,
  * «revisá tu correo»; una dirección de operación no crea espacios; con el alta
- * cerrada para la dirección, el texto neutro; y si no, el formulario.
+ * cerrada para la dirección, el texto neutro; y si no, el formulario, con un
+ * texto fijo debajo para quien llega de una empresa que ya usa ClaimMix: se
+ * entra por invitación, no se busca a la empresa por el dominio del correo.
  */
 
 import { headers } from "next/headers";
@@ -207,6 +209,8 @@ export default async function AltaPage({
           {t("alta.crear")}
         </button>
       </form>
+
+      <p className="mt-4 text-center text-xs text-slate-500">{t("alta.yaUsaClaimMix")}</p>
 
       {envioAutomatico && <script nonce={nonce} dangerouslySetInnerHTML={{ __html: ENVIO_AUTOMATICO }} />}
     </Tarjeta>

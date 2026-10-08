@@ -761,6 +761,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "alta.terminos.conector": "and the",
   "alta.terminos.privacidad": "privacy policy",
   "alta.crear": "Create my workspace",
+  "alta.yaUsaClaimMix": "Does your company already use ClaimMix? Ask an admin to invite you.",
   "alta.salir": "Sign out",
   "alta.noVerificado.titulo": "Check your email",
   "alta.noVerificado.texto": "Before you create your workspace you need to confirm your address. Open the link we sent you and come back to this screen.",

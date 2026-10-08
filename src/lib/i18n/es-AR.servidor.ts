@@ -771,6 +771,7 @@ export const esARServidor = {
   "alta.terminos.conector": "y la",
   "alta.terminos.privacidad": "política de privacidad",
   "alta.crear": "Crear mi espacio",
+  "alta.yaUsaClaimMix": "¿Tu empresa ya usa ClaimMix? Pedile a un admin que te invite.",
   "alta.salir": "Cerrar sesión",
   "alta.noVerificado.titulo": "Revisá tu correo",
   "alta.noVerificado.texto": "Antes de crear tu espacio tenés que confirmar tu dirección. Abrí el enlace que te mandamos y volvé a esta pantalla.",

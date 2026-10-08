@@ -41,11 +41,25 @@ Corren en cada PR, y estos son los que **impiden** mergear:
 | `Peso del bundle` | 310 kB comprimidos de JavaScript |
 | `Aislamiento de tenants` | que la base separe las aseguradoras |
 | `Pen test local` | que ninguna ruta nueva conteste sin credenciales |
+| `Post-deploy QA` (sólo con base `main`) | que el deploy de QA de este mismo commit pasó todos sus chequeos |
 
-Los tres últimos eran nuevos y ya están marcados como requeridos, en `main` y en
-`qa`: el paso 9 de más abajo cuenta cómo se decidió. `Tests de integración`,
-`Tests de Gmail` y `Cobertura` también corren en cada PR, pero
-no son requeridos y por eso no están en la tabla: un PR mergea con ellos en rojo.
+`Peso del bundle`, `Aislamiento de tenants` y `Pen test local` eran nuevos y ya
+están marcados como requeridos, en `main` y en `qa`: el paso 9 de más abajo
+cuenta cómo se decidió. `Tests de integración` y `Cobertura` también corren en
+cada PR, pero no son requeridos y por eso no están en la tabla: un PR mergea con
+ellos en rojo.
+
+El 15, `Post-deploy QA`, no corre en el PR: es el estado que el job
+`qa_veredicto` de `post-deploy.yml` (que se llama «Veredicto de QA», para que
+sólo el estado lleve ese nombre) publica sobre el commit desplegado a QA
+cuando terminan sus chequeos, con el pen test —la pared con un inquilino propio
+y los ataques al agente— incluido. Sólo cuenta con base `main`: el PR de `qa` a
+`main` tiene por cabeza ese mismo commit, y un QA rojo, o que no corrió, o que
+corrió sin el ensayo por faltar los `QA_R2_*`, tiene que frenar la promoción. Un PR a `qa` no lo puede tener, porque el deploy de QA
+sale después de mergearlo. Todavía no está marcado como requerido: GitHub sólo
+deja elegir un estado que ya se publicó, así que se marca después de verlo en una
+promoción. Y con el repositorio privado la regla no se impone sola: se mira antes
+de mergear.
 
 ### Después del deploy
 
@@ -65,8 +79,9 @@ chequeo.
 | Ensayo                              | sí           | sí          | sube adjuntos de verdad, al balde propio de QA, no al de producción                                                                                   |
 | Canales de entrada                  | sí           | no          | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito                                                                                     |
 | Migraciones al día                  | sí           | sí          | sólo le pregunta al registro de migraciones                                                                                                           |
-| Permisos del rol                    | sí           | sí          | sólo le pregunta al catálogo                                                                                                                          |
-| Pen test                            | sí           | no          | la pared entre inquilinos necesita el inquilino de demo, que en QA no está                                                                            |
+| Permisos del rol                    | sí           | sí          | sólo le pregunta al catálogo: permisos, y que el rol no saltee RLS                                                                                    |
+| Pen test                            | sí           | sí          | en QA la pared se arma con un inquilino efímero y un caso propio (`--pared-propia`), que se borran al terminar; producción lo rechaza                 |
+| Ataques al agente (`--agent`)       | no           | sí          | gastan tokens del cupo del inquilino y escriben casos; contra producción se corren a mano al tocar el agente o los prompts                           |
 | Carga de lectura                    | sí           | no          | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
 
 **Lo apagado no queda callado.** El job `alcance` corre al final, aun con todo
@@ -83,7 +98,7 @@ fallan.
 
 #### Los secretos de repositorio que necesita QA
 
-Settings → Secrets and variables → Actions. Sin los tres primeros el job
+Settings → Secrets and variables → Actions. Sin los cuatro primeros el job
 `qa_secretos` corta la corrida y no se chequea nada; los demás sólo encienden
 el ensayo.
 
@@ -92,7 +107,7 @@ el ensayo.
 | `QA_DATABASE_URL`                                                              | la rama de Neon de QA                        | no corre ningún chequeo             |
 | `QA_DATABASE_URL_APP`                                                          | la misma rama, con el rol `claimmix_app`     | ídem                                |
 | `QA_CRON_SECRET`                                                               | el `CRON_SECRET` cargado en `claimmix-qa`    | ídem: el smoke no puede preguntar   |
-| `QA_GMAIL_TENANT_ID`                                                           | el inquilino de QA                           | el ensayo no corre                  |
+| `QA_GMAIL_TENANT_ID`                                                           | el inquilino de QA                           | ídem: el pen test no tiene dónde armar su señuelo |
 | `QA_R2_ACCOUNT_ID`, `QA_R2_ACCESS_KEY_ID`, `QA_R2_SECRET_ACCESS_KEY`, `QA_R2_BUCKET` | el balde propio de QA, `claimmix-qa-attachments` (misma cuenta de Cloudflare que producción, otro token) | el ensayo no corre |
 
 ⛔ **`QA_DATABASE_URL` no es la de producción, nunca.** `qa_secretos` compara
@@ -335,7 +350,9 @@ qué cada una:
   el alias de producción, `QA_CRON_SECRET` para el de QA y `PREVIEW_CRON_SECRET`
   para cualquier otra vista previa. Si el de Preview no coincide, ese paso recibe
   401 y el diagnóstico se pierde justo el día que sirve; si falta
-  `PREVIEW_CRON_SECRET`, el paso no interroga. Hasta #382 era el mismo valor que
+  el secreto que toca (`PREVIEW_CRON_SECRET` para una vista previa), el paso corta
+  con «Falta el CRON_SECRET de este host» y no interroga: ninguno cae al de otro
+  ambiente. `barrer-trabados.yml` corta igual. Hasta #382 era el mismo valor que
   el de producción, y el código de una rama sin revisar corría en Preview con el
   bearer interno de producción. Los otros tres workflows con secretos
   (`deploy-checks.yml`, `post-deploy.yml` y `barrer-trabados.yml`) ya no admiten
@@ -471,25 +488,27 @@ todos sus chequeos, ensayo incluido, en verde. Van en
 Settings → Secrets and variables → Actions del repositorio, y la tabla de
 «Después del deploy» dice qué apaga cada ausencia.
 
-Los tres obligatorios son `QA_DATABASE_URL`, `QA_DATABASE_URL_APP` y
-`QA_CRON_SECRET`. Los dos primeros son las mismas cadenas de Neon que se
-cargaron en Vercel en el paso 4bis; el tercero, el mismo `CRON_SECRET` que se
-generó ahí. Sin alguno de los tres el job `qa_secretos` corta la corrida con el
-motivo escrito en el resumen: no hay chequeo que pueda correr sin ellos, y no
-correr no se muestra como verde.
+Los cuatro obligatorios son `QA_DATABASE_URL`, `QA_DATABASE_URL_APP`,
+`QA_CRON_SECRET` y `QA_GMAIL_TENANT_ID`. Los dos primeros son las mismas cadenas
+de Neon que se cargaron en Vercel en el paso 4bis; el tercero, el mismo
+`CRON_SECRET` que se generó ahí; el cuarto, el inquilino donde el pen test deja
+su caso señuelo. Sin alguno de los cuatro el job `qa_secretos` corta la corrida
+con el motivo escrito en el resumen: no hay chequeo que pueda correr sin ellos, y
+no correr no se muestra como verde.
 
 ⛔ **Nunca las cadenas de producción.** `qa_secretos` las compara sin imprimir
 ninguna de las dos y falla si coinciden, porque el ensayo escribe y borra casos
 donde apunte. La comparación es la última red, no el permiso para probar.
 
-Los otros cinco —`QA_GMAIL_TENANT_ID` y los cuatro `QA_R2_*`— son opcionales y
-encienden el ensayo de conversaciones. El inquilino ya existe: como fila en la
-rama `qa` de Neon y como `GOOGLE_DEFAULT_TENANT_ID` en `claimmix-qa` —no como
-`GMAIL_TENANT_ID`, que ahí queda vacía—. Los de R2 son los del balde
-propio de QA, `claimmix-qa-attachments`. Pasarle los de producción haría
-que el ensayo de QA suba y borre adjuntos en el balde de los clientes: sin los
-cuatro el ensayo queda apagado, y el job `alcance` lo nombra como no verificado
-en cada corrida.
+El inquilino ya existe: como fila en la rama `qa` de Neon y como
+`GOOGLE_DEFAULT_TENANT_ID` en `claimmix-qa` —no como `GMAIL_TENANT_ID`, que ahí
+queda vacía—.
+
+Los otros cuatro, los `QA_R2_*`, son opcionales y encienden el ensayo de
+conversaciones. Son los del balde propio de QA, `claimmix-qa-attachments`.
+Pasarle los de producción haría que el ensayo de QA suba y borre adjuntos en el
+balde de los clientes: sin los cuatro el ensayo queda apagado, y el job
+`alcance` lo nombra como no verificado en cada corrida.
 
 Dos secretos del repositorio no son de QA. `PREVIEW_CRON_SECRET` es el
 `CRON_SECRET` del alcance Preview de `claimmix` (paso 5): un valor propio,

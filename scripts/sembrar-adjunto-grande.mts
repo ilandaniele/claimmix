@@ -1,10 +1,15 @@
 /**
- * `pnpm sembrar-adjunto [--limpiar]` — deja un adjunto de 8 MiB listo para el
- * e2e de streaming (`tests/e2e/adjunto-de-8mb.spec.ts`).
+ * `pnpm sembrar-adjunto [--svg] [--limpiar]` — deja un adjunto de 8 MiB listo
+ * para el e2e de streaming (`tests/e2e/adjunto-de-8mb.spec.ts`).
  *
  * El archivo se genera acá, no vive en el repo: 8 MiB de ceros pesarían lo
  * mismo en cada clonado y al test no le importa el contenido, sólo el
  * tamaño y que llegue en más de un trozo.
+ *
+ * Con `--svg` deja, en cambio, un SVG chico con un `<script>` adentro, para
+ * `tests/e2e/adjunto-svg.spec.ts`: ahí lo que se mira son las cabeceras con
+ * que sale un archivo así, no el tamaño. Tiene su propio id, así que los dos
+ * conviven y cada uno se saca con su `--limpiar`.
  *
  * **No corre contra producción.** Mismas guardas que
  * `sembrar-para-integracion.mts` —falta la cadena, no es una URL, es la misma
@@ -47,7 +52,7 @@ try {
 
 if (produccion && destino === produccion) {
   console.error("✗ Esa es la cadena de PRODUCCIÓN.");
-  console.error("  Este script sube un adjunto de 8 MiB. En la base donde viven");
+  console.error("  Este script sube un adjunto de prueba. En la base donde viven");
   console.error("  denuncias reales, eso no tiene por qué estar.");
   process.exit(2);
 }
@@ -75,10 +80,42 @@ neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 // con mensajes que ya siembra `pnpm sembrar`.
 const INQUILINO = "10000000-0000-0000-0000-000000000001";
 const CASO = "e2e00000-0000-4000-8000-000000000001";
-const ADJUNTO = "e2e00000-0000-4000-8000-0000000000f8";
-const TAMANO = 8 * 1024 * 1024;
+const TAMANO_PDF = 8 * 1024 * 1024;
 
 const LIMPIAR = process.argv.includes("--limpiar");
+const SVG = process.argv.includes("--svg");
+
+// Un header que un visor reconoce, determinístico, sin depender de nada.
+function pdfDeOchoMegas(): Buffer {
+  const data = Buffer.alloc(TAMANO_PDF, 0);
+  data.write("%PDF-1.4\n", 0, "latin1");
+  data.write("\n%%EOF\n", TAMANO_PDF - 7, "latin1");
+  return data;
+}
+
+// El `<script>` tiene que estar: es lo que mandaría quien quiere ejecutar algo.
+function svgConScript(): Buffer {
+  return Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>document.title = "ejecutado"</script></svg>',
+    "utf8"
+  );
+}
+
+const ARCHIVO = SVG
+  ? {
+      id: "e2e00000-0000-4000-8000-0000000000f9",
+      nombre: "con-script.svg",
+      tipo: "image/svg+xml",
+      clave: "e2e-svg",
+      armar: svgConScript,
+    }
+  : {
+      id: "e2e00000-0000-4000-8000-0000000000f8",
+      nombre: "ocho-megas.pdf",
+      tipo: "application/pdf",
+      clave: "e2e-pdf",
+      armar: pdfDeOchoMegas,
+    };
 
 const pool = new Pool({ connectionString: destino });
 const cx = await pool.connect();
@@ -86,30 +123,27 @@ const cx = await pool.connect();
 try {
   const { rows } = await cx.query(
     `select storage_path from claim_attachments where id = $1`,
-    [ADJUNTO]
+    [ARCHIVO.id]
   );
   const previo: string | null = rows[0]?.storage_path ?? null;
 
   if (LIMPIAR) {
     if (previo) await deleteAttachment(previo);
-    await cx.query(`delete from claim_attachments where id = $1`, [ADJUNTO]);
-    console.log(previo ? `✓ adjunto borrado: ${ADJUNTO}` : `· no había nada que borrar (${ADJUNTO})`);
+    await cx.query(`delete from claim_attachments where id = $1`, [ARCHIVO.id]);
+    console.log(previo ? `✓ adjunto borrado: ${ARCHIVO.id}` : `· no había nada que borrar (${ARCHIVO.id})`);
   } else {
     // Un objeto de la corrida anterior, si quedó — la clave cambia en cada
-    // corrida (`e2e-pdf-<timestamp>`), así que sembrar de nuevo no lo pisa solo.
+    // corrida (`<clave>-<timestamp>`), así que sembrar de nuevo no lo pisa solo.
     if (previo) await deleteAttachment(previo);
 
-    // Un header que un visor reconoce, determinístico, sin depender de nada.
-    const data = Buffer.alloc(TAMANO, 0);
-    data.write("%PDF-1.4\n", 0, "latin1");
-    data.write("\n%%EOF\n", TAMANO - 7, "latin1");
+    const data = ARCHIVO.armar();
 
     const subido = await uploadAttachment({
       tenantId: INQUILINO,
       caseId: CASO,
-      messageId: `e2e-pdf-${Date.now()}`,
-      filename: "ocho-megas.pdf",
-      contentType: "application/pdf",
+      messageId: `${ARCHIVO.clave}-${Date.now()}`,
+      filename: ARCHIVO.nombre,
+      contentType: ARCHIVO.tipo,
       data,
     });
     if ("error" in subido) {
@@ -119,15 +153,15 @@ try {
       await cx.query(
         `insert into claim_attachments
            (id, tenant_id, case_id, file_name, content_type, size_bytes, storage_path, rejected_reason)
-         values ($1, $2, $3, 'ocho-megas.pdf', 'application/pdf', $4, $5, null)
+         values ($1, $2, $3, $4, $5, $6, $7, null)
          on conflict (id) do update set
            storage_path = excluded.storage_path,
            size_bytes = excluded.size_bytes,
            content_type = excluded.content_type,
            rejected_reason = null`,
-        [ADJUNTO, INQUILINO, CASO, TAMANO, subido.storagePath]
+        [ARCHIVO.id, INQUILINO, CASO, ARCHIVO.nombre, ARCHIVO.tipo, data.length, subido.storagePath]
       );
-      console.log(`adjunto sembrado: ${ADJUNTO} (${TAMANO} bytes) en ${host}`);
+      console.log(`adjunto sembrado: ${ARCHIVO.id} (${data.length} bytes) en ${host}`);
     }
   }
 } finally {

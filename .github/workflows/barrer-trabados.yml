@@ -21,7 +21,8 @@
 #
 # `vercel.json` ya tiene dos crons y los dos son diarios: ése es el techo del
 # plan Hobby —dos tareas, una vez por día— y no vamos a plan pago. GitHub
-# Actions corre programado gratis en un repo público, así que el barrido vive
+# Actions corre programado sin plan pago —el repo es privado desde el
+# 2026-09-26, así que gasta del cupo gratuito de minutos—, y el barrido vive
 # acá. No es un rodeo: es el único lugar sin costo donde esto puede correr
 # seguido.
 #
@@ -122,15 +123,16 @@ jobs:
           # abre esa puerta: cada proyecto de Vercel tiene el suyo y
           # `/api/cron/reap-stuck` compara contra el del deploy al que se le
           # pega. Barrer QA con el de producción devuelve 401 tres veces.
-          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix.vercel.app', '-qa.vercel.app') && secrets.QA_CRON_SECRET || secrets.CRON_SECRET }}
+          #
+          # `a && x || y` cae a `y` cuando `x` está vacío: con QA_CRON_SECRET
+          # sin cargar, el de producción viajaba a claimmix-qa. Con el respaldo
+          # entre paréntesis nunca queda vacío, y el primer comando corta.
+          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix.vercel.app', '-qa.vercel.app') && (secrets.QA_CRON_SECRET || '__falta__') || (secrets.CRON_SECRET || '__falta__') }}
           URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
         run: |
           set -uo pipefail
 
-          if [ -z "${CRON_SECRET}" ]; then
-            echo "::error::Falta el secreto CRON_SECRET del repositorio."
-            exit 1
-          fi
+          [ "${CRON_SECRET}" != '__falta__' ] || { echo '::error::Falta el CRON_SECRET de este host (QA_CRON_SECRET para claimmix-qa, CRON_SECRET para producción).'; exit 1; }
 
           # Tres intentos: la red de un runner se corta sola de vez en cuando, y
           # un barrido que no salió no es una incidencia — lo es que no salga
@@ -222,9 +224,12 @@ jobs:
           # abre esa puerta: cada proyecto de Vercel tiene el suyo y
           # `/api/cron/reap-stuck` compara contra el del deploy al que se le
           # pega. Barrer QA con el de producción devuelve 401 tres veces.
-          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix.vercel.app', '-qa.vercel.app') && secrets.QA_CRON_SECRET || secrets.CRON_SECRET }}
+          # El respaldo `'__falta__'` está por lo mismo que en el barrido de arriba.
+          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix.vercel.app', '-qa.vercel.app') && (secrets.QA_CRON_SECRET || '__falta__') || (secrets.CRON_SECRET || '__falta__') }}
           URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
-        run: node scripts/mirar-salud.mjs
+        run: |
+          [ "${CRON_SECRET}" != '__falta__' ] || { echo '::error::Falta el CRON_SECRET de este host (QA_CRON_SECRET para claimmix-qa, CRON_SECRET para producción).'; exit 1; }
+          node scripts/mirar-salud.mjs
 
       - name: Que significa que esto falle
         if: failure()

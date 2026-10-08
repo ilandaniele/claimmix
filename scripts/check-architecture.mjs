@@ -462,6 +462,89 @@ console.log("\n▸ enTenant no se anida");
   }
 }
 
+/**
+ * Las llamadas encadenadas que arrancan en el `(` de `abre`, con su nombre y sus
+ * argumentos crudos: `db.select().from(tenants)` da [select, from].
+ */
+function cadenaDesde(txt, abre, nombre) {
+  const llamadas = [];
+  const sigue = /\s*\.\s*(\w+)\s*(?:<[^(]*>)?\s*\(/y;
+  let desde = abre;
+  let nom = nombre;
+  for (;;) {
+    let prof = 0;
+    let i = desde;
+    for (; i < txt.length; i++) {
+      if (txt[i] === "(") prof++;
+      else if (txt[i] === ")" && --prof === 0) break;
+    }
+    if (i >= txt.length) break;
+    llamadas.push({ nombre: nom, args: txt.slice(desde + 1, i) });
+    sigue.lastIndex = i + 1;
+    const m = sigue.exec(txt);
+    if (!m) break;
+    nom = m[1];
+    desde = i + m[0].length;
+  }
+  return llamadas;
+}
+
+/**
+ * ¿Hay una consulta que pida TODAS las columnas de `tenants`?
+ *
+ * `select()`, `returning()`, `query.tenants`, `getTableColumns(tenants)` y un
+ * `select({ t: tenants })` se expanden a cada columna del schema de Drizzle.
+ * Como la 0048 agrega `tenants.autoalta` y se aplica a mano, el código que llega
+ * antes que ella pediría una columna que no existe. Nombrar las columnas que se
+ * usan es lo que deja desplegar en cualquier orden.
+ */
+function consultasDeTenantsEnteras(txt) {
+  const motivos = [];
+  if (/\.\s*query\s*\.\s*tenants\b/.test(txt)) motivos.push("query.tenants");
+  if (/\bgetTableColumns\s*\(\s*tenants\s*\)/.test(txt)) motivos.push("getTableColumns(tenants)");
+  const re = /\.\s*(select|selectDistinct|insert|update|delete)\s*(?:<[^(]*>)?\s*\(/g;
+  const SOBRE_TENANTS = /^(from|innerJoin|leftJoin|rightJoin|fullJoin|crossJoin)$/;
+  let m;
+  while ((m = re.exec(txt))) {
+    const [primera, ...resto] = cadenaDesde(txt, m.index + m[0].length - 1, m[1]);
+    if (!primera) continue;
+    if (m[1].startsWith("select")) {
+      const sobreTenants = resto.some((c) => SOBRE_TENANTS.test(c.nombre) && /^\s*tenants\s*(,|$)/.test(c.args));
+      if (primera.args.trim() === "" && sobreTenants) motivos.push("select() sobre tenants");
+      if (/(?<![\w.$])tenants(?![\w$]|\s*\.)/.test(primera.args)) motivos.push("select({ …: tenants })");
+    } else if (
+      /^\s*tenants\s*$/.test(primera.args) &&
+      resto.some((c) => c.nombre === "returning" && c.args.trim() === "")
+    ) {
+      motivos.push(`${m[1]}(tenants).returning()`);
+    }
+  }
+  return motivos;
+}
+
+// ── Ninguna consulta pide todas las columnas de tenants ─────
+//
+// El login (`fila-de-usuario-cacheada`) lee `tenants`, y la 0048 le agrega una
+// columna que se aplica a mano en tres bases. Un `select()` sin campos sobre
+// tenants funciona hoy y se cae el día que el código llega a una base sin
+// migrar: nadie puede entrar. Con los campos nombrados el despliegue no depende
+// del orden.
+console.log("\n▸ Ninguna consulta pide todas las columnas de tenants");
+{
+  const enteras = [];
+  for (const ruta of archivos("src")) {
+    const motivos = consultasDeTenantsEnteras(sinComentarios(readFileSync(ruta, "utf8")));
+    if (motivos.length) enteras.push(`${ruta} (${[...new Set(motivos)].join(", ")})`);
+  }
+  if (enteras.length === 0) {
+    bien("todas nombran las columnas que usan");
+  } else {
+    mal(`${enteras.length} archivo(s) piden tenants entera`);
+    for (const e of enteras) console.log(`     ${e}`);
+    console.log("     Nombrá las columnas: select({ id: tenants.id, ... }) y returning({ id: tenants.id }).");
+  }
+}
+
 // ── 9. El inquilino no entra por el cuerpo del pedido ──────────────────────
 //
 // El webhook de WhatsApp aceptaba un `tenant_id` en el cuerpo y le ganaba a la
@@ -965,7 +1048,96 @@ console.log("\n▸ Nadie compara `deployment.environment` con un literal");
   }
 }
 
-// ── 19. Un secreto elegido por condición no cae al de otro ambiente ───────
+// ── 19. El número de WhatsApp se lee en un solo lugar ─────────────────────
+//
+// Con un número por inquilino, la credencial con que se manda y el inquilino al
+// que va lo que entra salen de `whatsapp_numeros` (`src/server/whatsapp/numeros.ts`),
+// y el .env es sólo el respaldo de la plataforma. Un archivo que lea
+// `WHATSAPP_PHONE_NUMBER_ID` o `WHATSAPP_ACCESS_TOKEN` por su cuenta manda desde
+// el número equivocado o le entrega un mensaje al inquilino equivocado, y no da
+// ningún error: sólo responde por otra casa.
+//
+// El sondeo de /api/health mira la plataforma, no a un inquilino: es el único
+// que queda afuera.
+console.log("\n▸ El número de WhatsApp se lee en un solo lugar");
+{
+  const LECTOR = "src/server/whatsapp/numeros.ts";
+  const SONDEO = "src/app/api/health/route.ts";
+  const re = /\bprocess\.env\.WHATSAPP_(?:PHONE_NUMBER_ID|ACCESS_TOKEN|BUSINESS_ACCOUNT_ID|TENANT_ID)\b/;
+  const sueltos = archivos("src").filter(
+    (f) => f !== LECTOR && f !== SONDEO && re.test(sinComentarios(readFileSync(f, "utf8")))
+  );
+  if (sueltos.length === 0) {
+    bien("sólo `numeros.ts` lee el número, el token y el inquilino de WhatsApp");
+  } else {
+    mal(`${sueltos.length} archivo(s) leen el número de WhatsApp por su cuenta`);
+    for (const x of sueltos) console.log(`     ${x}`);
+    console.log("     `credencialesWhatsApp(tenantId)` para mandar, `resolverNumeros(ids)` para");
+    console.log("     saber de quién es lo que entra, `inquilinoDeLaPlataforma()` para el timbre.");
+  }
+}
+
+// ── 20. Sólo el panel del operador escribe tenants y whatsapp_numeros ─────
+//
+// Desde la 0048 la app (`claimmix_app`) no puede escribir esas dos tablas: el
+// plan, la facturación, la prueba y el número de cada inquilino los cambia el
+// rol dueño, que no tiene RLS y no sabe de quién es lo que toca. Por eso todo lo
+// que las escribe vive en `panel-operador.ts`: cada acción es una sentencia con
+// su asiento de auditoría, sólo sobre inquilinos del alta automática, y la guarda
+// de `requireOperator` está delante. Un segundo archivo que las escriba con el
+// rol dueño es una escritura sobre cualquier inquilino sin asiento ni guarda.
+//
+// Cuenta como escritura el SQL (`update tenants`, `insert into whatsapp_numeros`…)
+// o `.update(tenants)` / `.insert(whatsappNumeros)`… en un archivo que importe el
+// `db` del dueño. Los que sólo usan el de la capa (`enTenant`) escriben con
+// `claimmix_app`, que de estas tablas sólo puede tocar las siete columnas de
+// configuración de tenants; `pnpm permisos` vigila ese borde.
+console.log("\n▸ Sólo el panel del operador escribe tenants y whatsapp_numeros con el rol dueño");
+{
+  const PANEL = "src/server/alta/panel-operador.ts";
+  const ESCRIBE_SQL = /\b(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?(?:tenants|whatsapp_numeros)\b/i;
+  const ESCRIBE_DRIZZLE = /\.\s*(?:update|insert|delete)\s*\(\s*(?:tenants|whatsappNumeros)\b/;
+  const ROL_DUENO = /import\s*\{[^}]*\b(?:db|getDb)\b[^}]*\}\s*from\s*["']@\/lib\/db["']/;
+  // Los comentarios afuera y las cadenas adentro: el SQL que se busca vive en una cadena.
+  const sinSoloComentarios = (texto) => {
+    let out = "";
+    for (let i = 0; i < texto.length; i++) {
+      const c = texto[i];
+      if (c === '"' || c === "'" || c === "`") {
+        out += c;
+        for (i++; i < texto.length && texto[i] !== c; i++) {
+          out += texto[i];
+          if (texto[i] === "\\") out += texto[++i] ?? "";
+        }
+        out += c;
+      } else if (c === "/" && texto[i + 1] === "/") {
+        while (i < texto.length && texto[i] !== "\n") i++;
+        out += "\n";
+      } else if (c === "/" && texto[i + 1] === "*") {
+        const fin = texto.indexOf("*/", i + 2);
+        i = fin === -1 ? texto.length : fin + 1;
+      } else {
+        out += c;
+      }
+    }
+    return out;
+  };
+  const sueltos = archivos("src").filter((f) => {
+    if (f === PANEL) return false;
+    const texto = sinSoloComentarios(readFileSync(f, "utf8"));
+    return ROL_DUENO.test(texto) && (ESCRIBE_SQL.test(texto) || ESCRIBE_DRIZZLE.test(texto));
+  });
+  if (sueltos.length === 0) {
+    bien("sólo `panel-operador.ts` escribe tenants y whatsapp_numeros con el rol dueño");
+  } else {
+    mal(`${sueltos.length} archivo(s) escriben tenants o whatsapp_numeros fuera del panel del operador`);
+    for (const x of sueltos) console.log(`     ${x}`);
+    console.log("     Una acción nueva sobre un inquilino o su número va en `panel-operador.ts`:");
+    console.log("     una sentencia con su asiento de auditoría y detrás de `requireOperator`.");
+  }
+}
+
+// ── 21. Un secreto elegido por condición no cae al de otro ambiente ───────
 //
 // `cond && secrets.A || secrets.B` parece un if/else y no lo es: con A vacío,
 // `&&` devuelve la cadena vacía, que es falsa, y la expresión sigue con B. Con

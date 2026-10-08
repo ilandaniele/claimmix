@@ -505,6 +505,7 @@ describe("POST /api/intake/simulate", () => {
       remaining: 0,
       resetAt: Date.now() + 30000,
       retryAfterSeconds: 30,
+      ventana: 0,
     });
 
     const req = makeRequest({ scenario_id: "choque-01" });

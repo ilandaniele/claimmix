@@ -14,13 +14,15 @@
  * Either way the message flows into the same intake pipeline
  * (createWhatsAppIntake → runIntakeAgent) that the email channel uses.
  *
+ * A qué inquilino va cada evento de Meta lo decide `resolverNumeros`
+ * (`@/server/whatsapp/numeros`) por el `phone_number_id` con que Meta lo firmó;
+ * las credenciales del número (WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN,
+ * WHATSAPP_TENANT_ID) se leen sólo ahí.
+ *
  * Env:
  *   WHATSAPP_VERIFY_TOKEN   — token echoed during the Meta GET handshake
  *   WHATSAPP_APP_SECRET     — Meta App Secret, validates the POST signature
- *   WHATSAPP_ACCESS_TOKEN   — Cloud API token for outbound acknowledgements
- *   WHATSAPP_PHONE_NUMBER_ID— Cloud API sender phone-number id
  *   WHATSAPP_WEBHOOK_SECRET — Bearer secret for the normalized path
- *   WHATSAPP_TENANT_ID      — fallback tenant for inbound messages
  */
 
 import { after, type NextRequest, NextResponse } from "next/server";
@@ -34,6 +36,7 @@ import {
   retomarExtraccionesPendientes,
 } from "@/server/intake/retomar-pendientes";
 import { logger } from "@/lib/observability/logger";
+import { inquilinoDeLaPlataforma, resolverNumeros } from "@/server/whatsapp/numeros";
 import {
   parseCloudApiMessages,
   resolveWebhookChallenge,
@@ -64,55 +67,6 @@ function hasBearer(request: NextRequest): boolean {
   const secret = process.env.WHATSAPP_WEBHOOK_SECRET;
   if (!secret) return false;
   return timingSafeStringEqual(request.headers.get("authorization"), `Bearer ${secret}`);
-}
-
-/**
- * Este mensaje, ¿es para el número que atendemos?
- *
- * La firma dice que el evento viene de Meta. NO dice a quién le hablaron: un
- * webhook es de la APP, y una app puede quedar suscripta a más de una WABA —
- * una segunda aseguradora, un número de prueba, uno viejo que nadie dio de
- * baja. Todos esos mensajes llegan acá, firmados y válidos.
- *
- * Y abajo el inquilino sale de `WHATSAPP_TENANT_ID`, que es una constante. O
- * sea que la denuncia de la otra aseguradora se guardaba en la bandeja de
- * ésta, con sus fotos y su DNI. Es exactamente lo que el aislamiento por
- * inquilino existe para impedir, entrando por la única puerta que no lo
- * miraba.
- *
- * Deja pasar cuando falta cualquiera de los dos lados, y eso es a propósito.
- * Sin `WHATSAPP_PHONE_NUMBER_ID` no hay con qué comparar; y si algún día Meta
- * deja de mandar `metadata`, ser estricto acá tiraría TODAS las denuncias en
- * vez de una. La comparación protege del número de más, no del payload raro.
- *
- * Un mensaje descartado no se reintenta: el evento está bien, el destinatario
- * no somos nosotros, y reintentarlo no lo va a cambiar.
- */
-function esParaNuestroNumero(toPhoneNumberId: string | undefined): boolean {
-  const nuestro = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
-  if (!nuestro || !toPhoneNumberId) return true;
-  return toPhoneNumberId.trim() === nuestro;
-}
-
-/**
- * De quién es el mensaje que entra.
- *
- * Sale de la configuración del deploy y NADA MÁS. Antes el cuerpo del pedido
- * podía traer un `tenant_id` y ganaba: quien tuviera `WHATSAPP_WEBHOOK_SECRET`
- * —que es UNO solo y global, y que un adaptador BSP tiene por definición—
- * escribía una denuncia, con su teléfono y sus fotos, en la bandeja de
- * cualquier aseguradora del sistema, incluida una que nunca habilitó WhatsApp.
- * Y ahí la extracción corre igual.
- *
- * Ningún llamador lo mandaba: ni el ensayo, ni la prueba de carga, ni el pen
- * test, ni el adaptador. Era una puerta abierta que nadie usaba.
- *
- * El día que haya de verdad más de un inquilino por WhatsApp, el inquilino
- * tiene que salir de la CREDENCIAL —un secreto por adaptador— y no del cuerpo,
- * que es lo que la capa de datos viene diciendo desde el principio.
- */
-function resolveTenantId(): string | null {
-  return process.env.WHATSAPP_TENANT_ID ?? process.env.GMAIL_TENANT_ID ?? null;
 }
 
 /**
@@ -287,27 +241,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const tenantId = resolveTenantId();
-    if (!tenantId) {
-      // ACK anyway (200) so Meta does not retry indefinitely; log the misconfig.
-      logger.error({}, "webhooks_whatsapp.whatsapp_tenant_id_not_configured");
-      return NextResponse.json({ ok: true, ignored: "tenant_not_configured" }, { status: 200 });
+    const messages = parseCloudApiMessages(payload);
+
+    // La firma dice que el evento viene de Meta, no a quién le hablaron: la app
+    // puede estar suscripta a más de una WABA. Una sola consulta por pedido: de
+    // quién es cada número que aparece en el lote.
+    let inquilinoDe: Map<string, string>;
+    try {
+      inquilinoDe = await resolverNumeros(
+        messages.flatMap((m) => (m.toPhoneNumberId?.trim() ? [m.toPhoneNumberId.trim()] : []))
+      );
+    } catch (err) {
+      // Un 500 y no un descarte: Meta reintenta, y resolver "por las dudas" al
+      // inquilino por omisión sería mandar la denuncia de otro a la bandeja de éste.
+      logger.error({ error: err instanceof Error ? err.message : String(err) }, "whatsapp.webhook.ruteo_failed");
+      return NextResponse.json(
+        { error: { code: "ROUTING_FAILED", message: "Could not resolve the destination number." } },
+        { status: 500 }
+      );
     }
 
-    const messages = parseCloudApiMessages(payload);
     const caseIds: string[] = [];
     // Junta casos, no mensajes: dos mensajes del mismo remitente en el mismo
-    // pedido caen en el mismo caso, y el agente corre una vez por caso.
-    const paraElAgente = new Set<string>();
+    // pedido caen en el mismo caso, y el agente corre una vez por caso. Un
+    // pedido puede traer mensajes de más de un inquilino: un agente por cada uno.
+    const paraElAgente = new Map<string, Set<string>>();
     let sinGuardar = 0;
-    let deOtroNumero = 0;
+    let descartados = 0;
 
     for (const msg of messages) {
-      if (!esParaNuestroNumero(msg.toPhoneNumberId)) {
-        deOtroNumero++;
+      const numero = msg.toPhoneNumberId?.trim();
+      const tenantId = numero ? inquilinoDe.get(numero) : undefined;
+      if (!tenantId) {
+        // Sin metadata, de un número sin fila conectada o de uno suspendido: no
+        // se reintenta, el evento está bien y el destinatario no es de nadie.
+        descartados++;
         logger.error({
-        to_phone_number_id: msg.toPhoneNumberId ?? null,
-      }, "whatsapp.webhook.numero_ajeno");
+          to_phone_number_id: numero ?? null,
+        }, "whatsapp.webhook.numero_desconocido");
         continue;
       }
       try {
@@ -321,7 +292,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // contra Vertex y un segundo mensaje al asegurado diciendo lo mismo.
         // Meta reintenta cuando el acuse tarda, y el acuse mide 2,9 s p95. Y el
         // que pasó el tope por remitente (E12) tampoco: se guardó y no se lee.
-        if (!stored.duplicado && !stored.excedente) paraElAgente.add(stored.caseId);
+        if (!stored.duplicado && !stored.excedente) {
+          const casos = paraElAgente.get(tenantId) ?? new Set<string>();
+          casos.add(stored.caseId);
+          paraElAgente.set(tenantId, casos);
+        }
       } catch (err) {
         sinGuardar++;
         // El mensaje del error, no su nombre: `insertWhatsAppMessage` se toma
@@ -334,7 +309,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    scheduleAgent([...paraElAgente], tenantId, true, hasta);
+    for (const [tenantId, casos] of paraElAgente) scheduleAgent([...casos], tenantId, true, hasta);
 
     /*
      * Si algún mensaje no se guardó, esto NO es un 200.
@@ -369,7 +344,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ok: true,
         received: caseIds.length,
         case_ids: caseIds,
-        ...(deOtroNumero > 0 ? { ignored_other_number: deOtroNumero } : {}),
+        ...(descartados > 0 ? { ignored_other_number: descartados } : {}),
       },
       { status: 200 }
     );
@@ -407,7 +382,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const tenantId = resolveTenantId();
+  // De la configuración del deploy y nada más: el secreto es uno solo y global,
+  // así que si el cuerpo pudiera elegir el inquilino, quien lo tenga escribiría
+  // en la bandeja de cualquiera. Va siempre a la plataforma, nunca a una prueba.
+  const tenantId = inquilinoDeLaPlataforma();
   if (!tenantId) {
     return NextResponse.json(
       { error: { code: "TENANT_NOT_CONFIGURED", message: "WhatsApp tenant is not configured." } },

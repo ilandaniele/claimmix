@@ -23,7 +23,7 @@
  * consultas.
  */
 import "server-only";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
@@ -37,6 +37,10 @@ export interface FilaUsuario {
   locale: string | null;
   /** `tenants.plan` del inquilino de la sesión; decide lo del Plan Pro. */
   plan: string;
+  /** `tenants.billing_status`; con `autoalta` dice si el espacio está en prueba. */
+  billing_status: string;
+  /** `tenants.autoalta`; null si la 0048 todavía no está aplicada. */
+  autoalta: boolean | null;
 }
 
 /**
@@ -91,6 +95,9 @@ export async function filaDeUsuario(userId: string): Promise<FilaUsuario | null>
         full_name: users.full_name,
         locale: users.locale,
         plan: tenants.plan,
+        billing_status: tenants.billing_status,
+        // `to_jsonb` y no la columna: antes de la 0048 `tenants.autoalta` tira 42703 y deja afuera a todos.
+        autoalta: sql<boolean | null>`(to_jsonb(${tenants}.*) ->> 'autoalta')::boolean`,
       })
       .from(users)
       // El plan viaja en la misma consulta: sin un segundo viaje por pedido.

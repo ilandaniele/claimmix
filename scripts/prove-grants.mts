@@ -17,7 +17,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { neon } from "@neondatabase/serverless";
-import { PERMISOS_QUITADOS } from "./lib/permisos-quitados.mjs";
+import { PERMISOS_POR_COLUMNA, PERMISOS_QUITADOS } from "./lib/permisos-quitados.mjs";
 
 const url = process.env.DATABASE_URL_APP?.trim();
 if (!url) {
@@ -73,26 +73,24 @@ const tablas = (await sql`
 `.catch(explicar)) as Array<{ tabla: string; rls: boolean; forzado: boolean }>;
 
 /**
- * Qué privilegios tiene el rol sobre cada una.
+ * Qué privilegios tiene el rol sobre una tabla.
  *
  * `has_table_privilege` y no `information_schema.table_privileges`: la vista
  * lista sólo lo concedido directamente, y se pierde lo que llega por herencia
  * de otro rol. Ahí un permiso que existe aparece como faltante, y se termina
  * concediendo de nuevo algo que ya estaba.
+ *
+ * `quote_ident` porque `user` es palabra reservada.
  */
-const faltantes: string[] = [];
-const sinForzar: string[] = [];
-const sinPolitica: string[] = [];
-
-for (const t of tablas) {
+async function privilegiosDe(tabla: string) {
   const [p] = (await sql`
     select
-      has_table_privilege(${rol}, ${"public." + t.tabla}, 'SELECT') as leer,
-      has_table_privilege(${rol}, ${"public." + t.tabla}, 'INSERT') as insertar,
-      has_table_privilege(${rol}, ${"public." + t.tabla}, 'UPDATE') as actualizar,
-      has_table_privilege(${rol}, ${"public." + t.tabla}, 'DELETE') as borrar,
+      has_table_privilege(${rol}, 'public.' || quote_ident(${tabla}), 'SELECT') as leer,
+      has_table_privilege(${rol}, 'public.' || quote_ident(${tabla}), 'INSERT') as insertar,
+      has_table_privilege(${rol}, 'public.' || quote_ident(${tabla}), 'UPDATE') as actualizar,
+      has_table_privilege(${rol}, 'public.' || quote_ident(${tabla}), 'DELETE') as borrar,
       (select count(*)::int from pg_policies
-        where schemaname = 'public' and tablename = ${t.tabla}) as politicas
+        where schemaname = 'public' and tablename = ${tabla}) as politicas
   `) as Array<{
     leer: boolean;
     insertar: boolean;
@@ -100,16 +98,29 @@ for (const t of tablas) {
     borrar: boolean;
     politicas: number;
   }>;
+  return p;
+}
 
-  // Lo quitado a propósito (`permisos-quitados.mjs`) falla al revés: por TENERLO.
-  const quitados: readonly string[] = PERMISOS_QUITADOS[t.tabla as keyof typeof PERMISOS_QUITADOS] ?? [];
+/** Lo quitado a propósito (`permisos-quitados.mjs`) falla al revés: por TENERLO. */
+function desviosDe(tabla: string, p: Awaited<ReturnType<typeof privilegiosDe>>): string[] {
+  const quitados: readonly string[] = PERMISOS_QUITADOS[tabla as keyof typeof PERMISOS_QUITADOS] ?? [];
   const tiene = { SELECT: p.leer, INSERT: p.insertar, UPDATE: p.actualizar, DELETE: p.borrar };
   const privilegios = Object.keys(tiene) as Array<keyof typeof tiene>;
   const falta = privilegios.filter((x) => !quitados.includes(x) && !tiene[x]);
   const sobra = privilegios.filter((x) => quitados.includes(x) && tiene[x]);
+  return [
+    ...(falta.length ? [`${tabla}: le falta ${falta.join(", ")}`] : []),
+    ...(sobra.length ? [`${tabla}: tiene ${sobra.join(", ")} y se le quitó a propósito`] : []),
+  ];
+}
 
-  if (falta.length) faltantes.push(`${t.tabla}: le falta ${falta.join(", ")}`);
-  if (sobra.length) faltantes.push(`${t.tabla}: tiene ${sobra.join(", ")} y se le quitó a propósito`);
+const faltantes: string[] = [];
+const sinForzar: string[] = [];
+const sinPolitica: string[] = [];
+
+for (const t of tablas) {
+  const p = await privilegiosDe(t.tabla);
+  faltantes.push(...desviosDe(t.tabla, p));
   if (!t.forzado) sinForzar.push(t.tabla);
   if (p.politicas === 0) sinPolitica.push(t.tabla);
 }
@@ -142,7 +153,92 @@ if (sinPolitica.length === 0) {
   console.log(`   ✗ ${sinPolitica.length} sin ninguna: ${sinPolitica.join(", ")}`);
 }
 
-const problemas = faltantes.length + sinForzar.length + sinPolitica.length;
+// ── Lo que trae la 0048 ─────────────────────────────────────────────────────
+//
+// `tenants`, `account`, `session`, `verification` y `user` no tienen columna de
+// inquilino, así que el recorrido de arriba no las ve. Se miran acá, con la misma
+// lista, más los permisos por columna y la función que crea inquilinos.
+console.log("\n▸ Tablas sin columna de inquilino");
+const sinColumna: string[] = [];
+for (const tabla of Object.keys(PERMISOS_QUITADOS)) {
+  if (tablas.some((t) => t.tabla === tabla)) continue;
+  const [e] = (await sql`select to_regclass('public.' || quote_ident(${tabla})) is not null as existe`) as Array<{
+    existe: boolean;
+  }>;
+  if (e.existe) sinColumna.push(...desviosDe(tabla, await privilegiosDe(tabla)));
+}
+
+// La 0048 se aplica a mano: sin ella no hay función, ni tabla de números, ni columna.
+const [m] = (await sql`
+  select
+    to_regprocedure('public.claimmix_crear_inquilino(uuid, uuid, text, text, integer, integer, inet)') is not null as funcion,
+    to_regclass('public.whatsapp_numeros') is not null as numeros,
+    exists (
+      select 1 from pg_attribute
+      where attrelid = to_regclass('public.tenants') and attname = 'autoalta' and not attisdropped
+    ) as columna
+`) as Array<{ funcion: boolean; numeros: boolean; columna: boolean }>;
+const sinMigrar = [
+  ...(m.funcion ? [] : ["la función claimmix_crear_inquilino"]),
+  ...(m.numeros ? [] : ["la tabla whatsapp_numeros"]),
+  ...(m.columna ? [] : ["la columna tenants.autoalta"]),
+];
+if (sinMigrar.length) sinColumna.push(`0048 sin aplicar en esta base: falta ${sinMigrar.join(", ")}`);
+
+// `tenants` no tiene tenant_id: su política compara la propia columna id.
+const [rlsTenants] = (await sql`
+  select c.relrowsecurity as rls, c.relforcerowsecurity as forzado,
+         (select count(*)::int from pg_policies
+           where schemaname = 'public' and tablename = 'tenants'
+             and policyname = 'claimmix_tenant_isolation') as politicas
+  from pg_class c
+  where c.oid = to_regclass('public.tenants')
+`) as Array<{ rls: boolean; forzado: boolean; politicas: number }>;
+if (!rlsTenants.rls || !rlsTenants.forzado || rlsTenants.politicas === 0) {
+  sinColumna.push("tenants: sin RLS forzada o sin la política claimmix_tenant_isolation");
+}
+
+// Cada columna con el permiso que le toca: ni una más, ni una menos.
+for (const [tabla, porPrivilegio] of Object.entries(PERMISOS_POR_COLUMNA)) {
+  for (const [privilegio, permitidas] of Object.entries(porPrivilegio)) {
+    const filas = (await sql`
+      select a.attname::text as columna,
+             has_column_privilege(${rol}::name, 'public.' || quote_ident(${tabla}), a.attname::text, ${privilegio}) as tiene
+      from pg_attribute a
+      where a.attrelid = to_regclass('public.' || quote_ident(${tabla}))
+        and a.attnum > 0 and not a.attisdropped
+      order by a.attnum
+    `) as Array<{ columna: string; tiene: boolean }>;
+    const falta = permitidas.filter((c) => !filas.some((f) => f.columna === c && f.tiene));
+    const sobra = filas.filter((f) => f.tiene && !permitidas.includes(f.columna)).map((f) => f.columna);
+    if (falta.length) sinColumna.push(`${tabla}: le falta ${privilegio} en ${falta.join(", ")}`);
+    if (sobra.length) sinColumna.push(`${tabla}: tiene ${privilegio} en ${sobra.join(", ")} y no le toca`);
+  }
+}
+
+// EXECUTE para el rol y cerrada a PUBLIC (`REVOKE ... FROM PUBLIC` de la 0048).
+if (m.funcion) {
+  const [f] = (await sql`
+    select coalesce(has_function_privilege(${rol}::name, p.oid, 'EXECUTE'), false) as puede,
+           coalesce(p.proacl is not null and not exists (
+             select 1 from aclexplode(p.proacl) x where x.grantee = 0 and x.privilege_type = 'EXECUTE'
+           ), false) as cerrada
+    from pg_proc p
+    where p.oid = to_regprocedure('public.claimmix_crear_inquilino(uuid, uuid, text, text, integer, integer, inet)')::oid
+  `) as Array<{ puede: boolean; cerrada: boolean }>;
+  if (!f.puede) sinColumna.push("claimmix_crear_inquilino: el rol no puede ejecutarla");
+  if (!f.cerrada) sinColumna.push("claimmix_crear_inquilino: PUBLIC puede ejecutarla");
+}
+
+if (sinColumna.length === 0) {
+  console.log("   ✓ tenants, whatsapp_numeros, account, session, verification y user con lo mismo que dice la lista");
+  console.log("   ✓ permisos por columna exactos y la función de alta cerrada a PUBLIC");
+} else {
+  console.log(`   ✗ ${sinColumna.length} desvío(s):`);
+  for (const d of sinColumna) console.log(`      · ${d}`);
+}
+
+const problemas = faltantes.length + sinForzar.length + sinPolitica.length + sinColumna.length;
 console.log("\n" + "─".repeat(70));
 if (problemas === 0) {
   console.log("✓ El rol tiene exactamente lo que la capa necesita, y ni un poco más.");

@@ -29,6 +29,7 @@ import { ADMIN_ROLES } from "@/lib/auth/require-role";
 import { CoreSyncPanel } from "./CoreSyncPanel";
 import { MontosPanel } from "./MontosPanel";
 import { paraAdmin, ssoParaAdmin } from "./para-admin";
+import { PruebaPanel } from "./PruebaPanel";
 import { SsoPanel } from "./SsoPanel";
 import { esResultadoSso } from "./sso-resultados";
 import { MONTOS_POR_DEFECTO } from "@/core/case/monto-estimado";
@@ -141,6 +142,13 @@ export default async function ConfiguracionPage({
             </Field>
           </div>
         </Section>
+
+        {/* ── Prueba y número de WhatsApp (alta automática, sólo admin, sólo lectura) ── */}
+        {admin?.prueba && (
+          <Section title={t("configuracion.prueba.titulo")}>
+            <PruebaPanel prueba={admin.prueba} t={t} />
+          </Section>
+        )}
 
         {/* ── Cambiar contraseña ────────────────────────────────────────────── */}
         <Section title={t("password.boton")}>

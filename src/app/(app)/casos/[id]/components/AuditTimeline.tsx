@@ -68,6 +68,7 @@ const MOTIVOS_DEL_CASO: Record<string, ClaveDelCliente> = {
   entregado_por_fuera: "case.detail.motivo.entregadoPorFuera",
   plantilla_sin_aprobar: "reenvio.motivo.plantilla_sin_aprobar",
   ventana_cerrada: "reenvio.motivo.ventana_cerrada",
+  tope_de_plantillas: "reenvio.motivo.tope_de_plantillas",
   sin_destinatario: "reenvio.motivo.sin_destinatario",
   nada_pendiente: "reenvio.motivo.nada_pendiente",
 };

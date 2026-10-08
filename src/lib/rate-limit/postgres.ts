@@ -37,6 +37,11 @@ export interface Counted {
    * volver a preguntarle a la base, cuánto de ese lote ya está gastado.
    */
   hits: number;
+  /**
+   * El `window_start` (epoch ms) donde quedó contado el intento, para que
+   * `liberarCupo` devuelva SÓLO ese. 0 si la base no llegó a contar nada.
+   */
+  ventana: number;
 }
 
 /**
@@ -49,12 +54,15 @@ export interface Counted {
  *                 siempre). Lo usa `rateLimit` cuando el perfil reserva de a
  *                 lotes: en vez de escribir una vez por pedido, escribe una
  *                 vez por lote y el resto se resuelve en memoria.
+ * @param fallaCerrada Si la base no contesta, relanza el error en vez de dejar
+ *                 pasar: lo decide `rateLimit` para los cupos que cuestan plata.
  */
 export async function checkRateLimitPostgres(
   key: string,
   limit: number,
   windowMs: number,
-  lote = 1
+  lote = 1,
+  fallaCerrada = false
 ): Promise<Counted> {
   const now = Date.now();
   // Todas las instancias tienen que caer en la misma ventana para contar
@@ -83,8 +91,9 @@ export async function checkRateLimitPostgres(
       remaining: Math.max(0, limit - hits),
       resetAt,
       hits,
+      ventana: windowStart.getTime(),
     };
-  } catch {
+  } catch (error) {
     /*
      * Si la base no contesta, dejar pasar.
      *
@@ -95,22 +104,39 @@ export async function checkRateLimitPostgres(
      * hipo el ataque tampoco puede tener éxito.
      *
      * Lo que sí cuesta es no enterarse, así que queda anotado.
+     *
+     * La excepción son los cupos que cuestan plata (una llamada al modelo, una
+     * plantilla de WhatsApp, un mail del sistema): ahí un hipo de la base sí
+     * compra algo, el gasto sin tope, y quien llama pide `fallaCerrada`.
      */
+    if (fallaCerrada) throw error;
     logger.warn({}, "rate_limit.la_base_no_contesto_el_intento");
     // hits: 0 — nada se cargó de verdad, así que quien reserva de a lotes no
     // le resta presupuesto a nadie por un intento que la base nunca vio.
-    return { allowed: true, remaining: limit, resetAt, hits: 0 };
+    // ventana: 0 — y `liberarCupo` no tiene nada que devolver.
+    return { allowed: true, remaining: limit, resetAt, hits: 0, ventana: 0 };
   }
 }
 
-/** Resta un intento a la ventana en curso; si ya cambió de ventana no hay nada que devolver. */
-export async function liberarIntentoPostgres(key: string, windowMs: number): Promise<void> {
-  const windowStart = new Date(Math.floor(Date.now() / windowMs) * windowMs);
+/**
+ * Resta un intento, pero sólo de la ventana donde se contó.
+ *
+ * Restar a ciegas le baja el contador a quien no lo subió: un llamador que no
+ * llegó a contar (la base no contestó, o la ventana cambió mientras tanto)
+ * abría cupos que no eran suyos. Si `ventana` ya no es la en curso no hay nada
+ * que devolver, y el contador no baja de 0.
+ */
+export async function liberarIntentoPostgres(
+  key: string,
+  windowMs: number,
+  ventana: number
+): Promise<void> {
+  if (ventana !== Math.floor(Date.now() / windowMs) * windowMs) return;
   try {
     // sin-inquilino: el mismo contador por clave que `checkRateLimitPostgres`.
     await db.execute(sql`
       update rate_limit_counters set hits = greatest(hits - 1, 0)
-      where bucket_key = ${key} and window_start = ${windowStart.toISOString()}
+      where bucket_key = ${key} and window_start = ${new Date(ventana).toISOString()}
     `);
   } catch {
     logger.warn({}, "rate_limit.la_base_no_devolvio_el_intento");

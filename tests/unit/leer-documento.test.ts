@@ -10,6 +10,7 @@ import { z } from "zod";
 const m = vi.hoisted(() => ({
   motor: vi.fn(),
   checkBudget: vi.fn(),
+  soltar: vi.fn(),
   registrar: vi.fn(),
   rateLimit: vi.fn(),
   callGemini: vi.fn(),
@@ -19,7 +20,11 @@ const m = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/server/ai/provider", () => ({ resolveExtractionEngine: m.motor }));
-vi.mock("@/server/ai/budget", () => ({ checkBudget: m.checkBudget, registrarConsumoDelModelo: m.registrar }));
+vi.mock("@/server/ai/budget", () => ({
+  checkBudget: m.checkBudget,
+  registrarConsumoDelModelo: m.registrar,
+  soltarReserva: m.soltar,
+}));
 vi.mock("@/server/ai/gemini-extractor", () => ({ callGemini: m.callGemini, contarTokens: m.contarTokens }));
 vi.mock("@/server/worker/adjuntos", () => ({ PLAZO_DE_CONTEO_MS: 1000, TOPE_TOKENS_PDF: 5000 }));
 vi.mock("@/lib/rate-limit/index", () => ({
@@ -106,6 +111,30 @@ describe("leerDocumento", () => {
       await leer();
     }
     expect(m.rateLimit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["cupo", () => m.rateLimit.mockResolvedValue({ allowed: false })],
+    ["archivo", () => m.contarTokens.mockResolvedValue("rechazo")],
+    ["modelo", () => m.contarTokens.mockResolvedValue("plazo")],
+    ["paginas", () => m.contarTokens.mockResolvedValue(5001)],
+  ])("sin «%s» una prueba devuelve lo que reservó de su cupo diario", async (motivo, preparar) => {
+    const reserva = { clave: "ia:prueba:t", ventanas: [123] };
+    m.checkBudget.mockResolvedValue({ exceeded: false, reserva });
+    preparar();
+
+    await expect(leer()).resolves.toEqual({ sinLeer: motivo });
+
+    expect(m.soltar).toHaveBeenCalledTimes(1);
+    expect(m.soltar).toHaveBeenCalledWith(reserva);
+  });
+
+  it("si llama al modelo la reserva se gasta y no se devuelve", async () => {
+    m.checkBudget.mockResolvedValue({ exceeded: false, reserva: { clave: "ia:prueba:t", ventanas: [123] } });
+
+    await expect(leer()).resolves.toEqual({ ok: { total: 5 } });
+
+    expect(m.soltar).not.toHaveBeenCalled();
   });
 
   it("una respuesta vacía, que no es JSON o que no valida, queda sin leer pero se anota", async () => {

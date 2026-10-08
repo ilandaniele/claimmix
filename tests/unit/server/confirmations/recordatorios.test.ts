@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   enviar: vi.fn(),
   despachar: vi.fn(),
   plantilla: vi.fn(),
+  credenciales: vi.fn(),
   auditar: vi.fn(),
   logError: vi.fn(),
   logWarn: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/data/scope", async () => {
 
 vi.mock("@/server/confirmations/messenger", () => ({ messengerFor: () => ({ send: m.enviar }) }));
 vi.mock("@/server/whatsapp/cloud-api", () => ({ estadoDePlantilla: m.plantilla }));
+vi.mock("@/server/whatsapp/numeros", () => ({ credencialesWhatsApp: m.credenciales }));
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: m.despachar,
   seEntrego: (r: { error?: string }) => !r.error,
@@ -104,6 +106,13 @@ beforeEach(() => {
   m.despachar.mockResolvedValue({ providerMessageId: "m-1" });
   m.auditar.mockResolvedValue(undefined);
   m.plantilla.mockResolvedValue("no_disponible");
+  m.credenciales.mockResolvedValue({
+    accessToken: "test-token",
+    phoneNumberId: "123456",
+    wabaId: "654321",
+    autoalta: false,
+    vencida: false,
+  });
   s = {
     canal: "email",
     destinatario: "juan@correo.test",

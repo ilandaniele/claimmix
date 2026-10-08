@@ -41,7 +41,15 @@ export type { UserRole } from "@/lib/auth/roles";
 
 export interface RoleContext {
   user: { id: string; email?: string; emailVerified?: boolean };
-  userRow: { id: string; tenant_id: string; role: UserRole; plan: string; locale?: string | null };
+  userRow: {
+    id: string;
+    tenant_id: string;
+    role: UserRole;
+    plan: string;
+    locale?: string | null;
+    billing_status?: string;
+    autoalta?: boolean | null;
+  };
 }
 
 /**

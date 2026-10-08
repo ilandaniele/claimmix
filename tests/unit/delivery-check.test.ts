@@ -17,6 +17,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const TENANT = "tenant-uuid-001";
+const CRED = { accessToken: "test-token", phoneNumberId: "123456", wabaId: "654321", autoalta: false, vencida: false };
+
+/** El número del inquilino, sin tocar la base. */
+const conNumero = (cred: typeof CRED | null) =>
+  vi.doMock("@/server/whatsapp/numeros", () => ({ credencialesWhatsApp: vi.fn().mockResolvedValue(cred) }));
 
 describe("probarEntrega", () => {
   beforeEach(() => {
@@ -24,18 +29,32 @@ describe("probarEntrega", () => {
   });
 
   it("WhatsApp: si Meta lo acepta, informa que salió", async () => {
-    vi.doMock("@/server/whatsapp/cloud-api", () => ({
-      sendWhatsAppText: vi.fn().mockResolvedValue({ ok: true }),
-    }));
+    const enviar = vi.fn().mockResolvedValue({ ok: true });
+    conNumero(CRED);
+    vi.doMock("@/server/whatsapp/cloud-api", () => ({ sendWhatsAppText: enviar }));
 
     const { probarEntrega } = await import("@/server/notify/delivery-check");
     expect(await probarEntrega("whatsapp", TENANT, "5491100000000")).toEqual({
       ok: true,
       detail: "Meta lo aceptó y lo puso en camino",
     });
+    expect(enviar).toHaveBeenCalledWith("5491100000000", expect.any(String), CRED);
+  });
+
+  it("WhatsApp: sin número conectado NO salió, y no llama a Meta", async () => {
+    const enviar = vi.fn();
+    conNumero(null);
+    vi.doMock("@/server/whatsapp/cloud-api", () => ({ sendWhatsAppText: enviar }));
+
+    const { probarEntrega } = await import("@/server/notify/delivery-check");
+    const res = await probarEntrega("whatsapp", TENANT, "5491100000000");
+    expect(res.ok).toBe(false);
+    expect(res.detail).toMatch(/número/i);
+    expect(enviar).not.toHaveBeenCalled();
   });
 
   it("WhatsApp: si Meta lo rechaza, informa que NO salió y con qué motivo", async () => {
+    conNumero(CRED);
     vi.doMock("@/server/whatsapp/cloud-api", () => ({
       sendWhatsAppText: vi.fn().mockResolvedValue({ ok: false, error: "131030" }),
     }));

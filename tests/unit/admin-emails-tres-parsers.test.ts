@@ -7,8 +7,8 @@
  * Los tres parten la variable con el mismo patrón
  * (`split(",").map(trim+lower).filter(Boolean)`):
  *   - require-operator.ts `operatorEmails()`
- *   - provision.ts `isAllowlistedAdmin()` (privada; se observa por el rol que
- *     asigna `provisionUserProfile`)
+ *   - provision.ts `esDireccionDeOperador()` (privada; se observa por el rol
+ *     que asigna `provisionUserProfile`)
  *   - registro-permitido.ts `parsearPermitidos()`, que además distingue
  *     "@dominio" de una dirección y por eso hace un filtro extra.
  *
@@ -17,7 +17,7 @@
  * una entrada "@" sola, que expone la diferencia real: `parsearPermitidos` la
  * trata como un dominio con nombre vacío y la descarta con su filtro extra;
  * `operatorEmails` y el parseo interno de `isAllowlistedAdmin` (idéntico por
- * lectura directa de provision.ts:38-44) la conservan. Por eso NO se unifican:
+ * lectura directa de provision.ts) la conservan. Por eso NO se unifican:
  * quedan las tres implementaciones como están.
  */
 
@@ -70,8 +70,8 @@ describe("provision.ts coincide con las otras dos en los seis casos", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.GOOGLE_DEFAULT_TENANT_ID = TENANT;
-    // Pasa el portón de alta (isSignupAllowed) para cualquier ADMIN_EMAILS de
-    // la tabla: lo que se compara acá es sólo la lista de admins.
+    // Una lista de alta abierta no cambia nada: lo que se compara acá es sólo
+    // la lista de admins, y quien no está en ella no recibe perfil.
     process.env.SIGNUP_ALLOWED_EMAILS = "@x.com";
     (db.select as ReturnType<typeof vi.fn>).mockReturnValue({
       from: vi.fn().mockReturnValue({
@@ -93,10 +93,11 @@ describe("provision.ts coincide con las otras dos en los seis casos", () => {
 
     await provisionUserProfile({ id: "u", name: "Ana", email: "ana@x.com", emailVerified: true });
 
-    const esperaAdmin = esperado.includes("ana@x.com");
-    expect(values).toHaveBeenCalledWith(
-      expect.objectContaining({ role: esperaAdmin ? "admin" : "analyst" })
-    );
+    if (esperado.includes("ana@x.com")) {
+      expect(values).toHaveBeenCalledWith(expect.objectContaining({ role: "admin" }));
+    } else {
+      expect(values).not.toHaveBeenCalled();
+    }
   });
 });
 
@@ -120,11 +121,10 @@ describe("una entrada '@' sola: acá discrepan, y por eso no se unifican", () =>
   });
 
   /*
-   * provision.ts no se puede ejercitar con la dirección "@": el portón previo
-   * (isSignupAllowed) ya la rechaza por forma de dirección antes de llegar a
-   * isAllowlistedAdmin. Pero su parseo interno (provision.ts:38-44) es la
-   * misma cadena que operatorEmails —split(",").map(trim+lower).filter(Boolean)—,
-   * verificado por lectura directa del archivo, así que hereda la misma lista
-   * que operatorEmails y discrepa con parsearPermitidos igual que ella.
+   * provision.ts no se puede ejercitar con la dirección "@": no es una dirección
+   * de nadie. Pero su parseo interno (esDireccionDeOperador) es la misma cadena
+   * que operatorEmails —split(",").map(trim+lower).filter(Boolean)—, verificado
+   * por lectura directa del archivo, así que hereda la misma lista que
+   * operatorEmails y discrepa con parsearPermitidos igual que ella.
    */
 });

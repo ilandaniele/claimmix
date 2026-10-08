@@ -22,7 +22,8 @@
  *   · **WhatsApp.** Se arma el payload que manda Meta, se firma con el
  *     `WHATSAPP_APP_SECRET` de verdad y se lo manda al webhook del deploy. Entra
  *     por el camino firmado —el real, no el simulado— y ejercita la validación
- *     de firma, el parseo, la resolución de tenant y el worker. El número es del
+ *     de firma, el parseo, la resolución del inquilino por el número al que se
+ *     le escribe (`WHATSAPP_PHONE_NUMBER_ID`) y el worker. El número es del
  *     bloque reservado, y el mensajero se niega a mandarle nada a ese bloque
  *     venga por donde venga.
  *
@@ -62,6 +63,7 @@ function flag(name: string): string | null {
 const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app").replace(/\/+$/, "");
 const SECRET = process.env.CRON_SECRET;
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
+const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
 const TENANT = process.env.GMAIL_TENANT_ID;
 
 if (!process.env.DATABASE_URL || !TENANT) {
@@ -373,6 +375,13 @@ async function knockByWhatsApp(): Promise<void> {
     return;
   }
 
+  // El webhook rutea por el número al que le escriben: sin él descarta el
+  // evento y el caso nunca aparece. Se avisa acá y no a los cinco minutos de espera.
+  if (!PHONE_NUMBER_ID) {
+    check("WHATSAPP_PHONE_NUMBER_ID configurado", false, "sin él el webhook no sabe de quién es el mensaje");
+    return;
+  }
+
   // Del bloque reservado. El mensajero se niega a escribirle a este bloque
   // venga por donde venga, así que nadie recibe nada.
   const from = `5490000${RUN}`;
@@ -387,6 +396,7 @@ async function knockByWhatsApp(): Promise<void> {
             field: "messages",
             value: {
               messaging_product: "whatsapp",
+              metadata: { display_phone_number: "timbre", phone_number_id: PHONE_NUMBER_ID },
               contacts: [{ profile: { name: "Asegurado de prueba" }, wa_id: from }],
               messages: [
                 {

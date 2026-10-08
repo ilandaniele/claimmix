@@ -27,6 +27,11 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: { AGENT_DELIBERATION_FAILED: "agent.deliberation_failed" },
 }));
 
+vi.mock("@/server/ai/budget", () => ({
+  reservarSiEsPrueba: async () => ({ exceeded: false }),
+  registrarConsumoDelModelo: async () => undefined,
+}));
+
 const originalFetch = globalThis.fetch;
 const guardadas: Record<string, string | undefined> = {};
 

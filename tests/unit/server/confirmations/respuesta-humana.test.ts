@@ -9,12 +9,15 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockEnTenant, mockEnTenantVarias, mockSend, mockWriteAuditLog } = vi.hoisted(() => ({
-  mockEnTenant: vi.fn(),
-  mockEnTenantVarias: vi.fn(),
-  mockSend: vi.fn(),
-  mockWriteAuditLog: vi.fn(),
-}));
+const { mockEnTenant, mockEnTenantVarias, mockSend, mockWriteAuditLog, mockCredenciales, mockSinNumero } =
+  vi.hoisted(() => ({
+    mockEnTenant: vi.fn(),
+    mockEnTenantVarias: vi.fn(),
+    mockSend: vi.fn(),
+    mockWriteAuditLog: vi.fn(),
+    mockCredenciales: vi.fn(),
+    mockSinNumero: vi.fn(),
+  }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/data/scope", () => ({
@@ -22,6 +25,10 @@ vi.mock("@/data/scope", () => ({
   enTenantVarias: mockEnTenantVarias,
 }));
 vi.mock("@/server/whatsapp/cloud-api", () => ({ sendWhatsAppText: mockSend }));
+vi.mock("@/server/whatsapp/numeros", () => ({
+  credencialesWhatsApp: mockCredenciales,
+  avisarSinNumero: mockSinNumero,
+}));
 vi.mock("@/lib/audit/log", () => ({
   AuditEvent: { CASE_HUMAN_REPLY: "case.human_reply" },
   writeAuditLog: mockWriteAuditLog,
@@ -33,6 +40,7 @@ const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const USER_ID = "20000000-0000-0000-0000-000000000001";
 const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TEXTO = "Ya está resuelto, gracias por avisar.";
+const CRED = { accessToken: "test-token", phoneNumberId: "123456", wabaId: "654321", autoalta: false, vencida: false };
 
 const CTX = {
   user: { id: USER_ID },
@@ -60,6 +68,7 @@ function caso(o: Partial<{ status: string; channel: string; email_thread_id: str
 beforeEach(() => {
   vi.clearAllMocks();
   mockSend.mockResolvedValue({ ok: true, messageId: "wamid.1" });
+  mockCredenciales.mockResolvedValue(CRED);
   mockWriteAuditLog.mockResolvedValue(undefined);
 });
 
@@ -172,7 +181,8 @@ describe("responderPorWhatsApp", () => {
 
     const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO, { ip: "1.2.3.4", ua: "curl/8" });
 
-    expect(mockSend).toHaveBeenCalledWith("5491100000001", TEXTO);
+    expect(mockCredenciales).toHaveBeenCalledWith(TENANT_ID);
+    expect(mockSend).toHaveBeenCalledWith("5491100000001", TEXTO, CRED);
     expect(r).toEqual({ ok: true, id: "outbound-1", estado: "sent" });
     // Un insert propio (queued) y, después de mandar, un lote con el update y
     // la marca de «para responder» — nunca junto al insert.
@@ -218,6 +228,23 @@ describe("responderPorWhatsApp", () => {
     expect(mockEnTenantVarias).toHaveBeenCalledTimes(1);
     expect(mockWriteAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ payload: { outbound_id: "outbound-2", estado: "failed" } })
+    );
+  });
+
+  it("sin número conectado, no llama a Meta, lo anota y deja la fila como failed", async () => {
+    mockCredenciales.mockResolvedValueOnce(null);
+    mockEnTenantVarias.mockResolvedValueOnce(caso());
+    mockEnTenant
+      .mockResolvedValueOnce([{ id: "outbound-3" }])
+      .mockResolvedValueOnce(undefined);
+
+    const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
+
+    expect(r).toEqual({ ok: false, motivo: "envio_fallido" });
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockSinNumero).toHaveBeenCalledWith(TENANT_ID, "respuesta_humana");
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { outbound_id: "outbound-3", estado: "failed" } })
     );
   });
 

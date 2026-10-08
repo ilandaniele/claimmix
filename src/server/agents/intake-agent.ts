@@ -14,6 +14,7 @@ import {
   marcarParaResponderAunqueSigaElAgente,
 } from "@/server/cases/para-responder";
 import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
+import { avisarSinNumero, credencialesWhatsApp } from "@/server/whatsapp/numeros";
 import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { runEmailExtractionWorker } from "@/server/worker/extract";
@@ -345,13 +346,19 @@ async function storeWhatsAppMedia(
 ): Promise<void> {
   try {
     const downloaded: EmailAttachment[] = [];
+    // El token es el del número de este inquilino; sin él no hay descarga y
+    // cada foto queda como «no se pudo bajar».
+    const cred = media.some((ref) => !ref.data) ? await credencialesWhatsApp(tenantId) : null;
+    if (!cred && media.some((ref) => !ref.data)) avisarSinNumero(tenantId, "media");
 
     for (const ref of media) {
       // Bytes in hand skip the round trip. Only the rehearsal and the BSP
       // adapter arrive that way; a real Cloud API message never does.
       const file = ref.data
         ? { data: ref.data, mimeType: ref.mimeType }
-        : await downloadWhatsAppMedia(ref.id);
+        : cred
+          ? await downloadWhatsAppMedia(ref.id, cred)
+          : null;
       if (!file) {
         // No es lo mismo que «pasaba el tope»: acá no hay ni siquiera un
         // peso. Igual se anota, para que el analista vea que algo se mandó.

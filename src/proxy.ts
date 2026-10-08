@@ -28,7 +28,7 @@ import { auth } from "@/lib/auth";
  * Las que tienen sentido solo sin sesion: si ya entraste, no vas al formulario
  * de entrada, vas a tu bandeja.
  */
-const SOLO_ANONIMOS = ["/login", "/registro", "/recuperar"];
+const SOLO_ANONIMOS = ["/login", "/registro", "/recuperar", "/alta/correo"];
 
 const PUBLIC_PREFIXES = [
   "/login",
@@ -39,6 +39,13 @@ const PUBLIC_PREFIXES = [
   // mail tiene que poder terminar de cambiarla igual.
   "/recuperar",
   "/restablecer",
+  // El enlace de «Activar tu cuenta»: quien lo abre todavía no tiene cuenta, ni
+  // sesión. `/alta` a secas NO es pública: pide sesión.
+  "/alta/correo",
+  // El enlace de una invitación: quien lo abre puede no tener cuenta ni sesión, y
+  // la página decide qué mostrar según el caso. No está en SOLO_ANONIMOS: quien
+  // vuelve de Google ya tiene sesión y es justo quien la termina.
+  "/invitacion",
   // Las tres páginas que tienen que poder verse SIN cuenta, y que no podían.
   //
   // /demo es la pantalla que ve un prospecto: estaba detrás del login, o sea

@@ -430,7 +430,7 @@ export async function avisarDesvios(input: DesviosNuevosInput): Promise<boolean>
 async function avisar(aviso: Aviso): Promise<boolean> {
   const { caseId, tenantId } = aviso;
   const contexto = caseId ? { case_id: caseId } : { tenant_id: tenantId };
-  let cupoGastado: Aviso["cupo"];
+  let cupoGastado: { clave: string; windowMs: number; ventana: number } | undefined;
   let entregado = false;
 
   try {
@@ -462,11 +462,12 @@ async function avisar(aviso: Aviso): Promise<boolean> {
 
     // El cupo se gasta sólo si hay a quién y desde dónde mandar.
     if (aviso.cupo) {
-      if (!(await rateLimit(aviso.cupo.clave, aviso.cupo.config)).allowed) {
+      const cupo = await rateLimit(aviso.cupo.clave, aviso.cupo.config);
+      if (!cupo.allowed) {
         logger.warn(contexto, `${aviso.log}.tope`);
         return false;
       }
-      cupoGastado = aviso.cupo;
+      cupoGastado = { clave: aviso.cupo.clave, windowMs: aviso.cupo.config.windowMs, ventana: cupo.ventana };
     }
 
     const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "";
@@ -507,7 +508,10 @@ async function avisar(aviso: Aviso): Promise<boolean> {
   } finally {
     // Un correo que no salió no gasta el tope: con uno por día, el siguiente intento es el único que hay.
     // `liberarCupo` ya anota y traga la falla de la base: no hace falta un catch acá.
-    if (cupoGastado && !entregado) await liberarCupo(cupoGastado.clave, cupoGastado.config.windowMs);
+    // Y sólo el que se contó, en la ventana donde se contó.
+    if (cupoGastado && !entregado) {
+      await liberarCupo(cupoGastado.clave, cupoGastado.windowMs, cupoGastado.ventana);
+    }
   }
   return entregado;
 }

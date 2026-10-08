@@ -22,7 +22,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/server/ai/provider", () => ({ resolveExtractionEngine: m.motor }));
-vi.mock("@/server/ai/budget", () => ({ checkBudget: m.checkBudget, registrarConsumoDelModelo: m.registrar }));
+vi.mock("@/server/ai/budget", () => ({ checkBudget: m.checkBudget, registrarConsumoDelModelo: m.registrar, soltarReserva: vi.fn() }));
 vi.mock("@/server/ai/gemini-extractor", () => ({ callGemini: m.callGemini, contarTokens: m.contarTokens }));
 vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: m.rateLimit,

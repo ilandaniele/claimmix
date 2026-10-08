@@ -19,6 +19,8 @@ import {
 } from "@/server/whatsapp/cloud-api";
 
 const APP_SECRET = "test-app-secret";
+const CRED = { accessToken: "test-token", phoneNumberId: "123", wabaId: "waba-1" };
+const CRED_PLANTILLA = { ...CRED, tenantId: "tenant-plataforma", enPrueba: false, vencida: false };
 
 function sign(body: string, secret = APP_SECRET): string {
   return "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
@@ -131,15 +133,8 @@ describe("parseCloudApiMessages", () => {
 describe("sendWhatsAppText — plazo del envío", () => {
   const realFetch = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
-    process.env.WHATSAPP_PHONE_NUMBER_ID = "123";
-  });
-
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
   });
 
   it("un fetch que rechaza con TimeoutError da ok:false y no tira", async () => {
@@ -147,7 +142,18 @@ describe("sendWhatsAppText — plazo del envío", () => {
       throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
     }) as unknown as typeof fetch;
 
-    await expect(sendWhatsAppText("5491100000000", "hola")).resolves.toMatchObject({ ok: false });
+    await expect(sendWhatsAppText("5491100000000", "hola", CRED)).resolves.toMatchObject({ ok: false });
+  });
+
+  it("manda con el número y el token de la credencial, no con el entorno", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.out" }] }), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await sendWhatsAppText("5491100000000", "hola", { accessToken: "fake-otro-token", phoneNumberId: "999111" });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/999111/messages");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer fake-otro-token");
   });
 
   it("el fetch del envío recibe un signal", async () => {
@@ -157,7 +163,7 @@ describe("sendWhatsAppText — plazo del envío", () => {
       return new Response(JSON.stringify({ messages: [{ id: "wamid.out" }] }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await sendWhatsAppText("5491100000000", "hola");
+    await sendWhatsAppText("5491100000000", "hola", CRED);
 
     expect(signalRecibido).toBeInstanceOf(AbortSignal);
   });
@@ -166,22 +172,15 @@ describe("sendWhatsAppText — plazo del envío", () => {
 describe("sendWhatsAppText — el JSON no cambió", () => {
   const realFetch = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
-    process.env.WHATSAPP_PHONE_NUMBER_ID = "123";
-  });
-
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
   });
 
   it("manda exactamente el mismo cuerpo de siempre", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.out" }] }), { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await sendWhatsAppText("5491100000000", "hola");
+    await sendWhatsAppText("5491100000000", "hola", CRED);
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string);
@@ -198,22 +197,15 @@ describe("sendWhatsAppText — el JSON no cambió", () => {
 describe("sendWhatsAppTemplate", () => {
   const realFetch = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
-    process.env.WHATSAPP_PHONE_NUMBER_ID = "123";
-  });
-
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
   });
 
   it("manda la plantilla con el payload exacto", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.tpl" }] }), { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const r = await sendWhatsAppTemplate("5491100000000", "reabrir_denuncia", "es_AR", ["abc-123", "la foto"]);
+    const r = await sendWhatsAppTemplate("5491100000000", "reabrir_denuncia", "es_AR", ["abc-123", "la foto"], CRED_PLANTILLA);
 
     expect(r).toEqual({ ok: true, messageId: "wamid.tpl" });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -243,7 +235,7 @@ describe("sendWhatsAppTemplate", () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.tpl" }] }), { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await sendWhatsAppTemplate("5491100000000", "reabrir_denuncia", "es_AR", ["a\nb", "c\td", "e    f"]);
+    await sendWhatsAppTemplate("5491100000000", "reabrir_denuncia", "es_AR", ["a\nb", "c\td", "e    f"], CRED_PLANTILLA);
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string);
@@ -260,23 +252,20 @@ describe("estadoDePlantilla", () => {
 
   beforeEach(() => {
     olvidarEstadoDePlantilla();
-    process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = "waba-1";
-    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
   });
 
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
     olvidarEstadoDePlantilla();
   });
 
-  it("sin WHATSAPP_BUSINESS_ACCOUNT_ID: no_disponible, y no llama a fetch", async () => {
-    delete process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
+  it("sin WABA en la credencial: no_disponible, y no llama a fetch", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("no_disponible");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", { ...CRED, wabaId: null })).resolves.toBe(
+      "no_disponible"
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -285,7 +274,7 @@ describe("estadoDePlantilla", () => {
       new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "APPROVED", language: "es_AR" }] }), { status: 200 })
     ) as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("aprobada");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", CRED)).resolves.toBe("aprobada");
   });
 
   it("PENDING da pendiente", async () => {
@@ -293,7 +282,7 @@ describe("estadoDePlantilla", () => {
       new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "PENDING", language: "es_AR" }] }), { status: 200 })
     ) as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("pendiente");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", CRED)).resolves.toBe("pendiente");
   });
 
   it("otro idioma solamente: pendiente", async () => {
@@ -301,20 +290,20 @@ describe("estadoDePlantilla", () => {
       new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "APPROVED", language: "en_US" }] }), { status: 200 })
     ) as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("pendiente");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", CRED)).resolves.toBe("pendiente");
   });
 
   // Un error de Graph es pasajero: no se confunde con «no hay plantilla».
   it("HTTP 500 da sin_respuesta", async () => {
     globalThis.fetch = vi.fn(async () => new Response("error", { status: 500 })) as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("sin_respuesta");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", CRED)).resolves.toBe("sin_respuesta");
   });
 
   it("HTTP 429 da sin_respuesta", async () => {
     globalThis.fetch = vi.fn(async () => new Response("", { status: 429 })) as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("sin_respuesta");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", CRED)).resolves.toBe("sin_respuesta");
   });
 
   // Un token vencido no se arregla reintentando: el recordatorio gasta la etapa
@@ -322,7 +311,7 @@ describe("estadoDePlantilla", () => {
   it("HTTP 401 da no_disponible", async () => {
     globalThis.fetch = vi.fn(async () => new Response("", { status: 401 })) as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("no_disponible");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", CRED)).resolves.toBe("no_disponible");
   });
 
   it("un fetch que tira da sin_respuesta", async () => {
@@ -330,7 +319,7 @@ describe("estadoDePlantilla", () => {
       throw new Error("ECONNRESET");
     }) as unknown as typeof fetch;
 
-    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR")).resolves.toBe("sin_respuesta");
+    await expect(estadoDePlantilla("reabrir_denuncia", "es_AR", CRED)).resolves.toBe("sin_respuesta");
   });
 
   it("una segunda llamada dentro del TTL no vuelve a pedir", async () => {
@@ -339,10 +328,23 @@ describe("estadoDePlantilla", () => {
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await estadoDePlantilla("reabrir_denuncia", "es_AR");
-    await estadoDePlantilla("reabrir_denuncia", "es_AR");
+    await estadoDePlantilla("reabrir_denuncia", "es_AR", CRED);
+    await estadoDePlantilla("reabrir_denuncia", "es_AR", CRED);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("la caché es por WABA: otra cuenta vuelve a preguntar", async () => {
+    const fetchMock = vi.fn(async (_url: string) =>
+      new Response(JSON.stringify({ data: [{ name: "reabrir_denuncia", status: "APPROVED", language: "es_AR" }] }), { status: 200 })
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await estadoDePlantilla("reabrir_denuncia", "es_AR", CRED);
+    await estadoDePlantilla("reabrir_denuncia", "es_AR", { ...CRED, wabaId: "waba-2" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/waba-2/message_templates");
   });
 
   it("después de olvidarEstadoDePlantilla() vuelve a pedir", async () => {
@@ -351,9 +353,9 @@ describe("estadoDePlantilla", () => {
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await estadoDePlantilla("reabrir_denuncia", "es_AR");
+    await estadoDePlantilla("reabrir_denuncia", "es_AR", CRED);
     olvidarEstadoDePlantilla();
-    await estadoDePlantilla("reabrir_denuncia", "es_AR");
+    await estadoDePlantilla("reabrir_denuncia", "es_AR", CRED);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -362,13 +364,8 @@ describe("estadoDePlantilla", () => {
 describe("downloadWhatsAppMedia — plazo de la descarga", () => {
   const realFetch = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
-  });
-
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
   });
 
   it("un fetch que rechaza con TimeoutError da null", async () => {
@@ -376,7 +373,7 @@ describe("downloadWhatsAppMedia — plazo de la descarga", () => {
       throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
     }) as unknown as typeof fetch;
 
-    await expect(downloadWhatsAppMedia("media-1")).resolves.toBeNull();
+    await expect(downloadWhatsAppMedia("media-1", CRED)).resolves.toBeNull();
   });
 
   it("la metadata y la descarga de bytes reciben cada una un signal", async () => {
@@ -393,7 +390,7 @@ describe("downloadWhatsAppMedia — plazo de la descarga", () => {
       return new Response(Buffer.from("bytes"), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await downloadWhatsAppMedia("media-1");
+    await downloadWhatsAppMedia("media-1", CRED);
 
     expect(signals).toHaveLength(2);
     expect(signals[0]).toBeInstanceOf(AbortSignal);

@@ -373,7 +373,30 @@ export interface RateLimitResult {
   resetAt: number;
   /** Seconds until the window resets (for Retry-After header) */
   retryAfterSeconds: number;
+  /**
+   * Dónde quedó contado el intento (el `window_start`, en epoch ms), para
+   * pasárselo a `liberarCupo`. 0 si no se contó nada.
+   */
+  ventana: number;
 }
+
+export interface ConfigDeCupo {
+  limit: number;
+  windowMs: number;
+  /** Reserva de a lotes, ver `credito-local.ts`. */
+  lote?: number;
+  /**
+   * Si el contador no contesta, el cupo se cierra en vez de dejar pasar. Para
+   * los que cuestan plata: una llamada al modelo, una plantilla de WhatsApp,
+   * un mail del sistema, un alta. Sin esto el hipo de la base los abre.
+   */
+  fallaCerrada?: boolean;
+}
+
+type Cuenta = Omit<RateLimitResult, "retryAfterSeconds">;
+
+/** Cuánto esperar, como mucho, cuando el contador no contestó: el aviso es «probá en un rato», no «mañana». */
+const REINTENTO_SIN_CONTADOR_MS = 60_000;
 
 /**
  * Check the rate limit for the given key and profile.
@@ -384,25 +407,25 @@ export interface RateLimitResult {
  *                 en memoria — ver `credito-local.ts`. Sin `lote` (todos los
  *                 perfiles de autenticación) cada llamada sigue yendo a la
  *                 base: es la defensa contra fuerza bruta y no se negocia.
+ *                 Con `fallaCerrada`, si el contador no contesta devuelve
+ *                 `allowed: false`; sin ella sigue abierto, como siempre.
  */
-export async function rateLimit(
-  key: string,
-  config: { limit: number; windowMs: number; lote?: number }
-): Promise<RateLimitResult> {
-  const provider = resolveProvider();
-
-  let result: { allowed: boolean; remaining: number; resetAt: number };
-
-  if (provider === "postgres" && config.lote) {
-    result = await rateLimitDeALotes(key, config.limit, config.windowMs, config.lote);
-  } else if (provider === "upstash") {
-    const { checkRateLimitUpstash } = await import("./upstash");
-    result = await checkRateLimitUpstash(key, config.limit, config.windowMs);
-  } else if (provider === "postgres") {
-    const { checkRateLimitPostgres } = await import("./postgres");
-    result = await checkRateLimitPostgres(key, config.limit, config.windowMs);
-  } else {
-    result = checkMemory(key, config.limit, config.windowMs);
+export async function rateLimit(key: string, config: ConfigDeCupo): Promise<RateLimitResult> {
+  let result: Cuenta;
+  try {
+    result = await contar(resolveProvider(), key, config);
+  } catch (error) {
+    if (!config.fallaCerrada) throw error;
+    logger.warn(
+      { error: error instanceof Error ? error.name : "UnknownError" },
+      "rate_limit.el_contador_no_contesto_y_se_cerro"
+    );
+    result = {
+      allowed: false,
+      remaining: 0,
+      resetAt: Date.now() + Math.min(config.windowMs, REINTENTO_SIN_CONTADOR_MS),
+      ventana: 0,
+    };
   }
 
   const retryAfterSeconds = Math.ceil(
@@ -415,19 +438,45 @@ export async function rateLimit(
   };
 }
 
+async function contar(
+  provider: ReturnType<typeof resolveProvider>,
+  key: string,
+  config: ConfigDeCupo
+): Promise<Cuenta> {
+  if (provider === "postgres" && config.lote) {
+    return rateLimitDeALotes(key, config.limit, config.windowMs, config.lote, config.fallaCerrada);
+  }
+  if (provider === "upstash") {
+    const { checkRateLimitUpstash } = await import("./upstash");
+    return checkRateLimitUpstash(key, config.limit, config.windowMs);
+  }
+  if (provider === "postgres") {
+    const { checkRateLimitPostgres } = await import("./postgres");
+    return checkRateLimitPostgres(key, config.limit, config.windowMs, 1, config.fallaCerrada);
+  }
+  return checkMemory(key, config.limit, config.windowMs);
+}
+
 /**
- * Devuelve el intento que acaba de contar `rateLimit`, para cuando lo que el
- * cupo cuida no llegó a pasar (un correo que no salió): sin esto, un envío
- * fallido deja sin aviso al resto de la ventana. Upstash es un stub sin esta
- * operación, y los perfiles con `lote` reservan por adelantado: no aplica.
+ * Devuelve el intento que `rateLimit` contó en `ventana` (el `ventana` de su
+ * resultado), para cuando lo que el cupo cuida no llegó a pasar (un correo que
+ * no salió): sin esto, un envío fallido deja sin aviso al resto de la ventana.
+ *
+ * Sólo resta ese intento, y sólo si la ventana sigue siendo la misma: restar a
+ * ciegas le abre cupo a quien no lo gastó (se libera lo que otro contó, o lo
+ * que esta llamada nunca llegó a contar). Por eso quien la usa toma primero los
+ * cupos, guarda cuáles dieron `allowed: true` y libera sólo esos.
+ *
+ * Upstash es un stub sin esta operación, y los perfiles con `lote` reservan por
+ * adelantado: no aplica.
  */
-export async function liberarCupo(key: string, windowMs: number): Promise<void> {
+export async function liberarCupo(key: string, windowMs: number, ventana: number): Promise<void> {
   const provider = resolveProvider();
   if (provider === "postgres") {
     const { liberarIntentoPostgres } = await import("./postgres");
-    await liberarIntentoPostgres(key, windowMs);
+    await liberarIntentoPostgres(key, windowMs, ventana);
   } else if (provider === "memory") {
-    liberarIntento(key);
+    liberarIntento(key, ventana);
   }
 }
 
@@ -442,19 +491,20 @@ async function rateLimitDeALotes(
   key: string,
   limit: number,
   windowMs: number,
-  lote: number
-): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+  lote: number,
+  fallaCerrada?: boolean
+): Promise<Cuenta> {
   const { gastarCredito, anotarReserva } = await import("./credito-local");
 
   const local = gastarCredito(key, windowMs);
-  if (local) return local;
+  if (local) return { ...local, ventana: local.resetAt - windowMs };
 
   const { checkRateLimitPostgres } = await import("./postgres");
-  const remoto = await checkRateLimitPostgres(key, limit, windowMs, lote);
+  const remoto = await checkRateLimitPostgres(key, limit, windowMs, lote, fallaCerrada);
   anotarReserva(key, windowMs, remoto.hits, limit, lote);
 
   // Recién anotado: siempre hay al menos un crédito del lote sin usar.
-  return gastarCredito(key, windowMs)!;
+  return { ...gastarCredito(key, windowMs)!, ventana: remoto.ventana };
 }
 
 /**

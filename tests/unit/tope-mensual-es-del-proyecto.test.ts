@@ -36,14 +36,13 @@ vi.mock("server-only", () => ({}));
 function baseQueDevuelve(total: number, marcar?: () => void) {
   const filas = [{ total }, { total: 0 }, { total: 0 }, { total: 0 }];
   let n = 0;
+  const where = () => {
+    marcar?.();
+    return Promise.resolve([filas[n++] ?? { total: 0 }]);
+  };
   return {
     select: () => ({
-      from: () => ({
-        where: () => {
-          marcar?.();
-          return Promise.resolve([filas[n++] ?? { total: 0 }]);
-        },
-      }),
+      from: () => ({ where, leftJoin: () => ({ where }) }),
     }),
   };
 }
@@ -61,19 +60,25 @@ vi.mock("@/data/scope", async () => {
   };
 });
 
-vi.mock("@/lib/db", () => ({
-  db: baseQueDevuelve(GASTO_DEL_PROYECTO),
-  tables: {
-    aiUsage: {
-      tenant_id: { name: "tenant_id" },
-      user_id: { name: "user_id" },
-      created_at: { name: "created_at" },
-      cost_usd: { name: "cost_usd" },
-      prompt_tokens: { name: "prompt_tokens" },
-      completion_tokens: { name: "completion_tokens" },
+vi.mock("@/lib/db", async () => {
+  const esquema = await vi.importActual<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  return {
+    db: baseQueDevuelve(GASTO_DEL_PROYECTO),
+    tables: {
+      // `tenants` y `aiUsageMensual` de verdad: el tope arma una subconsulta con ellas.
+      tenants: esquema.tenants,
+      aiUsageMensual: esquema.aiUsageMensual,
+      aiUsage: {
+        tenant_id: { name: "tenant_id" },
+        user_id: { name: "user_id" },
+        created_at: { name: "created_at" },
+        cost_usd: { name: "cost_usd" },
+        prompt_tokens: { name: "prompt_tokens" },
+        completion_tokens: { name: "completion_tokens" },
+      },
     },
-  },
-}));
+  };
+});
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
 

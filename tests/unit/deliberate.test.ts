@@ -27,14 +27,21 @@ vi.mock("@/server/ai/agent-tools", () => ({
   runTool: vi.fn(),
 }));
 
+vi.mock("@/server/ai/budget", () => ({
+  reservarSiEsPrueba: vi.fn(async () => ({ exceeded: false })),
+  registrarConsumoDelModelo: vi.fn(async () => undefined),
+}));
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { deliberate, validate, type AgentPlan, type DeliberationInput } from "@/server/ai/deliberate";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
+import { reservarSiEsPrueba } from "@/server/ai/budget";
 import { separarPorRespaldo } from "@/core/case/respaldado-por-busqueda";
 
 const mockCallGemini = callGemini as unknown as ReturnType<typeof vi.fn>;
 const mockRunTool = runTool as unknown as ReturnType<typeof vi.fn>;
+const mockReservar = reservarSiEsPrueba as unknown as ReturnType<typeof vi.fn>;
 
 function situation(overrides: Partial<DeliberationInput> = {}): DeliberationInput {
   return {
@@ -594,5 +601,39 @@ describe("deliberate — el tope de consultas", () => {
       expect(prompt).toContain("(B) La decisión, cuando ya sabés qué hacer:");
       expect(prompt).not.toContain("Ya no podés consultar nada más");
     }
+  });
+});
+
+describe("deliberate — el presupuesto de las pruebas", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReservar.mockResolvedValue({ exceeded: false });
+  });
+
+  it("reserva las cuatro llamadas que puede gastar un mensaje, antes de llamar al modelo", async () => {
+    mockCallGemini.mockResolvedValueOnce({
+      text: JSON.stringify({ intent: "ask", ask_for: ["fotos_danos"], reasoning: "x" }),
+      usage: {},
+      model: "gemini-test",
+    });
+
+    await deliberate(situation());
+
+    expect(mockReservar).toHaveBeenCalledWith(situation().tenantId, 4);
+    expect(mockReservar.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCallGemini.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("sin presupuesto no llama al modelo y deja el árbol de siempre", async () => {
+    mockReservar.mockResolvedValueOnce({ exceeded: true, motivo: "prueba_diaria" });
+
+    expect(await deliberate(situation())).toBeNull();
+    expect(mockCallGemini).not.toHaveBeenCalled();
+  });
+
+  it("una denuncia grave no gasta ni reserva nada", async () => {
+    expect(await deliberate(situation({ isHighSeverity: true }))).toBeNull();
+    expect(mockReservar).not.toHaveBeenCalled();
   });
 });

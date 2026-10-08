@@ -80,6 +80,19 @@ describe("leerEstadoDelAgente", () => {
     expect(estado).toEqual({ estado: "activo", procesando: 5 });
   });
 
+  it("sólo mira el presupuesto: no reserva llamadas, así que dibujar el indicador no gasta el cupo de una prueba", async () => {
+    mockModoDeIa.mockReturnValue("gemini");
+    mockCheckBudget.mockResolvedValue({ exceeded: false });
+
+    await leerEstadoDelAgente(TENANT);
+    await leerEstadoDelAgente(TENANT);
+
+    expect(mockCheckBudget).toHaveBeenCalledTimes(2);
+    for (const llamada of mockCheckBudget.mock.calls) {
+      expect(llamada).toEqual([TENANT.tenantId, null, { llamadas: 0 }]);
+    }
+  });
+
   it("un error de la base nunca tira: devuelve null", async () => {
     mockModoDeIa.mockReturnValue("gemini");
     mockCheckBudget.mockResolvedValue({ exceeded: false });

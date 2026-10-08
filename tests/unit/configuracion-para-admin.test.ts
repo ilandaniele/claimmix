@@ -50,7 +50,7 @@ describe("paraAdmin", () => {
     });
     expect(enTenantVarias).toHaveBeenCalledOnce();
     expect(lecturaDelTenant(0)).toContain(
-      'select "specialist_alert_emails", "recordatorio_horas", "rangos_de_monto" from "tenants"'
+      'select "specialist_alert_emails", "recordatorio_horas", "rangos_de_monto", "billing_status", "trial_ends_at",'
     );
     expect(listaDelTenant).not.toHaveBeenCalled();
   });
@@ -58,14 +58,15 @@ describe("paraAdmin", () => {
   it("sin la 0040: avisos y recordatorios se ven, los montos no", async () => {
     enTenantVarias
       .mockRejectedValueOnce(falta("42703"))
+      .mockRejectedValueOnce(falta("42703"))
       .mockResolvedValueOnce([[{ emails: ["a@b.com.ar"], horas: [48] }], [VISTA]]);
 
     const admin = await paraAdmin(TENANT);
 
     expect(admin).toMatchObject({ alertas: ["a@b.com.ar"], recordatorioHoras: [48], core: VISTA });
     expect(admin.montos).toBeUndefined();
-    expect(lecturaDelTenant(1)).toContain("recordatorio_horas");
-    expect(lecturaDelTenant(1)).not.toContain("rangos_de_monto");
+    expect(lecturaDelTenant(2)).toContain("recordatorio_horas");
+    expect(lecturaDelTenant(2)).not.toContain("rangos_de_monto");
   });
 
   // Antes el 42703 de la columna nueva se leía como «falta la 0036» y escondía
@@ -74,17 +75,19 @@ describe("paraAdmin", () => {
     enTenantVarias
       .mockRejectedValueOnce(falta("42703"))
       .mockRejectedValueOnce(falta("42703"))
+      .mockRejectedValueOnce(falta("42703"))
       .mockResolvedValueOnce([[{ emails: ["a@b.com.ar"] }], [VISTA]]);
 
     const admin = await paraAdmin(TENANT);
 
     expect(admin).toMatchObject({ alertas: ["a@b.com.ar"], core: VISTA, migracionPendiente: false });
     expect(admin.recordatorioHoras).toBeUndefined();
-    expect(lecturaDelTenant(2)).not.toContain("recordatorio_horas");
+    expect(lecturaDelTenant(3)).not.toContain("recordatorio_horas");
   });
 
   it("sin la 0036: la lista sola y el aviso de la migración", async () => {
     enTenantVarias
+      .mockRejectedValueOnce(falta("42P01"))
       .mockRejectedValueOnce(falta("42P01"))
       .mockRejectedValueOnce(falta("42P01"))
       .mockRejectedValueOnce(falta("42P01"));

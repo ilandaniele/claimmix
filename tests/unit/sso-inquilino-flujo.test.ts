@@ -65,6 +65,7 @@ vi.mock("@/server/sso/usuarios", () => ({
   },
   correoExigeSso: async (email: string, tenantId: string) =>
     tenantId === h.config?.tenant_id && h.exigen.has(email.split("@")[1]!),
+  dominioExigeSsoEnAlgunInquilino: async (email: string) => h.exigen.has(email.split("@")[1]!),
 }));
 vi.mock("@/server/sso/config", async (original) => ({
   ...(await original<typeof import("@/server/sso/config")>()),
@@ -75,7 +76,7 @@ vi.mock("@/server/sso/config", async (original) => ({
 const pedirFijado = vi.fn();
 vi.mock("@/server/red/https-fijado", () => ({ pedirFijado: (...a: unknown[]) => pedirFijado(...a) }));
 
-import { enAltaDeAdmin } from "@/lib/auth/registro-permitido";
+import { enAlta } from "@/lib/auth/registro-permitido";
 import { urlDeVueltaDelSso } from "@/lib/auth/base-url";
 import { cifrar } from "@/lib/security/cifrado";
 import { olvidarLosIdps } from "@/server/sso/config";
@@ -247,12 +248,25 @@ describe("la vuelta del IdP", () => {
     );
   });
 
-  it("nunca entra como admin, aunque el mail esté en ADMIN_EMAILS", async () => {
-    vi.stubEnv("ADMIN_EMAILS", "ana@empresa.com");
+  it("nunca entra como admin, aunque ADMIN_EMAILS tenga a otros", async () => {
+    vi.stubEnv("ADMIN_EMAILS", "jefe@veltra.com");
     try {
       await entrar();
       const usuario = h.store.user.find((u) => u.email === "ana@empresa.com");
       expect(h.perfiles.get(usuario.id)?.role).toBe("viewer");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.stubEnv("NEXT_PUBLIC_SITE_URL", BASE);
+      vi.stubEnv("GMAIL_TOKEN_ENCRYPTION_KEY", "test-sso-encryption-key-0123456789");
+    }
+  });
+
+  it("una dirección de operador no queda como miembro de la aseguradora", async () => {
+    vi.stubEnv("ADMIN_EMAILS", "ana@empresa.com");
+    try {
+      await entrar();
+      const usuario = h.store.user.find((u) => u.email === "ana@empresa.com");
+      expect(h.perfiles.has(usuario.id)).toBe(false);
     } finally {
       vi.unstubAllEnvs();
       vi.stubEnv("NEXT_PUBLIC_SITE_URL", BASE);
@@ -530,7 +544,7 @@ describe("«Exigir SSO» en el gancho de sesión", () => {
   const CLAVE = "fake-clave-larga-y-unica-123";
 
   async function registrarPorClave(email: string) {
-    await enAltaDeAdmin(() => auth.api.signUpEmail({ body: { email, password: CLAVE, name: "Pepe" } }));
+    await enAlta("invitacion", () => auth.api.signUpEmail({ body: { email, password: CLAVE, name: "Pepe" } }));
   }
 
   it("una persona del dominio que entra con contraseña no recibe sesión, y el error lo dice", async () => {
@@ -544,9 +558,8 @@ describe("«Exigir SSO» en el gancho de sesión", () => {
     expect(h.store.session).toHaveLength(antes);
   });
 
-  it("el admin que crea a alguien del dominio con «Exigir» prendido no deja una cuenta a medias", async () => {
-    // La sesión de la cuenta recién hecha chocaba con el gancho, que tiraba después de
-    // crear usuario y cuenta: sin perfil, y el reintento decía «ya existe».
+  it("la invitación a alguien del dominio con «Exigir» prendido no deja una cuenta a medias", async () => {
+    // La cuenta nace sin sesión, así que el gancho de sesión no corta el alta; entrar sigue pidiendo el SSO.
     h.exigen.add("empresa.com");
 
     await expect(registrarPorClave("nuevo@empresa.com")).resolves.toBeUndefined();
@@ -554,47 +567,39 @@ describe("«Exigir SSO» en el gancho de sesión", () => {
     const usuario = h.store.user.find((u) => u.email === "nuevo@empresa.com");
     expect(usuario).toBeTruthy();
     expect(h.store.account.filter((a) => a.userId === usuario.id)).toHaveLength(1);
-    // El alta no da acceso por contraseña: entrar sigue pidiendo el SSO.
+    // La invitación no da acceso por contraseña: entrar sigue pidiendo el SSO.
     const error = await auth.api.signInEmail({ body: { email: "nuevo@empresa.com", password: CLAVE } }).catch((e) => e);
     expect(error.body?.code).toBe("sso_requerido");
   });
 
-  it("el registro abierto de alguien del dominio no crea nada: la cuenta no podría abrir sesión", async () => {
-    vi.stubEnv("SIGNUP_ALLOWED_EMAILS", "@empresa.com");
-    vi.stubEnv("DEFAULT_TENANT_ID", T1);
-    try {
-      h.exigen.add("empresa.com");
+  it("el registro por correo de alguien del dominio no crea nada: la cuenta no podría abrir sesión", async () => {
+    const registrar = () =>
+      enAlta("correo", () => auth.api.signUpEmail({ body: { email: "pepe@empresa.com", password: CLAVE, name: "Pepe" } }));
+    h.exigen.add("empresa.com");
 
-      const error = await auth.api
-        .signUpEmail({ body: { email: "pepe@empresa.com", password: CLAVE, name: "Pepe" } })
-        .catch((e) => e);
+    const error = await registrar().catch((e) => e);
 
-      expect(error).toBeInstanceOf(Error);
-      expect(h.store.user).toHaveLength(0);
-      expect(h.store.account).toHaveLength(0);
+    expect(error.body?.code).toBe("sso_requerido");
+    expect(h.store.user).toHaveLength(0);
+    expect(h.store.account).toHaveLength(0);
 
-      h.exigen.clear();
-      await auth.api.signUpEmail({ body: { email: "pepe@empresa.com", password: CLAVE, name: "Pepe" } });
-      expect(h.store.user).toHaveLength(1);
-    } finally {
-      vi.unstubAllEnvs();
-      vi.stubEnv("NEXT_PUBLIC_SITE_URL", BASE);
-      vi.stubEnv("GMAIL_TOKEN_ENCRYPTION_KEY", "test-sso-encryption-key-0123456789");
-    }
+    h.exigen.clear();
+    await registrar();
+    expect(h.store.user).toHaveLength(1);
   });
 
-  it("el «exigir» de un inquilino no frena el registro que aterriza en otro", async () => {
-    // Regresión: sólo se miraba el dominio, y «exigir» de T1 negaba el alta de una cuenta que sería de T2.
-    vi.stubEnv("SIGNUP_ALLOWED_EMAILS", "@empresa.com");
+  it("el «exigir» de cualquier inquilino frena el alta por correo: la cuenta nueva no cae en ninguno", async () => {
+    // Antes se comparaba con el inquilino donde aterrizaba la cuenta. Ahora no hay uno.
     vi.stubEnv("DEFAULT_TENANT_ID", T2);
     try {
       h.exigen.add("empresa.com");
 
-      await auth.api.signUpEmail({ body: { email: "pepe@empresa.com", password: CLAVE, name: "Pepe" } });
+      const error = await enAlta("correo", () =>
+        auth.api.signUpEmail({ body: { email: "pepe@empresa.com", password: CLAVE, name: "Pepe" } })
+      ).catch((e) => e);
 
-      const usuario = h.store.user.find((u) => u.email === "pepe@empresa.com");
-      expect(usuario).toBeTruthy();
-      expect(h.store.account.filter((c) => c.userId === usuario.id)).toHaveLength(1);
+      expect(error.body?.code).toBe("sso_requerido");
+      expect(h.store.user).toHaveLength(0);
     } finally {
       vi.unstubAllEnvs();
       vi.stubEnv("NEXT_PUBLIC_SITE_URL", BASE);
@@ -606,7 +611,7 @@ describe("«Exigir SSO» en el gancho de sesión", () => {
     // `changePassword` con `revokeOtherSessions` borra las sesiones y crea una nueva, y el
     // gancho la negaba: la persona quedaba afuera y con un error, después de cambiar la clave.
     await registrarPorClave("pepe@empresa.com");
-    // El perfil lo pone la ruta del admin después del alta; acá se simula.
+    // El perfil lo pone `aceptarInvitacion` después del alta; acá se simula.
     h.perfiles.set(h.store.user[0].id, { tenant: T1, role: "analyst" });
     h.exigen.add("empresa.com");
     identidad = { sub: "sub-pepe", email: "pepe@empresa.com", email_verified: true, name: "Pepe" };

@@ -1,11 +1,13 @@
 /**
- * Signup allowlist — the tenant's front door.
+ * Quién recibe perfil al crearse una cuenta — the tenant's front door.
  *
- * /registro is a public route and Google sign-in is open; both funnel through
- * provisionUserProfile. Before the allowlist, any new account was dropped into
- * GOOGLE_DEFAULT_TENANT_ID as an "analyst", and since /bandeja only checks for
- * a session and GET /api/cases accepts ALL_ROLES, a stranger who registered
- * could read every claim in the production tenant (names, DNI, policy numbers).
+ * Google sign-in and the email signup both funnel through provisionUserProfile.
+ * It used to drop any allowed address into GOOGLE_DEFAULT_TENANT_ID (the
+ * production tenant, with real claims) as an "analyst". Now no new account ever
+ * lands there: only the member who arrives by their company's SSO (viewer of
+ * that tenant) and the product operator (ADMIN_EMAILS, verified, admin of the
+ * platform tenant) get a profile. Everyone else stays without one and follows
+ * to /alta, which creates their own space.
  *
  * The profile row IS tenant membership: withholding it leaves the account with
  * no tenant, so pages redirect and APIs 401. These tests pin that behaviour.
@@ -45,7 +47,7 @@ function mockInsert() {
   return values;
 }
 
-describe("provisionUserProfile — signup allowlist", () => {
+describe("provisionUserProfile — sin perfil en el inquilino por omisión", () => {
   const env = { ...process.env };
 
   beforeEach(() => {
@@ -80,64 +82,54 @@ describe("provisionUserProfile — signup allowlist", () => {
     expect(values).not.toHaveBeenCalled();
   });
 
-  it("admits an allowlisted address", async () => {
+  it("una dirección de SIGNUP_ALLOWED_EMAILS, verificada, ya no recibe perfil: va a /alta", async () => {
     process.env.SIGNUP_ALLOWED_EMAILS = "analista@aseguradora.com";
     const values = mockInsert();
 
     await provisionUserProfile({ id: "u3", name: "Ana", email: "Analista@Aseguradora.com", emailVerified: true });
 
-    expect(values).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "u3", tenant_id: TENANT, role: "analyst" })
-    );
+    expect(values).not.toHaveBeenCalled();
   });
 
-  it("admits a whole domain via @domain, for onboarding an insurer's staff", async () => {
+  it("un dominio entero de la lista tampoco recibe perfil", async () => {
     process.env.SIGNUP_ALLOWED_EMAILS = "@aseguradora.com";
     const values = mockInsert();
 
     await provisionUserProfile({ id: "u4", name: "Bruno", email: "bruno@aseguradora.com", emailVerified: true });
 
-    expect(values).toHaveBeenCalledWith(expect.objectContaining({ id: "u4" }));
+    expect(values).not.toHaveBeenCalled();
   });
 
-  it("does not let an @domain entry match a lookalike suffix", async () => {
-    process.env.SIGNUP_ALLOWED_EMAILS = "@aseguradora.com";
+  it("con el alta automática prendida, una cuenta nueva común queda sin perfil", async () => {
+    process.env.ALTA_AUTOMATICA = "1";
     const values = mockInsert();
 
-    await provisionUserProfile({ id: "u5", name: "Evil", email: "evil@notaseguradora.com" });
+    await provisionUserProfile({ id: "u5", name: "Eva", email: "eva@example.com", emailVerified: true });
 
     expect(values).not.toHaveBeenCalled();
   });
 
-  it("treats ADMIN_EMAILS as allowed, and makes them admin once verified", async () => {
+  it("el operador de ADMIN_EMAILS, con el mail verificado, queda admin del inquilino de la plataforma", async () => {
     process.env.ADMIN_EMAILS = "jefe@veltra.com";
     const values = mockInsert();
 
     await provisionUserProfile({
       id: "u6",
       name: "Jefe",
-      email: "jefe@veltra.com",
+      email: "Jefe@Veltra.com",
       emailVerified: true,
     });
 
-    expect(values).toHaveBeenCalledWith(expect.objectContaining({ id: "u6", role: "admin" }));
+    expect(values).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ id: "u6", tenant_id: TENANT, role: "admin" }));
   });
 
-  it("refuses an allowlisted address that has not been proven", async () => {
+  it("refuses an operator address that has not been proven", async () => {
     /**
-     * This test used to assert the opposite, and describe it as intended: an
-     * unverified password signup on the allowlist was admitted as an analyst.
-     *
-     * requireEmailVerification is false on that path, so the address is simply
-     * what the person typed. Anyone who guessed an allowlisted address that had
-     * not registered yet could take it and read every claim in the tenant —
-     * names, DNI, policy numbers, addresses. Adding a new company mailbox to
-     * ADMIN_EMAILS opened exactly that window, on an address anyone could
-     * guess from the company name.
-     *
+     * requireEmailVerification is false on the password path, so the address is
+     * simply what the person typed. Anyone who guessed an operator address that
+     * had not registered yet could take it and become admin of the platform.
      * Google sign-in proves the address, so the intended path is unaffected.
-     * A password signup now lands with no profile row: the account exists, it
-     * reaches nothing, and an admin attaches it from /admin/users.
      */
     process.env.ADMIN_EMAILS = "jefe@veltra.com";
     const values = mockInsert();
@@ -147,17 +139,21 @@ describe("provisionUserProfile — signup allowlist", () => {
     expect(values).not.toHaveBeenCalled();
   });
 
-  it("refuses an unverified address on the signup allowlist too", async () => {
-    process.env.SIGNUP_ALLOWED_EMAILS = "@aseguradora.com";
+  it("sin inquilino de la plataforma configurado, el operador no queda a medias: falla fuerte", async () => {
+    process.env.ADMIN_EMAILS = "jefe@veltra.com";
+    delete process.env.GOOGLE_DEFAULT_TENANT_ID;
+    delete process.env.DEFAULT_TENANT_ID;
+    delete process.env.GMAIL_TENANT_ID;
     const values = mockInsert();
 
-    await provisionUserProfile({ id: "u8", name: "Mallory", email: "ana@aseguradora.com" });
-
+    await expect(
+      provisionUserProfile({ id: "u9", name: "Jefe", email: "jefe@veltra.com", emailVerified: true })
+    ).rejects.toThrow(/GOOGLE_DEFAULT_TENANT_ID/);
     expect(values).not.toHaveBeenCalled();
   });
 
   it("still skips work when the profile already exists (idempotent hook)", async () => {
-    process.env.SIGNUP_ALLOWED_EMAILS = "@aseguradora.com";
+    process.env.ADMIN_EMAILS = "jefe@veltra.com";
     (db.select as ReturnType<typeof vi.fn>).mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ id: "u7" }]) }),
@@ -165,7 +161,7 @@ describe("provisionUserProfile — signup allowlist", () => {
     });
     const values = mockInsert();
 
-    await provisionUserProfile({ id: "u7", name: "Ya", email: "ya@aseguradora.com" });
+    await provisionUserProfile({ id: "u7", name: "Ya", email: "jefe@veltra.com", emailVerified: true });
 
     expect(values).not.toHaveBeenCalled();
   });
@@ -201,12 +197,26 @@ describe("provisionUserProfile — alta por el SSO de un inquilino", () => {
     );
   });
 
-  it("nunca admin, aunque el mail esté en ADMIN_EMAILS", async () => {
+  it("una dirección de operador no queda en el espacio de una aseguradora: sin perfil", async () => {
+    // El operador vive en la plataforma. Que su dirección apareciera como
+    // miembro (aunque fuera viewer) de otra organización la dejaría de hacer
+    // sólo nuestra.
     process.env.ADMIN_EMAILS = "ana@empresa.com";
     const values = mockInsert();
 
     await enIngresoPorSso(ingreso, () =>
       provisionUserProfile({ id: "u1", name: "Ana", email: "ana@empresa.com", emailVerified: true })
+    );
+
+    expect(values).not.toHaveBeenCalled();
+  });
+
+  it("nunca admin: otro miembro del dominio, con ADMIN_EMAILS en uso, sigue siendo viewer", async () => {
+    process.env.ADMIN_EMAILS = "jefe@veltra.com";
+    const values = mockInsert();
+
+    await enIngresoPorSso(ingreso, () =>
+      provisionUserProfile({ id: "u2", name: "Beto", email: "beto@empresa.com", emailVerified: true })
     );
 
     expect(values).toHaveBeenCalledWith(expect.objectContaining({ role: "viewer", tenant_id: T_SSO }));
@@ -248,7 +258,7 @@ describe("provisionUserProfile — alta por el SSO de un inquilino", () => {
     expect(values).not.toHaveBeenCalled();
   });
 
-  it("fuera del SSO, el mismo mail sigue sujeto a la allowlist", async () => {
+  it("fuera del SSO, el mismo mail no recibe perfil en ninguna parte", async () => {
     const values = mockInsert();
 
     await provisionUserProfile({ id: "u1", name: "Ana", email: "ana@empresa.com", emailVerified: true });

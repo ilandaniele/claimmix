@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   dominioExigeSso: vi.fn(),
-  correoExigeSso: vi.fn(),
   inquilinoDelUsuario: vi.fn(),
   filas: [] as unknown[],
   contextos: [] as unknown[],
@@ -25,11 +24,9 @@ describe("revisarSesionNueva", () => {
   beforeEach(() => {
     vi.resetModules();
     h.dominioExigeSso.mockReset();
-    h.correoExigeSso.mockReset();
     h.inquilinoDelUsuario.mockReset();
     vi.doMock("@/server/sso/usuarios", () => ({
       dominioExigeSso: h.dominioExigeSso,
-      correoExigeSso: h.correoExigeSso,
       inquilinoDelUsuario: h.inquilinoDelUsuario,
     }));
   });
@@ -57,15 +54,6 @@ describe("revisarSesionNueva", () => {
     expect(h.dominioExigeSso).toHaveBeenCalledTimes(1);
     expect(h.dominioExigeSso).toHaveBeenCalledWith("u1");
     expect(h.inquilinoDelUsuario).not.toHaveBeenCalled();
-  });
-
-  it("el alta de un admin no es un ingreso: crea la sesión de la cuenta recién hecha sin consultar «exigir»", async () => {
-    // Regresión: con «exigir» el gancho tiraba después de crear usuario y cuenta, y el alta quedaba a medias.
-    h.dominioExigeSso.mockResolvedValue(true);
-    const { revisarSesionNueva, enAltaDeAdmin } = await cargar();
-
-    expect(await codigoDe(enAltaDeAdmin(() => revisarSesionNueva("u1")))).toBeNull();
-    expect(h.dominioExigeSso).not.toHaveBeenCalled();
   });
 
   it("cambiar la contraseña rota la sesión de quien ya estaba adentro, y no la niega", async () => {
@@ -135,67 +123,6 @@ describe("revisarSesionNueva", () => {
   it("los códigos que viajan a /login son los dos que /login sabe decir", async () => {
     const { CODIGO_SSO_REQUERIDO, CODIGO_SSO_OTRO_INQUILINO } = await cargar();
     expect([CODIGO_SSO_REQUERIDO, CODIGO_SSO_OTRO_INQUILINO]).toEqual(["sso_requerido", "sso_otro_inquilino"]);
-  });
-});
-
-describe("altaBloqueadaPorSso", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    h.correoExigeSso.mockReset();
-    vi.doMock("@/server/sso/usuarios", () => ({
-      dominioExigeSso: h.dominioExigeSso,
-      correoExigeSso: h.correoExigeSso,
-      inquilinoDelUsuario: h.inquilinoDelUsuario,
-    }));
-  });
-
-  async function cargar() {
-    const exigir = await import("@/server/sso/exigir");
-    const registro = await import("@/lib/auth/registro-permitido");
-    return { ...exigir, ...registro };
-  }
-
-  it("un mail de un dominio que exige SSO no puede darse de alta por contraseña", async () => {
-    h.correoExigeSso.mockResolvedValue(true);
-    const { altaBloqueadaPorSso } = await cargar();
-
-    expect(await altaBloqueadaPorSso("pepe@empresa.com", "T1")).toBe(true);
-    expect(h.correoExigeSso).toHaveBeenCalledWith("pepe@empresa.com", "T1");
-  });
-
-  it("un mail de otro dominio sí", async () => {
-    h.correoExigeSso.mockResolvedValue(false);
-    const { altaBloqueadaPorSso } = await cargar();
-
-    expect(await altaBloqueadaPorSso("pepe@otra.com", "T1")).toBe(false);
-  });
-
-  it("pregunta por el inquilino donde aterriza el alta: «exigir» de otro no la frena", async () => {
-    // Regresión: se preguntaba sólo por dominio, y «exigir» de A frenaba altas que aterrizan en B.
-    h.correoExigeSso.mockImplementation(async (_email: string, tenantId: string) => tenantId === "A");
-    const { altaBloqueadaPorSso } = await cargar();
-
-    expect(await altaBloqueadaPorSso("pepe@empresa.com", "A")).toBe(true);
-    expect(await altaBloqueadaPorSso("pepe@empresa.com", "B")).toBe(false);
-  });
-
-  it("sin inquilino por defecto no hay perfil que crear y no se pregunta", async () => {
-    h.correoExigeSso.mockResolvedValue(true);
-    const { altaBloqueadaPorSso } = await cargar();
-
-    expect(await altaBloqueadaPorSso("pepe@empresa.com", null)).toBe(false);
-    expect(h.correoExigeSso).not.toHaveBeenCalled();
-  });
-
-  it("el alta de un admin y el SSO del propio inquilino pasan sin consulta", async () => {
-    h.correoExigeSso.mockResolvedValue(true);
-    const { altaBloqueadaPorSso, enAltaDeAdmin, enIngresoPorSso } = await cargar();
-
-    expect(await enAltaDeAdmin(() => altaBloqueadaPorSso("pepe@empresa.com", "T1"))).toBe(false);
-    expect(
-      await enIngresoPorSso({ tenantId: "T1", dominio: "empresa.com" }, () => altaBloqueadaPorSso("pepe@empresa.com", "T1"))
-    ).toBe(false);
-    expect(h.correoExigeSso).not.toHaveBeenCalled();
   });
 });
 

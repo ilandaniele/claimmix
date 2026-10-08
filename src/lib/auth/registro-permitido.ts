@@ -1,6 +1,6 @@
 // Who may create an account: SIGNUP_ALLOWED_EMAILS + ADMIN_EMAILS.
 // Entry starting with "@" = whole domain; anything else = exact address.
-// No list → nobody. Admins bypass via `enAltaDeAdmin`.
+// No list → nobody. Las invitaciones y el SSO entran por sus propias puertas.
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import { dominioDelMail } from "@/core/sso";
@@ -44,15 +44,13 @@ export function permitidosConfigurados(): Permiso[] {
   );
 }
 
-// AsyncLocalStorage, not a module flag: concurrent requests must not share it.
-const altaDeAdmin = new AsyncLocalStorage<true>();
-
-export function enAltaDeAdmin<T>(fn: () => Promise<T>): Promise<T> {
-  return altaDeAdmin.run(true, fn);
-}
-
-export function esAltaDeAdmin(): boolean {
-  return altaDeAdmin.getStore() === true;
+/**
+ * ¿Puede esta dirección crear su cuenta (y su espacio) por la puerta pública?
+ * Con `ALTA_AUTOMATICA=1` cualquiera; apagada, sólo las de la lista. Es la única
+ * copia de la regla: la usan el gancho de alta de Google y la pantalla `/alta`.
+ */
+export function altaAbierta(email: string): boolean {
+  return process.env.ALTA_AUTOMATICA === "1" || puedeRegistrarse(email, permitidosConfigurados());
 }
 
 /**
@@ -74,8 +72,25 @@ export function ingresoPorSso(): IngresoPorSso | undefined {
   return ingresoSso.getStore();
 }
 
+/**
+ * Un alta por la puerta del servidor (el formulario de /registro o una invitación
+ * ya canjeada), en curso. La abre el código que llama a `signUpEmail` después de
+ * decidir que esa persona puede; el gancho de alta lo lee para saber que el pedido
+ * no viene de la puerta abierta de Google. Nunca sale de una entrada del pedido.
+ */
+export type CaminoDeAltaEnCurso = "correo" | "invitacion";
+
+const altaEnCurso = new AsyncLocalStorage<CaminoDeAltaEnCurso>();
+
+export function enAlta<T>(camino: CaminoDeAltaEnCurso, fn: () => Promise<T>): Promise<T> {
+  return altaEnCurso.run(camino, fn);
+}
+
+export function altaEnCursoPorServidor(): CaminoDeAltaEnCurso | undefined {
+  return altaEnCurso.getStore();
+}
+
 export function altaHabilitada(email: string): boolean {
-  if (esAltaDeAdmin()) return true;
   // El dominio verificado del inquilino hace de allowlist, y nada más que esa.
   const sso = ingresoPorSso();
   if (sso) return dominioDelMail(email) === sso.dominio;

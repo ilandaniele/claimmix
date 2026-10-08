@@ -33,7 +33,7 @@ import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
 import { redactObject, redactString } from "@/lib/audit/redact";
-import { registrarConsumoDelModelo } from "@/server/ai/budget";
+import { registrarConsumoDelModelo, reservarSiEsPrueba } from "@/server/ai/budget";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 
@@ -163,6 +163,15 @@ export async function deliberate(
   if (input.isHighSeverity) return null;
 
   try {
+    // Una prueba reserva por adelantado las llamadas que este mensaje puede
+    // gastar: sin cupo, queda el árbol de siempre. Los demás topes ya los miró
+    // el worker antes de extraer, y los demás inquilinos no reservan nada.
+    const presupuesto = await reservarSiEsPrueba(input.tenantId, LLAMADAS_POR_DELIBERACION);
+    if (presupuesto.exceeded) {
+      logger.warn({ motivo: presupuesto.motivo }, "agent.deliberation_sin_presupuesto");
+      return null;
+    }
+
     const { plan, toolCalls, lookupResults } = await think(input);
     if (!plan) return null;
     plan.toolCalls = toolCalls;
@@ -217,6 +226,9 @@ export async function deliberate(
  * consulta, así que el tope de dos sólo corta repeticiones.
  */
 const MAX_TOOL_CALLS = 2;
+
+/** Una pasada por consulta, la que trae el plan y una de margen: lo que `deliberate` reserva. */
+const LLAMADAS_POR_DELIBERACION = MAX_TOOL_CALLS + 2;
 
 /**
  * Let the agent look things up until it knows enough to decide.

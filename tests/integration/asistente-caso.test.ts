@@ -28,7 +28,7 @@ const m = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/api/entrada", () => ({ entrar: m.entrar }));
 vi.mock("@/server/ai/provider", () => ({ resolveExtractionEngine: m.motor }));
-vi.mock("@/server/ai/budget", () => ({ checkBudget: m.checkBudget, registrarConsumoDelModelo: m.registrar }));
+vi.mock("@/server/ai/budget", () => ({ checkBudget: m.checkBudget, registrarConsumoDelModelo: m.registrar, soltarReserva: vi.fn() }));
 vi.mock("@/server/ai/gemini-extractor", () => ({ callGemini: m.callGemini, contarTokens: vi.fn() }));
 vi.mock("@/server/worker/adjuntos", () => ({ PLAZO_DE_CONTEO_MS: 1000, TOPE_TOKENS_PDF: 5000 }));
 vi.mock("@/lib/rate-limit/index", () => ({

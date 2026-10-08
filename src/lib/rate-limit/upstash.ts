@@ -20,7 +20,8 @@
  * paquetes opcionales, para que el build ande sin ellos.
  */
 
-type RateLimitResult = { allowed: boolean; remaining: number; resetAt: number };
+/** `ventana: 0`: este stub no devuelve intentos, así que no hay ventana donde liberar. */
+type RateLimitResult = { allowed: boolean; remaining: number; resetAt: number; ventana: number };
 
 export async function checkRateLimitUpstash(
   key: string,
@@ -69,5 +70,6 @@ export async function checkRateLimitUpstash(
     allowed: result.success,
     remaining: result.remaining,
     resetAt: result.reset,
+    ventana: 0,
   };
 }

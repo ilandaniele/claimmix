@@ -30,7 +30,8 @@ import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { consultaDelPedido } from "@/server/confirmations/ultimo-pedido";
 import { messengerFor } from "@/server/confirmations/messenger";
 import { vencimientoDeLaVentana } from "@/core/whatsapp/puede-responder";
-import { estadoDePlantilla, type EstadoDePlantilla } from "@/server/whatsapp/cloud-api";
+import { estadoDePlantilla, quedaCupoDePlantilla, type EstadoDePlantilla } from "@/server/whatsapp/cloud-api";
+import { credencialesWhatsApp } from "@/server/whatsapp/numeros";
 import { PLANTILLA_REABRIR } from "@/core/mensajes/reabrir-denuncia";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
@@ -386,15 +387,47 @@ export function decidirReenvio(
  * nuevo con esa respuesta. El llamado a Graph sólo pasa cuando hace falta —
  * un caso con la ventana abierta, o que ya se cae por otro motivo, nunca lo
  * dispara.
+ *
+ * Una prueba vencida no manda plantillas (`sendWhatsAppTemplate` las corta con
+ * tope 0): si el reenvío sólo faltaba por ahí, el motivo es `tope_de_plantillas`
+ * y a Meta ni se le pregunta. Con `mirarCupo` (quien va a escribir el caso
+ * después), una vigente con el tope del día gastado también termina en
+ * `tope_de_plantillas`. Ni una ni otra gasta el cupo diario: lo toma el envío.
+ * Una pantalla que sólo muestra el botón no lo pide, porque mirar escribe en el
+ * limitador.
  */
 export async function decidirConPlantilla(
   d: DatosDelReenvio,
   ahora: Date,
-  reabrir: boolean
+  reabrir: boolean,
+  tenantId: string,
+  mirarCupo = false
 ): Promise<DecisionDelReenvio> {
   const primera = decidirReenvio(d, ahora, reabrir);
   if (primera.ok || primera.motivo !== "ventana_cerrada") return primera;
-  return decidirReenvio(d, ahora, reabrir, await estadoDePlantilla(PLANTILLA_REABRIR.nombre, PLANTILLA_REABRIR.idioma));
+  // Las plantillas son por WABA: se le pregunta a Meta con el número del inquilino.
+  const cred = await credencialesWhatsApp(tenantId);
+  if (cred?.enPrueba && cred.vencida) {
+    const conPlantilla = decidirReenvio(d, ahora, reabrir, "aprobada");
+    return conPlantilla.ok ? { ok: false, motivo: "tope_de_plantillas" } : conPlantilla;
+  }
+  const estado = cred
+    ? await estadoDePlantilla(PLANTILLA_REABRIR.nombre, PLANTILLA_REABRIR.idioma, cred)
+    : "no_disponible";
+  const decision = decidirReenvio(d, ahora, reabrir, estado);
+  // El tope diario de una prueba vigente lo cuenta el envío, que llega después
+  // de reabrir el caso: sin mirarlo antes, un reenvío sin lugar dejaba el caso
+  // abierto, auditado como reenviado y sin ningún mensaje afuera.
+  if (
+    mirarCupo &&
+    decision.ok &&
+    decision.porPlantilla &&
+    cred?.enPrueba &&
+    !(await quedaCupoDePlantilla(tenantId))
+  ) {
+    return { ok: false, motivo: "tope_de_plantillas" };
+  }
+  return decision;
 }
 
 /**
@@ -454,7 +487,7 @@ export async function reenviarPedido(
     return { ok: false, motivo: "no_encontrado" };
   }
 
-  const decision = await decidirConPlantilla(datos, new Date(), reabrir);
+  const decision = await decidirConPlantilla(datos, new Date(), reabrir, tenantCtx.tenantId, true);
   if (!decision.ok) return { ok: false, motivo: decision.motivo };
 
   const ahora = new Date().toISOString();

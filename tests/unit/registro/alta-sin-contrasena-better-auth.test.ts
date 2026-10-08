@@ -5,8 +5,7 @@
  * Lo que `signUp` da por sentado de la librería, y que no se puede probar con un
  * simulacro: con `autoSignIn: false` el alta no abre sesión, una dirección ya
  * tomada contesta como una nueva, y el enlace de restablecimiento llega a los
- * ganchos con el usuario entero —el de después necesita su correo y su nombre
- * para darle perfil.
+ * ganchos con el usuario entero (id, correo y nombre).
  *
  * Sólo se sustituye el almacenamiento (`memoryAdapter` en lugar de Drizzle), el
  * envío del mail y lo que hace `onPasswordReset`, que tiene su propia prueba.
@@ -48,6 +47,7 @@ vi.mock("@/server/sso/usuarios", () => ({
   inquilinoDelUsuario: vi.fn(),
   dominioExigeSso: vi.fn(),
   correoExigeSso: vi.fn(),
+  dominioExigeSsoEnAlgunInquilino: vi.fn(async () => false),
 }));
 vi.mock("@/server/sso/config", async (original) => ({
   ...(await original<typeof import("@/server/sso/config")>()),
@@ -58,11 +58,13 @@ vi.mock("@/server/notify/password-reset", () => ({ sendPasswordResetEmail: h.env
 vi.mock("@/lib/auth/on-password-reset", () => ({ onPasswordReset: h.alRestablecer }));
 
 let auth: typeof import("@/lib/auth").auth;
+let enAlta: typeof import("@/lib/auth/registro-permitido").enAlta;
 
 beforeAll(async () => {
   vi.stubEnv("BETTER_AUTH_SECRET", "test-better-auth-secret-key");
   vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://claimmix.test");
   ({ auth } = await import("@/lib/auth"));
+  ({ enAlta } = await import("@/lib/auth/registro-permitido"));
 });
 
 beforeEach(() => {
@@ -74,11 +76,14 @@ beforeEach(() => {
   vi.stubEnv("ADMIN_EMAILS", "");
 });
 
-const altaDe = (email: string) =>
+const registrar = (email: string) =>
   auth.api.signUpEmail({
     body: { name: "Ana Pérez", email, password: "fake-password-de-prueba-1234" },
     headers: new Headers(),
   });
+
+/** El alta por el formulario: lo que abre la puerta lo pone el servidor, no el pedido. */
+const altaDe = (email: string) => enAlta("correo", () => registrar(email));
 
 describe("el alta no abre sesión", () => {
   it("autoSignIn está apagado", () => {
@@ -112,10 +117,12 @@ describe("el alta no abre sesión", () => {
     expect(h.store.user[0].id).toBe(primera.user.id);
   });
 
-  it("una dirección fuera de la lista no se crea: el gancho la niega", async () => {
+  it("un alta que ninguna puerta del servidor abrió no se crea: el gancho la niega", async () => {
     // Contesta con error, no con la respuesta de mentira: por eso `signUp` mira la
     // lista ANTES de llamar y manda a todos al mismo aviso.
-    await expect(altaDe("intrusa@otra-empresa.com")).rejects.toThrow();
+    await expect(registrar("intrusa@otra-empresa.com")).rejects.toMatchObject({
+      body: { code: "registro_cerrado" },
+    });
 
     expect(h.store.user).toHaveLength(0);
   });

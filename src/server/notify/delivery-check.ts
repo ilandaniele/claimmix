@@ -80,13 +80,20 @@ export async function probarEntrega(
   destinatario: string
 ): Promise<ResultadoDeEntrega> {
   return canal === "whatsapp"
-    ? enviarPorWhatsApp(destinatario)
+    ? enviarPorWhatsApp(tenantId, destinatario)
     : enviarPorCorreo(tenantId, destinatario);
 }
 
-async function enviarPorWhatsApp(destinatario: string): Promise<ResultadoDeEntrega> {
+async function enviarPorWhatsApp(
+  tenantId: string,
+  destinatario: string
+): Promise<ResultadoDeEntrega> {
+  const { credencialesWhatsApp } = await import("@/server/whatsapp/numeros");
+  const cred = await credencialesWhatsApp(tenantId);
+  if (!cred) return { ok: false, detail: "ningún número de WhatsApp conectado" };
+
   const { sendWhatsAppText } = await import("@/server/whatsapp/cloud-api");
-  const res = await sendWhatsAppText(destinatario, cuerpoDePrueba());
+  const res = await sendWhatsAppText(destinatario, cuerpoDePrueba(), cred);
   return res.ok
     ? { ok: true, detail: "Meta lo aceptó y lo puso en camino" }
     : { ok: false, detail: res.error ?? "falló el envío" };

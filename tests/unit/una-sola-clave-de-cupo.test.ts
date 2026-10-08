@@ -110,12 +110,9 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/auth/session", () => ({ getSessionContext: vi.fn() }));
 vi.mock("@/lib/auth/provision", () => ({ resolveDefaultTenantId: () => null }));
 vi.mock("@/lib/db", () => ({ db: {} }));
-vi.mock("@/lib/db/schema", () => ({ users: {} }));
+vi.mock("@/lib/db/schema", () => ({ users: {}, authUsers: {} }));
 // Las preguntas al SSO van a la base: acá sólo importa con qué clave se pide el cupo.
-vi.mock("@/server/sso/exigir", () => ({
-  CODIGO_SSO_REQUERIDO: "sso_requerido",
-  altaBloqueadaPorSso: async () => false,
-}));
+vi.mock("@/server/sso/usuarios", () => ({ dominioExigeSsoEnAlgunInquilino: async () => false }));
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: vi.fn(),
   AuditEvent: { AUTH_RATE_LIMITED: "auth.rate_limited", AUTH_SIGN_UP: "auth.sign_up" },
@@ -190,9 +187,12 @@ describe("el formulario y la API comparten cubeta (E21)", () => {
     const { POST } = await import("@/app/api/auth/[...all]/route");
 
     const fd = new FormData();
+    fd.set("empresa", "Seguros del Sur");
+    fd.set("whatsapp", "+5492916426930");
+    fd.set("terminos", "on");
     fd.set("full_name", "Ana Pérez");
     fd.set("email", "Ana@Ejemplo.com");
-    await signUp({}, fd);
+    await signUp(fd);
     const claveFormulario = mockRateLimit.mock.calls[0][0];
 
     expect(mockTopePorIp).toHaveBeenCalledWith("1.2.3.4");

@@ -13,27 +13,27 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockDb, mockWriteAuditLog, mockAltaNueva, mockProvision } = vi.hoisted(() => ({
-  mockDb: { delete: vi.fn(), select: vi.fn(), update: vi.fn() },
+const { mockDb, mockWriteAuditLog, mockProvision, mockRemitente } = vi.hoisted(() => ({
+  mockDb: { delete: vi.fn(), select: vi.fn(), update: vi.fn(), insert: vi.fn() },
   mockWriteAuditLog: vi.fn(),
-  mockAltaNueva: vi.fn(),
   mockProvision: vi.fn(),
+  mockRemitente: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/lib/db", () => ({ db: mockDb, tables: {} }));
 
-vi.mock("@/lib/auth/alta-nueva", () => ({ inquilinoDeAltaNueva: mockAltaNueva }));
-
 vi.mock("@/lib/auth/provision", () => ({ provisionUserProfile: mockProvision }));
+
+vi.mock("@/server/notify/remitente-sistema", () => ({ remitenteDelSistema: mockRemitente }));
 
 vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockWriteAuditLog,
   AuditEvent: { PASSWORD_RESET_COMPLETED: "auth.password_reset_completed" },
 }));
 
-import { onPasswordReset } from "@/lib/auth/on-password-reset";
+import { marcarCorreoVerificado, onPasswordReset } from "@/lib/auth/on-password-reset";
 import { authUsers, sessions } from "@/lib/db/schema";
 
 const USER = { id: "user-001", email: "ana@example.com", name: "Ana Pérez" };
@@ -43,11 +43,9 @@ function conBase(opciones: {
   sesionesBorradas?: unknown[];
   borrarFalla?: boolean;
   perfil?: unknown[];
-  /** Lo que devuelve la segunda búsqueda de perfil, la de después de crearlo. */
-  perfilTrasCrear?: unknown[];
   marcarFalla?: boolean;
 } = {}) {
-  const { sesionesBorradas = [{ id: "s-1" }, { id: "s-2" }], borrarFalla = false, perfil = [{ tenant_id: "tenant-1" }], perfilTrasCrear, marcarFalla = false } =
+  const { sesionesBorradas = [{ id: "s-1" }, { id: "s-2" }], borrarFalla = false, perfil = [{ tenant_id: "tenant-1" }], marcarFalla = false } =
     opciones;
 
   const tablasBorradas: unknown[] = [];
@@ -83,7 +81,6 @@ function conBase(opciones: {
     }),
   });
   mockDb.select.mockReturnValue(buscar(perfil));
-  if (perfilTrasCrear) mockDb.select.mockReturnValueOnce(buscar(perfil)).mockReturnValue(buscar(perfilTrasCrear));
 
   return { tablasBorradas, marcados };
 }
@@ -91,9 +88,9 @@ function conBase(opciones: {
 beforeEach(() => {
   vi.clearAllMocks();
   mockWriteAuditLog.mockResolvedValue(undefined);
-  // Por omisión la dirección no está habilitada para el alta: sin perfil, nada que crear.
-  mockAltaNueva.mockResolvedValue(null);
   mockProvision.mockResolvedValue(undefined);
+  // Por omisión hay remitente del sistema: es lo que habilita marcar el correo.
+  mockRemitente.mockReturnValue({ correo: "sistema@example.com", refreshToken: "test-refresh-key" });
 });
 
 describe("onPasswordReset", () => {
@@ -166,69 +163,52 @@ describe("onPasswordReset", () => {
   });
 
   /*
-   * El alta sin contraseña crea la cuenta sin perfil, con el correo sin probar.
-   * Abrir el enlace es esa prueba: ahí recién se le da el perfil, y la
-   * auditoría queda en el inquilino que le tocó.
+   * Restablecer prueba la casilla, no que la persona pueda estar en algún
+   * espacio. El perfil nunca sale de acá: antes caía en el inquilino por
+   * omisión (producción, con casos reales); ahora lo crea `/alta`, y sólo a
+   * quien eligió él mismo su espacio. `provision` está simulado como guardia:
+   * si el módulo volviera a importarlo, estos tests lo verían.
    */
-  describe("quien se dio de alta sin contraseña", () => {
-    it("sin perfil y con el alta habilitada, se lo provisiona con el correo verificado", async () => {
-      // Sin sesiones: quien se dio de alta sin contraseña nunca entró.
-      conBase({ sesionesBorradas: [], perfil: [], perfilTrasCrear: [{ tenant_id: "tenant-alta" }] });
-      mockAltaNueva.mockResolvedValue("tenant-alta");
-
-      await onPasswordReset(USER);
-
-      expect(mockAltaNueva).toHaveBeenCalledWith("ana@example.com");
-      expect(mockProvision).toHaveBeenCalledTimes(1);
-      expect(mockProvision).toHaveBeenCalledWith({
-        id: "user-001",
-        name: "Ana Pérez",
-        email: "ana@example.com",
-        emailVerified: true,
-      });
-      const entrada = mockWriteAuditLog.mock.calls[0][0];
-      expect(entrada.tenant_id).toBe("tenant-alta");
-      expect(entrada.payload).toEqual({ sesiones_cerradas: 0, perfil_creado: true });
-    });
-
-    /*
-     * Un pre-registro: alguien eligió la contraseña de una dirección permitida
-     * que todavía no tenía cuenta, entró (sin perfil no hay bloqueo) y su cookie
-     * firmada vale hasta 60 s después de borrada la sesión. Darle el perfil al
-     * dueño real en ese momento se lo daría también a esa cookie.
-     */
-    it("sin perfil pero con sesiones abiertas no provisiona y deja el aviso", async () => {
-      const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
-      conBase({ sesionesBorradas: [{ id: "s-1" }], perfil: [] });
-      mockAltaNueva.mockResolvedValue("tenant-alta");
+  describe("restablecer nunca da perfil", () => {
+    it("sin perfil y sin sesiones: cierra, no crea nada y no anota", async () => {
+      conBase({ sesionesBorradas: [], perfil: [] });
 
       await onPasswordReset(USER);
 
       expect(mockDb.delete).toHaveBeenCalledTimes(1);
-      expect(mockAltaNueva).not.toHaveBeenCalled();
+      expect(mockDb.insert).not.toHaveBeenCalled();
+      expect(mockProvision).not.toHaveBeenCalled();
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+    });
+
+    it("sin perfil y con sesiones: tampoco crea nada, y no hace falta avisar nada", async () => {
+      const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+      conBase({ sesionesBorradas: [{ id: "s-1" }], perfil: [] });
+
+      await onPasswordReset(USER);
+
+      expect(mockDb.delete).toHaveBeenCalledTimes(1);
+      expect(mockDb.insert).not.toHaveBeenCalled();
       expect(mockProvision).not.toHaveBeenCalled();
       expect(mockWriteAuditLog).not.toHaveBeenCalled();
       const lineas = aviso.mock.calls.map((c) => String(c[0]));
-      expect(lineas.some((l) => l.includes("auth.reset.perfil_no_dado_con_sesiones"))).toBe(true);
+      expect(lineas.some((l) => l.includes("perfil_no_dado_con_sesiones"))).toBe(false);
       aviso.mockRestore();
     });
 
-    it("sin perfil y sin poder contar las sesiones tampoco provisiona", async () => {
+    it("sin perfil y sin poder contar las sesiones tampoco crea nada", async () => {
       const grito = vi.spyOn(console, "error").mockImplementation(() => {});
-      const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
       conBase({ borrarFalla: true, perfil: [] });
-      mockAltaNueva.mockResolvedValue("tenant-alta");
 
       await expect(onPasswordReset(USER)).resolves.toBeUndefined();
 
+      expect(mockDb.insert).not.toHaveBeenCalled();
       expect(mockProvision).not.toHaveBeenCalled();
       grito.mockRestore();
-      aviso.mockRestore();
     });
 
-    it("con perfil no vuelve a provisionar", async () => {
+    it("con perfil anota sólo las sesiones cerradas, sin marca de perfil creado", async () => {
       conBase();
-      mockAltaNueva.mockResolvedValue("tenant-alta");
 
       await onPasswordReset(USER);
 
@@ -236,39 +216,13 @@ describe("onPasswordReset", () => {
       expect(mockWriteAuditLog.mock.calls[0][0].payload).toEqual({ sesiones_cerradas: 2 });
     });
 
-    it("sin la dirección habilitada no provisiona, aunque abra el enlace", async () => {
+    it("sin correo en el usuario tampoco intenta nada", async () => {
       conBase({ sesionesBorradas: [], perfil: [] });
-      mockAltaNueva.mockResolvedValue(null);
-
-      await onPasswordReset(USER);
-
-      expect(mockProvision).not.toHaveBeenCalled();
-      expect(mockWriteAuditLog).not.toHaveBeenCalled();
-    });
-
-    it("si no se puede crear el perfil, igual cierra las sesiones y no tira", async () => {
-      const grito = vi.spyOn(console, "error").mockImplementation(() => {});
-      conBase({ sesionesBorradas: [], perfil: [] });
-      mockAltaNueva.mockResolvedValue("tenant-alta");
-      mockProvision.mockRejectedValue(new Error("se cayó la base"));
-
-      await expect(onPasswordReset(USER)).resolves.toBeUndefined();
-
-      expect(mockDb.delete).toHaveBeenCalledTimes(1);
-      expect(mockWriteAuditLog).not.toHaveBeenCalled();
-      const lineas = grito.mock.calls.map((c) => String(c[0]));
-      expect(lineas.some((l) => l.includes("auth.reset.no_se_pudo_dar_perfil"))).toBe(true);
-      grito.mockRestore();
-    });
-
-    it("sin correo en el usuario no intenta darle perfil", async () => {
-      conBase({ sesionesBorradas: [], perfil: [] });
-      mockAltaNueva.mockResolvedValue("tenant-alta");
 
       await onPasswordReset({ id: "user-001" });
 
-      expect(mockAltaNueva).not.toHaveBeenCalled();
       expect(mockProvision).not.toHaveBeenCalled();
+      expect(mockDb.insert).not.toHaveBeenCalled();
     });
   });
 
@@ -290,6 +244,36 @@ describe("onPasswordReset", () => {
     expect(marcados).toHaveLength(1);
     expect(marcados[0]!.tabla).toBe(authUsers);
     expect(marcados[0]!.valores).toEqual({ emailVerified: true });
+  });
+
+  it("sin remitente del sistema no marca nada, pero lo demás sigue igual", async () => {
+    // Sin él el enlace pudo salir por la casilla de una aseguradora, que quien
+    // la administra puede leer: abrirlo no prueba que la casilla sea de la persona.
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockRemitente.mockReturnValue(null);
+    const { marcados } = conBase();
+
+    await onPasswordReset(USER);
+
+    expect(marcados).toHaveLength(0);
+    expect(mockDb.delete).toHaveBeenCalledTimes(1);
+    expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+    const lineas = aviso.mock.calls.map((c) => String(c[0]));
+    expect(lineas.some((l) => l.includes("auth.reset.correo_sin_verificar_por_falta_de_remitente"))).toBe(true);
+    aviso.mockRestore();
+  });
+
+  it("marcarCorreoVerificado solo toca la tabla de Better Auth y solo con remitente", async () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { marcados } = conBase();
+
+    await marcarCorreoVerificado("user-001");
+    expect(marcados).toHaveLength(1);
+
+    mockRemitente.mockReturnValue(null);
+    await marcarCorreoVerificado("user-001");
+    expect(marcados).toHaveLength(1);
+    aviso.mockRestore();
   });
 
   it("si no se puede marcar, la persona igual puede volver a entrar", async () => {

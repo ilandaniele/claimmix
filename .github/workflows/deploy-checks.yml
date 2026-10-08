@@ -141,6 +141,8 @@ on:
         required: false
       WHATSAPP_APP_SECRET:
         required: false
+      WHATSAPP_PHONE_NUMBER_ID:
+        required: false
       DEMO_TENANT_ID:
         required: false
   # Para poder ensayar este archivo en una rama antes de que tenga un caller:
@@ -456,6 +458,8 @@ jobs:
   # La mitad de WhatsApp necesita WHATSAPP_APP_SECRET para firmar como Meta. Si
   # no está, el job falla: saltearla en silencio dejaba verde un chequeo que
   # no había tocado el webhook, que es darla por probada.
+  # Y WHATSAPP_PHONE_NUMBER_ID, que es el número al que le "escribe": el webhook
+  # rutea por él, y sin él el evento se descarta y el caso nunca aparece.
   timbre:
     name: Canales de entrada
     runs-on: ubuntu-latest
@@ -505,6 +509,7 @@ jobs:
           DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
           GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
           WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
 
       - name: Qué significa que esto falle
         if: failure()

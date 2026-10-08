@@ -8,10 +8,9 @@ import { db } from "@/lib/db";
 import { accounts, authUsers, sessions, verifications } from "@/lib/db/schema";
 
 import { resolveBaseURL } from "./base-url";
-import { provisionUserProfile, resolveDefaultTenantId } from "./provision";
-import { rechazoDeAlta } from "./alta-nueva";
+import { provisionUserProfile } from "./provision";
+import { caminoDeAlta } from "./alta-nueva";
 import { ssoInquilino } from "./sso-inquilino";
-import { logger } from "@/lib/observability/logger";
 import { revisarSesionNueva } from "@/server/sso/exigir";
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
@@ -106,7 +105,7 @@ export const auth = betterAuth({
      *
      * Nunca lanza y nunca registra el enlace: ver src/server/notify/password-reset.ts.
      */
-    sendResetPassword: async ({ user, url }) => {
+    sendResetPassword: async ({ user, url }, request) => {
       const { sendPasswordResetEmail } = await import(
         "@/server/notify/password-reset"
       );
@@ -116,6 +115,7 @@ export const auth = betterAuth({
         userId: user.id,
         url,
         duraMinutos: Math.round(RESET_DURA_SEGUNDOS / 60),
+        request,
       });
     },
 
@@ -222,22 +222,17 @@ export const auth = betterAuth({
          * pantalla nuestra. Cerrar solo el formulario habria dejado la puerta
          * de al lado abierta — y esa es la que menos se mira.
          *
-         * Devolver `false` aborta la creacion. La pantalla de registro ademas
-         * comprueba antes, para poder decir algo entendible en vez del error
-         * generico que sale de aca.
+         * `caminoDeAlta` lanza si el alta no entra por ninguna puerta. Lanza
+         * (422) y no devuelve `false`: con `autoSignIn: false`, un `false` o un
+         * 403 en `signUpEmail` se vuelven un usuario de mentira con 200, y la
+         * vuelta de Google se queda sin saber por que no hubo cuenta. Un 422
+         * llega como error, y el callback manda a `/login?error=<codigo>`.
          *
          * Con «Exigir SSO» en el dominio tampoco se crea: el gancho de sesion
          * le negaria la sesion a la cuenta recien hecha y quedaria a medias.
          */
-        before: async (user) => {
-          const email = typeof user.email === "string" ? user.email : "";
-          const motivo = await rechazoDeAlta(email, resolveDefaultTenantId());
-          if (!motivo) return;
-          logger.warn({
-        dominio: email.slice(email.lastIndexOf("@") + 1) || "(sin dominio)",
-        motivo,
-      }, "auth.registro.rechazado");
-          return false;
+        before: async (user, context) => {
+          await caminoDeAlta(typeof user.email === "string" ? user.email : "", context);
         },
         after: async (user) => {
           await provisionUserProfile(user);

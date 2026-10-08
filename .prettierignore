@@ -4,3 +4,5 @@ coverage/
 playwright-report/
 test-results/
 pnpm-lock.yaml
+# Generado: pnpm bases:empaquetar --comprobar lo compara byte a byte.
+src/server/bases/plantilla.generated.ts

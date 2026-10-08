@@ -102,13 +102,15 @@ const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const USER_ID = "20000000-0000-0000-0000-000000000001";
 
-function makeRequest() {
+function makeRequest(body?: unknown) {
   return new NextRequest(`http://localhost/api/cases/${CASE_ID}/re-analyze`, {
     method: "POST",
     headers: {
       "user-agent": "vitest",
       "x-forwarded-for": "127.0.0.1",
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 
@@ -379,6 +381,92 @@ describe("POST /api/cases/:id/re-analyze", () => {
     expect(mockDb.update).not.toHaveBeenCalled();
     expect(mockAfter).not.toHaveBeenCalled();
     expect(mockRunIntakeAgent).not.toHaveBeenCalled();
+  });
+
+  describe("«Marcar como relevante» (marcar_relevante)", () => {
+    const descartado = {
+      id: CASE_ID,
+      status: "no_relevante",
+      assigned_to: null,
+      extraction_lease_at: null,
+      extraction_pending: false,
+    };
+
+    it("un admin sobre un descartado: pone is_claim en true y deja el motivo en la auditoría", async () => {
+      mockDb.select.mockReturnValue(makeSelectChain([descartado]));
+
+      const res = await POST(makeRequest({ marcar_relevante: true }), {
+        params: Promise.resolve({ id: CASE_ID }),
+      });
+
+      expect(res.status).toBe(202);
+      expect(mockDb.update.mock.results[0].value.set.mock.calls[0][0]).toMatchObject({
+        status: "procesando",
+        is_claim: true,
+      });
+      expect(mockWriteAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actor_id: USER_ID,
+          event_type: "case.re_analyze_triggered",
+          payload: { previous_status: "no_relevante", reason: "marcado_relevante" },
+        })
+      );
+      expect(mockAfter).toHaveBeenCalledTimes(1);
+    });
+
+    it("un analista recibe FSM_INVALID_TRANSITION y no se escribe nada", async () => {
+      mockRequireRole.mockResolvedValue({
+        db: mockDb,
+        user: { id: USER_ID },
+        userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "analyst" },
+      });
+      mockDb.select.mockReturnValue(makeSelectChain([descartado]));
+
+      const res = await POST(makeRequest({ marcar_relevante: true }), {
+        params: Promise.resolve({ id: CASE_ID }),
+      });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ error: { code: "FSM_INVALID_TRANSITION" } });
+      expect(mockDb.update).not.toHaveBeenCalled();
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+      expect(mockAfter).not.toHaveBeenCalled();
+    });
+
+    it("sobre un caso que no está descartado responde 409 y no lo toca", async () => {
+      // El default de beforeEach: listo_para_core.
+      const res = await POST(makeRequest({ marcar_relevante: true }), {
+        params: Promise.resolve({ id: CASE_ID }),
+      });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ error: { code: "FSM_INVALID_TRANSITION" } });
+      expect(mockDb.update).not.toHaveBeenCalled();
+      expect(mockAfter).not.toHaveBeenCalled();
+    });
+
+    it("sin el cuerpo, un descartado se re-analiza como siempre: sin is_claim y sin motivo", async () => {
+      mockDb.select.mockReturnValue(makeSelectChain([descartado]));
+
+      const res = await POST(makeRequest(), { params: Promise.resolve({ id: CASE_ID }) });
+
+      expect(res.status).toBe(202);
+      expect(mockDb.update.mock.results[0].value.set.mock.calls[0][0]).not.toHaveProperty("is_claim");
+      expect(mockWriteAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: { previous_status: "no_relevante" } })
+      );
+    });
+
+    it("un cuerpo con marcar_relevante distinto de true se rechaza antes de leer el caso", async () => {
+      const res = await POST(makeRequest({ marcar_relevante: false }), {
+        params: Promise.resolve({ id: CASE_ID }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ error: { code: "VALIDATION_FAILED" } });
+      expect(mockDb.select).not.toHaveBeenCalled();
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
   });
 
   it("returns 401 when requireRole throws (unauthenticated)", async () => {

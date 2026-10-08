@@ -7,6 +7,7 @@
  *  - Schema validation (count bounds, delay_ms bounds, invalid scenario_id)
  *  - Budget exceeded
  *  - Happy path: 202 Accepted with correct accepted count and case_ids
+ *  - Los casos nacen sin póliza ni asegurado sembrados, y el lote no repite escenario
  *  - after() callback runs runIntakeAgent for every created case
  *  - Delay between cases is forwarded to the background callback
  */
@@ -25,7 +26,7 @@ const {
   mockRateLimit,
   mockRunIntakeAgent,
   mockWriteAuditLog,
-  mockGetRandomScenario,
+  mockEscenariosSinRepetir,
   mockGetScenarioById,
   baseSimulada,
 } = vi.hoisted(() => {
@@ -43,7 +44,7 @@ const {
     mockRateLimit: vi.fn(),
     mockRunIntakeAgent: vi.fn(),
     mockWriteAuditLog: vi.fn(),
-    mockGetRandomScenario: vi.fn(),
+    mockEscenariosSinRepetir: vi.fn(),
     mockGetScenarioById: vi.fn(),
   };
 });
@@ -88,7 +89,7 @@ vi.mock("@/lib/audit/log", () => ({
 }));
 
 vi.mock("@/server/intake/scenarios", () => ({
-  getRandomScenario: mockGetRandomScenario,
+  escenariosSinRepetir: mockEscenariosSinRepetir,
   getScenarioById: mockGetScenarioById,
 }));
 
@@ -171,7 +172,9 @@ describe("POST /api/admin/batch-simulate", () => {
     mockCheckBudget.mockResolvedValue({ exceeded: false });
     mockWriteAuditLog.mockResolvedValue(undefined);
     mockRunIntakeAgent.mockResolvedValue(undefined);
-    mockGetRandomScenario.mockReturnValue(DEFAULT_SCENARIO);
+    mockEscenariosSinRepetir.mockImplementation((_ramo: unknown, n: number) =>
+      Array.from({ length: n }, () => DEFAULT_SCENARIO)
+    );
     mockGetScenarioById.mockReturnValue(DEFAULT_SCENARIO);
   });
 
@@ -204,6 +207,18 @@ describe("POST /api/admin/batch-simulate", () => {
     for (const caso of casos) expect(caso).not.toHaveProperty("assigned_to");
   });
 
+  it("crea los casos sin póliza ni asegurado: los completa la extracción, como con un mail real", async () => {
+    await POST(makeRequest({ count: 2 }));
+
+    const casos = casosInsertados.filter((v) => v.status === "procesando");
+    expect(casos).toHaveLength(2);
+    // El texto del escenario no trae la póliza, así que sembrarla dejaba un dato que el mensaje no tiene.
+    for (const caso of casos) {
+      expect(caso).not.toHaveProperty("policy_number");
+      expect(caso).not.toHaveProperty("policyholder_name");
+    }
+  });
+
   it("registers exactly one after() callback", async () => {
     await POST(makeRequest({ count: 2 }));
     expect(mockAfter).toHaveBeenCalledTimes(1);
@@ -230,20 +245,37 @@ describe("POST /api/admin/batch-simulate", () => {
     );
   });
 
-  it("uses getRandomScenario for each case when no claim_type or scenario_id given", async () => {
+  it("sortea el lote entero de una vez cuando no hay claim_type ni scenario_id", async () => {
     await POST(makeRequest({ count: 5 }));
-    expect(mockGetRandomScenario).toHaveBeenCalledTimes(5);
+    expect(mockEscenariosSinRepetir).toHaveBeenCalledTimes(1);
+    expect(mockEscenariosSinRepetir).toHaveBeenCalledWith(undefined, 5);
   });
 
-  it("passes claim_type to getRandomScenario when specified", async () => {
+  it("passes claim_type to escenariosSinRepetir when specified", async () => {
     await POST(makeRequest({ count: 2, claim_type: "robo" }));
-    expect(mockGetRandomScenario).toHaveBeenCalledWith("robo");
+    expect(mockEscenariosSinRepetir).toHaveBeenCalledWith("robo", 2);
+  });
+
+  it("un lote que cabe en el pool no repite escenario", async () => {
+    const real = await vi.importActual<typeof import("@/server/intake/scenarios")>(
+      "@/server/intake/scenarios"
+    );
+    mockEscenariosSinRepetir.mockImplementation(real.escenariosSinRepetir);
+
+    await POST(makeRequest({ count: 30 }));
+
+    // El asunto lleva el id del escenario: dos casos del mismo escenario tendrían el mismo.
+    const asuntos = casosInsertados
+      .map((v) => v.subject)
+      .filter((s): s is string => typeof s === "string");
+    expect(asuntos).toHaveLength(30);
+    expect(new Set(asuntos).size).toBe(30);
   });
 
   it("uses getScenarioById when scenario_id is provided", async () => {
     await POST(makeRequest({ count: 3, scenario_id: "choque-01" }));
     expect(mockGetScenarioById).toHaveBeenCalledWith("choque-01");
-    expect(mockGetRandomScenario).not.toHaveBeenCalled();
+    expect(mockEscenariosSinRepetir).not.toHaveBeenCalled();
   });
 
   it("uses the same fixed scenario for all cases when scenario_id is set", async () => {

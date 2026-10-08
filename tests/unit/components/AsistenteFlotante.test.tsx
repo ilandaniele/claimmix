@@ -1,12 +1,12 @@
 /**
  * AsistenteFlotante — botón flotante y su panel (spec A). `CajaDelAsistente`
  * va mockeada: acá se prueba el flotante (visibilidad por ruta, abrir/cerrar,
- * foco, Escape, panel no modal, persistencia entre cierres), no el contenido
- * de la caja — eso lo prueba `CajaDelAsistente.test.tsx`.
+ * foco, Escape, panel no modal, persistencia entre cierres, minimizar a la
+ * pestaña), no el contenido de la caja — eso lo prueba `CajaDelAsistente.test.tsx`.
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { useEffect, type RefObject } from "react";
 import { AsistenteFlotante } from "../../../src/app/(app)/_components/AsistenteFlotante";
 
@@ -32,6 +32,10 @@ vi.mock("@/app/(app)/asistente/_components/CajaDelAsistente", () => ({
 describe("AsistenteFlotante", () => {
   beforeEach(() => {
     montajes = 0;
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
   });
 
   it("en /asistente no se muestra: la caja entera ya está en pantalla", () => {
@@ -166,5 +170,67 @@ describe("AsistenteFlotante", () => {
 
     await user.click(boton);
     await waitFor(() => expect(document.activeElement).toBe(textarea));
+  });
+
+  it("minimizar oculta la píldora, deja la pestaña y lo guarda en localStorage", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    await user.click(screen.getByRole("button", { name: "Ocultar el botón del asistente" }));
+
+    expect(screen.queryByRole("button", { name: "Preguntale al asistente" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ocultar el botón del asistente" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mostrar el asistente" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("claimmix:asistente-minimizado")).toBe("true");
+  });
+
+  it("al minimizar, el foco va a la pestaña", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    await user.click(screen.getByRole("button", { name: "Ocultar el botón del asistente" }));
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Mostrar el asistente" }));
+  });
+
+  it("la pestaña restaura la píldora, abre el panel y borra la elección guardada", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    await user.click(screen.getByRole("button", { name: "Ocultar el botón del asistente" }));
+    await user.click(screen.getByRole("button", { name: "Mostrar el asistente" }));
+
+    expect(screen.getByRole("button", { name: "Preguntale al asistente" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mostrar el asistente" })).toBeNull();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(window.localStorage.getItem("claimmix:asistente-minimizado")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox")));
+  });
+
+  it("si ya venía minimizado, arranca en la pestaña y no le roba el foco a nadie", async () => {
+    pathname = "/bandeja";
+    window.localStorage.setItem("claimmix:asistente-minimizado", "true");
+    render(<AsistenteFlotante />);
+
+    const pestana = await screen.findByRole("button", { name: "Mostrar el asistente" });
+    expect(screen.queryByRole("button", { name: "Preguntale al asistente" })).toBeNull();
+    expect(document.activeElement).not.toBe(pestana);
+  });
+
+  it("minimizar con el panel abierto lo cierra, pero la caja sigue montada", async () => {
+    pathname = "/bandeja";
+    const user = userEvent.setup();
+    render(<AsistenteFlotante />);
+
+    await user.click(screen.getByRole("button", { name: "Preguntale al asistente" }));
+    await screen.findByTestId("caja-mock");
+    await user.click(screen.getByRole("button", { name: "Ocultar el botón del asistente" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByTestId("caja-mock")).toBeInTheDocument();
+    expect(montajes).toBe(1);
   });
 });

@@ -23,6 +23,7 @@ import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
 import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
 import { revisarDesvios, type ResultadoDeLaRevision } from "@/server/desvios/revision-nocturna";
+import { avisarDesvios } from "@/server/notify/specialist-alert";
 import { aplicarRetencion, type ResultadoRetencion } from "@/server/cases/retencion";
 import { purgarAdjuntos, type ResultadoPurga } from "@/server/storage/purgar-adjuntos";
 import { ventanaDiaria } from "@/core/retencion";
@@ -112,8 +113,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // una por día: un cupo de 24 h la deja pasar sólo a la primera llamada del día.
   // Las reglas que fallaron vuelven en la respuesta: el log solo no lo mira nadie,
   // y barrer-trabados.yml se pone rojo con ellas.
+  //
+  // Cada aseguradora con desvíos nuevos recibe un correo con los conteos (a lo
+  // sumo uno por día, lo limita el aviso). La revisión de mañana sólo cuenta lo
+  // nuevo de mañana: un aviso que hoy no entra en la función no se repite.
   let desviosNuevos = 0;
   let desviosFallidas: ResultadoDeLaRevision["fallidas"] = [];
+  let avisosDeDesvios = 0;
   if (Date.now() < hasta - 60_000) {
     try {
       const cupo = await rateLimit(claveDeCupo("revision-de-desvios"), RATE_LIMIT_CONFIGS.REVISION_DE_DESVIOS);
@@ -121,6 +127,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const revision = await revisarDesvios();
         desviosNuevos = revision.nuevos;
         desviosFallidas = revision.fallidas;
+        for (const [tenantId, porRegla] of Object.entries(revision.porInquilino)) {
+          if (Date.now() >= hasta - 60_000) break;
+          if (await avisarDesvios({ tenantId, porRegla })) avisosDeDesvios += 1;
+        }
       }
     } catch (err) {
       logger.error({ code: errorCode(err) }, "cron_reap_stuck.desvios_fallaron");
@@ -176,6 +186,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     avisos_de_cierre: avisosDeCierre,
     desvios_nuevos: desviosNuevos,
     desvios_fallidas: desviosFallidas,
+    avisos_de_desvios: avisosDeDesvios,
     purga,
     retencion,
     rate_limit_rows_purged: purged,

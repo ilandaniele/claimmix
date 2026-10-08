@@ -96,6 +96,12 @@ vi.mock("@/server/notify/specialist-alert", () => ({
   alertSpecialists: vi.fn().mockResolvedValue(undefined),
 }));
 
+// La guarda de «una derivación, un evento»: la base de verdad no está acá. Por
+// defecto la derivación es nueva; los tests de la guarda la ponen en false.
+vi.mock("@/server/confirmations/derivacion-nueva", () => ({
+  anotarDerivacionSiEsNueva: vi.fn().mockResolvedValue(true),
+}));
+
 // Mock gap analyzer.
 vi.mock("@/server/cases/gap-analyzer", () => ({
   // Real value: the orchestrator resolves pending confirmations against the
@@ -127,6 +133,7 @@ import { deliberate } from "@/server/ai/deliberate";
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
+import { anotarDerivacionSiEsNueva } from "@/server/confirmations/derivacion-nueva";
 
 // ── DB mock builder ───────────────────────────────────────────────────────────
 
@@ -393,6 +400,9 @@ const TENANT_ID = "cccccccc-0000-0000-0000-000000000001";
 const SENDER_EMAIL = "claimant@example.com";
 const NO_MATCHES: CustomerMatch[] = [];
 
+/** Lo que `escalate()` le pidió anotar a la guarda: el evento `claim.specialist_required` ya no pasa por `writeAuditLog`. */
+const derivacionesAnotadas = () => vi.mocked(anotarDerivacionSiEsNueva).mock.calls.map((c) => c[0]);
+
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -403,6 +413,7 @@ beforeEach(() => {
 
   vi.mocked(deliberate).mockResolvedValue(null);
   vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(false);
+  vi.mocked(anotarDerivacionSiEsNueva).mockResolvedValue(true);
 
   // Reset gap analyzer to default (complete claim) for each test.
   vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
@@ -497,11 +508,8 @@ describe("orchestratePostExtraction — high severity (AC11)", () => {
       NO_MATCHES
     );
 
-    const specialistAudit = vi.mocked(writeAuditLog).mock.calls.find(
-      (call) => call[0].event_type === "claim.specialist_required"
-    );
-    expect(specialistAudit).toBeDefined();
-    expect(specialistAudit?.[0].target_id).toBe(CASE_ID);
+    expect(derivacionesAnotadas()).toHaveLength(1);
+    expect(derivacionesAnotadas()[0]).toMatchObject({ caseId: CASE_ID, tenantId: TENANT_ID });
   });
 
   it("sets case status to requiere_especialista for high severity", async () => {
@@ -691,10 +699,7 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
   it("el registro de auditoría no se entera: sólo gravedad y motivo", async () => {
     await derivacion({ severity: "critical", requires_specialist: true, injury_severity: "severe" });
 
-    const registro = vi
-      .mocked(writeAuditLog)
-      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
-    expect(registro?.[0].payload).toEqual({ severity: "critical", reason: "severidad critical" });
+    expect(derivacionesAnotadas()[0].payload).toEqual({ severity: "critical", reason: "severidad critical" });
   });
 
   it("el motivo del agente llega tachado al registro", async () => {
@@ -709,10 +714,7 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
 
     await derivacion({});
 
-    const registro = vi
-      .mocked(writeAuditLog)
-      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
-    expect(registro?.[0].payload).toMatchObject({
+    expect(derivacionesAnotadas()[0].payload).toMatchObject({
       reason: "el DNI [DNI] que escribió no es el del titular",
     });
   });
@@ -720,14 +722,65 @@ describe("orchestratePostExtraction — la derivación con heridos", () => {
   it("con gravedad media, el motivo de la derivación es «lesiones» y no manda otro mensaje", async () => {
     const { salidas } = await derivacion({ severity: "medium", injury_severity: "minor" });
 
-    const registro = vi
-      .mocked(writeAuditLog)
-      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
-    expect(registro?.[0].payload).toEqual({ severity: "medium", reason: "lesiones" });
+    expect(derivacionesAnotadas()[0].payload).toEqual({ severity: "medium", reason: "lesiones" });
 
     const templates = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
     expect(templates).toEqual(["specialist_escalation"]);
     expect(salidas).toHaveLength(1);
+  });
+});
+
+// ── Test suite: una derivación, un evento, un mensaje ────────────────────────
+
+describe("orchestratePostExtraction — una derivación, un evento", () => {
+  const derivar = () =>
+    orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({ severity: "high", requires_specialist: true }),
+        senderEmail: SENDER_EMAIL,
+      },
+      NO_MATCHES
+    );
+
+  const escalaciones = () =>
+    vi.mocked(dispatchOutboundEmail).mock.calls.filter((c) => c[0].template === "specialist_escalation");
+
+  it("con la derivación ya anotada, el asegurado no recibe otro mensaje y el especialista sí se entera", async () => {
+    vi.mocked(anotarDerivacionSiEsNueva).mockResolvedValue(false);
+
+    await derivar();
+
+    expect(escalaciones()).toHaveLength(0);
+    expect(alertSpecialists).toHaveBeenCalledTimes(1);
+  });
+
+  it("con la derivación nueva, el mensaje sale", async () => {
+    await derivar();
+
+    expect(escalaciones()).toHaveLength(1);
+    expect(alertSpecialists).toHaveBeenCalledTimes(1);
+  });
+
+  it("con el caso movido, la guarda ni se consulta", async () => {
+    setupDbMocks({ casoMovido: true });
+
+    await derivar();
+
+    expect(anotarDerivacionSiEsNueva).not.toHaveBeenCalled();
+    expect(escalaciones()).toHaveLength(0);
+  });
+
+  it("dos pasadas sobre el mismo caso: un mensaje, dos avisos al especialista y dos consultas a la guarda", async () => {
+    vi.mocked(anotarDerivacionSiEsNueva).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    await derivar();
+    await derivar();
+
+    expect(escalaciones()).toHaveLength(1);
+    expect(alertSpecialists).toHaveBeenCalledTimes(2);
+    expect(anotarDerivacionSiEsNueva).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -3644,10 +3697,7 @@ describe("orchestratePostExtraction — the agent hands a case to a person", () 
     escalatingPlan();
     await run();
 
-    const entry = vi
-      .mocked(writeAuditLog)
-      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
-    expect(entry?.[0].payload).toMatchObject({ reason: "la póliza venció en 2020" });
+    expect(derivacionesAnotadas()[0].payload).toMatchObject({ reason: "la póliza venció en 2020" });
   });
 
   it("records what it looked up before deciding", async () => {
@@ -4781,12 +4831,8 @@ describe("orchestratePostExtraction — la derivación no manda un segundo mensa
       [conflictoDeTitular()]
     );
 
-    const derivacion = vi
-      .mocked(writeAuditLog)
-      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
-
-    expect(derivacion).toBeDefined();
-    expect(derivacion?.[0].payload).toMatchObject({
+    expect(derivacionesAnotadas()).toHaveLength(1);
+    expect(derivacionesAnotadas()[0].payload).toMatchObject({
       reason: "quien escribe no es el titular de la póliza",
     });
   });
@@ -5782,9 +5828,7 @@ describe("orchestratePostExtraction — el caso ya se movió (E2)", () => {
     expect(
       vi.mocked(dispatchOutboundEmail).mock.calls.some((c) => c[0].template === "specialist_escalation")
     ).toBe(false);
-    expect(
-      vi.mocked(writeAuditLog).mock.calls.some((c) => c[0].event_type === "claim.specialist_required")
-    ).toBe(false);
+    expect(anotarDerivacionSiEsNueva).not.toHaveBeenCalled();
     expect(alertSpecialists).not.toHaveBeenCalled();
   });
 

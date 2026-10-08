@@ -13,6 +13,7 @@
 
 "use client";
 
+import type { EstadoDelDocumento } from "@/core/case/estado-del-documento";
 import type { LecturaGuardada } from "@/core/case/presupuesto-taller";
 import { useT } from "@/lib/i18n/LocaleContext";
 import type { ClaveDelCliente } from "@/lib/i18n";
@@ -44,13 +45,28 @@ interface Attachment {
   lectura_presupuesto: LecturaGuardada | null;
 }
 
+/** Un documento que el tipo de siniestro pide, con el nombre ya resuelto. */
+export interface Esperado {
+  clave: string;
+  etiqueta: string;
+  estado: EstadoDelDocumento;
+}
+
 interface AttachmentsPanelProps {
   attachments: Attachment[];
   caseId: string;
   puedeAbrir: boolean;
   /** El mismo corte que cambiar el estado del caso; sin él, la lectura se ve y no se pide. */
   puedeLeerPresupuesto?: boolean;
+  /** Qué se espera para este tipo de siniestro. Sin esto, un caso sin adjuntos sólo dice que no hay. */
+  esperados?: Esperado[];
 }
+
+const CLAVE_DEL_ESTADO: Record<EstadoDelDocumento, ClaveDelCliente> = {
+  pending: "doc.status.pending",
+  received: "doc.status.received",
+  declined: "doc.status.declined",
+};
 
 /** Format bytes as human-readable size string (e.g. "1.2 MB") */
 function formatBytes(bytes: number): string {
@@ -130,13 +146,32 @@ export function AttachmentsPanel({
   caseId,
   puedeAbrir,
   puedeLeerPresupuesto = false,
+  esperados,
 }: AttachmentsPanelProps) {
   const t = useT();
   if (attachments.length === 0) {
     return (
-      <p className="text-sm text-slate-500">
-        {t("case.detail.noAttachments")}
-      </p>
+      <>
+        <p className="text-sm text-slate-500">
+          {t("case.detail.noAttachments")}
+        </p>
+        {esperados &&
+          (esperados.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">{t("case.detail.adjuntosSinEsperados")}</p>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-slate-500">{t("case.detail.adjuntosEsperados")}</p>
+              <ul className="mt-1 space-y-1">
+                {esperados.map((e) => (
+                  <li key={e.clave} className="flex items-start justify-between gap-3 text-sm text-slate-700">
+                    <span>{e.etiqueta}</span>
+                    <span className="shrink-0 text-xs text-slate-500">{t(CLAVE_DEL_ESTADO[e.estado])}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ))}
+      </>
     );
   }
 

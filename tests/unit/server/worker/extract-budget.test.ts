@@ -20,13 +20,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function correr(presupuesto: Record<string, unknown>) {
+async function correr(presupuesto: Record<string, unknown>, casoMovido = false) {
   vi.resetModules();
 
   const espiaDeUpdate = vi.fn();
   const { espiaDeAuditoria } = registrarMocks({
     fila: filaDeCaso(CASE_ID, TENANT_ID, { channel: "email" }),
     espiaDeUpdate,
+    casoMovido,
   });
 
   const aviso = vi.fn().mockResolvedValue(undefined);
@@ -90,5 +91,28 @@ describe("runEmailExtractionWorker — presupuesto agotado", () => {
     const excedidos = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.budget_exceeded");
     expect(excedidos).toHaveLength(1);
     expect(excedidos[0][0]).toMatchObject({ tenant_id: TENANT_ID, target_id: CASE_ID, payload: { reason: "tope" } });
+  });
+
+  // Ese evento alimenta la regla de derivación y las métricas del trayecto:
+  // sin él, el cambio a escalado no tiene quién lo cuente.
+  it("el escalado deja un ai.extracted con el cambio de estado y el motivo", async () => {
+    const { espiaDeAuditoria } = await correr({ exceeded: true, reason: "tope", motivo: "anonimo" });
+
+    const escalados = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.extracted");
+    expect(escalados).toHaveLength(1);
+    expect(escalados[0][0]).toMatchObject({
+      tenant_id: TENANT_ID,
+      target_id: CASE_ID,
+      payload: { new_status: "escalado", reason: "budget_exceeded", error_code: "AI_BUDGET_EXCEEDED" },
+    });
+    expect(escalados[0][0].payload).not.toHaveProperty("status_not_applied");
+  });
+
+  it("si otra mano ya movió el caso, el ai.extracted avisa que el estado no se aplicó", async () => {
+    const { espiaDeAuditoria } = await correr({ exceeded: true, reason: "tope", motivo: "anonimo" }, true);
+
+    const escalados = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.extracted");
+    expect(escalados).toHaveLength(1);
+    expect(escalados[0][0].payload).toMatchObject({ new_status: "escalado", status_not_applied: true });
   });
 });

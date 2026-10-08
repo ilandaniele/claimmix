@@ -26,6 +26,7 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 
+import { faltantesVigentes } from "@/core/case/faltantes-vigentes";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { digitsOnlyEquals, policyNumberEquals } from "@/lib/db/helpers";
 import { customers, insuredAssets, policies } from "@/lib/db/schema";
@@ -285,8 +286,8 @@ const historialDelCaso: AgentTool = {
     const fields = await enTenant(tenantCtx, (db) =>
       db
         .select({
-          key: extractedFields.field_key,
-          value: extractedFields.field_value,
+          field_key: extractedFields.field_key,
+          field_value: extractedFields.field_value,
           confidence: extractedFields.confidence,
         })
         .from(extractedFields)
@@ -298,9 +299,9 @@ const historialDelCaso: AgentTool = {
     const docs = await enTenant(tenantCtx, (db) =>
       db
         .select({
-          key: missingDocs.doc_key,
-          satisfied: missingDocs.satisfied_at,
-          declined: missingDocs.declined_at,
+          doc_key: missingDocs.doc_key,
+          satisfied_at: missingDocs.satisfied_at,
+          declined_at: missingDocs.declined_at,
         })
         .from(missingDocs)
         .where(
@@ -310,13 +311,13 @@ const historialDelCaso: AgentTool = {
 
     return {
       datos: fields.map((f) => ({
-        campo: f.key,
-        valor: f.value,
+        campo: f.field_key,
+        valor: f.field_value,
         certeza: Number(f.confidence),
       })),
-      documentos: docs.map((d) => ({
-        documento: d.key,
-        estado: d.satisfied ? "recibido" : d.declined ? "no lo tienen" : "pendiente",
+      documentos: faltantesVigentes(docs, fields).map((d) => ({
+        documento: d.doc_key,
+        estado: d.satisfied_at ? "recibido" : d.declined_at ? "no lo tienen" : "pendiente",
       })),
     };
   },

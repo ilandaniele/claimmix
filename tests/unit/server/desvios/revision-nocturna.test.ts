@@ -30,15 +30,22 @@ let consultas: Consulta[] = [];
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
-/** Contesta con las filas insertadas de cada regla, en el orden en que corren. */
-function insertadas(...cuentas: Array<number | Error>) {
+type Fila = { tenant_id: string };
+
+/**
+ * Contesta con lo insertado por cada regla, en el orden en que corren: un número
+ * (cuántas filas, sin decir de quién), un error, o las filas que devuelve el
+ * `returning tenant_id`.
+ */
+function insertadas(...cuentas: Array<number | Error | Fila[]>) {
   consultas = [];
   m.execute.mockImplementation(async (q: SQL) => {
     const { sql, params } = dialecto.sqlToQuery(q);
     consultas.push({ sql: norm(sql), params });
     const c = cuentas[consultas.length - 1] ?? 0;
     if (c instanceof Error) throw c;
-    return { rowCount: c };
+    if (Array.isArray(c)) return { rowCount: c.length, rows: c };
+    return { rowCount: c, rows: Array.from({ length: c }, () => ({ tenant_id: "inquilino-1" })) };
   });
 }
 
@@ -66,7 +73,7 @@ describe("revisarDesvios", () => {
 
     for (const c of consultas) {
       expect(c.sql).toMatch(/^insert into "case_desvios" \(case_id, tenant_id, regla, ancla, dato\) select /);
-      expect(c.sql).toMatch(/on conflict \(case_id, regla, ancla\) do nothing$/);
+      expect(c.sql).toMatch(/on conflict \(case_id, regla, ancla\) do nothing returning tenant_id$/);
     }
   });
 
@@ -84,6 +91,30 @@ describe("revisarDesvios", () => {
     });
     expect(r.nuevos).toBe(10);
     expect(r.fallidas).toEqual([]);
+  });
+
+  it("cuenta por inquilino lo que devuelve el returning tenant_id de cada regla", async () => {
+    insertadas(
+      [{ tenant_id: "a" }, { tenant_id: "a" }, { tenant_id: "b" }],
+      0,
+      [{ tenant_id: "b" }],
+      0,
+      [{ tenant_id: "a" }]
+    );
+
+    const r = await revisarDesvios();
+
+    expect(r.porInquilino).toEqual({
+      a: { doc_sin_recibir: 2, plan_sin_terminar: 1 },
+      b: { doc_sin_recibir: 1, derivacion_sin_respuesta: 1 },
+    });
+    expect(r.nuevos).toBe(5);
+  });
+
+  it("sin desvíos nuevos no hay inquilinos", async () => {
+    const r = await revisarDesvios();
+
+    expect(r.porInquilino).toEqual({});
   });
 
   it("si una regla falla se registra con su nombre y las demás corren igual", async () => {
@@ -177,10 +208,31 @@ describe("doc_sin_recibir", () => {
     await revisarDesvios();
     const { sql, params } = de("doc_sin_recibir");
 
-    expect(sql).toContain("where d.pedido <= now() - $1::int * interval '1 hour'");
-    expect(params).toEqual([72]);
+    expect(sql).toContain("where d.pedido <= now() - $2::int * interval '1 hour'");
+    // La confianza mínima del dato presente va primero (la usa el not exists); las horas, después.
+    expect(params).toEqual([0.6, 72]);
     expect(sql).toContain("group by d.case_id, d.tenant_id, d.pedido");
     expect(sql).toContain(`'doc_sin_recibir', d.pedido, left(string_agg(distinct d.doc_key, ','), 200)`);
+  });
+
+  it("clave canónica y alias son el mismo documento: el pedido y el pendiente se juntan por la canónica", async () => {
+    await revisarDesvios();
+    const { sql } = de("doc_sin_recibir");
+
+    expect(sql).toContain("case m.doc_key when 'nombre_asegurado' then 'full_name'");
+    expect(sql).toContain("else m.doc_key end as doc_key");
+    expect(sql).toMatch(/\(m\.doc_key = any\(o\.asked_keys\) or case m\.doc_key when .* else m\.doc_key end = any\(o\.asked_keys\)\)/);
+  });
+
+  it("un documento que ya cubre un dato extraído con confianza no es un desvío", async () => {
+    await revisarDesvios();
+    const { sql } = de("doc_sin_recibir");
+
+    expect(sql).toMatch(/not exists \( select 1 from "extracted_fields" ef join \(values \('full_name', 'full_name'\)/);
+    expect(sql).toContain("('full_name', 'nombre_asegurado')");
+    expect(sql).toContain("on ef.field_key = c.campo where ef.case_id = m.case_id");
+    expect(sql).toContain("coalesce(trim(ef.field_value), '') <> ''");
+    expect(sql).toContain("ef.confidence >= $1");
   });
 });
 
@@ -259,6 +311,19 @@ describe("derivacion_sin_respuesta", () => {
   it("el ancla es esa marca y no lleva dato", async () => {
     await revisarDesvios();
     expect(de("derivacion_sin_respuesta").sql).toContain(`'derivacion_sin_respuesta', r.t, null::text`);
+  });
+
+  it("sin marca de derivación, la escalada por falla cuenta desde su paso a escalado, y con marca gana la marca", async () => {
+    await revisarDesvios();
+    const { sql } = de("derivacion_sin_respuesta");
+
+    expect(sql).toContain("select coalesce( min(a.created_at) filter (where a.event_type in ('claim.specialist_required', 'claim.specialist_alerted')),");
+    // El segundo término del coalesce sólo mira cambios de estado hacia escalado que se aplicaron.
+    expect(sql).toMatch(
+      /min\(a\.created_at\) filter \(where a\.event_type in \('case\.status_changed'[^)]*\) and coalesce\(a\.payload->>'new_status', a\.payload->>'to'\) in \('escalado', 'requiere_especialista'\) and \(a\.payload->>'status_not_applied'\) is distinct from 'true'\)/
+    );
+    // Y el lateral lee las dos familias de eventos, la marca y el cambio de estado.
+    expect(sql).toContain("and a.event_type in ('claim.specialist_required', 'claim.specialist_alerted', 'case.status_changed',");
   });
 });
 

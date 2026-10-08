@@ -131,7 +131,6 @@ export async function POST(request: NextRequest): Promise<Response> {
    */
   let claimType: ClaimType | null;
   let policyholderName: string | null = null;
-  let policyNumber: string | null = null;
 
   if (input.scenario_id) {
     const scenario = getScenarioById(input.scenario_id);
@@ -146,7 +145,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     rawText = scenario.raw_text;
     claimType = scenario.case_type;
     policyholderName = scenario.policyholder_name;
-    policyNumber = scenario.policy_number;
   } else {
     rawText = input.raw_text!;
     claimType = input.case_type ?? null;
@@ -201,8 +199,6 @@ export async function POST(request: NextRequest): Promise<Response> {
           .insert(cases)
           .values({
             tenant_id: userRow.tenant_id,
-            policy_number: policyNumber,
-            policyholder_name: policyholderName,
             claim_type: claimType,
             status: "procesando",
             confidence_min: null,

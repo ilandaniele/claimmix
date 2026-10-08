@@ -3,8 +3,8 @@
  * la aseguradora (B10).
  *
  *   art. 46  el asegurado denuncia el siniestro dentro de los 3 días de
- *            conocerlo. Es un plazo DEL ASEGURADO: acá sólo informa si llegó
- *            en término, no vence nada del analista.
+ *            conocerlo. Es un plazo DEL ASEGURADO: acá sólo señala cuántos días
+ *            pasaron, no decide si llegó en término ni vence nada del analista.
  *   art. 56  el asegurador se pronuncia dentro de los 30 días de recibida la
  *            información completa. Lo anclamos a `listo_para_core`, que es
  *            cuando el agente da el caso por completo. Es una aproximación y
@@ -147,19 +147,21 @@ export function limitesDelFiltro(filtro: FiltroDeVencimiento, ahora: Date): { de
 }
 
 /**
- * Si el asegurado denunció dentro de los 3 días del hecho (art. 46).
- * `fechaHecho` es la que dijo él (`AAAA-MM-DD` o `dd/mm/aaaa`); `recibidoEn`, el
- * momento en que entró el caso. Sin una fecha que sirva, o con el hecho después
- * de la denuncia, no se opina.
+ * Cuántos días pasaron entre el hecho y la denuncia (art. 46), como señal para
+ * revisar y no como decisión: el plazo corre desde que el asegurado conoció el
+ * siniestro y admite excepciones, y eso lo evalúa una persona.
+ * `fechaHecho` es la que leyó el agente (`AAAA-MM-DD` o `dd/mm/aaaa`);
+ * `recibidoEn`, el momento en que entró el caso. Sin una fecha que sirva, o con
+ * el hecho después de la denuncia, no se opina.
  */
-export function denunciaEnTermino(
+export function diasHastaLaDenuncia(
   fechaHecho: string | null | undefined,
   recibidoEn: string | Date | null | undefined
-): { enTermino: boolean; dias: number } | null {
+): { dias: number; superaArt46: boolean } | null {
   if (!recibidoEn) return null;
   const hecho = dia(fechaHecho);
   const recibido = dia(diaArgentino(new Date(recibidoEn)));
   if (hecho === null || recibido === null || recibido < hecho) return null;
   const dias = Math.round((recibido - hecho) / DIA_MS);
-  return { enTermino: dias <= PLAZOS_LEGALES.art46.dias, dias };
+  return { dias, superaArt46: dias > PLAZOS_LEGALES.art46.dias };
 }

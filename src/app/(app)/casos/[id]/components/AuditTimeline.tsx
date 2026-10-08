@@ -20,6 +20,10 @@ interface AuditLogEntry {
   event_type: string;
   created_at: string;
   reason: string | null;
+  /** El nombre de la persona que lo hizo; el id no viaja. */
+  actor_name?: string | null;
+  /** Hubo una persona detrás, aunque ya no tenga nombre. Sin ella, fue el sistema. */
+  con_actor?: boolean;
 }
 
 interface AuditTimelineProps {
@@ -57,6 +61,9 @@ const MOTIVOS_DEL_CASO: Record<string, ClaveDelCliente> = {
   tomar_el_control: "case.detail.tomarElControl",
   tope_por_remitente: "case.detail.motivo.topePorRemitente",
   tope_por_formulario: "case.detail.motivo.topePorFormulario",
+  marcado_relevante: "case.detail.motivo.marcadoRelevante",
+  clasificador: "case.detail.motivo.clasificador",
+  budget_exceeded: "audit.ai.budget_exceeded",
   devolver_al_agente: "case.detail.devolverAlAgente",
   entregado_por_fuera: "case.detail.motivo.entregadoPorFuera",
   plantilla_sin_aprobar: "reenvio.motivo.plantilla_sin_aprobar",
@@ -82,6 +89,19 @@ function motivoLegible(
   if (m) return t("case.detail.motivo.severidad").replace("{nivel}", t(`severity.${m[1]}` as ClaveDelCliente));
 
   return reason;
+}
+
+/** Quién hizo el evento. Sin dato de autoría (`con_actor` ausente) no se afirma nada. */
+function Autor({ event, t }: { event: AuditLogEntry; t: (key: ClaveDelCliente) => string }) {
+  const autor =
+    event.actor_name ||
+    (event.con_actor === undefined ? null : t(event.con_actor ? "audit.actor.persona" : "audit.actor.sistema"));
+  if (!autor) return null;
+  return (
+    <p className="text-xs text-slate-500" data-testid="autor-del-evento">
+      {autor}
+    </p>
+  );
 }
 
 function dotColor(eventType: string): string {
@@ -125,6 +145,7 @@ export function AuditTimeline({ events, channel }: AuditTimelineProps) {
             >
               {formatDate(event.created_at, locale)}
             </time>
+            <Autor event={event} t={t} />
             {/*
               * El motivo, traducido cuando es un código de rechazo de adjunto.
               *

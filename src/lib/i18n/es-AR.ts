@@ -82,9 +82,9 @@ export const esAR = {
   "status.info_faltante": "Info faltante",
   "status.confirmacion_pendiente": "Confirmación pendiente",
   "status.requiere_especialista": "Requiere especialista",
-  "status.listo_para_core": "Listo para Core",
-  "status.enviado_a_core": "Enviado a Core",
-  "status.error_core": "Error Core",
+  "status.listo_para_core": "Listo para entregar",
+  "status.enviado_a_core": "Entregado al sistema central",
+  "status.error_core": "Falló la entrega",
   "status.no_relevante": "No relevante",
   // Después de la entrega; los marca una persona (B25)
   "status.en_liquidacion": "En liquidación",
@@ -131,6 +131,12 @@ export const esAR = {
   "table.col.assignedTo": "Asignación",
   "table.col.vencimiento": "Vence",
   "table.col.complejidad": "Complejidad",
+  "table.col.motivoDescarte": "Motivo del descarte",
+  "table.col.asuntoRemitente": "Asunto / remitente",
+  // Respaldo cuando el caso descartado no trae un motivo propio del modelo.
+  "noRelevante.motivoPorDefecto": "La IA determinó que no es una denuncia",
+  "noRelevante.marcarRelevante": "Marcar como relevante",
+  "noRelevante.marcado": "Marcado como relevante: vuelve al agente",
 
   // ── Bandeja actions ────────────────────────────────────────────────────────
   "bandeja.simulate": "Simular nuevo email",
@@ -203,7 +209,7 @@ export const esAR = {
   "tardio.tipo.consulta_estado": "Pregunta cómo va",
   "tardio.tipo.otro": "Otra cosa",
   "tardio.tipo.sin_clasificar": "Sin clasificar",
-  "case.detail.exportToCore": "Exportar al Core",
+  "case.detail.exportToCore": "Entregar al sistema central",
   "case.detail.markComplete": "Marcar completo",
   "case.detail.resolveEscalated": "Resolver escalado → Listo",
   "case.detail.processing": "Procesando...",
@@ -288,13 +294,17 @@ export const esAR = {
   "close.error": "Error al cerrar el siniestro. Intentá de nuevo.",
   "close.errorFsm": "Ese cambio de situación no es válido.",
 
-  // ── Listo para Core: confirmación de una persona (P6) ───────────────────────
+  // ── Listo para entregar: confirmación de una persona (P6) ───────────────────────
   "case.detail.confirmarListo": "Confirmar y dejar listo",
-  "case.detail.confirmado": "Quedó confirmado como listo para Core",
+  "case.detail.confirmado": "Quedó confirmado como listo para entregar",
   "case.detail.confirmadoPor": "Confirmado por {quien}",
   "case.detail.confirmadoAnonimo": "Confirmado por el equipo",
-  "case.detail.revisadoListo": "Revisado: pasar a Listo para Core",
-  "audit.case.ready_confirmed": "Una persona lo confirmó como listo para Core",
+  "case.detail.revisadoListo": "Revisado: dejar listo para entregar",
+  "audit.case.ready_confirmed": "Una persona lo confirmó como listo para entregar",
+  // Dejarlo listo con datos o documentos todavía pendientes: {lista} son sus nombres.
+  "listoConFaltantes.title": "¿Dejarlo listo con faltantes?",
+  "listoConFaltantes.description": "Todavía falta: {lista}. El agente deja de pedirlos.",
+  "listoConFaltantes.confirm": "Dejarlo listo igual",
 
   // ── Escalate dialog ────────────────────────────────────────────────────────
   "escalate.title": "Escalar siniestro",
@@ -388,7 +398,7 @@ export const esAR = {
   "audit.claim.late_message_alerted": "Se avisó al especialista del mensaje nuevo",
   "audit.claim.workshop_estimate_read": "Se leyó el presupuesto del taller",
   "audit.policy.conditions_uploaded": "Se subieron las condiciones de la póliza",
-  "audit.claim.case_reopened": "Se reabrió por un mensaje nuevo",
+  "audit.claim.case_reopened": "Se reabrió",
   "audit.claim.closed_abandoned": "Se cerró porque el asegurado no contestó",
   "audit.claim.field_confirmed": "Se confirmó un dato",
   "audit.claim.field_rejected": "Se descartó un dato",
@@ -417,6 +427,9 @@ export const esAR = {
   "audit.doc.received": "Llegó un documento",
   "audit.ai.extraction_started": "Empezó el análisis",
   "audit.whatsapp.received": "Llegó un mensaje por WhatsApp",
+  // Quién hizo cada evento del historial: el nombre cuando lo hay, y si no, esto.
+  "audit.actor.sistema": "Automático",
+  "audit.actor.persona": "Alguien del equipo",
 
   // ── Supplemental pages ─────────────────────────────────────────────────────
   "analisis.title": "Análisis",
@@ -546,9 +559,10 @@ export const esAR = {
   // B10, B11: vencimiento, denuncia en término y plan de trabajo en la ficha.
   "plazo.art46": "Denuncia del siniestro (art. 46)",
   "plazo.art56": "Pronunciamiento del asegurador (art. 56)",
-  "denuncia.enTermino": "En término ({n} d)",
-  "denuncia.fueraDeTermino": "Fuera de término ({n} d)",
-  "denuncia.ayuda": "Días entre el hecho y la denuncia. La Ley 17.418 da 3 días (art. 46).",
+  "denuncia.dias": "{n} d del hecho a la denuncia",
+  "denuncia.revisar": "{n} d del hecho a la denuncia · revisar",
+  "denuncia.ayuda":
+    "Señal para revisar, no una decisión. Cuenta desde la fecha del hecho que leyó el agente hasta que el caso entró a ClaimMix. El art. 46 de la Ley 17.418 da 3 días desde que el asegurado conoció el siniestro y admite excepciones; lo evalúa una persona del equipo. No se le informa al asegurado.",
   "planDeTrabajo.proximos": "Próximos pasos",
   "planDeTrabajo.hechos": "Hechos",
   "planDeTrabajo.automatico": "automático",
@@ -594,6 +608,8 @@ export const esAR = {
   "case.detail.severity": "Severidad",
   "case.detail.noConfirmations": "Sin confirmaciones pendientes.",
   "case.detail.noAttachments": "Sin adjuntos.",
+  "case.detail.adjuntosEsperados": "Se esperan para este tipo de siniestro:",
+  "case.detail.adjuntosSinEsperados": "Este tipo de siniestro no pide documentos.",
   "case.detail.confirmField": "Confirmar",
   "case.detail.rejectField": "Rechazar",
   "case.detail.fieldKey": "Campo",
@@ -622,6 +638,8 @@ export const esAR = {
   "case.detail.motivo.entregadoPorFuera": "Entregado a la aseguradora por fuera de la app",
   "case.detail.motivo.topePorRemitente": "No se analizó: el remitente superó su cupo",
   "case.detail.motivo.topePorFormulario": "No se analizó: el formulario superó su cupo diario",
+  "case.detail.motivo.clasificador": "Lo descartó el clasificador de IA",
+  "case.detail.motivo.marcadoRelevante": "Lo marcó como relevante una persona",
 
   // ── Por qué un adjunto no quedó guardado ───────────────────────────────────
   // La fila rechazada se escribe para que el analista vea que le mandaron algo
@@ -1145,6 +1163,8 @@ export const esAR = {
   // ── Asistente flotante — el mismo asistente, en un panel sobre cualquier página ─
   "asistente.flotante.abrir": "Preguntale al asistente",
   "asistente.flotante.cerrar": "Cerrar asistente",
+  "asistente.flotante.minimizar": "Ocultar el botón del asistente",
+  "asistente.flotante.mostrar": "Mostrar el asistente",
 
   // ── Ayuda — cómo se usa la interfaz, mismo texto en la demo y en la app ─
   "ayuda.abrir": "Ayuda: cómo se usa",

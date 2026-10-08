@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import { ID_PANEL_DE_LA_LISTA } from "./components/ids";
-import { contarPorOpcion } from "@/core/case/filtro-de-estado";
+import { contarPorOpcion, type ClaveDeEstado } from "@/core/case/filtro-de-estado";
 import { usePaginacion } from "./components/useFilterParam";
 import { NavegacionPendienteProvider, useNavegacion } from "./components/navegacion-pendiente";
 import { BotonDeFiltros, MarcasDeFiltros } from "./components/PanelDeFiltros";
@@ -273,10 +273,11 @@ interface DashboardClientProps {
   scenarios: readonly OpcionDeEscenario[];
   allStatusCounts: { status: CaseStatus | "todos"; count: number }[];
   /**
-   * "lista" o "tablero". `vista` no es un filtro: page.tsx ya lo validó, y
-   * ausente es "lista" — la pantalla de siempre, sin cambios.
+   * El total real de cada columna del tablero, bajo todos los filtros. Sólo lo
+   * trae la consulta del tablero; sin él (la lista) el tablero se arma con los
+   * contadores de las pestañas.
    */
-  vista?: "lista" | "tablero";
+  totalesDelTablero?: Record<ClaveDeEstado, number>;
   /** Los tipos de siniestro propios de la aseguradora, con el nombre en el idioma de la cuenta. */
   tiposPropios?: readonly TipoPropio[];
 }
@@ -285,7 +286,7 @@ function DashboardClientInterno({
   initialData,
   scenarios,
   allStatusCounts,
-  vista = "lista",
+  totalesDelTablero,
   tiposPropios = [],
 }: DashboardClientProps) {
   const t = useT();
@@ -300,15 +301,24 @@ function DashboardClientInterno({
    */
   const { pending, paramsVisibles, empujar } = useNavegacion();
   /*
-   * El switch lista/tablero cambia sólo el parámetro `vista`, sin tocar page
-   * ni el resto de los filtros: no es un filtro, es otra forma de mirar lo
-   * mismo.
+   * La vista sale de `paramsVisibles` como lo demás: el botón se aprieta en el
+   * acto y no cuando el servidor contesta. `vista` no es un filtro; cualquier
+   * valor que no sea "tablero" es la lista de siempre.
+   */
+  const vistaActual: "lista" | "tablero" = paramsVisibles.get("vista") === "tablero" ? "tablero" : "lista";
+  /*
+   * El switch lista/tablero cambia el parámetro `vista` y deja los filtros: no
+   * es un filtro, es otra forma de mirar lo mismo. Pero cada vista pide su
+   * propia consulta al servidor —la del tablero trae las más nuevas de CADA
+   * columna—, así que va por `empujar`, y sin `page`: el tablero no pagina y
+   * volver a la lista en la página 4 de otra consulta es una página vacía.
    */
   const irAVista = useCallback(
     (v: "lista" | "tablero") => {
       const params = new URLSearchParams(paramsVisibles.toString());
       if (v === "lista") params.delete("vista");
       else params.set("vista", v);
+      params.delete("page");
       const query = params.toString();
       empujar(query ? `${pathname}?${query}` : pathname);
     },
@@ -338,6 +348,7 @@ function DashboardClientInterno({
     const p = new URLSearchParams(searchParams.toString());
     p.delete("page");
     p.delete("per_page");
+    p.delete("vista");
     return p.toString();
   })();
   const activePage = parseInt(paramsVisibles.get("page") ?? "1", 10) || 1;
@@ -349,6 +360,13 @@ function DashboardClientInterno({
   // Lo que pide el sondeo: la URL, no el destino de una navegación en vuelo.
   const sondeaLaCola =
     searchParams.get("para_responder") === "true" || searchParams.get("cola") === "mia";
+  /*
+   * En el tablero tampoco se mezclan filas: una fila nueva puede no ser de las
+   * veinte más nuevas de su columna, y el total de la columna lo sabe sólo el
+   * servidor.
+   */
+  const enElTablero = searchParams.get("vista") === "tablero";
+  const pideAlServidor = sondeaLaCola || enElTablero;
   const router = useRouter();
 
   const [seleccionando, setSeleccionando] = useState(false);
@@ -476,6 +494,22 @@ function DashboardClientInterno({
   }, []);
 
   // ── Realtime handlers ──────────────────────────────────────────────────────
+  /*
+   * El sondeo llama a un manejador por fila cambiada, y cada `router.refresh()`
+   * vuelve a renderizar /bandeja entera: el router no los junta, los encola y
+   * los corre uno tras otro. El bucle del sondeo es sincrónico, así que lo que
+   * pida refrescar en una misma vuelta se junta en un solo pedido.
+   */
+  const refrescoPendiente = useRef(false);
+  const refrescar = useCallback(() => {
+    if (refrescoPendiente.current) return;
+    refrescoPendiente.current = true;
+    queueMicrotask(() => {
+      refrescoPendiente.current = false;
+      router.refresh();
+    });
+  }, [router]);
+
   const handleInsert = useCallback(
     (newCase: CaseRow) => {
       /*
@@ -484,8 +518,8 @@ function DashboardClientInterno({
        * toda la bandeja. Dónde va y cuántos quedan lo sabe el servidor, que
        * ordena por la marca.
        */
-      if (sondeaLaCola) {
-        router.refresh();
+      if (pideAlServidor) {
+        refrescar();
         return;
       }
       setCases((prev) => mergeCaseUpdate(prev, newCase, "insert"));
@@ -499,13 +533,15 @@ function DashboardClientInterno({
       );
       addToast(`${t("bandeja.toastNew")} ${formatCaseNumber(newCase.id)}`, "info");
     },
-    [addToast, t, sondeaLaCola, router]
+    [addToast, t, pideAlServidor, refrescar]
   );
 
   const handleUpdate = useCallback(
     (updatedCase: CaseRow, prevStatus: CaseStatus | null) => {
       setCases((prev) => mergeCaseUpdate(prev, updatedCase, "update"));
       if (prevStatus && prevStatus !== updatedCase.status) {
+        // Una tarjeta que cambia de columna mueve dos totales que sólo el servidor tiene.
+        if (enElTablero) refrescar();
         setStatusCountsBase((prev) =>
           prev.map((item) => {
             if (item.status === prevStatus)
@@ -532,7 +568,7 @@ function DashboardClientInterno({
         );
       }
     },
-    [addToast, t, estadosActivos]
+    [addToast, t, estadosActivos, enElTablero, refrescar]
   );
 
   /*
@@ -541,9 +577,9 @@ function DashboardClientInterno({
    */
   const handleCompleta = useCallback(
     (ids: ReadonlySet<string>) => {
-      if (sondeaLaCola && cases.some((c) => !ids.has(c.id))) router.refresh();
+      if (pideAlServidor && cases.some((c) => !ids.has(c.id))) refrescar();
     },
-    [sondeaLaCola, cases, router]
+    [pideAlServidor, cases, refrescar]
   );
 
   useCasesRealtime({ onInsert: handleInsert, onUpdate: handleUpdate, onCompleta: handleCompleta });
@@ -622,17 +658,17 @@ function DashboardClientInterno({
               <div className="flex items-center gap-0.5 rounded-full bg-slate-100 p-0.5">
                 <button
                   type="button"
-                  aria-pressed={vista === "lista"}
+                  aria-pressed={vistaActual === "lista"}
                   onClick={() => irAVista("lista")}
-                  className={claseChip(vista === "lista")}
+                  className={claseChip(vistaActual === "lista")}
                 >
                   {t("bandeja.vista.lista")}
                 </button>
                 <button
                   type="button"
-                  aria-pressed={vista === "tablero"}
+                  aria-pressed={vistaActual === "tablero"}
                   onClick={() => irAVista("tablero")}
-                  className={claseChip(vista === "tablero")}
+                  className={claseChip(vistaActual === "tablero")}
                 >
                   {t("bandeja.vista.tablero")}
                 </button>
@@ -733,8 +769,18 @@ function DashboardClientInterno({
             * `role="tablist"` de las pestañas, y sin ellos un lector anuncia
             * «pestaña 2 de 6» sin ningún panel al que esa pestaña lleve.
             */}
-          {vista === "tablero" ? (
-            <Tablero casos={visibleCases} totales={cuentasDeEstado} />
+          {vistaActual === "tablero" ? (
+            <div
+              className={`h-full transition-opacity ${pending ? "pointer-events-none opacity-60" : ""}`}
+              aria-busy={pending}
+            >
+              <Tablero
+                casos={visibleCases}
+                totales={totalesDelTablero ?? cuentasDeEstado}
+                tiposPropios={tiposPropios}
+                paramsActuales={paramsVisibles.toString()}
+              />
+            </div>
           ) : (
             <div
               id={ID_PANEL_DE_LA_LISTA}
@@ -750,6 +796,7 @@ function DashboardClientInterno({
                 seleccionando={seleccionando}
                 desde={paraResponder ? "para_responder" : undefined}
                 tiposPropios={tiposPropios}
+                descartes={activeIsClaim === "false"}
               />
             </div>
           )}
@@ -761,9 +808,10 @@ function DashboardClientInterno({
           * cambiar de página. Ahora la lista se mueve y el control se queda.
           *
           * En el tablero no hay paginador: cada columna ya muestra "N de M" y
-          * el link "ver todos" lleva al resto en la lista.
+          * el link "Ver todos" lleva al resto en la lista, con los filtros que
+          * están puestos.
           */}
-        {vista === "lista" && visibleTotal > 0 && (
+        {vistaActual === "lista" && visibleTotal > 0 && (
           <Pagination
             page={activePage}
             perPage={PER_PAGE}

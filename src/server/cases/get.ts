@@ -16,6 +16,8 @@
  */
 
 import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
+import { faltantesVigentes } from "@/core/case/faltantes-vigentes";
+import { EVENTOS_DE_INTERVENCION } from "@/core/metricas/intervencion";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { AuditEvent } from "@/lib/audit/log";
 import { firstRow } from "@/lib/db/helpers";
@@ -40,6 +42,10 @@ export interface AuditLogEntry {
   created_at: string;
   /** El motivo, cuando el evento trae uno. Es lo único del payload que se muestra. */
   reason: string | null;
+  /** Quién lo hizo, cuando fue una persona del equipo. El id no sale: sólo el nombre. */
+  actor_name: string | null;
+  /** Hubo una persona detrás, aunque ya no se pueda nombrar. Sin ella, lo hizo el sistema. */
+  con_actor: boolean;
 }
 
 export interface CaseDetail {
@@ -158,14 +164,22 @@ export async function fetchMissingDocs(
 }
 
 /**
+ * Los eventos que hizo una persona: las intervenciones y abrir un presupuesto.
+ * El resto lo escribe el sistema, aunque cargue el `actor_id` de quien lo
+ * disparó (Re-analizar, simular): firmarlo con ese nombre sería decir que lo
+ * decidió esa persona y no la IA.
+ */
+const DE_PERSONA = new Set<string>([...EVENTOS_DE_INTERVENCION, AuditEvent.WORKSHOP_ESTIMATE_READ]);
+
+/**
  * Las últimas veinte cosas que le pasaron al caso.
  *
- * Cuatro columnas, no la fila entera.
+ * Pocas columnas, no la fila entera.
  *
  * Era un `select()` pelado, así que al navegador le llegaba también `ip` y `ua`
  * —de qué computadora y con qué navegador trabajó cada analista— y el `payload`
- * completo de cada evento. La pantalla muestra el tipo, la fecha y, si lo hay,
- * el motivo. Nada más.
+ * completo de cada evento. La pantalla muestra el tipo, la fecha, quién lo hizo
+ * y, si lo hay, el motivo. Nada más.
  *
  * Esto se volvió concreto el día que las confirmaciones de campo empezaron a
  * guardar la IP del analista: hasta entonces la columna venía casi siempre en
@@ -183,6 +197,9 @@ export async function fetchAuditLog(
           event_type: auditLog.event_type,
           created_at: auditLog.created_at,
           payload: auditLog.payload,
+          actor_id: auditLog.actor_id,
+          // Una sola consulta: el nombre sale por la PK de users, como `assigned_name` de la lista.
+          actor_name: sql<string | null>`(select u.full_name from users u where u.id = ${auditLog.actor_id})`,
         })
         .from(auditLog)
         .where(
@@ -207,6 +224,9 @@ export async function fetchAuditLog(
       id: f.id,
       event_type: f.event_type,
       created_at: f.created_at,
+      // El id no viaja: la pantalla necesita el nombre, o saber que hubo una persona.
+      actor_name: DE_PERSONA.has(f.event_type) ? (f.actor_name ?? null) : null,
+      con_actor: DE_PERSONA.has(f.event_type) && f.actor_id != null,
       /*
        * Del payload sale sólo `reason`, que es lo único que la pantalla pinta.
        *
@@ -253,7 +273,7 @@ export async function getCaseDetail(
   return {
     case: caseRow,
     extracted_fields: extractedData,
-    missing_docs: missingDocsData,
+    missing_docs: faltantesVigentes(missingDocsData, extractedData),
     audit_log: auditData,
   };
 }

@@ -193,8 +193,10 @@ function setupDbMocks({
    * it. Empty means we have never asked for anything, so every ask is new.
    */
   lastAskRows = [] as Array<{ asked_keys?: string[] | null; created_at?: string; template?: string }>,
-  /** Rows for filesArrivedSinceWeLastSpoke: non-empty means a file arrived. */
+  /** Rows for archivosDesdeQueHablamos: non-empty means a file arrived. */
   newAttachmentRows = [] as Array<{ id: string }>,
+  /** Rows for the size-rejection query of archivosDesdeQueHablamos: non-empty means a file did not get in. */
+  rejectedAttachmentRows = [] as Array<{ id: string }>,
   /**
    * Rows for factsLearnedSinceWeLastSpoke: non-empty means the claimant told
    * us something we did not have when we last wrote to them.
@@ -219,6 +221,8 @@ function setupDbMocks({
    * de mandar el mail y de auditar.
    */
   casoMovido = false,
+  /** La lectura de «cuándo hablamos» (sólo `created_at`) tira, como en un hipo de la base. */
+  hablamosIlegible = false,
 } = {}) {
   const mockDbTyped = db as unknown as MockDb;
 
@@ -253,18 +257,24 @@ function setupDbMocks({
   const adjuntosWhereSpy = vi.fn();
 
   // db.select() returns a chainable builder; from() decides the result.
-  mockDbTyped.select.mockImplementation(() => ({
+  mockDbTyped.select.mockImplementation((proj?: Record<string, unknown>) => ({
     from: (table: unknown) => {
       const tableName = getTableName(table);
 
       if (tableName === "outbound_messages") {
+        const soloLaFecha = Object.keys(proj ?? {}).join() === "created_at";
         return {
           where: () => ({
             // hasPriorOutbound: "has anything gone out at all?"
             limit: () => Promise.resolve(outboundMessagesRows),
             // alreadyAskedFor: "what did the last sent ask ask for?", and
             // checkConfirmationAlreadySent: "is the closing the last thing we said?"
-            orderBy: () => ({ limit: () => Promise.resolve(lastAskRows) }),
+            orderBy: () => ({
+              limit: () =>
+                hablamosIlegible && soloLaFecha
+                  ? Promise.reject(new Error("connection lost"))
+                  : Promise.resolve(lastAskRows),
+            }),
           }),
         };
       }
@@ -276,7 +286,16 @@ function setupDbMocks({
         return {
           where: (cond: unknown) => {
             adjuntosWhereSpy(cond);
-            return { limit: () => Promise.resolve(newAttachmentRows) };
+            return {
+              // Dos consultas por vuelta: la de los archivos que entraron y la
+              // de los que pasaron el tope; se distinguen por la condición.
+              limit: () =>
+                Promise.resolve(
+                  valoresDe(cond).includes("size_exceeded")
+                    ? rejectedAttachmentRows
+                    : newAttachmentRows
+                ),
+            };
           },
         };
       }
@@ -2806,6 +2825,174 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
 });
 
 /*
+ * Un archivo que pasó el tope de tamaño se le avisa a la persona.
+ *
+ * Deja una fila rechazada que no cuenta como «llegó un archivo»: con el pedido
+ * en espera salía silencio, y la persona, que escribió «ahí va la foto», creía
+ * que lo había mandado.
+ */
+describe("orchestratePostExtraction — un archivo que no entró por el tamaño", () => {
+  const PEDIDO_ANTERIOR = [
+    { asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" },
+  ];
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  function elAgenteEspera() {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "el pedido no cambió",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+  }
+
+  async function correr(claim = extractEmailClaimMock()) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+  }
+
+  const plantillas = () =>
+    vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0].template);
+
+  it("con el pedido en espera y un plan de esperar, sale sólo el aviso, sin repetir la lista", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      newAttachmentRows: [],
+      rejectedAttachmentRows: [{ id: "att-grande" }],
+    });
+    elAgenteEspera();
+
+    await correr();
+
+    expect(plantillas()).toEqual(["attachment_too_large"]);
+    const aviso = vi.mocked(dispatchOutboundEmail).mock.calls[0][0];
+    expect(aviso.data.missingFields).toBeUndefined();
+  });
+
+  it("lo mismo sin plan", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      newAttachmentRows: [],
+      rejectedAttachmentRows: [{ id: "att-grande" }],
+    });
+    vi.mocked(deliberate).mockResolvedValue(null);
+
+    await correr();
+
+    expect(plantillas()).toEqual(["attachment_too_large"]);
+  });
+
+  it("la primera vez, el pedido sale solo y lleva el aviso al pie", async () => {
+    const { adjuntosWhereSpy } = setupDbMocks({
+      lastAskRows: [],
+      rejectedAttachmentRows: [{ id: "att-grande" }],
+    });
+
+    await correr();
+
+    expect(plantillas()).toEqual(["missing_information_request"]);
+    expect(vi.mocked(dispatchOutboundEmail).mock.calls[0][0].data.archivoQueNoEntro).toBe(true);
+    // Sin `hablamos` no hay fecha: el rechazo es noticia cuando haya sido.
+    expect(columnasDe(adjuntosWhereSpy.mock.calls[1][0])).not.toContain("created_at");
+  });
+
+  it("si además entró otro archivo, el pedido vuelve a salir con el aviso al pie", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      newAttachmentRows: [{ id: "att-chico" }],
+      rejectedAttachmentRows: [{ id: "att-grande" }],
+    });
+    elAgenteEspera();
+
+    await correr();
+
+    expect(plantillas()).toEqual(["missing_information_request"]);
+    expect(vi.mocked(dispatchOutboundEmail).mock.calls[0][0].data.archivoQueNoEntro).toBe(true);
+  });
+
+  it("si no se pudo leer cuándo hablamos, no avisa de un archivo que quizá ya avisamos", async () => {
+    const { adjuntosWhereSpy } = setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      newAttachmentRows: [],
+      rejectedAttachmentRows: [{ id: "att-grande" }],
+      hablamosIlegible: true,
+    });
+    elAgenteEspera();
+
+    await correr();
+
+    expect(adjuntosWhereSpy).not.toHaveBeenCalled();
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("un caso grave sigue callado: lo toma una persona", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      rejectedAttachmentRows: [{ id: "att-grande" }],
+    });
+
+    await correr(extractEmailClaimMock({ severity: "high", requires_specialist: true }));
+
+    expect(plantillas()).not.toContain("attachment_too_large");
+    for (const [salida] of vi.mocked(dispatchOutboundEmail).mock.calls) {
+      expect(salida.data.archivoQueNoEntro).toBeUndefined();
+    }
+  });
+
+  it("la segunda consulta filtra por tamaño, por el caso y por la fecha; la primera no", async () => {
+    const { adjuntosWhereSpy } = setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      newAttachmentRows: [],
+    });
+    elAgenteEspera();
+
+    await correr();
+
+    expect(valoresDe(adjuntosWhereSpy.mock.calls[1][0])).toContain("size_exceeded");
+    expect(valoresDe(adjuntosWhereSpy.mock.calls[0][0])).not.toContain("size_exceeded");
+    const columnas = columnasDe(adjuntosWhereSpy.mock.calls[1][0]);
+    expect(columnas).toContain("case_id");
+    expect(columnas).toContain("created_at");
+    expect(columnas).toContain("rejected_reason");
+  });
+
+  it("sin archivo rechazado y con el pedido en espera, sigue callado", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      newAttachmentRows: [],
+      rejectedAttachmentRows: [],
+    });
+    elAgenteEspera();
+
+    await correr();
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+});
+
+/*
  * El rojo del ensayo `silencio` del 23/09.
  *
  * La lista traía varias cosas y una era la duda sobre los heridos. La persona
@@ -2943,7 +3130,8 @@ describe("orchestratePostExtraction — los heridos no se confirman con un «ok�
   async function contesta(
     asked: string[],
     texto: string,
-    fields: ReturnType<typeof heridos>[] = []
+    fields: ReturnType<typeof heridos>[] = [],
+    propuestos?: Record<string, string>
   ) {
     const spies = setupDbMocks({
       lastAskRows: [{ asked_keys: asked, created_at: "2026-09-23T12:00:00Z" }],
@@ -2961,6 +3149,7 @@ describe("orchestratePostExtraction — los heridos no se confirman con un «ok�
         extractedClaim: extractEmailClaimMock({ fields, fields_pending_confirmation: [] }),
         senderEmail: SENDER_EMAIL,
         latestMessageText: texto,
+        propuestos,
       },
       NO_MATCHES
     );
@@ -2983,6 +3172,83 @@ describe("orchestratePostExtraction — los heridos no se confirman con un «ok�
 
   it("un «sí» a un «no» que la persona dijo a medias sí lo confirma", async () => {
     expect(await contesta(["hay_heridos"], "sí", [heridos("none")])).toContain("hay_heridos");
+  });
+
+  /*
+   * El worker pasa lo que mostraba cada fila al llegar el mensaje: «¿cuál es tu
+   * DNI?» se preguntó abierta, y un «Confirmo» no la contesta.
+   */
+  describe("un «Confirmo» cierra sólo lo que vio con valor", () => {
+    it("cierra la que se mostró con valor y deja la que se preguntó abierta", async () => {
+      const cerradas = await contesta(["provincia", "dni"], "Confirmo", [], {
+        provincia: "Buenos Aires",
+        dni: "",
+      });
+
+      expect(cerradas).toContain("provincia");
+      expect(cerradas).not.toContain("dni");
+    });
+
+    it("una franja de la hora se cierra con un «sí»", async () => {
+      expect(
+        await contesta(["hora_siniestro"], "sí", [], { hora_siniestro: "a la tarde" })
+      ).toContain("hora_siniestro");
+    });
+
+    it("un valor que no se puede decir no cuenta como visto", async () => {
+      expect(
+        await contesta(["claim_type"], "Confirmo", [], { claim_type: "fake-tipo-raro" })
+      ).not.toContain("claim_type");
+    });
+
+    it("un «null» es una pregunta abierta", async () => {
+      expect(await contesta(["dni"], "Confirmo", [], { dni: "null" })).not.toContain("dni");
+    });
+
+    it("si no se pudo leer el pedido, no cierra nada por afirmación", async () => {
+      expect(await contesta(["provincia"], "Confirmo", [], {})).toEqual([]);
+    });
+
+    it("la clave preguntada se busca también por la canónica", async () => {
+      expect(
+        await contesta(["dni_asegurado"], "Confirmo", [], { dni: "12345678" })
+      ).toContain("dni_asegurado");
+    });
+
+    it("heridos con valor se confirma con un «sí»", async () => {
+      expect(
+        await contesta(["hay_heridos"], "sí", [heridos("none")], { hay_heridos: "none" })
+      ).toContain("hay_heridos");
+    });
+
+    it("heridos preguntada abierta no se cierra aunque haya un valor", async () => {
+      expect(
+        await contesta(["hay_heridos"], "sí", [heridos("none")], { hay_heridos: "" })
+      ).not.toContain("hay_heridos");
+    });
+
+    it("sigue la regla vieja de heridos: sin valor dicho en esta vuelta no se cierra", async () => {
+      const cerradas = await contesta(["hay_heridos", "provincia"], "Confirmo", [], {
+        hay_heridos: "none",
+        provincia: "Buenos Aires",
+      });
+
+      expect(cerradas).toContain("provincia");
+      expect(cerradas).not.toContain("hay_heridos");
+    });
+
+    it("la confianza alta cierra aunque el pedido la haya preguntado abierta", async () => {
+      const dni = { field_key: "dni", field_value: "12345678", confidence: 0.95, source: "ai" as const };
+
+      expect(await contesta(["dni"], "Confirmo", [dni], { dni: "" })).toContain("dni");
+    });
+
+    it("un «ok» a una sola pregunta con valor sigue siendo la respuesta", async () => {
+      const propuestos = { provincia: "Buenos Aires" };
+
+      expect(await contesta(["provincia"], "ok", [], propuestos)).toContain("provincia");
+      expect(await contesta(["provincia"], "ok")).toContain("provincia");
+    });
   });
 
   it("sin valor, se pregunta abierto y sin proponer nada", async () => {
@@ -3217,7 +3483,10 @@ describe("orchestratePostExtraction — una deliberación caída no deja una pre
     expect(cierres[0][0].data.question).toBe(PREGUNTA);
   });
 
-  it("un conflicto que ya salió es lo único que sale", async () => {
+  async function correrConflicto(
+    latestMessageText: string,
+    extra: { titularAjeno?: boolean; messenger?: AgentMessenger } = {}
+  ) {
     setupDbMocks();
     vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
       missingRequiredFields: [],
@@ -3250,11 +3519,59 @@ describe("orchestratePostExtraction — una deliberación caída no deja una pre
     await orchestratePostExtraction(
       CASE_ID,
       TENANT_ID,
-      { extractedClaim: claim, senderEmail: SENDER_EMAIL, latestMessageText: MENSAJE },
-      [conflicto]
+      {
+        extractedClaim: claim,
+        senderEmail: SENDER_EMAIL,
+        latestMessageText,
+        titularAjeno: extra.titularAjeno,
+      },
+      [conflicto],
+      extra.messenger
     );
+  }
+
+  it("un conflicto que ya salió es lo único que sale", async () => {
+    await correrConflicto(MENSAJE);
 
     expect(plantillas()).toEqual(["data_confirmation_request"]);
+  });
+
+  it("el conflicto contesta la pregunta", async () => {
+    await correrConflicto(MENSAJE);
+
+    const c = vi.mocked(dispatchOutboundEmail).mock.calls;
+    expect(c).toHaveLength(1);
+    expect(c[0][0].template).toBe("data_confirmation_request");
+    expect(c[0][0].data.question).toBe(PREGUNTA);
+  });
+
+  it("sin pregunta, el conflicto no trae question", async () => {
+    await correrConflicto("Gracias, quedo atento.");
+
+    expect(plantillas()).toEqual(["data_confirmation_request"]);
+    expect(vi.mocked(dispatchOutboundEmail).mock.calls[0][0].data.question).toBeNull();
+  });
+
+  it("el titular ajeno también la contesta", async () => {
+    await correrConflicto(MENSAJE, { titularAjeno: true });
+
+    expect(plantillas()).toEqual(["data_confirmation_request"]);
+    const data = vi.mocked(dispatchOutboundEmail).mock.calls[0][0].data;
+    expect(data.titularAjeno).toBe(true);
+    expect(data.question).toBe(PREGUNTA);
+  });
+
+  it("por WhatsApp también: el conflicto lleva la pregunta por el mensajero del canal", async () => {
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
+
+    await correrConflicto(MENSAJE, { messenger });
+
+    expect(messenger.send).toHaveBeenCalledTimes(1);
+    expect(messenger.send.mock.calls[0][0]).toMatchObject({
+      template: "data_confirmation_request",
+      data: { question: PREGUNTA },
+    });
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
   });
 });
 
@@ -5219,6 +5536,36 @@ describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…,
     expect(pedido?.knownValues).not.toHaveProperty("full_name");
   });
 
+  it("un nombre con el apellido primero, contestando lo pedido, queda confirmado", async () => {
+    const { fila, pedidas } = await vuelta({
+      texto: "Soy Paz Roberto, DNI 25.888.101",
+      fields: [campo("full_name", "Roberto Paz", 0.75)],
+      dudas: [duda("full_name", "Roberto Paz", 0.75)],
+      preguntadas: ["full_name"],
+    });
+
+    expect(fila("full_name")).toMatchObject({ status: "confirmed", suggested_value: "Roberto Paz" });
+    expect(pedidas).not.toContain("full_name");
+  });
+
+  it.each([
+    // La guarda de identidad sigue: no se lo pedimos.
+    ["dado vuelta sin pedirlo", "Soy Paz Roberto", "full_name", "Roberto Paz", []],
+    // Rotado sí, en cualquier orden no.
+    ["otro orden de los nombres de pila", "Soy José María Paz", "full_name", "María José Paz", ["full_name"]],
+    // El «Av.» lo puso el extractor.
+    ["la avenida la puso el extractor", "Choqué en Alem al 2300", "accident_location", "Av. Alem 2300", []],
+  ])("%s: se sigue preguntando", async (_c, texto, clave, valor, preguntadas) => {
+    const { fila } = await vuelta({
+      texto,
+      fields: [campo(clave, valor, 0.6)],
+      dudas: [duda(clave, valor, 0.6)],
+      preguntadas,
+    });
+
+    expect(fila(clave)?.status).toBe("pending");
+  });
+
   it.each([
     // No se lo pedimos: de quién es el nombre lo infirió el extractor.
     ["sin pedirlo", "Mi esposa es Ana Paz", "full_name", "Ana Paz", []],
@@ -5333,7 +5680,9 @@ describe("orchestratePostExtraction — lo dicho recién no vuelve como «¿…,
   it.each([
     ["es-AR", "No me acuerdo la hora", "tarde"],
     ["es-AR", "no sé", "desconocida"],
+    ["es-AR", "Fue esta tarde", "tarde"],
     ["en-US", "I don't remember", "afternoon"],
+    ["en-US", "It was this afternoon", "afternoon"],
   ])("%s: «%s» cierra la pregunta por la hora", async (_l, texto, valor) => {
     const { fila, pedido } = await vuelta({
       texto,

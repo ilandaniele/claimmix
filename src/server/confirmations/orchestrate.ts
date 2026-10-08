@@ -136,6 +136,12 @@ export interface ExtractedClaimOutput {
   sePuedeRetomar?: boolean;
   /** `asked_keys` del último mensaje que salió, si el worker ya lo leyó. */
   preguntadas?: string[];
+  /**
+   * Lo que mostraba cada confirmación pendiente cuando llegó este mensaje
+   * (`UltimoPedido.propuestos`); "" si se preguntó abierta. Un «Confirmo» sólo
+   * cierra lo que la persona vio con valor.
+   */
+  propuestos?: Record<string, string>;
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -393,7 +399,8 @@ export async function orchestratePostExtraction(
     tenantId,
     extractedClaim.fields,
     soloAcuse ? undefined : latestMessageText,
-    lastAsked
+    lastAsked,
+    extractedOutput.propuestos
   );
 
   const gapResult = await analyzeEmailClaimGaps(caseId, extractedClaim.fields, tenantId);
@@ -443,9 +450,9 @@ export async function orchestratePostExtraction(
    * mensaje con «Choqué en Villa Mitre», se le preguntó si Villa Mitre era
    * correcto — nadie se lo había pedido, ella ya lo había dicho.
    *
-   * No hace falta haberlo pedido: `dichoRecien` es literal y sabe de
-   * negaciones, así que un número suelto (¿DNI, póliza, teléfono?) sigue sin
-   * alcanzar. La excepción es de quién es un dato de identidad — nombre, DNI,
+   * No hace falta haberlo pedido: `dichoRecien` es literal —un nombre puede
+   * venir con el apellido primero— y sabe de negaciones, así que un número
+   * suelto (¿DNI, póliza, teléfono?) sigue sin alcanzar. La excepción es de quién es un dato de identidad — nombre, DNI,
    * email, teléfono—: «Mi esposa es Ana Paz» dice el nombre de Ana Paz tal
    * cual, y no es el del asegurado. Ahí sólo cuenta como dicho si es la
    * respuesta a lo que le pedimos. Lo inferido, los conflictos con el padrón
@@ -467,7 +474,7 @@ export async function orchestratePostExtraction(
     (esValorVago(c.fieldKey, c.proposedValue)
       ? pedidoRecien.has(c.fieldKey) && contestaSinHora(loQueEscribio)
       : (!CAMPOS_DE_IDENTIDAD.has(c.fieldKey) || pedidoRecien.has(c.fieldKey)) &&
-        dichoRecien(c.proposedValue, loQueEscribio));
+        dichoRecien(c.proposedValue, loQueEscribio, c.fieldKey));
   const dichos = confirmables.filter(loDijoRecien);
   const pendingConfirmationFields = confirmables.filter((c) => !loDijoRecien(c));
 
@@ -615,6 +622,9 @@ export async function orchestratePostExtraction(
             })),
             // Se deriva abajo en esta misma vuelta: el pedido no pregunta nada.
             titularAjeno: extractedOutput.titularAjeno === true,
+            // Es el único mensaje de la vuelta: la deliberación corre después y
+            // los envíos de abajo se cortan por `confirmationEmailDispatched`.
+            question: laPreguntaDelMensaje(latestMessageText),
           },
           inReplyToMessageId,
         });
@@ -917,11 +927,12 @@ export async function orchestratePostExtraction(
   // recognise what it was.
   // Una sola lectura de «cuándo hablamos» para las dos preguntas de abajo: no
   // hay ninguna escritura entre ellas. Ver `cuandoHablamosPorUltimaVez`.
-  const { hablamos, nosLoDevolvieron } = await cuandoHablamosPorUltimaVez(caseId, tenantId);
-  const somethingArrived = await filesArrivedSinceWeLastSpoke(
+  const { hablamos, nosLoDevolvieron, fallo } = await cuandoHablamosPorUltimaVez(caseId, tenantId);
+  const { llegoUnArchivo: somethingArrived, unArchivoNoEntro } = await archivosDesdeQueHablamos(
     caseId,
     tenantId,
-    hablamos
+    hablamos,
+    fallo
   );
 
   // La decisión se toma en el núcleo, que es puro y está probado con siete
@@ -936,6 +947,7 @@ export async function orchestratePostExtraction(
     elAgenteEspera: agentIsWaiting,
     nosPreguntoAlgo: owesAnAnswer,
     llegoUnArchivo: somethingArrived,
+    unArchivoNoEntro,
     nosContestoElPedido,
     nosLoDevolvieron,
     datosQueFaltan: askItems.fields.length,
@@ -961,6 +973,7 @@ export async function orchestratePostExtraction(
   const decision = queHacer({ ...señalesBase, aprendimosAlgo });
   const askIsNew = decision === "pedir";
   const acknowledgeOnly = decision === "acusar-recibo";
+  const avisarQueNoEntro = decision === "avisar-que-no-entro";
 
   if (askIsNew && !confirmationEmailDispatched && !derivaSola) {
     await messenger.send({
@@ -978,6 +991,8 @@ export async function orchestratePostExtraction(
         question: pregunta,
         datosDelPadron,
         escritoPorLaPersona,
+        // Va al pie, fuera del redactor: no depende de que el modelo se acuerde.
+        archivoQueNoEntro: unArchivoNoEntro,
         // Fourth message in, the reply still opened with "gracias por
         // contactarnos". Thanking someone for getting in touch three rounds
         // after they did is the tell that nobody is really reading.
@@ -1051,6 +1066,23 @@ export async function orchestratePostExtraction(
         datosDelPadron,
         escritoPorLaPersona,
       },
+      inReplyToMessageId,
+    });
+
+    acknowledgementDispatched = true;
+  }
+
+  // El pedido sigue en espera y el estado ya lo dejó la rama `askOnHold`. Sin
+  // `missingFields`: `asked_keys` queda null y `lastAskedKeys` sigue viendo el
+  // pedido anterior. Sin nombre: el texto es fijo.
+  if (avisarQueNoEntro && !confirmationEmailDispatched && !missingInfoEmailDispatched) {
+    await messenger.send({
+      caseId,
+      tenantId,
+      to: senderEmail,
+      lastMessage: latestMessageText,
+      template: "attachment_too_large",
+      data: { caseId },
       inReplyToMessageId,
     });
 
@@ -1146,7 +1178,9 @@ async function resolveAnsweredConfirmations(
    * Same guard, and the same reason, as the one `resolveDeclinedDocs` takes:
    * a question that was never asked cannot have been answered.
    */
-  alreadyAsked: string[]
+  alreadyAsked: string[],
+  /** Valor de cada fila pendiente cuando llegó el mensaje; sin esto (otros llamadores) cierra como antes. */
+  propuestos?: Record<string, string>
 ): Promise<string[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
@@ -1177,8 +1211,18 @@ async function resolveAnsweredConfirmations(
     const hayHeridosDicho = fields.some(
       (f) => canonicalFieldKey(f.field_key) === "hay_heridos" && !esValorVacio(f.field_value)
     );
+    // Sólo lo que el pedido mostró con valor: un «Confirmo» no contesta «¿cuál
+    // es tu DNI?». Misma regla que `knownValues` en `buildAskList`, menos la
+    // franja de la hora, que se pide como hora y un «sí» la cierra igual.
+    const hoy = diaArgentino();
+    const seMostroConValor = (clave: string) => {
+      if (!propuestos) return true;
+      const crudo = propuestos[clave] ?? propuestos[canonicalFieldKey(clave)];
+      return esValorVago(clave, crudo) || valorLegible(clave, crudo, hoy) !== null;
+    };
     for (const asked of await askedPendingFields(caseId, tenantId, fields, alreadyAsked)) {
       if (canonicalFieldKey(asked) === "hay_heridos" && !hayHeridosDicho) continue;
+      if (!seMostroConValor(asked)) continue;
       settled.add(asked);
     }
   }
@@ -2167,7 +2211,7 @@ async function alreadyAskedFor(
 async function cuandoHablamosPorUltimaVez(
   caseId: string,
   tenantId: string
-): Promise<{ hablamos: string | null; nosLoDevolvieron: boolean }> {
+): Promise<{ hablamos: string | null; nosLoDevolvieron: boolean; fallo: boolean }> {
   /*
    * Atrapa acá, y no en quien llama.
    *
@@ -2177,7 +2221,8 @@ async function cuandoHablamosPorUltimaVez(
    * abajo la orquestación entera.
    *
    * `null` es lo mismo que decía antes: las dos preguntas de «¿pasó algo desde
-   * que hablamos?» contestan que no, y el resto sigue.
+   * que hablamos?» contestan que no, y el resto sigue. `fallo` distingue ese
+   * `null` del de «nunca hablamos», que sí deja pasar un rechazo viejo.
    *
    * En el mismo viaje va la última vez que una persona devolvió el caso al
    * agente (E24): si fue después de lo último que dijimos, el pedido no queda
@@ -2221,35 +2266,41 @@ async function cuandoHablamosPorUltimaVez(
       hablamos,
       nosLoDevolvieron:
         devuelto !== null && (hablamos === null || Date.parse(devuelto) > Date.parse(hablamos)),
+      fallo: false,
     };
   } catch (err) {
     logger.error(
       { code: errorCode(err) },
       "orchestrate.ultimo_saliente_fallo"
     );
-    return { hablamos: null, nosLoDevolvieron: false };
+    return { hablamos: null, nosLoDevolvieron: false, fallo: true };
   }
 }
 
-async function filesArrivedSinceWeLastSpoke(
+async function archivosDesdeQueHablamos(
   caseId: string,
   tenantId: string,
-  hablamos: string | null
-): Promise<boolean> {
+  hablamos: string | null,
+  fallo: boolean
+): Promise<{ llegoUnArchivo: boolean; unArchivoNoEntro: boolean }> {
+  // Sin saber cuándo hablamos, un rechazo viejo ya avisado pasaría por noticia: se calla.
+  if (fallo) return { llegoUnArchivo: false, unArchivoNoEntro: false };
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
-  const tenantCtx: TenantContext = { tenantId };
   try {
-    if (!hablamos) return false;
+    // Sin `hablamos` no hay filtro de fecha, y `and()` se salta el `undefined`.
+    const desde = hablamos ? gt(claimAttachments.created_at, hablamos) : undefined;
 
-    const since = firstRow(
-      await enTenant(tenantCtx, (db) =>
+    type Fila = { id: string };
+    const [aceptados, pesados] = await enTenantVarias<[Fila[], Fila[]]>(
+      { tenantId },
+      (db) => [
         db
           .select({ id: claimAttachments.id })
           .from(claimAttachments)
           .where(
             and(
               eq(claimAttachments.case_id, caseId),
-              gt(claimAttachments.created_at, hablamos),
+              desde,
               /*
                * Sólo las filas que traen bytes. Esta señal —que se llama «llegó
                * un archivo» y es la que el núcleo usa para sacar el pedido de
@@ -2261,27 +2312,43 @@ async function filesArrivedSinceWeLastSpoke(
                * antes —189 filas con "storage_upload_failed" en producción,
                * contadas en `api/health/trabajo.ts`—, y el adjunto grande de
                * WhatsApp sólo sumó "size_exceeded". Repetir el pedido es peor que
-               * callarse. Decirle al asegurado que lo mande más chico es un cambio
-               * aparte, con plantilla propia.
+               * callarse; lo que sí se le dice es que no entró: la segunda
+               * consulta y la plantilla `attachment_too_large`.
                */
               isNull(claimAttachments.rejected_reason)
             )
           )
-          .limit(1)
-      )
+          .limit(1),
+        db
+          .select({ id: claimAttachments.id })
+          .from(claimAttachments)
+          .where(
+            and(
+              eq(claimAttachments.case_id, caseId),
+              desde,
+              eq(claimAttachments.rejected_reason, "size_exceeded")
+            )
+          )
+          .limit(1),
+      ]
     );
-    return Boolean(since);
+    return {
+      // Sin `hablamos` no había pedido que un archivo pudiera sacar de espera.
+      llegoUnArchivo: hablamos !== null && aceptados.length > 0,
+      // Sin `hablamos` nunca le dijimos nada: el rechazo es noticia cuando haya sido.
+      unArchivoNoEntro: pesados.length > 0,
+    };
   } catch (err) {
     // Speaking is the safe direction here too.
     logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_for_new_files");
-    return false;
+    return { llegoUnArchivo: false, unArchivoNoEntro: false };
   }
 }
 
 /**
  * ¿Nos enteramos de algo nuevo desde la última vez que hablamos?
  *
- * Hermana de filesArrivedSinceWeLastSpoke, y por el mismo motivo: la regla de
+ * Hermana de archivosDesdeQueHablamos, y por el mismo motivo: la regla de
  * no repetir el pedido acierta en que una petición sin cambios no se manda dos
  * veces, y se equivoca al concluir que no pasó nada. Alguien que contesta «fue
  * un choque, ayer a la tarde» mientras siguen faltando el nombre, la póliza y

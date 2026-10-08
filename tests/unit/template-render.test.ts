@@ -22,6 +22,7 @@ import {
   mencionaElTraspaso,
 } from "@/core/mensajes/traspaso";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
@@ -990,5 +991,30 @@ describe("renderTemplate — con la prosa ya redactada", () => {
     expect(conVacio.html).toBe(conNada.html);
     expect(conVacio.text).toBe(conNada.text);
     expect(conNada.html).toContain("<li>Número de póliza</li>");
+  });
+});
+
+describe("renderTemplate — attachment_too_large", () => {
+  it("texto fijo con el tope, el número de caso y sin «rechazado»", () => {
+    const r = renderTemplate("attachment_too_large", { caseId: "case-grande-1" });
+
+    expect(r.subject).toContain("case-grande-1");
+    expect(r.cuerpo).toBe(ARCHIVO_QUE_NO_ENTRO);
+    expect(r.text).toContain("Caso #case-grande-1");
+    expect(r.html).toContain("10 MB");
+    // Un fragmento de `<p>`, como information_received.
+    expect(r.html).not.toContain("<!DOCTYPE");
+    for (const salida of [r.subject, r.html, r.text]) expect(salida).not.toMatch(/rechazad/i);
+  });
+
+  it("con prosa redactada, la escapa en el HTML y la deja tal cual en el texto", () => {
+    const r = renderTemplate("attachment_too_large", {
+      caseId: "case-grande-1",
+      cuerpo: "Texto <b>redactado</b>",
+    });
+
+    expect(r.html).toContain("Texto &lt;b&gt;redactado&lt;/b&gt;");
+    expect(r.html).toContain("Caso #case-grande-1");
+    expect(r.text).toContain("Texto <b>redactado</b>");
   });
 });

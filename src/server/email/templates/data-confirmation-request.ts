@@ -27,6 +27,7 @@ import {
   LO_REVISA_UN_ESPECIALISTA,
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
+import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { SI_RESPONDES_EL_CORREO } from "@/core/mensajes/traspaso";
 
 /** Un dato sobre el que se pregunta. */
@@ -58,6 +59,8 @@ export interface DataConfirmationRequestData extends CampoAConfirmar {
   cuerpo?: string | null;
   /** Quien escribe no es el titular y el caso ya se derivó: no se pregunta nada. */
   titularAjeno?: boolean;
+  /** Lo que la persona preguntó en esta vuelta: el piso le contesta con la frase honesta. */
+  question?: string | null;
 }
 
 const SENSITIVE_FIELDS = new Set(["dni", "policy_number"]);
@@ -209,7 +212,11 @@ export function renderDataConfirmationRequest(
           `- O bien, escribí ${varios ? "los valores correctos" : "el valor correcto"} directamente en tu respuesta.`,
         ].join("\n");
 
-  const cuerpo = [introText, ...bloques.map((b) => b.text), actionText].join("\n\n");
+  // Con pregunta, la frase va antes de lo que tiene que hacer, como en el pedido.
+  const respuesta = data.question?.trim() ? [RESPUESTA_PENDIENTE] : [];
+  const respuestaHtml = respuesta.map((r) => `<p>${escapeHtml(r)}</p>`).join("");
+
+  const cuerpo = [introText, ...bloques.map((b) => b.text), ...respuesta, actionText].join("\n\n");
   const redactado = data.cuerpo?.trim();
   // Derivado, como los otros dos mails que cierran: el pie va fuera de la prosa,
   // que un cuerpo redactado reemplaza entera.
@@ -219,7 +226,7 @@ export function renderDataConfirmationRequest(
     ? textoAHtml(redactado)
     : `${introHtml}
   ${bloques.map((b) => b.html).join("\n  ")}
-  ${actionHtml}`;
+  ${respuestaHtml}${actionHtml}`;
 
   const html = `<!DOCTYPE html>
 <html lang="es">

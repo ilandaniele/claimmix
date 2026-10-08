@@ -64,7 +64,8 @@ export function filaDeCaso(
  *   · `propuestos` como las confirmaciones pendientes,
  *   · `guardados` como los valores de `extracted_fields` que lee el puntaje,
  *   · nada en los demás,
- *   · y le pasa a `espiaDeUpdate` todo lo que se escriba con `.set(...)`.
+ *   · y le pasa a `espiaDeUpdate` todo lo que se escriba con `.set(...)`,
+ *   · y a `espiaDeFiltro`, si viene, cada `.set(...)` con su `.where(...)`.
  *
  * El orden de los dos primeros SELECT es carga estructural: el worker los hace
  * en ese orden y el mock responde por posición.
@@ -74,7 +75,16 @@ export function dbSimulado(
   espiaDeUpdate: Mock<(data: Record<string, unknown>) => void>,
   cuerpo = "Buenos días, tuve un choque ayer.",
   pedido: string[] = [],
-  { conversacion, propuestos = {}, guardados = {}, guardadosFallan = false, cabecerasDelUltimo, casoMovido = false }: Conversacion = {}
+  {
+    conversacion,
+    propuestos = {},
+    guardados = {},
+    guardadosFallan = false,
+    cabecerasDelUltimo,
+    casoMovido = false,
+    espiaDeFiltro,
+    pendienteAlSoltar = false,
+  }: Conversacion = {}
 ) {
   let n = 0;
 
@@ -91,8 +101,10 @@ export function dbSimulado(
     const entrantes = !!columnas && "profile_name" in columnas;
     const pendientes = !!columnas && "suggested_value" in columnas;
     const deCampos = !!columnas && "field_key" in columnas && "field_value" in columnas;
+    const deLaMarca = pendienteAlSoltar && !!columnas && "pending" in columnas;
 
     const limit = vi.fn().mockImplementation(() => {
+      if (deLaMarca) return Promise.resolve([{ pending: true }]);
       if (idx === 1) return Promise.resolve([fila]);
       if (idx === 2) return Promise.resolve([mensajeCrudo]);
       return Promise.resolve([]);
@@ -152,9 +164,12 @@ export function dbSimulado(
       // `casoMovido` la hace fallar también y el worker nunca llega a extraer.
       const filasDelUpdate = casoMovido && "status" in data ? [] : [{ id: fila.id }];
       return {
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue(filasDelUpdate),
-          then: (r: (v: unknown) => void, j?: (e: unknown) => void) => Promise.resolve([]).then(r, j),
+        where: vi.fn().mockImplementation((filtro: unknown) => {
+          espiaDeFiltro?.(data, filtro);
+          return {
+            returning: vi.fn().mockResolvedValue(filasDelUpdate),
+            then: (r: (v: unknown) => void, j?: (e: unknown) => void) => Promise.resolve([]).then(r, j),
+          };
         }),
         returning: vi.fn().mockResolvedValue(filasDelUpdate),
       };
@@ -194,6 +209,10 @@ export interface Conversacion {
   cabecerasDelUltimo?: Cabecera[];
   /** El caso ya no es del agente: todo `UPDATE` con guarda no matchea ninguna fila (E2). */
   casoMovido?: boolean;
+  /** Recibe cada `.set(...)` junto con el `.where(...)` que la acota. */
+  espiaDeFiltro?: Mock<(data: Record<string, unknown>, filtro: unknown) => void>;
+  /** `releaseExtractionLease` encuentra la marca puesta: llegó algo mientras corría. */
+  pendienteAlSoltar?: boolean;
 }
 
 export interface OpcionesDelExtractor {
@@ -253,6 +272,8 @@ export function registrarMocks(opciones: {
     guardadosFallan,
     cabecerasDelUltimo,
     casoMovido,
+    espiaDeFiltro,
+    pendienteAlSoltar,
   } = opciones;
 
   const mockDb = dbSimulado(fila, espiaDeUpdate, cuerpo, pedido, {
@@ -262,6 +283,8 @@ export function registrarMocks(opciones: {
     guardadosFallan,
     cabecerasDelUltimo,
     casoMovido,
+    espiaDeFiltro,
+    pendienteAlSoltar,
   });
 
   vi.doMock("@/lib/db", () => ({

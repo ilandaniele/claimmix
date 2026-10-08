@@ -18,7 +18,7 @@
  * los logs, ni en la auditoría (sólo dice si se cambió).
  */
 
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
@@ -27,17 +27,18 @@ import { entrar } from "@/lib/api/entrada";
 import { ok, err } from "@/lib/api/respond";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
-import { accounts, ssoSettings } from "@/lib/db/schema";
+import { ssoSettings } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/observability/logger";
 import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { cifrar } from "@/lib/security/cifrado";
-import { dominioValido, esDominioPublico, normalizarDominio, proveedorDeSso } from "@/core/sso";
+import { dominioValido, esDominioPublico, normalizarDominio } from "@/core/sso";
 import {
   CAMPOS_DE_LA_VISTA,
-  CONFIG_COMPLETA,
+  cambiarEstadoSso,
   codigoPg,
   descubrir,
+  guardarIdp,
   type MotivoDeDescubrimiento,
 } from "@/server/sso/config";
 import { faltaLaMigracionConTabla, migracionPendiente } from "@/server/core-sync/config";
@@ -142,40 +143,11 @@ export async function PUT(request: NextRequest) {
     const ctx: TenantContext = { tenantId: userRow.tenant_id }; // nunca del body
     const cifrado = client_secret ? cifrar(client_secret) : null;
 
-    /*
-     * Todo en una sentencia. `excluded` es lo que se propone y la columna a
-     * secas es lo que ya estaba. Si cambia el issuer o el dominio hay que
-     * volver a probar el dominio. Si cambia cualquiera de los tres datos —issuer,
-     * dominio o client_id— se apaga el SSO y se deja de exigir: lo que se probó
-     * era otra configuración. Y si cambia el issuer o el client_id sin secreto
-     * nuevo, el viejo se descarta en lugar de mandárselo a otro IdP u otra aplicación.
-     */
-    const mismoIssuer = sql`${ssoSettings.issuer} is not distinct from excluded.issuer`;
-    const mismoCliente = sql`(${mismoIssuer} and ${ssoSettings.client_id} is not distinct from excluded.client_id)`;
-    const mismoIdp = sql`(${mismoIssuer} and ${ssoSettings.dominio} is not distinct from excluded.dominio)`;
-    const mismaConfig = sql`(${mismoIdp} and ${ssoSettings.client_id} is not distinct from excluded.client_id)`;
-    const firma = { actualizado_en: new Date().toISOString() };
-
+    // Todo en una sentencia: qué conserva y qué apaga cada cambio está en guardarIdp.
     let fila;
     try {
       [fila] = await enTenant(ctx, (db) =>
-        db
-          .insert(ssoSettings)
-          .values({ tenant_id: ctx.tenantId, issuer, client_id, dominio, client_secret_cifrado: cifrado, ...firma })
-          .onConflictDoUpdate({
-            target: ssoSettings.tenant_id,
-            set: {
-              issuer: sql`excluded.issuer`,
-              client_id: sql`excluded.client_id`,
-              dominio: sql`excluded.dominio`,
-              client_secret_cifrado: sql`case when ${mismoCliente} then coalesce(excluded.client_secret_cifrado, ${ssoSettings.client_secret_cifrado}) else excluded.client_secret_cifrado end`,
-              dominio_verificado_en: sql`case when ${mismoIdp} then ${ssoSettings.dominio_verificado_en} else null end`,
-              activo: sql`${ssoSettings.activo} and ${mismaConfig}`,
-              exigir: sql`${ssoSettings.exigir} and ${mismaConfig}`,
-              ...firma,
-            },
-          })
-          .returning(CAMPOS_DE_LA_VISTA)
+        guardarIdp(db, ctx.tenantId, { issuer, client_id, dominio, client_secret_cifrado: cifrado })
       );
     } catch (e) {
       traducirError(e);
@@ -245,36 +217,10 @@ export async function PATCH(request: NextRequest) {
     const { activo, exigir } = parsed.data;
     const ctx: TenantContext = { tenantId: userRow.tenant_id };
 
-    /*
-     * Las condiciones viajan en el mismo UPDATE: sin fila afectada, no se cumplían.
-     *  · prender (o exigir) pide la config completa y el dominio probado;
-     *  · exigir pide el SSO prendido y que QUIEN LO PIDE ya haya entrado por él,
-     *    la prueba de que el camino anda con su propia cuenta: exigir sin eso
-     *    puede dejar afuera al propio admin.
-     * Apagar el SSO apaga también «exigir», que sin SSO no significa nada.
-     */
-    const condiciones: SQL[] = [];
-    if (activo === true || exigir === true) condiciones.push(CONFIG_COMPLETA!);
-    if (exigir === true && activo !== true) condiciones.push(eq(ssoSettings.activo, true));
-    if (exigir === true) {
-      condiciones.push(
-        sql`exists (select 1 from ${accounts} where ${and(
-          eq(accounts.providerId, proveedorDeSso(ctx.tenantId)),
-          eq(accounts.userId, user.id)
-        )})`
-      );
-    }
-    const cambios = {
-      actualizado_en: new Date().toISOString(),
-      ...(activo !== undefined && { activo }),
-      ...(activo === false ? { exigir: false } : exigir !== undefined ? { exigir } : {}),
-    };
-
+    // Las condiciones viajan en el mismo UPDATE (ver cambiarEstadoSso): sin fila afectada, no se cumplían.
     let fila;
     try {
-      [fila] = await enTenant(ctx, (db) =>
-        db.update(ssoSettings).set(cambios).where(and(...condiciones)).returning(CAMPOS_DE_LA_VISTA)
-      );
+      [fila] = await enTenant(ctx, (db) => cambiarEstadoSso(db, ctx.tenantId, user.id, { activo, exigir }));
     } catch (e) {
       traducirError(e);
     }

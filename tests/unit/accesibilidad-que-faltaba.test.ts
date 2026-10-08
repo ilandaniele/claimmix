@@ -7,7 +7,8 @@
  * contraste.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +17,7 @@ const APP_LAYOUT = readFileSync("src/app/(app)/layout.tsx", "utf8");
 const CAMPOS = readFileSync("src/app/(app)/agente/CustomFieldsPanel.tsx", "utf8");
 const PROVIDER = readFileSync("src/app/(app)/configuracion/AiProviderPanel.tsx", "utf8");
 const HILO = readFileSync("src/app/(app)/casos/[id]/_components/MessagesThread.tsx", "utf8");
+const FILTROS = readFileSync("src/app/(app)/bandeja/components/PanelDeFiltros.tsx", "utf8");
 
 describe("el quinto diálogo", () => {
   it("atrapa el foco como los otros cuatro", () => {
@@ -81,5 +83,37 @@ describe("el contraste que quedó afuera del barrido", () => {
      * 2,56:1 contra el 4,5:1 que pide WCAG 1.4.3.
      */
     expect(HILO).not.toContain("text-slate-400");
+  });
+
+  it("ningún texto de la app usa text-slate-400", () => {
+    /*
+     * El barrido miró archivo por archivo y lo posterior volvió a traer el
+     * gris (el vacío del tablero, el «automático» del plan): 2,56:1. Una línea
+     * con tamaño de letra es texto; un icono no lo lleva, y lo decorativo va
+     * con aria-hidden. Los placeholder: y el modo oscuro llevan prefijo.
+     */
+    const RAIZ = "src/app/(app)";
+    const archivos = (readdirSync(RAIZ, { recursive: true, encoding: "utf8" }) as string[]).filter(
+      (f) => /\.tsx?$/.test(f)
+    );
+    const lista: string[] = [];
+    for (const f of archivos) {
+      readFileSync(join(RAIZ, f), "utf8")
+        .split("\n")
+        .forEach((linea, i) => {
+          const esComentario = /^\s*(\*|\/\/|\/\*|\{\/\*)/.test(linea);
+          const grisEnClaro = /(^|[\s"'`{])text-slate-400\b/.test(linea);
+          const tieneTamano = /(^|[\s"'`{])text-(xs|sm|base|\[[\d.]+px\])(?![\w-])/.test(linea);
+          if (!esComentario && grisEnClaro && tieneTamano && !linea.includes("aria-hidden")) {
+            lista.push(`${f}:${i + 1}`);
+          }
+        });
+    }
+    expect(lista).toEqual([]);
+  });
+
+  it("y el contador de los chips de filtro tampoco", () => {
+    // Toma el tamaño del chip, así que su línea no lo dice.
+    expect(FILTROS).not.toContain(': "text-slate-400"');
   });
 });

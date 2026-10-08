@@ -506,3 +506,93 @@ describe("deliberate — sinCentinelas en knownValues", () => {
     expect(mockCallGemini.mock.calls[0][0] as string).toContain("POL-8812-R");
   });
 });
+
+/**
+ * El tope de consultas bajó de 3 a 2: el ensayo del 07/10 nunca pasó de dos
+ * consultas por caso, y la cadena de tres ya no existe. La tercera pasada es
+ * ahora la última, sin menú, y corre en todos los casos con dos consultas.
+ */
+describe("deliberate — el tope de consultas", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function consulta(tool: string, args: Record<string, unknown> = {}) {
+    return { text: JSON.stringify({ tool, args }), usage: {}, model: "gemini-test" };
+  }
+
+  function decision() {
+    return {
+      text: JSON.stringify({ intent: "ask", ask_for: ["fotos_danos"], reasoning: "x" }),
+      usage: {},
+      model: "gemini-test",
+    };
+  }
+
+  const prompts = () => mockCallGemini.mock.calls.map((c) => c[0] as string);
+
+  it("dos consultas, y la tercera pasada decide sin menú", async () => {
+    mockRunTool
+      .mockResolvedValueOnce({ sin_datos: true })
+      .mockResolvedValueOnce({ encontradas: 0 });
+    mockCallGemini
+      .mockResolvedValueOnce(consulta("verificar_poliza", { numero_poliza: "POL-TEST-1" }))
+      .mockResolvedValueOnce(consulta("polizas_por_dni"))
+      .mockResolvedValueOnce(decision());
+
+    const plan = await deliberate(situation());
+
+    expect(plan).not.toBeNull();
+    expect(plan!.toolCalls.map((c) => c.tool)).toEqual(["verificar_poliza", "polizas_por_dni"]);
+    expect(plan!.lookupResults).toHaveLength(2);
+    expect(mockCallGemini).toHaveBeenCalledTimes(3);
+
+    const ultimo = prompts()[2];
+    expect(ultimo).toContain("Ya no podés consultar nada más");
+    expect(ultimo).toContain("LO QUE AVERIGUASTE");
+    expect(ultimo).toContain("Devolvé sólo esto, nada más:");
+    expect(ultimo).toContain("La decisión, cuando ya sabés qué hacer:");
+    expect(ultimo).not.toContain("ANTES DE DECIDIR PODÉS AVERIGUAR ESTO");
+    expect(ultimo).not.toContain("(A) Una consulta");
+    expect(ultimo).not.toContain("(La decisión");
+    expect(ultimo).not.toContain("UNA de estas dos cosas");
+  });
+
+  it("si en la última pasada pide otra consulta, no se corre y vuelve al árbol", async () => {
+    mockRunTool
+      .mockResolvedValueOnce({ sin_datos: true })
+      .mockResolvedValueOnce({ encontradas: 0 });
+    mockCallGemini
+      .mockResolvedValueOnce(consulta("verificar_poliza", { numero_poliza: "POL-TEST-1" }))
+      .mockResolvedValueOnce(consulta("polizas_por_dni"))
+      .mockResolvedValueOnce(consulta("historial_del_caso"));
+
+    const plan = await deliberate(situation());
+
+    expect(plan).toBeNull();
+    expect(mockRunTool).toHaveBeenCalledTimes(2);
+    expect(mockRunTool).not.toHaveBeenCalledWith("historial_del_caso", expect.anything(), expect.anything());
+    expect(mockCallGemini).toHaveBeenCalledTimes(3);
+  });
+
+  it("con una sola consulta la segunda pasada todavía ofrece el menú, y las pasadas que no son la última no cambiaron", async () => {
+    mockRunTool.mockResolvedValueOnce({ sin_datos: true });
+    mockCallGemini
+      .mockResolvedValueOnce(consulta("verificar_poliza", { numero_poliza: "POL-TEST-1" }))
+      .mockResolvedValueOnce(decision());
+
+    const plan = await deliberate(situation());
+
+    expect(plan).not.toBeNull();
+    expect(plan!.toolCalls).toHaveLength(1);
+    expect(mockCallGemini).toHaveBeenCalledTimes(2);
+
+    for (const prompt of prompts()) {
+      expect(prompt).toContain("ANTES DE DECIDIR PODÉS AVERIGUAR ESTO");
+      expect(prompt).toContain("Devolvé UNA de estas dos cosas, nada más:");
+      expect(prompt).toContain("(A) Una consulta");
+      expect(prompt).toContain("(B) La decisión, cuando ya sabés qué hacer:");
+      expect(prompt).not.toContain("Ya no podés consultar nada más");
+    }
+  });
+});

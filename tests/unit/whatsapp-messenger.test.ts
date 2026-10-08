@@ -65,6 +65,7 @@ import { db } from "@/lib/db";
 import { sendWhatsAppText, sendWhatsAppTemplate, olvidarEstadoDePlantilla } from "@/server/whatsapp/cloud-api";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
+import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { CUIDADO, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
@@ -1137,5 +1138,68 @@ describe("whatsappMessenger — reabrir con plantilla", () => {
     });
 
     expect(olvidarEstadoDePlantilla).toHaveBeenCalledTimes(1);
+  });
+});
+
+/*
+ * Un adjunto que pasó el tope de tamaño: se le dice, con texto fijo, y el
+ * pedido que salga igual lleva la frase al pie, fuera del redactor.
+ */
+describe("whatsappMessenger — el archivo que no entró", () => {
+  const redacta = (message: string) =>
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ message }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+    });
+  const veces = (s: string) => s.split(ARCHIVO_QUE_NO_ENTRO).length - 1;
+  const PEDIDO = { caseId: CASE, missingFields: ["parte_amistoso"] };
+
+  beforeEach(() => {
+    (callGemini as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("sin modelo en tests"));
+  });
+
+  it("el aviso es texto fijo, sin la lista, y queda en el libro con su nombre", async () => {
+    await send("attachment_too_large", { caseId: CASE });
+
+    expect(sentBody()).toBe(ARCHIVO_QUE_NO_ENTRO);
+    expect(inserted[0]?.template).toBe("wa_attachment_too_large");
+    expect(inserted[0]?.asked_keys == null).toBe(true);
+  });
+
+  it("aunque el redactor tenga prosa, el aviso no pasa por él", async () => {
+    redacta("Gracias, recibimos tu foto.");
+
+    await send("attachment_too_large", { caseId: CASE });
+
+    expect(sentBody()).toBe(ARCHIVO_QUE_NO_ENTRO);
+    expect(callGemini).not.toHaveBeenCalled();
+  });
+
+  it("el pedido con el aviso lleva la frase al pie, una sola vez", async () => {
+    await send("missing_information_request", { ...PEDIDO, archivoQueNoEntro: true });
+
+    const body = sentBody();
+    expect(body.endsWith(ARCHIVO_QUE_NO_ENTRO)).toBe(true);
+    expect(veces(body)).toBe(1);
+  });
+
+  it.each([{}, { archivoQueNoEntro: "true" }, { archivoQueNoEntro: false }])(
+    "el pedido sin el aviso (%j) no la lleva",
+    async (extra) => {
+      await send("missing_information_request", { ...PEDIDO, ...extra });
+      expect(sentBody()).not.toContain(ARCHIVO_QUE_NO_ENTRO);
+    }
+  );
+
+  it("en el simulado también va al pie", async () => {
+    await simulatedWhatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "missing_information_request",
+      data: { ...PEDIDO, archivoQueNoEntro: true },
+    });
+
+    expect(String(inserted[0]?.rendered_body).endsWith(ARCHIVO_QUE_NO_ENTRO)).toBe(true);
   });
 });

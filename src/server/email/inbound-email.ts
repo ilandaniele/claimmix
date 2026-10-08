@@ -90,7 +90,8 @@ export async function ingestInboundEmail(
     email.subject,
     email.fromAddr,
     email.headers ?? [],
-    channel
+    channel,
+    email.threadId ?? null
   );
 
   if (!existingCaseId) {

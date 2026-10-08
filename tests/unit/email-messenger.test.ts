@@ -637,3 +637,65 @@ describe("webMessenger", () => {
     expect(compose.mock.calls[0][0]).toMatchObject({ origenWeb: false });
   });
 });
+
+/*
+ * Un adjunto que pasó el tope de tamaño: el aviso es texto fijo, y el pedido
+ * que salga igual lleva la frase al pie, fuera del redactor.
+ */
+describe("emailMessenger — el archivo que no entró", () => {
+  const veces = (s: string) => s.split("10 MB").length - 1;
+  const PROSA = "Ilan, para seguir con tu reclamo necesitamos el número de póliza. Contanos y avanzamos.";
+
+  it("el aviso no pasa por el redactor y sale con el número de caso", async () => {
+    escribe("Gracias, recibimos tu foto.");
+
+    await mandar("attachment_too_large", { caseId: CASE });
+
+    expect(compose).not.toHaveBeenCalled();
+    expect(cuerpoEnviado()).toContain("10 MB");
+    expect(cuerpoEnviado()).toContain("Caso #");
+    expect(cuerpoEnviado()).not.toContain("recibimos tu foto");
+  });
+
+  it("el pedido redactado lleva la frase al pie, una sola vez", async () => {
+    escribe(PROSA);
+
+    await mandar("missing_information_request", { ...PEDIDO, archivoQueNoEntro: true });
+
+    expect(cuerpoEnviado()).toContain("necesitamos el número de póliza");
+    expect(veces(cuerpoEnviado())).toBe(1);
+  });
+
+  it("la frase va aunque el redactor falle: sale el piso de la plantilla más la frase", async () => {
+    modelo.mockRejectedValue(new Error("sin modelo"));
+
+    await mandar("missing_information_request", { ...PEDIDO, archivoQueNoEntro: true });
+
+    expect(cuerpoEnviado()).toContain("Número de póliza");
+    expect(veces(cuerpoEnviado())).toBe(1);
+  });
+
+  it("sin el aviso, el pedido no la lleva", async () => {
+    escribe(PROSA);
+
+    await mandar("missing_information_request", PEDIDO);
+
+    expect(cuerpoEnviado()).not.toContain("10 MB");
+  });
+
+  it("en el primer mail del formulario web, «Si no fuiste vos» sigue siendo lo último", async () => {
+    escribe(PROSA);
+
+    await webMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO_RESERVADA,
+      template: "missing_information_request",
+      data: { ...PEDIDO, archivoQueNoEntro: true },
+    });
+
+    expect(cuerpoEnviado().indexOf(SI_NO_FUISTE_VOS)).toBeGreaterThan(
+      cuerpoEnviado().indexOf("10 MB")
+    );
+  });
+});

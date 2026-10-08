@@ -23,7 +23,7 @@
  */
 
 import "server-only";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import {
   enTenant,
   enTenantVarias,
@@ -515,11 +515,15 @@ async function redispatchExtraction(
       }, "email_worker.redespacho_no_llego");
 
   try {
+    // Sólo si nadie la tomó desde que la soltamos: quien la tenga leyó este
+    // mensaje al tomarla —puede ser la hija, si el POST llegó y dejamos de
+    // esperarla—. Marcarla haría que, si muere, la próxima la tome vencida con
+    // la marca y conteste sin mirar si ya se contestó.
     await enTenant(tenantCtx, (db) =>
       db
         .update(cases)
         .set({ extraction_pending: true })
-        .where(eq(cases.id, caseId))
+        .where(and(eq(cases.id, caseId), isNull(cases.extraction_lease_at)))
     );
   } catch (err) {
     // Si ni esto se puede escribir, queda el log de arriba y nada más.
@@ -740,11 +744,21 @@ export async function runEmailExtractionWorker(
         blockers: throttle.blockers,
         nota: "Se devuelve a la cola en vez de seguir sin turno.",
       }, "email_worker.throttle_timeout");
+        // Lo que habría hecho de pedir la reserva al arrancar: marcar si estaba
+        // libre o viva. Una vencida es de una corrida muerta; con la marca, la
+        // próxima la tomaría como «le llegó algo mientras corría» y contestaría
+        // sin mirar si ya se contestó. Sin marca la levanta el barrido, heredada.
+        const vivaDesde = new Date(arrancó - EXTRACTION_LEASE_MS).toISOString();
         await enTenant(tenantCtx, (db) =>
           db
             .update(cases)
             .set({ extraction_pending: true })
-            .where(eq(cases.id, caseId))
+            .where(
+              and(
+                eq(cases.id, caseId),
+                or(isNull(cases.extraction_lease_at), gte(cases.extraction_lease_at, vivaDesde))
+              )
+            )
         );
         return;
       }
@@ -1504,6 +1518,7 @@ export async function runEmailExtractionWorker(
           heredadaEn,
           sePuedeRetomar: puedeArrancar(newStatus),
           preguntadas,
+          propuestos: pedido.propuestos,
         },
         customerMatches,
         messengerFor(caseRow.channel),

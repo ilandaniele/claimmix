@@ -293,6 +293,28 @@ describe("findCustomerMatches — conflict detection", () => {
     expect(emailMatch).toBeDefined();
     expect(emailMatch!.conflictsWithExtracted).toEqual([]);
   });
+
+  async function conflictosConNombreGuardado(guardado: string, extraido: string) {
+    vi.mocked(db.select).mockReturnValue(
+      makeSelectChain([{ ...CUSTOMER_A, full_name: guardado }]) as any
+    );
+    const matches = await findCustomerMatches(TENANT_ID, {
+      email: "juan@example.com",
+      full_name: extraido,
+    });
+    return matches.find((m) => m.matchType === "email")!.conflictsWithExtracted;
+  }
+
+  it.each([
+    ["el apellido primero y sin acentos", "PEREZ Juan"],
+    ["con coma y otro espaciado", "Pérez,  Juan"],
+  ])("%s no es conflicto", async (_caso, guardado) => {
+    expect(await conflictosConNombreGuardado(guardado, "Juan Pérez")).toEqual([]);
+  });
+
+  it("una parte del nombre sigue siendo conflicto", async () => {
+    expect(await conflictosConNombreGuardado("Juan Pérez", "Juan")).toContain("full_name");
+  });
 });
 
 // ── DB error handling ─────────────────────────────────────────────────────────

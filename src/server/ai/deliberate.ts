@@ -124,11 +124,14 @@ export interface DeliberationInput {
    *
    * Cada herramienta que el modelo pide cuesta una pasada entera del bucle, o
    * sea otra llamada a Gemini —seis segundos en la mediana— dentro de un
-   * presupuesto de cuarenta. Con hasta tres, es la diferencia entre una llamada
-   * y cuatro.
+   * presupuesto de cuarenta. Con hasta dos, es la diferencia entre una llamada
+   * y tres.
    *
    * Dárselo servido no le saca nada: las herramientas siguen ahí si igual
-   * quiere preguntar, y el plan se valida igual que siempre.
+   * quiere preguntar, y el plan se valida igual que siempre. Y no contestan lo
+   * mismo: `verificar_poliza` distingue un padrón vacío de una póliza que no
+   * existe, y `polizas_por_dni` trae los números, que acá no van a propósito.
+   * Por eso siguen.
    */
   yaAveriguado?: string;
   /**
@@ -205,10 +208,15 @@ export async function deliberate(
  *
  * Each is a database query and a round trip to the model, so the ceiling is
  * about cost and latency rather than safety — the tools are read-only, and a
- * loop that ran forever would only be expensive. Three is enough for the real
- * chains: check the DNI, find their policies, confirm one is in force.
+ * loop that ran forever would only be expensive.
+ *
+ * Dos, no tres. La cadena de tres —mirar el DNI, buscar sus pólizas, ver si
+ * alguna está vigente— ya no existe: el DNI llega en `remitente` y
+ * `polizas_por_dni` trae la vigencia. En tres ensayos completos del 07/10 hubo
+ * entre 16 y 19 consultas; en dos, un caso llegó a tres y la tercera repetía la
+ * consulta, así que el tope de dos sólo corta repeticiones.
  */
-const MAX_TOOL_CALLS = 3;
+const MAX_TOOL_CALLS = 2;
 
 /**
  * Let the agent look things up until it knows enough to decide.
@@ -258,7 +266,7 @@ async function think(
     // Antes del `if (!text)`, y ADENTRO del bucle: una respuesta inservible
     // se pagó igual, y una consulta a una herramienta gasta una pasada entera
     // que no es la que trae el plan. Registrar sólo la última contaría una de
-    // cuatro.
+    // tres.
     await registrarConsumoDelModelo(input.tenantId, model, usage);
 
     if (!text) return { plan: null, toolCalls, lookupResults: resultados };
@@ -398,13 +406,13 @@ Criterios, en orden:
 
 Nunca pidas algo que no esté en la lista de arriba, ni con otro nombre.
 ${toolSection(lastChance)}
-Devolvé UNA de estas dos cosas, nada más:
+Devolvé ${lastChance ? "sólo esto" : "UNA de estas dos cosas"}, nada más:
 
 ${lastChance ? "" : `(A) Una consulta, si te falta saber algo para decidir bien:
 
 {"tool": "<nombre de la herramienta>", "args": { ... }}
 
-`}(${lastChance ? "" : "B) "}La decisión, cuando ya sabés qué hacer:
+`}${lastChance ? "" : "(B) "}La decisión, cuando ya sabés qué hacer:
 
 {
   "intent": "ask" | "answer" | "answer_and_ask" | "acknowledge" | "escalate" | "wait",

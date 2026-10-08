@@ -1,7 +1,7 @@
 /**
  * La decisión de si el asegurado recibe un mensaje.
  *
- * Sin un solo mock: entran nueve señales y sale una decisión. Antes esto
+ * Sin un solo mock: entran diez señales y sale una decisión. Antes esto
  * vivía dentro de una función de 1.424 líneas enredada con la base, y probar
  * un caso costaba montar media aplicación — por eso el bug de abajo se
  * descubrió con un ensayo contra el agente real, en producción, y no acá.
@@ -20,6 +20,7 @@ const base: SeñalesDeRespuesta = {
   elAgenteEspera: false,
   nosPreguntoAlgo: false,
   llegoUnArchivo: false,
+  unArchivoNoEntro: false,
   nosContestoElPedido: false,
   nosLoDevolvieron: false,
   aprendimosAlgo: false,
@@ -134,6 +135,54 @@ describe("qué rompe la espera", () => {
     expect(
       queHacer(con({ elAgenteEspera: true, nosContestoElPedido: true, datosQueFaltan: 0 }))
     ).toBe("callar");
+  });
+});
+
+describe("el archivo que no entró", () => {
+  it("con el pedido en espera se le avisa", () => {
+    expect(queHacer(con({ yaSePidio: true, unArchivoNoEntro: true }))).toBe(
+      "avisar-que-no-entro"
+    );
+  });
+
+  it("también cuando el agente decidió esperar: la persona cree que lo mandó", () => {
+    expect(queHacer(con({ elAgenteEspera: true, unArchivoNoEntro: true }))).toBe(
+      "avisar-que-no-entro"
+    );
+    expect(
+      queHacer(con({ yaSePidio: true, elAgenteEspera: true, unArchivoNoEntro: true }))
+    ).toBe("avisar-que-no-entro");
+  });
+
+  it("gana sobre el acuse de recibo", () => {
+    expect(
+      queHacer(con({ yaSePidio: true, aprendimosAlgo: true, unArchivoNoEntro: true }))
+    ).toBe("avisar-que-no-entro");
+  });
+
+  it("un caso grave sigue callado", () => {
+    expect(queHacer(con({ esGrave: true, yaSePidio: true, unArchivoNoEntro: true }))).toBe(
+      "callar"
+    );
+  });
+
+  it("sin el pedido en espera manda el pedido, que lleva el aviso al pie", () => {
+    expect(queHacer(con({ unArchivoNoEntro: true }))).toBe("pedir");
+    expect(queHacer(con({ yaSePidio: true, nosPreguntoAlgo: true, unArchivoNoEntro: true }))).toBe(
+      "pedir"
+    );
+    expect(
+      queHacer(con({ yaSePidio: true, nosLoDevolvieron: true, unArchivoNoEntro: true }))
+    ).toBe("pedir");
+  });
+
+  it("no inventa un mensaje cuando no falta nada ni hay nada en espera", () => {
+    expect(queHacer(con({ datosQueFaltan: 0, unArchivoNoEntro: true }))).toBe("callar");
+  });
+
+  it("no saca el pedido de espera", () => {
+    expect(elPedidoQuedaEnEspera(con({ yaSePidio: true, unArchivoNoEntro: true }))).toBe(true);
+    expect(elPedidoQuedaEnEspera(con({ unArchivoNoEntro: true }))).toBe(false);
   });
 });
 

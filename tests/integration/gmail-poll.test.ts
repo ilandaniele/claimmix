@@ -588,10 +588,11 @@ describe("pollGmail — Gmail inbound polling pipeline", () => {
       expect(caseInserts).toHaveLength(0);
 
       // El canal real y las cabeceras de Gmail llegan a threadLookup
-      const [, , , , fromAddr, headers, channel] = (threadLookup as ReturnType<typeof vi.fn>).mock
+      const [, , , , fromAddr, headers, channel, threadId] = (threadLookup as ReturnType<typeof vi.fn>).mock
         .calls[0];
       expect(fromAddr).toBe("claimant@example.com");
       expect(channel).toBe("email");
+      expect(threadId).toBe(THREAD_ID_1);
       expect(headers).toContainEqual({
         name: "Authentication-Results",
         value: "mx.google.com; spf=pass smtp.mailfrom=claimant@example.com",

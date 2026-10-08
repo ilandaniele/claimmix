@@ -70,7 +70,7 @@ beforeEach(() => {
   m.recordar.mockImplementation(anota("recordar", { enviados: 3, salteados: 1 }));
   m.cerrar.mockImplementation(anota("cerrar", { closed: 4, caseIds: [] }));
   m.avisar.mockImplementation(anota("avisar", 2));
-  m.revisar.mockImplementation(anota("revisar", { nuevos: 6, porRegla: {} }));
+  m.revisar.mockImplementation(anota("revisar", { nuevos: 6, porRegla: {}, fallidas: [] }));
   m.purgar.mockImplementation(anota("purgar", 5));
   m.purgaAdjuntos.mockImplementation(anota("purgaAdjuntos", { modo: "borrar", candidatos: 3, purgados: 2, fallidos: 1 }));
   m.retencion.mockImplementation(
@@ -103,8 +103,8 @@ describe("GET /api/cron/reap-stuck", () => {
     expect(m.rateLimit).toHaveBeenCalledWith("revision-de-desvios", { limit: 1, windowMs: 86_400_000 });
     expect(m.revisar).toHaveBeenCalledOnce();
     expect(await primera.json()).toMatchObject({ desvios_nuevos: 6 });
-    expect(await segunda.json()).toMatchObject({ desvios_nuevos: 0 });
-    expect(await tercera.json()).toMatchObject({ desvios_nuevos: 0 });
+    expect(await segunda.json()).toMatchObject({ desvios_nuevos: 0, desvios_fallidas: [] });
+    expect(await tercera.json()).toMatchObject({ desvios_nuevos: 0, desvios_fallidas: [] });
   });
 
   it("sin cupo de revisión los demás barridos y la purga corren igual", async () => {
@@ -133,7 +133,19 @@ describe("GET /api/cron/reap-stuck", () => {
 
     expect(res.status).toBe(200);
     expect(m.purgar).toHaveBeenCalledOnce();
-    expect(await res.json()).toMatchObject({ desvios_nuevos: 0, rate_limit_rows_purged: 5 });
+    expect(await res.json()).toMatchObject({ desvios_nuevos: 0, desvios_fallidas: [], rate_limit_rows_purged: 5 });
+  });
+
+  it("las reglas que fallaron viajan en el JSON y la ruta sigue en 200", async () => {
+    m.revisar.mockResolvedValue({ nuevos: 1, porRegla: {}, fallidas: ["plazo_vencido", "cierre_sin_listo"] });
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      desvios_nuevos: 1,
+      desvios_fallidas: ["plazo_vencido", "cierre_sin_listo"],
+    });
   });
 
   it("no arranca la revisión de desvíos si no queda un minuto de la función", async () => {
@@ -147,7 +159,7 @@ describe("GET /api/cron/reap-stuck", () => {
     expect(res.status).toBe(200);
     expect(m.revisar).not.toHaveBeenCalled();
     expect(m.purgar).toHaveBeenCalledOnce();
-    expect(await res.json()).toMatchObject({ desvios_nuevos: 0 });
+    expect(await res.json()).toMatchObject({ desvios_nuevos: 0, desvios_fallidas: [] });
   });
 
   it("los recordatorios tienen a lo sumo un minuto y los avisos dejan un minuto antes del plazo", async () => {
@@ -194,6 +206,7 @@ describe("GET /api/cron/reap-stuck", () => {
       recordatorios_salteados: 1,
       avisos_de_cierre: 2,
       desvios_nuevos: 6,
+      desvios_fallidas: [],
       purga: null,
       retencion: null,
       rate_limit_rows_purged: 5,

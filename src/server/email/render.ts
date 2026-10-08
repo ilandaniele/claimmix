@@ -18,6 +18,7 @@ import { renderDataConfirmationRequest } from "./templates/data-confirmation-req
 import { renderSpecialistEscalation } from "./templates/specialist-escalation";
 import { renderInformationReceived } from "./templates/information-received";
 import { renderCaseClosureNotice } from "./templates/case-closure-notice";
+import { renderAttachmentTooLarge } from "./templates/attachment-too-large";
 import { maskEmail } from "@/lib/email/mask";
 
 /**
@@ -36,6 +37,8 @@ export type EmailTemplate =
   // Acusar recibo sin repetir el pedido: la persona contó algo nuevo y lo
   // que falta sigue siendo lo mismo que ya le pedimos.
   | "information_received"
+  // Un adjunto que pasó el tope de tamaño, con el pedido en espera: texto fijo, sin redactor.
+  | "attachment_too_large"
   // El aviso de cierre por abandono (B4): texto fijo, sin redactor.
   | "case_closure_notice";
 
@@ -229,6 +232,7 @@ export function renderTemplate(
           : undefined,
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
         titularAjeno: data.titularAjeno === true,
+        question: data.question != null ? String(data.question) : null,
       });
 
     case "specialist_escalation":
@@ -241,6 +245,12 @@ export function renderTemplate(
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
         heridos: data.heridos === true,
         yaPreguntamos: data.yaPreguntamos === true,
+      });
+
+    case "attachment_too_large":
+      return renderAttachmentTooLarge({
+        caseId: String(data.caseId ?? ""),
+        cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
       });
 
     case "case_closure_notice":

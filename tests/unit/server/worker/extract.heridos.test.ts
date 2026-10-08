@@ -75,6 +75,7 @@ async function correr(
   return {
     claim: llamadas[0][2].extractedClaim,
     preguntadas: llamadas[0][2].preguntadas,
+    propuestos: llamadas[0][2].propuestos,
     escrito: escrito.map((f) => f.field_key),
     severidadDelModelo: vi.mocked(classifySeverity).mock.calls[0]?.[1],
     caso: Object.assign({}, ...espiaDeUpdate.mock.calls.map((c) => c[0])) as Record<string, unknown>,
@@ -191,6 +192,29 @@ describe("la respuesta a una confirmación de heridos con valor", () => {
     expect(escrito).not.toContain("hay_heridos");
     expect(claim.fields_pending_confirmation).toContain("hay_heridos");
     expect(caso.injury_severity).not.toBe("none");
+  });
+});
+
+/*
+ * Un «Confirmo» sólo cierra lo que el pedido mostró con valor, y sólo el worker
+ * sabe qué mostraba: se lo pasa al orquestador.
+ */
+describe("el worker le pasa al orquestador lo que mostraba el pedido", () => {
+  it("el valor de cada confirmación pendiente", async () => {
+    const { propuestos } = await correr("email", {
+      cuerpo: "Sí",
+      pedido: ["hay_heridos"],
+      propuestos: { hay_heridos: "none" },
+      modelo: [],
+    });
+
+    expect(propuestos).toEqual({ hay_heridos: "none" });
+  });
+
+  it("y nada si no había ninguna", async () => {
+    const { propuestos } = await correr("whatsapp");
+
+    expect(propuestos).toEqual({});
   });
 });
 

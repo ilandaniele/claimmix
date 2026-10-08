@@ -1,12 +1,13 @@
 import "server-only";
 
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql, type SQL } from "drizzle-orm";
 import type { JSONWebKeySet } from "jose";
 import { z } from "zod";
 
+import { proveedorDeSso } from "@/core/sso";
 import { enTenant, type ClienteDatos } from "@/data/scope";
 import { db } from "@/lib/db";
-import { ssoSettings } from "@/lib/db/schema";
+import { accounts, ssoSettings } from "@/lib/db/schema";
 import { revisarForma } from "@/server/core-sync/destino";
 import { codigoPg, esFaltaDe0036 } from "@/server/core-sync/config";
 import { pedirFijado } from "@/server/red/https-fijado";
@@ -77,6 +78,81 @@ export function vistaDeLaConfigSso(db: ClienteDatos) {
 }
 
 export type VistaDeLaConfigSso = Awaited<ReturnType<typeof vistaDeLaConfigSso>>[number];
+
+/** El IdP que propone el admin, con el secreto ya cifrado (o nulo si no mandó uno). */
+export type IdpPropuesto = { issuer: string; client_id: string; dominio: string; client_secret_cifrado: string | null };
+
+/**
+ * Todo en una sentencia. `excluded` es lo que se propone y la columna a
+ * secas es lo que ya estaba. Si cambia el issuer o el dominio hay que
+ * volver a probar el dominio. Si cambia cualquiera de los tres datos —issuer,
+ * dominio o client_id— se apaga el SSO y se deja de exigir: lo que se probó
+ * era otra configuración. Y si cambia el issuer o el client_id sin secreto
+ * nuevo, el viejo se descarta en lugar de mandárselo a otro IdP u otra aplicación.
+ */
+export function guardarIdp(db: ClienteDatos, tenantId: string, idp: IdpPropuesto) {
+  const mismoIssuer = sql`${ssoSettings.issuer} is not distinct from excluded.issuer`;
+  const mismoCliente = sql`(${mismoIssuer} and ${ssoSettings.client_id} is not distinct from excluded.client_id)`;
+  const mismoIdp = sql`(${mismoIssuer} and ${ssoSettings.dominio} is not distinct from excluded.dominio)`;
+  const mismaConfig = sql`(${mismoIdp} and ${ssoSettings.client_id} is not distinct from excluded.client_id)`;
+  const firma = { actualizado_en: new Date().toISOString() };
+
+  return db
+    .insert(ssoSettings)
+    .values({
+      tenant_id: tenantId,
+      issuer: idp.issuer,
+      client_id: idp.client_id,
+      dominio: idp.dominio,
+      client_secret_cifrado: idp.client_secret_cifrado,
+      ...firma,
+    })
+    .onConflictDoUpdate({
+      target: ssoSettings.tenant_id,
+      set: {
+        issuer: sql`excluded.issuer`,
+        client_id: sql`excluded.client_id`,
+        dominio: sql`excluded.dominio`,
+        client_secret_cifrado: sql`case when ${mismoCliente} then coalesce(excluded.client_secret_cifrado, ${ssoSettings.client_secret_cifrado}) else excluded.client_secret_cifrado end`,
+        dominio_verificado_en: sql`case when ${mismoIdp} then ${ssoSettings.dominio_verificado_en} else null end`,
+        activo: sql`${ssoSettings.activo} and ${mismaConfig}`,
+        exigir: sql`${ssoSettings.exigir} and ${mismaConfig}`,
+        ...firma,
+      },
+    })
+    .returning(CAMPOS_DE_LA_VISTA);
+}
+
+export type CambioDeEstadoSso = { activo?: boolean; exigir?: boolean };
+
+/**
+ * Las condiciones viajan en el mismo UPDATE: sin fila afectada, no se cumplían.
+ *  · prender (o exigir) pide la config completa y el dominio probado;
+ *  · exigir pide el SSO prendido y que QUIEN LO PIDE ya haya entrado por él,
+ *    la prueba de que el camino anda con su propia cuenta: exigir sin eso
+ *    puede dejar afuera al propio admin.
+ * Apagar el SSO apaga también «exigir», que sin SSO no significa nada.
+ */
+export function cambiarEstadoSso(db: ClienteDatos, tenantId: string, userId: string, { activo, exigir }: CambioDeEstadoSso) {
+  const condiciones: SQL[] = [];
+  if (activo === true || exigir === true) condiciones.push(CONFIG_COMPLETA!);
+  if (exigir === true && activo !== true) condiciones.push(eq(ssoSettings.activo, true));
+  if (exigir === true) {
+    condiciones.push(
+      sql`exists (select 1 from ${accounts} where ${and(
+        eq(accounts.providerId, proveedorDeSso(tenantId)),
+        eq(accounts.userId, userId)
+      )})`
+    );
+  }
+  const cambios = {
+    actualizado_en: new Date().toISOString(),
+    ...(activo !== undefined && { activo }),
+    ...(activo === false ? { exigir: false } : exigir !== undefined ? { exigir } : {}),
+  };
+
+  return db.update(ssoSettings).set(cambios).where(and(...condiciones)).returning(CAMPOS_DE_LA_VISTA);
+}
 
 /** La config vigente de un inquilino ya identificado (por el `state` firmado de la vuelta del IdP). */
 export async function configVigenteDelInquilino(tenantId: string): Promise<ConfigSso | null> {

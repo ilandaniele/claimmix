@@ -93,6 +93,8 @@ supabase/.temp/
 *-sa-key.json
 *-service-account.json
 *.gcp-key.json
+# El nombre con que Google baja la clave de este proyecto: <proyecto>-<12 hex>.json.
+claimmix-506321-*.json
 
 # local scratch notes — may contain sensitive context
 prompt.txt

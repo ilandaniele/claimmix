@@ -9,6 +9,8 @@
  *      → handles the case where a claimant replies to our outbound email (IC7, AC6).
  *   2. cases.email_thread_id
  *      → legacy / inbound-thread matching (existing behaviour).
+ *   2b. claim_messages.thread_id (inbound, mismo proveedor, mismo remitente, el mensaje al que contesta)
+ *      → la respuesta del asegurado a su propio mail, que no cita ningún id nuestro.
  *
  * Resolution strategy:
  *   a. Check InReplyTo (most precise — direct reply to a specific message)
@@ -63,6 +65,7 @@ export interface ThreadLookupResult {
  * @param fromAddr    - Value of the From header; must already take part in the case
  * @param headers     - cabeceras del mensaje, de donde sale si el remitente es de quien dice
  * @param channel     - `email` exige un Authentication-Results de Gmail alineado con el From; `email_sim` sólo que no haya fallado
+ * @param threadId    - id de hilo del proveedor (Gmail: msg.threadId; ensayo: thread.<run>.<escenario>); sólo junta mails del mismo remitente y sólo con el que contesta
  * @returns { existingCaseId?: string }
  */
 export async function threadLookup(
@@ -72,7 +75,8 @@ export async function threadLookup(
   subject: string,
   fromAddr: string,
   headers: unknown = [],
-  channel: "email" | "email_sim" = "email_sim"
+  channel: "email" | "email_sim" = "email_sim",
+  threadId: string | null = null
 ): Promise<ThreadLookupResult> {
   // Sin remitente verificado no entra a ningún caso: abre el suyo.
   if (!remitenteVerificado(headers, fromAddr, channel)) {
@@ -125,8 +129,9 @@ export async function threadLookup(
 
   // ── 2. Legacy path: cases.email_thread_id ────────────────────────────────
   // This covers:
-  //   - Replies to the original inbound message (cases.email_thread_id = first MessageID)
   //   - Any rows that predate the claim_messages table (migration 0009)
+  // No cubre las respuestas de Gmail al mail original: ahí email_thread_id guarda
+  // el id hex de Gmail, que no aparece en ninguna cabecera. Queda como legado.
   try {
     const caseRow = candidates.length === 0 ? null : firstRow(
       await enTenant(tenantCtx, (db) =>
@@ -152,6 +157,54 @@ export async function threadLookup(
   } catch (err) {
     logger.error({ code: errorCode(err) }, "thread_lookup.cases_error");
     return { existingCaseId: undefined };
+  }
+
+  // ── 2b. El hilo del proveedor donde el remitente ya escribió ─────────────
+  // La respuesta del asegurado a su propio mail trae en In-Reply-To el
+  // Message-ID RFC de ese mail, que sólo guardamos en las cabeceras de su fila;
+  // Gmail sí la deja en el mismo hilo. Ese hilo lo arma Gmail con asunto y
+  // References, que cualquiera tipea: sólo vale la fila entrante del mismo
+  // remitente en ese hilo a cuyo mensaje contesta, y aun así pasa por
+  // onlyIfParticipant. No se elige por fecha: un mismo remitente puede tener
+  // dos casos en un hilo que Gmail agrupó por asunto. Sin cabeceras de
+  // respuesta no es una respuesta; con dos casos posibles, sigue el asunto.
+  if (threadId && sender && candidates.length > 0) {
+    try {
+      const rows = await enTenant(tenantCtx, (db) =>
+        db
+          .select({
+            case_id: claimMessages.case_id,
+            from_addr: claimMessages.from_addr,
+            provider_message_id: claimMessages.provider_message_id,
+            headers: claimMessages.headers,
+          })
+          .from(claimMessages)
+          .where(
+            and(
+              eq(claimMessages.direction, "inbound"),
+              // Un caso de WhatsApp guarda el teléfono como thread_id.
+              eq(claimMessages.provider, channel === "email_sim" ? "simulated" : "gmail"),
+              eq(claimMessages.thread_id, threadId)
+            )
+          )
+      );
+      const contestados = new Set(
+        rows
+          .filter(
+            (m) =>
+              bareAddress(m.from_addr) === sender &&
+              idsDeLaFila(m, channel).some((id) => candidates.includes(id))
+          )
+          .map((m) => m.case_id)
+      );
+      if (contestados.size === 1) {
+        const caseId = await onlyIfParticipant([...contestados][0], "provider_thread");
+        if (caseId) return { existingCaseId: caseId };
+      }
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "thread_lookup.provider_thread_error");
+      // No es fatal: sigue el asunto.
+    }
   }
 
   // ── 3. Last resort: the case number we put in our own subject ────────────
@@ -237,19 +290,39 @@ async function senderParticipates(
   }
 }
 
+/** `"<abc@mail>"` → `"abc@mail"`: así se comparan los ids. */
+function sinAngulos(raw: string): string {
+  return raw.trim().replace(/^<+/, "").replace(/>+$/, "").trim();
+}
+
+/**
+ * Los ids con que una respuesta puede nombrar a esta fila entrante: su
+ * Message-ID RFC, de las cabeceras guardadas. El simulado no manda cabeceras y
+ * el ensayo pone el id en provider_message_id.
+ */
+function idsDeLaFila(
+  m: { provider_message_id: string | null; headers: unknown },
+  channel: "email" | "email_sim"
+): string[] {
+  const cabecera = Array.isArray(m.headers)
+    ? (m.headers as Array<{ name?: string; value?: string }>).find(
+        (h) => h?.name?.toLowerCase() === "message-id"
+      )?.value
+    : undefined;
+  const ids = [cabecera, channel === "email_sim" ? m.provider_message_id : null];
+  return ids.flatMap((id) => (id ? [sinAngulos(id)] : []));
+}
+
 /**
  * Build a deduplicated list of candidate thread IDs from In-Reply-To and References.
  * Normalizes angle brackets (e.g. "<abc@mail>" → "abc@mail") and filters empty strings.
  */
 function buildCandidates(inReplyTo: string, references: string): string[] {
-  const normalize = (s: string): string =>
-    s.trim().replace(/^<+/, "").replace(/>+$/, "").trim();
-
   const seen = new Set<string>();
   const candidates: string[] = [];
 
   const addCandidate = (raw: string) => {
-    const normalized = normalize(raw);
+    const normalized = sinAngulos(raw);
     if (normalized && !seen.has(normalized)) {
       seen.add(normalized);
       candidates.push(normalized);

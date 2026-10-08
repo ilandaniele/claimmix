@@ -9,8 +9,8 @@
  * correrla dos veces —o dos corridas a la par— no duplica nada, y no hay que
  * traer los casos a memoria para compararlos con su historial.
  *
- * Cada regla corre sola: si una falla se registra y las demás siguen. Un
- * desvío que no se encontró esta noche se encuentra la siguiente.
+ * Cada regla corre sola: si una falla se registra, vuelve en `fallidas` y las
+ * demás siguen. Un desvío que no se encontró esta noche se encuentra la siguiente.
  *
  * Es un barrido de sistema sobre los casos de todos los inquilinos, con el rol
  * dueño (la tabla sólo se lee con `claimmix_app`). Cada fila lleva el
@@ -174,10 +174,13 @@ export interface ResultadoDeLaRevision {
   /** Los desvíos que se guardaron esta noche: los que ya estaban no cuentan. */
   nuevos: number;
   porRegla: Record<Regla, number>;
+  /** Las reglas que no corrieron por un error: el barrido las devuelve y barrer-trabados.yml se pone rojo. */
+  fallidas: Regla[];
 }
 
 export async function revisarDesvios(): Promise<ResultadoDeLaRevision> {
   const porRegla = Object.fromEntries(REGLAS.map((r) => [r, 0])) as Record<Regla, number>;
+  const fallidas: Regla[] = [];
 
   for (const regla of REGLAS) {
     try {
@@ -187,8 +190,9 @@ export async function revisarDesvios(): Promise<ResultadoDeLaRevision> {
       porRegla[regla] = (r as unknown as { rowCount?: number }).rowCount ?? 0;
     } catch (err) {
       logger.error({ regla, code: errorCode(err) }, "desvios.regla_fallo");
+      fallidas.push(regla);
     }
   }
 
-  return { nuevos: REGLAS.reduce((suma, r) => suma + porRegla[r], 0), porRegla };
+  return { nuevos: REGLAS.reduce((suma, r) => suma + porRegla[r], 0), porRegla, fallidas };
 }

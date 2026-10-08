@@ -762,7 +762,7 @@ bases antes del check.
 | `tests/unit/sso-inquilino.test.ts`, `sso-inquilino-flujo.test.ts`, `sso-ingreso.test.ts` | el plugin: el arranque, el callback (firma, `iss`, `aud`, `nonce`, dominio), el alta por primer ingreso , que quien ya estaba en el inquilino (mail local sin verificar, admin incluido) entre por su id y siga entrando sólo por SSO con «exigir», y que una rechazada sin `errorCallbackURL` vuelva a `/login` con su código |
 | `tests/unit/sso-exigir.test.ts`, `tests/unit/login-sso-requerido.test.ts` | «exigir»: corta contraseña y Google para el dominio, no niega el alta de un admin ni el cambio de contraseña, niega el alta abierta antes de crear la cuenta, y el login manda a `/login?error=sso_requerido` sin contar un fallo de credenciales |
 | `tests/unit/https-fijado.test.ts` | la llamada al IdP: IP fijada, tope de tamaño y de tiempo, sin cuerpo si no es 2xx |
-| `tests/integration/admin/sso.test.ts` | `/api/admin/sso` entera, con el IdP, el DNS y el cierre de sesiones simulados. El secreto nunca vuelve en una respuesta. El `CASE` del PUT (issuer, dominio y `client_id`) y el `EXISTS` del PATCH (la cuenta SSO del propio admin) se verifican sólo dibujando el SQL: se confirman en QA después de la 0045 |
+| `tests/integration/admin/sso.test.ts` | `/api/admin/sso` entera, con el IdP, el DNS y el cierre de sesiones simulados. El secreto nunca vuelve en una respuesta. El `CASE` del PUT (issuer, dominio y `client_id`) y el `EXISTS` del PATCH (la cuenta SSO del propio admin) se dibujan acá y se ejecutan contra Postgres, con `claimmix_app`, en la sección 7 de `pnpm capa-datos` |
 | `tests/unit/sso-panel*.test.ts*`, `sso-acciones.test.ts`, `configuracion-sso-pagina.test.tsx` | el panel de /configuracion y las acciones del servidor |
 | `tests/unit/cases-bulk-delete.test.ts`, `borrar-deja-rastro.test.ts` | borrar un caso anota los adjuntos en la cola en el mismo lote, y deja rastro en la auditoría |
 | `tests/unit/purgar-adjuntos.test.ts` | la purga: gracia, `purgar_despues` nulo = cancelada, de a 50, idempotente, el error queda como texto fijo, manda la fila más nueva por objeto y una purga lograda cierra las viejas |
@@ -778,8 +778,10 @@ Google Workspace de una aseguradora lo prueba el piloto.
 sesión, y la respuesta uniforme para un dominio desconocido; la sonda del
 dominio privado se saltea con `--solo-superficie` porque necesita la base) y tres
 sondas de `cualesBorra` en la pared entre inquilinos. No escribe ni abre sesiones:
-en producción es de sólo lectura. La sección 5 de `scripts/prove-data-layer.mts`
-(borrar el caso del inquilino de al lado) sí escribe, y por eso sólo corre en CI
+en producción es de sólo lectura. Las secciones 5, 6 y 7 de `scripts/prove-data-layer.mts`
+sí escriben. La 7 crea un inquilino descartable y ejecuta contra el ensayo el PUT y el
+PATCH del SSO, la cola de purga con dos borrados del mismo objeto (R2 simulado), la
+retención en `simular` y la revisión nocturna dos veces. Por eso sólo corren en CI
 o con `--escribe`, y nunca contra `ep-proud-resonance`: ahí el chequeo falla.
 
 ---
@@ -853,7 +855,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
-2. `pnpm rehearse`: las veinticinco conversaciones enteras contra el agente real.
+2. `pnpm rehearse`: las veintiséis conversaciones enteras contra el agente real.
    Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa

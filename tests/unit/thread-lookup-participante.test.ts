@@ -37,6 +37,10 @@ vi.mock("@/lib/db/schema", () => ({
     case_id: "case_id",
     direction: "direction",
     provider_message_id: "provider_message_id",
+    headers: "headers",
+    provider: "provider",
+    thread_id: "thread_id",
+    received_at: "received_at",
     from_addr: "from_addr",
     to_addr: "to_addr",
   },
@@ -58,6 +62,12 @@ vi.mock("drizzle-orm", () => ({
 type Row = Record<string, unknown>;
 const tables: Record<string, Row[]> = { cases: [], claim_messages: [] };
 let participantsUnreadable = false;
+let threadUnreadable = false;
+
+// Whether the condition (or any it is made of) looks at `col`.
+function mentions(cond: Cond, col: string): boolean {
+  return cond.op === "and" ? cond.conds.some((c) => mentions(c, col)) : cond.col === col;
+}
 
 function matches(row: Row, cond: Cond): boolean {
   switch (cond.op) {
@@ -79,10 +89,13 @@ const fakeDb = {
         if (participantsUnreadable && table.__table === "claim_messages" && cond.op === "eq") {
           throw Object.assign(new Error("connection lost"), { code: "57P01" });
         }
+        if (threadUnreadable && mentions(cond, "thread_id")) {
+          throw Object.assign(new Error("terminating connection"), { code: "57P01" });
+        }
         const out = tables[table.__table]
           .filter((r) => matches(r, cond))
           .map((r) => Object.fromEntries(Object.entries(proj).map(([k, col]) => [k, r[col]])));
-        return Object.assign(out, { limit: (n: number) => out.slice(0, n) });
+        return Object.assign(out, { limit: (n: number) => out.slice(0, n), orderBy: () => out });
       },
     }),
   }),
@@ -100,17 +113,35 @@ const TELEFONO = "5491100000000";
 const CASILLA = "siniestros@aseguradora.com";
 const ASEGURADO = "Martín Sosa <martin.sosa@example.com>";
 const EXTRANO = "alguien@evil.example";
+const HILO = "18c1a2b3d4e5f6";
+const REMITENTE = "martin.sosa@example.com";
+// Message-ID RFC del primer mail del asegurado: sólo vive en las cabeceras de su fila.
+const MENSAJE_PROPIO = "<CAJx.fake-propio@mail.gmail.com>";
+
+const FALLIDA = [
+  {
+    name: "Authentication-Results",
+    value: "mx.google.com; spf=fail smtp.mailfrom=martin.sosa@example.com; dkim=fail header.i=@example.com",
+  },
+];
+const NO_ALINEADA = [
+  { name: "Authentication-Results", value: "mx.google.com; spf=pass smtp.mailfrom=bounce@otro.example" },
+];
+const ALINEADA = [
+  { name: "Authentication-Results", value: `mx.google.com; spf=pass smtp.mailfrom=${REMITENTE}` },
+];
 
 beforeEach(() => {
   participantsUnreadable = false;
+  threadUnreadable = false;
   tables.cases = [
     { id: CASO_WHATSAPP, channel: "whatsapp", email_thread_id: TELEFONO },
-    { id: CASO_MAIL, channel: "email", email_thread_id: "18c1a2b3d4e5f6" },
+    { id: CASO_MAIL, channel: "email", email_thread_id: HILO },
   ];
   tables.claim_messages = [
-    { case_id: CASO_WHATSAPP, direction: "inbound", provider_message_id: "wamid.HBgN", from_addr: TELEFONO, to_addr: null },
-    { case_id: CASO_MAIL, direction: "inbound", provider_message_id: "gmail-1", from_addr: ASEGURADO, to_addr: CASILLA },
-    { case_id: CASO_MAIL, direction: "outbound", provider_message_id: "out-abc123", from_addr: CASILLA, to_addr: ASEGURADO },
+    { case_id: CASO_WHATSAPP, direction: "inbound", provider: "whatsapp", thread_id: TELEFONO, provider_message_id: "wamid.HBgN", from_addr: TELEFONO, to_addr: null },
+    { case_id: CASO_MAIL, direction: "inbound", provider: "gmail", thread_id: HILO, received_at: "2026-09-01T10:00:00.000Z", provider_message_id: "gmail-1", headers: [{ name: "Message-ID", value: MENSAJE_PROPIO }], from_addr: ASEGURADO, to_addr: CASILLA },
+    { case_id: CASO_MAIL, direction: "outbound", provider: "gmail", thread_id: HILO, provider_message_id: "out-abc123", from_addr: CASILLA, to_addr: ASEGURADO },
   ];
 });
 
@@ -177,12 +208,6 @@ describe("threadLookup: the claimant's reply", () => {
 });
 
 describe("el remitente que el servidor de correo dio por falso", () => {
-  const FALLIDA = [
-    {
-      name: "Authentication-Results",
-      value: "mx.google.com; spf=fail smtp.mailfrom=martin.sosa@example.com; dkim=fail header.i=@example.com",
-    },
-  ];
   const APROBADA = [
     {
       name: "Authentication-Results",
@@ -254,13 +279,6 @@ describe("el remitente que el servidor de correo dio por falso", () => {
 });
 
 describe("canal email: el remitente se prueba contra Gmail", () => {
-  const REMITENTE = "martin.sosa@example.com";
-  const NO_ALINEADA = [
-    { name: "Authentication-Results", value: "mx.google.com; spf=pass smtp.mailfrom=bounce@otro.example" },
-  ];
-  const ALINEADA = [
-    { name: "Authentication-Results", value: `mx.google.com; spf=pass smtp.mailfrom=${REMITENTE}` },
-  ];
   const ASUNTO = `Re: Denuncia de siniestro — caso #${CASO_MAIL}`;
 
   it("un spf=pass que no alinea con el From no se suma al hilo", async () => {
@@ -335,6 +353,171 @@ describe("canal email: el remitente se prueba contra Gmail", () => {
   it("el simulado con una falla explícita no se suma", async () => {
     const fallida = [{ name: "Authentication-Results", value: "mx.google.com; spf=fail smtp.mailfrom=x@y" }];
     const r = await threadLookup(TENANT, "<out-abc123>", "", "Re: Caso", REMITENTE, fallida, "email_sim");
+    expect(r.existingCaseId).toBeUndefined();
+  });
+});
+
+describe("el hilo del proveedor (respuesta a su propio mail)", () => {
+  const RESPUESTA = MENSAJE_PROPIO;
+  const ASUNTO = "Re: Denuncia";
+  const DEL_EXTRANO = [
+    {
+      name: "Authentication-Results",
+      value: "mx.google.com; spf=pass smtp.mailfrom=alguien@evil.example; dmarc=pass header.from=evil.example",
+    },
+  ];
+
+  it("la respuesta a su propio mail, sin Caso # en el asunto, se suma a su caso", async () => {
+    const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+    expect(r.existingCaseId).toBe(CASO_MAIL);
+  });
+
+  it("el simulado se suma por el hilo del ensayo", async () => {
+    const hiloDelEnsayo = "thread.fake-run.mail-tardio";
+    tables.claim_messages.push({
+      case_id: CASO_MAIL,
+      direction: "inbound",
+      provider: "simulated",
+      thread_id: hiloDelEnsayo,
+      provider_message_id: "sim-1",
+      from_addr: ASEGURADO,
+      to_addr: CASILLA,
+    });
+    // El simulado no manda cabeceras: el ensayo contesta con el id que puso en provider_message_id.
+    const r = await threadLookup(TENANT, "<sim-1>", "", ASUNTO, ASEGURADO, [], "email_sim", hiloDelEnsayo);
+    expect(r.existingCaseId).toBe(CASO_MAIL);
+  });
+
+  it("sin id de hilo no se suma: es el hilo lo que lo junta", async () => {
+    const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, ASEGURADO, ALINEADA, "email", null);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("sin cabeceras de respuesta no es una respuesta, aunque Gmail lo agrupe por asunto", async () => {
+    const r = await threadLookup(TENANT, "", "", ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("un extraño verificado, en el mismo hilo y con las mismas cabeceras, no entra al caso", async () => {
+    const r = await threadLookup(TENANT, RESPUESTA, RESPUESTA, ASUNTO, EXTRANO, DEL_EXTRANO, "email", HILO);
+    expect(r.existingCaseId).not.toBe(CASO_MAIL);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("un remitente sin verificar no se suma por el hilo", async () => {
+    vi.mocked(logger.warn).mockClear();
+    for (const headers of [NO_ALINEADA, FALLIDA]) {
+      const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, ASEGURADO, headers, "email", HILO);
+      expect(r.existingCaseId).toBeUndefined();
+    }
+    expect(logger.warn).toHaveBeenCalledWith(expect.anything(), "thread_lookup.sender_not_verified");
+  });
+
+  it("un From que imita al del caso no se suma por el hilo, aunque comparta dominio y dmarc=pass", async () => {
+    const delMismoDominio = [
+      { name: "Authentication-Results", value: "mx.google.com; dmarc=pass header.from=example.com" },
+    ];
+    const imitador = `atacante@example.com (<${REMITENTE}>)`;
+    const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, imitador, delMismoDominio, "email", HILO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("con dos remitentes en el hilo, cada uno va a su caso y ninguno al del otro", async () => {
+    const CASO_AJENO = "4d0d3b2a-1e6f-4c7d-8a81-9c0d1e2f3a4b";
+    tables.cases.push({ id: CASO_AJENO, channel: "email", email_thread_id: "18ffffffffffff" });
+    // Primero, como lo devuelve el orden por fecha descendente.
+    tables.claim_messages.unshift({
+      case_id: CASO_AJENO,
+      direction: "inbound",
+      provider: "gmail",
+      thread_id: HILO,
+      received_at: "2026-09-02T10:00:00.000Z",
+      provider_message_id: "gmail-ajeno",
+      headers: [{ name: "Message-ID", value: "<CAJx.fake-ajeno@mail.gmail.com>" }],
+      from_addr: EXTRANO,
+      to_addr: CASILLA,
+    });
+    const delAsegurado = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+    const delExtrano = await threadLookup(TENANT, "<CAJx.fake-ajeno@mail.gmail.com>", "", ASUNTO, EXTRANO, DEL_EXTRANO, "email", HILO);
+    expect(delAsegurado.existingCaseId).toBe(CASO_MAIL);
+    expect(delExtrano.existingCaseId).toBe(CASO_AJENO);
+  });
+
+  describe("un mismo remitente con dos casos en el mismo hilo", () => {
+    const CASO_SEGUNDO = "5e1e4c3b-2f70-4d8e-9b92-0d1e2f3a4b5c";
+    const SEGUNDO_MENSAJE = "<CAJx.fake-segundo@mail.gmail.com>";
+
+    beforeEach(() => {
+      tables.cases.push({ id: CASO_SEGUNDO, channel: "email", email_thread_id: "18eeeeeeeeeeee" });
+      // Más nuevo que el primero, y con la cabecera escrita como la manda otro cliente.
+      tables.claim_messages.unshift({
+        case_id: CASO_SEGUNDO,
+        direction: "inbound",
+        provider: "gmail",
+        thread_id: HILO,
+        received_at: "2026-09-05T10:00:00.000Z",
+        provider_message_id: "gmail-2",
+        headers: [{ name: "Message-Id", value: SEGUNDO_MENSAJE }],
+        from_addr: ASEGURADO,
+        to_addr: CASILLA,
+      });
+    });
+
+    it("la respuesta al primer mail vuelve al primer caso, aunque el segundo sea más nuevo", async () => {
+      const r = await threadLookup(TENANT, RESPUESTA, RESPUESTA, ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+      expect(r.existingCaseId).toBe(CASO_MAIL);
+    });
+
+    it("la respuesta al segundo mail va al segundo caso", async () => {
+      const r = await threadLookup(TENANT, SEGUNDO_MENSAJE, SEGUNDO_MENSAJE, ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+      expect(r.existingCaseId).toBe(CASO_SEGUNDO);
+    });
+
+    it("el mensaje que contesta puede venir sólo en References", async () => {
+      const r = await threadLookup(TENANT, "<CAJx.fake-ninguno@mail.gmail.com>", RESPUESTA, ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+      expect(r.existingCaseId).toBe(CASO_MAIL);
+    });
+
+    it("si no contesta a ningún mail suyo del hilo no se suma a ninguno", async () => {
+      const r = await threadLookup(TENANT, "<CAJx.fake-ninguno@mail.gmail.com>", "", ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+      expect(r.existingCaseId).toBeUndefined();
+    });
+
+    it("si nombra mails de los dos casos no elige: sigue el asunto", async () => {
+      const sinAsunto = await threadLookup(TENANT, SEGUNDO_MENSAJE, RESPUESTA, ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+      const conAsunto = await threadLookup(TENANT, SEGUNDO_MENSAJE, RESPUESTA, `Re: Caso #${CASO_MAIL}`, ASEGURADO, ALINEADA, "email", HILO);
+      expect(sinAsunto.existingCaseId).toBeUndefined();
+      expect(conAsunto.existingCaseId).toBe(CASO_MAIL);
+    });
+  });
+
+  it("un teléfono de WhatsApp como id de hilo no junta nada: el proveedor tiene que ser el del canal", async () => {
+    // Sin el filtro por proveedor, la guardia de participante lo dejaría pasar.
+    const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, TELEFONO, [], "email_sim", TELEFONO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("una fila de Gmail no cuenta para el canal simulado", async () => {
+    const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, ASEGURADO, [], "email_sim", HILO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("con los participantes ilegibles abre su propio caso", async () => {
+    participantsUnreadable = true;
+    const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
+    expect(r.existingCaseId).toBeUndefined();
+  });
+
+  it("si el hilo no se puede leer sigue el asunto, y lo dice", async () => {
+    threadUnreadable = true;
+    const r = await threadLookup(TENANT, RESPUESTA, "", `Re: Caso #${CASO_MAIL}`, ASEGURADO, ALINEADA, "email", HILO);
+    expect(r.existingCaseId).toBe(CASO_MAIL);
+    expect(logger.error).toHaveBeenCalledWith(expect.anything(), "thread_lookup.provider_thread_error");
+  });
+
+  it("si el hilo no se puede leer y el asunto no ayuda, abre su propio caso sin propagar el error", async () => {
+    threadUnreadable = true;
+    const r = await threadLookup(TENANT, RESPUESTA, "", ASUNTO, ASEGURADO, ALINEADA, "email", HILO);
     expect(r.existingCaseId).toBeUndefined();
   });
 });

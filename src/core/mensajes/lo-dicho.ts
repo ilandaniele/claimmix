@@ -34,6 +34,13 @@ const NEGACIONES = new Set([
   "not", "never", "nor", "isn", "wasn", "aren", "weren", "don", "didn", "doesn",
 ]);
 
+// «Paz Roberto» es «Roberto Paz», porque el DNI y el padrón ponen el apellido
+// primero; rotado y no en cualquier orden, porque «José María Paz» no es «María José Paz».
+function rotaciones(buscado: string): string[] {
+  const p = buscado.split(" ");
+  return p.map((_, k) => [...p.slice(k), ...p.slice(0, k)].join(" "));
+}
+
 /**
  * Si la persona acaba de escribir el valor, palabra por palabra, y no para
  * negarlo: «No, no soy Roberto Paz» no dice que sea Roberto Paz.
@@ -41,16 +48,23 @@ const NEGACIONES = new Set([
  * Un número suelto no cuenta: ahí la duda es de qué es —DNI, póliza, teléfono—
  * y no qué escribió. De qué campo es un valor con letras lo dice haberlo
  * pedido, y eso lo mira quien llama.
+ *
+ * Un nombre (`clave` que canoniza a `full_name`) cuenta también rotado. Una
+ * dirección no se arregla: el «Av.» de «Av. Alem 2300» lo pone el extractor y
+ * la persona no lo escribió.
  */
-export function dichoRecien(valor: string, texto: string | null | undefined): boolean {
+export function dichoRecien(valor: string, texto: string | null | undefined, clave?: string): boolean {
   if (!texto || esValorVacio(valor)) return false;
   const buscado = plano(valor);
   // Sobre el valor crudo: «18:30» es una hora, no un número suelto.
   if (buscado.length < 3 || /^[\d\s.\-]+$/.test(valor)) return false;
-  return frases(texto).some((f) => {
-    const i = ` ${f} `.indexOf(` ${buscado} `);
-    return i >= 0 && !f.slice(0, i).trim().split(" ").slice(-3).some((p) => NEGACIONES.has(p));
-  });
+  const buscados = clave && canonicalFieldKey(clave) === "full_name" ? rotaciones(buscado) : [buscado];
+  return frases(texto).some((f) =>
+    buscados.some((b) => {
+      const i = ` ${f} `.indexOf(` ${b} `);
+      return i >= 0 && !f.slice(0, i).trim().split(" ").slice(-3).some((p) => NEGACIONES.has(p));
+    })
+  );
 }
 
 // Una hora dicha con palabras también es una hora: «a las seis», «al mediodía».
@@ -90,6 +104,9 @@ const RELLENO = new Set([
   "but", "really", "honestly", "exact", "exactly", "time", "yesterday", "today", "last", "sometime",
   "like", "mid", "early", "late",
 ]);
+// «esta tarde», «this afternoon»; sólo pegado a la franja, porque sin el acento
+// «está seguro» se leería como que no sabe.
+const DEMOSTRATIVOS = new Set(["esta", "este", "this"]);
 
 /**
  * Si contestó «¿más o menos a qué hora fue?» sin dar una hora: con la franja
@@ -104,7 +121,14 @@ export function contestaSinHora(texto: string | null | undefined): boolean {
     const p = f.split(" ");
     const tiene = (s: Set<string>) => p.some((w) => s.has(w));
     return (
-      p.every((w) => RELLENO.has(w) || NEGACIONES.has(w) || FRANJAS.has(w) || NO_SABE.has(w)) &&
+      p.every(
+        (w, i) =>
+          RELLENO.has(w) ||
+          NEGACIONES.has(w) ||
+          FRANJAS.has(w) ||
+          NO_SABE.has(w) ||
+          (DEMOSTRATIVOS.has(w) && FRANJAS.has(p[i + 1]))
+      ) &&
       (tiene(NO_SABE) || (tiene(FRANJAS) && !tiene(NEGACIONES)))
     );
   });

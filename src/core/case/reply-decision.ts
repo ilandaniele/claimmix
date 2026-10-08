@@ -5,8 +5,8 @@
  * y hasta acá vivía enredada entre consultas a la base, dentro de una función
  * de mil cuatrocientas líneas. Para probarla había que montar media aplicación.
  *
- * Acá no hay base, ni red, ni reloj: entran nueve señales y sale una decisión.
- * Se prueba con ocho booleanos y un número.
+ * Acá no hay base, ni red, ni reloj: entran diez señales y sale una decisión.
+ * Se prueba con nueve booleanos y un número.
  *
  * ── Por qué cada señal está ────────────────────────────────────────────────
  *
@@ -42,6 +42,11 @@
  * contestar. El primer mensaje después de «Devolver al agente» lleva
  * respuesta, aunque el pedido sea el mismo de antes.
  *
+ * **Y un archivo que no entró se avisa.** Un adjunto de más de 10 MB deja una
+ * fila rechazada y no cuenta como «llegó un archivo»: la persona cree que lo
+ * mandó. Con el pedido en espera se le dice que no entró, aunque el agente haya
+ * decidido esperar — no es repetir el pedido, es algo que sólo nosotros sabemos.
+ *
  * **La severidad alta manda callar.** Un caso grave lo toma una persona; el
  * agente no debe adelantarse con un mensaje automático.
  */
@@ -56,6 +61,11 @@ export type SeñalesDeRespuesta = {
   readonly nosPreguntoAlgo: boolean;
   /** ¿Llegó un archivo desde la última vez que hablamos? */
   readonly llegoUnArchivo: boolean;
+  /**
+   * ¿Mandó un archivo que no entró por el tamaño desde la última vez que
+   * hablamos? No saca el pedido de espera.
+   */
+  readonly unArchivoNoEntro: boolean;
   /**
    * ¿El último mensaje cerró algo de lo que le habíamos pedido?
    *
@@ -79,9 +89,10 @@ export type SeñalesDeRespuesta = {
  *
  *   pedir          mandarle la lista de lo que falta
  *   acusar-recibo  decirle que tomamos nota, sin repetir la lista
+ *   avisar-que-no-entro  decirle que un archivo no entró por el tamaño, sin repetir la lista
  *   callar         no mandar nada
  */
-export type QueHacer = "pedir" | "acusar-recibo" | "callar";
+export type QueHacer = "pedir" | "acusar-recibo" | "avisar-que-no-entro" | "callar";
 
 /**
  * ¿El pedido queda en espera?
@@ -108,6 +119,10 @@ export function queHacer(s: SeñalesDeRespuesta): QueHacer {
 
   // Hay algo que pedir y no se pidió todavía —o algo cambió desde que se pidió.
   if (s.datosQueFaltan > 0 && !enEspera) return "pedir";
+
+  // Con el pedido en espera, un archivo que no entró se avisa aunque el agente
+  // espere: la persona cree que lo mandó y sólo nosotros sabemos que no.
+  if (enEspera && s.unArchivoNoEntro) return "avisar-que-no-entro";
 
   // El pedido está en espera, pero el asegurado contó algo. Un acuse corto:
   // tomamos nota, seguimos esperando lo de antes. Sin la lista — volver a

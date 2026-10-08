@@ -193,7 +193,7 @@ function Panel({
                         <span
                           className={[
                             "cifra ml-1.5 tabular-nums",
-                            puesto ? "opacity-80" : "text-slate-400",
+                            puesto ? "opacity-80" : "text-slate-500",
                           ].join(" ")}
                         >
                           {cuentas[opcion.clave]}

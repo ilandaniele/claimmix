@@ -62,13 +62,14 @@ export type ResultadoPurga = {
   fallidos: number;
 };
 
-type Pendiente = { id: string; tenant_id: string; case_id: string; storage_path: string };
+export type Pendiente = { id: string; tenant_id: string; case_id: string; storage_path: string };
 
 /** Las demás filas de la cola, para saber si hay una más nueva del mismo objeto. */
 const masNueva = alias(adjuntosPorPurgar, "mas_nueva");
 
+// Exportadas para `pnpm capa-datos` (sección 7), que las corre contra el ensayo con R2 simulado y marcando sólo filas propias.
 /** Los vencidos, los más viejos primero. */
-async function vencidos(): Promise<Pendiente[]> {
+export async function vencidos(): Promise<Pendiente[]> {
   // sin-inquilino: Barrido de sistema: la cola es de TODOS los inquilinos y el
   // rol de la aplicación no puede actualizarla ni borrarla, sólo encolar.
   return db
@@ -114,7 +115,7 @@ async function vencidos(): Promise<Pendiente[]> {
  * Una sola sentencia marca todo lo de la corrida: lo borrado como purgado, lo que falló con un intento más.
  * Un objeto borrado cierra también las filas más viejas de su mismo path, que ya no tienen nada que purgar.
  */
-async function marcar(resultados: Array<{ id: string; ok: boolean; storage_path: string }>): Promise<void> {
+export async function marcar(resultados: Array<{ id: string; ok: boolean; storage_path: string }>): Promise<void> {
   const valores = sql.join(
     resultados.map((r) => sql`(${r.id}::uuid, ${r.ok}::boolean, ${r.storage_path}::text)`),
     sql`, `

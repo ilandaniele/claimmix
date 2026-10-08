@@ -44,6 +44,7 @@ import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { policyTypeDeRamo } from "@/core/case/ramos";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
+import { MAX_ATTACHMENT_SIZE_BYTES } from "@/core/adjuntos/firma";
 import { AppError } from "@/lib/errors";
 import { errorCode } from "@/lib/observability/error-code";
 import type { PatchActor } from "@/server/cases/patch";
@@ -122,6 +123,11 @@ interface TurnDicho {
    */
   adjunto?: { fixture: string; tipo: string; reemplazo?: string };
   /**
+   * Una foto que pasa el tope de tamaño, por WhatsApp: ceros en memoria, sin
+   * fixture. La fila queda rechazada por "size_exceeded" y nada sube a R2.
+   */
+  pesado?: boolean;
+  /**
    * El asunto, cuando el que inventa el ensayo no sirve.
    *
    * Por omisión todos los mails del ensayo entran con el asunto «Denuncia de
@@ -131,6 +137,10 @@ interface TurnDicho {
    * modelo y gastaba diez mil tokens en decir que no era un reclamo. El
    * escenario decía probar que el filtro lo frena «antes de gastar un solo
    * token», y lo que probaba era lo contrario sin que nadie lo notara.
+   *
+   * En un turno que no es el primero, un asunto propio también hace que el mail
+   * conteste a su mail anterior (In-Reply-To): entra por el hilo del proveedor y
+   * no por el «caso #» del asunto.
    */
   subject?: string;
   /**
@@ -457,6 +467,8 @@ const SCENARIOS: Scenario[] = [
       },
       {
         say: "Hola, ¿cómo va mi denuncia? No tuve novedades.",
+        // Sin «caso #»: sólo el hilo del proveedor lo puede pegar a su caso.
+        subject: "Re: Denuncia de siniestro",
         expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "consulta_estado" },
       },
     ],
@@ -665,6 +677,22 @@ const SCENARIOS: Scenario[] = [
         say: "Perdón, mandé cualquier cosa",
         photo: "irrelevante",
         expect: { attachments: 1, recognisesNothing: true },
+      },
+    ],
+  },
+
+  {
+    id: "archivo-pesado",
+    what: "Una foto de más de 10 MB no entra, y se le dice en vez de callar o repetir el pedido",
+    turns: [
+      { say: "Hola, tuve un choque con el auto ayer a la tarde", expect: { replies: 1 } },
+      {
+        // Antes se quedaba callado con el pedido en espera, o repetía la lista
+        // entera. Cualquiera de los dos caminos —el aviso, o el pedido con la
+        // frase al pie— dice «10 MB».
+        say: "Ahí te mando la foto del choque",
+        pesado: true,
+        expect: { replies: 1, mentions: ["10 MB"], attachments: 1, recognisesNothing: true },
       },
     ],
   },
@@ -1152,6 +1180,15 @@ async function deliverWhatsApp(
             data: imageFor(turn.photo),
           },
         ]
+      : turn.pesado
+        ? [
+            {
+              id: `rehearsal-${RUN}-${i}`,
+              mimeType: "image/jpeg",
+              filename: `pesada-${i}.jpg`,
+              data: Buffer.alloc(MAX_ATTACHMENT_SIZE_BYTES + 1),
+            },
+          ]
       : turn.adjunto
         ? [
             {
@@ -1171,10 +1208,14 @@ async function deliverWhatsApp(
  *
  * Returns the case, or null when the prefilter turned the message away.
  *
- * Replies carry the case number in the subject, which is how a real reply
- * threads: our outbound subject puts it there and the claimant's mail client
- * quotes it back. Header threading is the other route and cannot be rehearsed
- * — a simulated send has no Message-ID, because no message was sent.
+ * A reply joins its case by one of two routes. The case number in the subject:
+ * our outbound subject puts it there and the claimant's mail client quotes it
+ * back. Or the provider thread: same `threadId`, and an In-Reply-To pointing
+ * to the claimant's own previous mail, which is what a mail client puts there.
+ * Only the turns with a subject of their own (no «caso #») carry the In-Reply-To;
+ * the rest keep entering by subject, so both routes stay rehearsed.
+ * The route through our own Message-ID cannot be rehearsed — a simulated send
+ * has none, because no message was sent.
  */
 async function deliverEmail(
   scenario: Scenario,
@@ -1202,6 +1243,7 @@ async function deliverEmail(
     bodyText: turn.say,
     messageId: `rehearsal.${RUN}.${scenario.id}.${i}@example.com`,
     threadId: `thread.${RUN}.${scenario.id}`,
+    inReplyTo: caseId && turn.subject ? `<rehearsal.${RUN}.${scenario.id}.${i - 1}@example.com>` : undefined,
     headers: turn.headers,
   });
 
@@ -1448,7 +1490,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         continue;
       }
 
-      console.log(`\n   [${i + 1}] 👤 ${turn.say}${turn.photo ? "  📎" : ""}`);
+      console.log(`\n   [${i + 1}] 👤 ${turn.say}${turn.photo || turn.pesado ? "  📎" : ""}`);
 
       // Qué estaba cerrado antes de este turno. En el primero no hay caso
       // todavía, y por lo tanto no hay nada cerrado.
@@ -1477,6 +1519,9 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         continue;
       }
       const active: string = delivered;
+      if (byEmail && caseId && active !== caseId) {
+        note(scenario.id, i + 1, "abrió otro caso en vez de sumarse al de la conversación", "mismo-caso");
+      }
       caseId = active;
 
       // Se retoma aunque el turno no cuente respuestas. El de la foto espera que

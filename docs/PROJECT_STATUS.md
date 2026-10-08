@@ -487,6 +487,10 @@ Three things worth remembering:
   `*-sa-key.json` and Google names the download `<project>-<hex>.json`, which does not
   match — one `git add -A` away from a service-account key in a public repo. Keep the
   local copy named `*-sa-key.json`.
+
+  Nota posterior (2026-10-07): `.gitignore` ahora también cubre
+  `claimmix-506321-*.json`, el nombre con que Google baja la clave de este
+  proyecto: la descarga sin renombrar ya no entra con un `git add -A`.
 - **New organisations block service-account keys by default**
   (`iam.disableServiceAccountKeyCreation`). Overriding it at *project* level is the
   narrow fix; the wide one is Workload Identity Federation, where Vercel proves who it
@@ -2268,19 +2272,20 @@ solo lado de la llave.
   **HECHO.** `enmascarar` se sacó de `conflictosParaElRedactor` y ahora corre
   también en `renderConflict` (`src/server/confirmations/messenger.ts:217-222`),
   que es el texto que sale cuando el redactor está apagado o falla.
-- **Un adjunto rechazado por tamaño: la fila ya está y ahora se ve; falta
-  avisarle al asegurado.** La mitad vieja de esto quedó desactualizada: desde
-  `540d005` la descarga no devuelve `null` sino «demasiado grande», el intake lo
-  convierte en un adjunto con `rechazoPrevio` y `rehost-attachments` escribe la
-  fila con `rejected_reason: "size_exceeded"` y `storage_path` en null. Lo que
-  faltaba era **mostrarla** —la fila existía y la pantalla del analista la
-  salteaba—, y eso se cierra con este cambio. **La mitad que sigue abierta es la
-  otra punta: el ASEGURADO no se entera de que el archivo no entró.** Sigue
-  creyendo que lo mandó, y el agente no le pide uno más chico; hoy los
-  comentarios del código dicen que el que pide el archivo más chico es el
-  analista, que es exactamente el trabajo manual que esto tendría que ahorrar.
-  Pide una señal nueva en `src/core/case/reply-decision.ts`, una decisión nueva
-  en `queHacer`, una plantilla nueva en `src/server/email/render.ts` y su ensayo.
+- ~~**Un adjunto rechazado por tamaño: la fila ya está y ahora se ve; falta
+  avisarle al asegurado.**~~ ✅ **HECHO.** La señal `unArchivoNoEntro` entra a
+  `src/core/case/reply-decision.ts` y la decisión `avisar-que-no-entro` sale sólo
+  con el pedido en espera, aunque el agente haya decidido esperar, y nunca en un
+  caso grave. La plantilla `attachment_too_large` (mail y WhatsApp) es texto
+  fijo, sin redactor: el redactor lee «ahí va la foto» y agradece una foto que
+  no entró. Cuando el pedido sale igual, la frase va al pie, fuera del redactor
+  (`archivoQueNoEntro`, como `conPie` y `SI_NO_FUISTE_VOS`). El «10 MB» sale de
+  `MAX_ATTACHMENT_SIZE_BYTES` (`src/core/mensajes/archivo-que-no-entro.ts`), no de
+  una copia. Ensayo `archivo-pesado`: una foto de `MAX_ATTACHMENT_SIZE_BYTES + 1`
+  en memoria, sin fixture y sin subir nada a R2. **Sigue abierto:** el cierre, el
+  conflicto (D) y la derivación no mencionan el archivo, y sólo `size_exceeded`
+  se avisa: `aggregate_size_exceeded` y `content_type_not_allowed` siguen sin
+  decírsele al asegurado.
 - **El hueco de foco de los dos diálogos de caso**: mientras `loading` es true
   todos los enfocables quedan deshabilitados, la lista sale vacía y el Tab
   escapa por un segundo. Ya pasaba con las dos copias del bloque.
@@ -2571,11 +2576,20 @@ Vale anotarlo para que no vuelva a la lista:
 - **El prompt ya está bien formado para el caché de Vertex** — la parte variable
   está al final. Lo que falta es leer el contador de tokens cacheados para saber
   si pega.
+
+  Nota posterior (2026-10-07): `callGemini` ya lee `cachedContentTokenCount` y los
+  logs `ai.email_extraction.attempt1`/`attempt2` y `ai.extraction.attemptN` lo
+  traen como `cached_tokens`. El costo todavía no descuenta lo cacheado.
 - **Los índices trigram con cero escaneos sirven**: el cero es artefacto de 483
   filas, no un índice mal formado. No borrarlos.
 - **El barrido de `text-slate-400` respetó sus exenciones**: las diez restantes
   son iconos. Quedaron dos afuera del criterio —una hora relativa y una equis de
   12 px— y los placeholders, que no entraron.
+
+  Nota posterior (2026-10-07): después del barrido entraron dos textos con ese
+  gris —el vacío del tablero y el «automático» del plan de trabajo— y el contador
+  de los chips de filtro también lo tenía; pasaron a `slate-500`, y
+  `accesibilidad-que-faltaba.test.ts` ahora recorre todo `src/app/(app)`.
 - **El modo oscuro no se rompió** con el cambio a `slate-500`: mejora los dos.
 - **Imágenes, `next/font`, los barriles de iconos, `zod` en el cliente y los 26
   `force-dynamic`**: todos callejones sin salida, medidos.
@@ -2665,6 +2679,12 @@ Dos, las dos en el camino del agente:
 - **`deliberate` gasta hasta cuatro llamadas al modelo** buscando lo que el
   matcheo de cliente, el de póliza y la carga de la conversación ya
   respondieron doscientas líneas antes.
+  Medido el 07/10 en tres corridas completas: entre 16 y 19 consultas por
+  corrida (12 o 13 `verificar_poliza`, entre 4 y 6 `polizas_por_dni`). En dos de
+  ellas un caso llegó al tope de tres, y la tercera llamada repetía la consulta,
+  así que bajar el tope a dos sólo corta repeticiones. Las herramientas se quedan: `yaAveriguado` no distingue un padrón
+  vacío de una póliza inexistente ni trae los números. El tope bajó de 3 a 2:
+  hasta tres llamadas en vez de cuatro.
 - **`outbound_messages` se lee cinco veces por orquestación** para el mismo
   caso, más dos «desde que hablamos» que comparten la misma fila.
 
@@ -3151,9 +3171,15 @@ sobre el 429 que esperaban. Una línea por arreglo:
 - Si matan la corrida entre el envío por WhatsApp y la fila del registro, la
   heredada lo manda otra vez. Cerrarlo pide escribir la fila antes de enviar, y
   eso pide una migración.
-- La heredada se pierde en dos caminos: cuando el freno del mail difiere antes
+- ~~La heredada se pierde en dos caminos: cuando el freno del mail difiere antes
   de tomar la reserva, y cuando falla el redespacho. Esa corrida contesta sin
-  mirar si ya se contestó.
+  mirar si ya se contestó.~~ ✅ **HECHO 2026-10-07.** El freno marca pendiente
+  sólo si, cuando arrancó la corrida, la reserva estaba libre o viva —lo que
+  habría hecho al pedirla—; una vencida queda sin marca y la levanta el barrido
+  como heredada. El redespacho que no llegó marca sólo si nadie tomó el caso
+  desde que se soltó: quien lo tenga ya leyó el mensaje. Lo prueba
+  `tests/unit/server/worker/extract.reserva-heredada.test.ts`; el ensayo no
+  fuerza este camino.
 - Un 429 de cupo diario gasta los tres intentos a lo largo de tres barridos y
   escala. Aceptado.
 - `reap-stuck` saltea los pendientes, así que un caso que retomar difiere para
@@ -3167,6 +3193,9 @@ sobre el 429 que esperaban. Una línea por arreglo:
   estaba en pie, con la frase honesta.
 - Una pregunta que llega después del cierre, o en la vuelta en que sale un
   conflicto, sigue sin respuesta propia. Son huecos anteriores y no se tocaron.
+  *Enmendado 2026-10-07:* la vuelta del conflicto ya contesta: la rama D manda
+  `question` y el piso del mail y el de WhatsApp suman la frase honesta. La
+  pregunta que llega después del cierre sigue igual.
 
 ### ✍️ Lo que el ensayo dejó ver de la redacción (2026-09-21)
 
@@ -3382,6 +3411,9 @@ comillas.
 Queda sin arreglar, de antes: el DNI y la póliza siguen yendo enteros en
 `knownValues` hasta el redactor (AC24), y un «Confirmo» cierra todas las
 filas preguntadas, no sólo las que la persona vio con valor.
+*Enmendado 2026-10-07:* un «Confirmo» ya cierra sólo lo que el pedido mostró con
+valor: el worker le pasa al orquestador los `propuestos` del último pedido. Lo
+del DNI y la póliza en `knownValues` sigue igual.
 
 ### 🪪 Quien escribe no es el titular: se deriva sola, sin esperar al modelo (2026-09-23)
 
@@ -3446,9 +3478,9 @@ tiene que mirar el especialista. Pero la respuesta no la lee nadie más que él:
 **Lo que sigue en manos del modelo.** Cero coincidencias porque el número de
 póliza está escrito con otro formato (el guion no se normaliza, a propósito),
 un padre y un hijo con el mismo nombre y distinto DNI, una coincidencia sólo
-por DNI, y un solo dato en conflicto. Aparte, `detectConflicts` sigue marcando
-como conflicto una diferencia de formato en el nombre y pide confirmarla. No
-deriva, pero pregunta de más. Es deuda aparte.
+por DNI, y un solo dato en conflicto. Desde el 07/10 `detectConflicts` compara
+el nombre con `mismoNombre`: acentos, mayúsculas, signos y el apellido primero
+ya no son conflicto; una parte del nombre («Roberto» frente a «Roberto Paz») sí.
 
 Verificado: 40 tests nuevos (la regla pura, la comparación de nombres, la señal
 del worker por mail y WhatsApp, y la derivación en el orquestador con un solo
@@ -3579,11 +3611,14 @@ desapareció sin respuesta y apareció «Más o menos a qué hora fue.».
 - **El ensayo.** `goteo` corre `confirma-lo-dicho` y `hora-en-una-forma`
   (`scripts/lib/ensayo-confirmaciones.mjs`). Ver `docs/TESTING.md`.
 
-**Lo que queda.** La coincidencia es literal: un nombre dado vuelta o «Alem al
-2300» contra «Av. Alem 2300» se sigue confirmando. Una hora que el extractor
-normalizó («18:00» de «a las 6») también, igual que un valor que dio sin que se
-lo pidiéramos y un número suelto de confianza media. «Fue esta tarde» no cuenta
-como la franja sola, así que la hora se vuelve a pedir.
+**Lo que queda.** La coincidencia es literal salvo el nombre, que desde el
+07/10 cuenta también rotado («Paz Roberto» es «Roberto Paz»; «José María Paz»
+no es «María José Paz», y «Paz, Roberto» con coma tampoco cuenta). «Alem al
+2300» contra «Av. Alem 2300» se sigue confirmando a propósito: el «Av.» lo puso
+el extractor. Una hora que el extractor normalizó («18:00» de «a las 6») también,
+igual que un valor que dio sin que se lo pidiéramos y un número suelto de
+confianza media. «Fue esta tarde» ya cuenta como la franja sola: «esta», «este»
+y «this» valen sólo antes de la franja.
 
 ### 🤝 Cuando hay heridos, la derivación empieza por el cuidado (2026-09-24)
 
@@ -4294,10 +4329,10 @@ auditoría conviene crearlo antes a mano, con `CONCURRENTLY`. Es aditiva e
 idempotente. Sin ella `/api/health` da 503 y `pnpm permisos`, `pnpm tenancy` y
 `pnpm capa-datos` necesitan las dos tablas.
 
-**Lo que no se probó.** El SQL de la revisión nocturna nunca corrió contra un
-Postgres (no hay uno local y la migración no está aplicada): se probó su forma.
-Tampoco se midió el p95 del tablero contra una base con meses de auditoría. El
-primer barrido puede marcar hasta 30 días de casos ya cerrados. `cierre_sin_listo`
+**Lo que no se probó.** El SQL de la revisión nocturna corre contra Postgres en
+la sección 7 de `pnpm capa-datos` (dos veces seguidas, para ver que la segunda no
+repite nada), sobre un inquilino descartable. No se midió el p95 del tablero
+contra una base con meses de auditoría. El primer barrido puede marcar hasta 30 días de casos ya cerrados. `cierre_sin_listo`
 sólo mira casos abiertos después de la primera auditoría de un cambio de estado
 del agente (`AUDITORIA_DEL_AGENTE_DESDE`): antes de eso el agente no dejaba rastro
 y un caso viejo saldría como desvío sin serlo.
@@ -4673,10 +4708,12 @@ sola migración (la 0047).
   recompone volviendo a aplicar la 0046 entera (`--forget 0046 --apply` y
   `--apply`), no corriendo su backfill suelto. Si el dueño la rechaza, el commit
   de `offset 0` va solo.
-- **B19: la 0045 ya está aplicada** (30/09, en producción, staging y QA). Falta
-  probar en QA lo que sólo se comprobó con SQL dibujado: el `CASE` del PUT y el `EXISTS`
-  del PATCH de `/api/admin/sso`, la cola de purga (incluido borrar dos veces el
-  mismo objeto) y una pasada de la retención en `simular`. Además:
+- **B19: la 0045 ya está aplicada** (30/09, en producción, staging y QA). El
+  `CASE` del PUT y el `EXISTS` del PATCH de `/api/admin/sso`, la cola de purga
+  (incluido borrar dos veces el mismo objeto) y la retención en `simular` ya
+  corren contra Postgres en la sección 7 de `pnpm capa-datos`, en cada corrida
+  del CI; no hace falta repetirlos a mano en QA. Pendiente, lo que esa prueba no
+  cubre (simula R2 y no enciende ningún modo):
   - Confirmar la separación de buckets de R2: QA tiene el suyo
     (`claimmix-qa-attachments`); falta confirmar el de staging contra el de
     producción.

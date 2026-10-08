@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { captured, mockDbInsert } = vi.hoisted(() => ({
+const { captured, mockDbInsert, loggerError } = vi.hoisted(() => ({
   captured: { row: null as Record<string, unknown> | null },
   mockDbInsert: vi.fn(),
+  loggerError: vi.fn(),
 }));
 
 // La capa de datos, corriendo contra el db que este test ya simula.
@@ -29,11 +30,57 @@ vi.mock("@/lib/db/helpers", () => ({
   firstRow: <T>(rows: T[]): T | null => rows[0] ?? null,
 }));
 
+vi.mock("@/lib/observability/logger", () => ({
+  logger: { error: loggerError, warn: vi.fn(), info: vi.fn() },
+}));
+
 import { logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
+
+function insertQueFalla(err: unknown) {
+  mockDbInsert.mockReturnValue({
+    values: vi.fn().mockReturnValue({ returning: vi.fn().mockRejectedValue(err) }),
+  });
+}
+
+// Lo que tira neon-http cuando se cae la red: sin `code`.
+const errorDeRed = () =>
+  Object.assign(new Error("Error connecting to database: fetch failed"), { name: "NeonDbError" });
+
+const PARAMS = {
+  tenantId: "tenant-001",
+  caseId: "case-001",
+  modelName: "gemini-2.5-flash",
+  promptVersion: "builtin-v1",
+  input: {
+    subject: "Siniestro",
+    body: "Tuve un choque.",
+  },
+  claim: {
+    extraction_model: "gemini-2.5-flash",
+    is_claim: true,
+    confidence: 0.9,
+    fields: [
+      {
+        field_key: "claim_type",
+        field_value: "choque",
+        confidence: 0.95,
+        source: "ai",
+      },
+    ],
+    missing_fields: [],
+  } as any,
+  trainability: {
+    isTrainableSuggestion: true,
+    trainabilityScore: 0.85,
+    trainabilityReasons: [],
+    blockingReasons: [],
+  },
+};
 
 describe("logAgentRun", () => {
   beforeEach(() => {
     captured.row = null;
+    loggerError.mockClear();
     mockDbInsert.mockReturnValue({
       values: vi.fn((row: Record<string, unknown>) => {
         captured.row = row;
@@ -82,11 +129,58 @@ describe("logAgentRun", () => {
       model_name: "gemini-2.5-flash",
     });
   });
+
+  it("un NeonDbError de red sin code se anota por su nombre, sin el mensaje ni la fila", async () => {
+    insertQueFalla(errorDeRed());
+
+    expect(await logAgentRun(PARAMS)).toBeNull();
+
+    expect(loggerError).toHaveBeenCalledWith({ detalle: "NeonDbError" }, "agent_runs.insert_error");
+    const anotado = JSON.stringify(loggerError.mock.calls);
+    expect(anotado).not.toContain("no_data");
+    expect(anotado).not.toContain("fetch failed");
+    expect(anotado).not.toContain("Tuve un choque.");
+  });
+
+  it("un error con code anota el code", async () => {
+    insertQueFalla(Object.assign(new Error("duplicate key"), { code: "23505" }));
+
+    expect(await logAgentRun(PARAMS)).toBeNull();
+
+    expect(loggerError).toHaveBeenCalledWith({ detalle: "23505" }, "agent_runs.insert_error");
+  });
+
+  it("sin fila devuelta sigue diciendo no_data", async () => {
+    mockDbInsert.mockReturnValue({
+      values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }),
+    });
+
+    expect(await logAgentRun(PARAMS)).toBeNull();
+
+    expect(loggerError).toHaveBeenCalledWith({ detalle: "no_data" }, "agent_runs.insert_error");
+  });
+
+  it("un rechazo que no es un Error se anota como UnknownError", async () => {
+    insertQueFalla("boom");
+
+    expect(await logAgentRun(PARAMS)).toBeNull();
+
+    expect(loggerError).toHaveBeenCalledWith({ detalle: "UnknownError" }, "agent_runs.insert_error");
+  });
+
+  it("la tabla sin migrar (42P01) no anota nada", async () => {
+    insertQueFalla(Object.assign(new Error("relation does not exist"), { code: "42P01" }));
+
+    expect(await logAgentRun(PARAMS)).toBeNull();
+
+    expect(loggerError).not.toHaveBeenCalled();
+  });
 });
 
 describe("logAgentRunError", () => {
   beforeEach(() => {
     captured.row = null;
+    loggerError.mockClear();
     mockDbInsert.mockReturnValue({
       values: vi.fn((row: Record<string, unknown>) => {
         captured.row = row;
@@ -202,5 +296,20 @@ describe("logAgentRunError", () => {
     });
 
     expect(id).toBeNull();
+    expect(loggerError).not.toHaveBeenCalled();
+  });
+
+  it("un NeonDbError de red sin code se anota por su nombre", async () => {
+    insertQueFalla(errorDeRed());
+
+    const id = await logAgentRunError({
+      tenantId: "tenant-001",
+      caseId: "case-001",
+      input: { subject: "S", body: "B" },
+      errorName: "GeminiExtractionError",
+    });
+
+    expect(id).toBeNull();
+    expect(loggerError).toHaveBeenCalledWith({ detalle: "NeonDbError" }, "agent_runs.error_run_insert_error");
   });
 });

@@ -9,8 +9,8 @@
  *
  * Cada herramienta que el modelo pide cuesta una pasada entera del bucle, o sea
  * otra llamada a Gemini —seis segundos en la mediana— dentro de un presupuesto
- * de cuarenta. Con `MAX_TOOL_CALLS = 3`, es la diferencia entre una llamada y
- * cuatro.
+ * de cuarenta. Con `MAX_TOOL_CALLS = 2`, es la diferencia entre una llamada y
+ * tres.
  */
 
 import { readFileSync } from "node:fs";

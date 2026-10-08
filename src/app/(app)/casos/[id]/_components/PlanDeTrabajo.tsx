@@ -65,7 +65,7 @@ export function PlanDeTrabajo({ caseId, pasos, puedeCambiarEstado }: PlanDeTraba
         />
         <span className={p.hecho ? "text-slate-500 line-through" : undefined}>{p.titulo}</span>
       </label>
-      {p.auto && <span className="mt-0.5 shrink-0 text-[11px] uppercase tracking-wide text-slate-400">{t("planDeTrabajo.automatico")}</span>}
+      {p.auto && <span className="mt-0.5 shrink-0 text-[11px] uppercase tracking-wide text-slate-500">{t("planDeTrabajo.automatico")}</span>}
     </li>
   );
 

@@ -4,8 +4,9 @@
  *
  * El SQL no se ejecuta acá (no hay Postgres): se renderiza con el dialecto de
  * verdad y se comprueba su forma —qué tabla llena, cómo evita duplicar, qué
- * deja afuera, con qué plazos—. Que corra contra datos reales es lo que prueba
- * `pnpm check` en el deploy.
+ * deja afuera, con qué plazos—. Que corra contra Postgres, sin reglas fallidas y
+ * sin duplicar al repetirse, lo prueba la sección 7 de `pnpm capa-datos`, en CI
+ * contra el ensayo.
  */
 
 vi.mock("server-only", () => ({}));
@@ -82,6 +83,7 @@ describe("revisarDesvios", () => {
       plan_sin_terminar: 4,
     });
     expect(r.nuevos).toBe(10);
+    expect(r.fallidas).toEqual([]);
   });
 
   it("si una regla falla se registra con su nombre y las demás corren igual", async () => {
@@ -92,6 +94,7 @@ describe("revisarDesvios", () => {
     expect(consultas).toHaveLength(5);
     expect(r.porRegla.cierre_sin_listo).toBe(0);
     expect(r.nuevos).toBe(6);
+    expect(r.fallidas).toEqual(["cierre_sin_listo"]);
     expect(m.logError).toHaveBeenCalledTimes(1);
     const [datos, mensaje] = m.logError.mock.calls[0]!;
     expect(datos).toMatchObject({ regla: "cierre_sin_listo" });
@@ -100,14 +103,29 @@ describe("revisarDesvios", () => {
     expect(JSON.stringify(datos)).not.toContain("boom");
   });
 
+  it("dos reglas fallando se listan en el orden en que corren y las demás cuentan", async () => {
+    insertadas(new Error("a"), 1, 2, new Error("b"), 3);
+
+    const r = await revisarDesvios();
+
+    expect(r.fallidas).toEqual(["doc_sin_recibir", "plazo_vencido"]);
+    expect(r.nuevos).toBe(6);
+    expect(m.logError).toHaveBeenCalledTimes(2);
+  });
+
   it("sin rowCount cuenta cero en vez de romper", async () => {
     m.execute.mockResolvedValue({});
-    expect((await revisarDesvios()).nuevos).toBe(0);
+    const r = await revisarDesvios();
+    expect(r.nuevos).toBe(0);
+    // Que falte rowCount no es una falla.
+    expect(r.fallidas).toEqual([]);
   });
 
   it("las cinco fallando no tira: devuelve cero", async () => {
     m.execute.mockRejectedValue(new Error("caída"));
-    expect((await revisarDesvios()).nuevos).toBe(0);
+    const r = await revisarDesvios();
+    expect(r.nuevos).toBe(0);
+    expect(r.fallidas).toEqual([...REGLAS]);
     expect(m.logError).toHaveBeenCalledTimes(5);
   });
 });

@@ -11,14 +11,15 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
-  enTenant: vi.fn(),
+  enControl: vi.fn(),
   ejecutadas: [] as unknown[],
   filas: [] as unknown[],
   exigeSso: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/data/scope", () => ({ enTenant: h.enTenant }));
+vi.mock("@/data/scope", () => ({ enControl: h.enControl }));
+vi.mock("@/server/bases/espejar-sin-fallar", () => ({ espejarSinFallar: vi.fn().mockResolvedValue(true) }));
 vi.mock("@/server/sso/usuarios", () => ({ correoExigeSso: h.exigeSso }));
 
 import {
@@ -51,7 +52,7 @@ beforeEach(() => {
   h.filas = [];
   h.exigeSso.mockReset();
   h.exigeSso.mockResolvedValue(false);
-  h.enTenant.mockImplementation(async (ctx: unknown, armar: (db: unknown) => unknown) => {
+  h.enControl.mockImplementation(async (ctx: unknown, armar: (db: unknown) => unknown) => {
     h.ejecutadas.push(ctx);
     return armar({
       execute: async (consulta: unknown) => {
@@ -164,7 +165,7 @@ describe("aceptarInvitacion", () => {
     const aceptada = await aceptarInvitacion(datos(), quien);
 
     expect(aceptada).toBe(true);
-    expect(h.enTenant).toHaveBeenCalledOnce();
+    expect(h.enControl).toHaveBeenCalledOnce();
     expect(h.ejecutadas[0]).toEqual({ tenantId: ESPACIO });
     expect(h.ejecutadas).toHaveLength(2);
   });
@@ -215,7 +216,7 @@ describe("aceptarInvitacion", () => {
   });
 
   it("si la base falla, tira: no se confunde con una invitación rechazada", async () => {
-    h.enTenant.mockRejectedValue(new Error("base caída"));
+    h.enControl.mockRejectedValue(new Error("base caída"));
 
     await expect(aceptarInvitacion(datos(), quien)).rejects.toThrow("base caída");
   });

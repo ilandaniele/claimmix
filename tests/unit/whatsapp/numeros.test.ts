@@ -21,7 +21,7 @@ const { mockSelectDb, mockSelectInquilino } = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: { select: (...args: unknown[]) => mockSelectDb(...args) } }));
 vi.mock("@/data/scope", () => ({
-  enTenant: async (_ctx: unknown, fn: (c: unknown) => unknown) =>
+  enControl: async (_ctx: unknown, fn: (c: unknown) => unknown) =>
     fn({ select: (...args: unknown[]) => mockSelectInquilino(...args) }),
 }));
 vi.mock("@/lib/security/cifrado", () => ({

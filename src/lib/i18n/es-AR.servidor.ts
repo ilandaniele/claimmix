@@ -902,6 +902,7 @@ export const esARServidor = {
   "altas.r.ok": "Listo.",
   "altas.r.no_aplica": "No se cambió nada: el estado ya no lo permitía.",
   "altas.r.migracion_pendiente": "Falta aplicar una migración de la base de datos. Avisá al equipo técnico.",
+  "altas.r.espejo_pendiente": "Listo, pero la copia en la base del cliente quedó pendiente: se pone al día sola en un rato.",
   "altas.r.datos_invalidos": "Los datos no son válidos.",
   "altas.r.no_confirmado": "Falta confirmar que el código de Meta lo pasó la persona del correo de contacto.",
   "altas.r.falla": "No se pudo hacer. Probá de nuevo en un rato.",

@@ -30,7 +30,7 @@ vi.mock("@/lib/db", () => ({
   db: { select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }) },
 }));
 vi.mock("@/data/scope", () => ({
-  enTenant: async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+  enControl: async (_ctx: unknown, armar: (db: unknown) => unknown) =>
     armar({
       insert: () => ({
         values: async (v: { id: string; tenant_id: string; role: string }) => {

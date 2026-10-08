@@ -18,7 +18,7 @@
 import "server-only";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { tenants, whatsappNumeros } from "@/lib/db/schema";
 import { enPrueba, pruebaVencida, SIN_SERVICIO } from "@/lib/billing/plans";
 import { descifrar } from "@/lib/security/cifrado";
@@ -131,7 +131,7 @@ export interface CredencialesDelNumero extends CredencialesMeta {
  */
 export async function credencialesWhatsApp(tenantId: string): Promise<CredencialesDelNumero | null> {
   try {
-    const filas = await enTenant({ tenantId }, (c) =>
+    const filas = await enControl({ tenantId }, (c) =>
       c
         .select({
           estado: whatsappNumeros.estado,

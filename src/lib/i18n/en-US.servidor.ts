@@ -892,6 +892,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "altas.r.ok": "Done.",
   "altas.r.no_aplica": "Nothing changed: the current state no longer allowed it.",
   "altas.r.migracion_pendiente": "A database migration is pending. Tell the technical team.",
+  "altas.r.espejo_pendiente": "Done, but the copy in the client database is still pending: it catches up on its own in a while.",
   "altas.r.datos_invalidos": "The data is not valid.",
   "altas.r.no_confirmado": "You must confirm that the Meta code was given by the person at the contact email.",
   "altas.r.falla": "It could not be done. Try again in a while.",

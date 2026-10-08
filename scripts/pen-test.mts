@@ -27,13 +27,16 @@
  *   pnpm pentest --agent            # + los ataques al agente (gasta tokens)
  *   pnpm pentest --url https://…    # contra un preview
  *   pnpm pentest --solo-superficie  # sin base ni tokens: sirve contra un server local en CI, antes de mergear
+ *   pnpm pentest --pared-propia     # la pared con un inquilino efímero y un caso propio: sólo contra QA
  */
 
+import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 
 import { findRoutes, routePattern, routeToUrl } from "./lib/rutas-api.mjs";
+import { HOST_DE_PRODUCCION, hostDe } from "../tests/e2e/base-de-ensayo";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
@@ -55,6 +58,66 @@ const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.a
   /\/+$/,
   ""
 );
+
+// Con `--solo-superficie` no se toca la base, así que no hay nada que proteger.
+const paredPropia = args.includes("--pared-propia") && !soloSuperficie;
+
+/*
+ * `--pared-propia` escribe: un inquilino, un caso, un cliente y una póliza que
+ * se borran al final. Escribir en la base de producción desde un test es lo que
+ * este producto no se puede permitir, y la dirección es lo único que este
+ * guion puede mirar para saber dónde está parado. Si no se puede leer, se
+ * trata como producción.
+ *
+ * `DEMO_TENANT_ID` también la frena: sólo existe donde existe la demo, o sea en
+ * producción. En QA no se define y la pared se arma con un inquilino propio.
+ */
+const apuntaAProduccion = (() => {
+  try {
+    return new URL(BASE).hostname === "claimmix.vercel.app";
+  } catch {
+    return true;
+  }
+})();
+if (paredPropia && (apuntaAProduccion || process.env.DEMO_TENANT_ID)) {
+  console.error(
+    "--pared-propia escribe en la base y no corre contra producción " +
+      "(SMOKE_URL es claimmix.vercel.app o DEMO_TENANT_ID está definido)."
+  );
+  process.exit(1);
+}
+
+/*
+ * Lo de arriba mira adónde apunta el ataque, no adónde escribe la siembra: eso
+ * lo deciden `DATABASE_URL` y `DATABASE_URL_APP`, y un `.env.local` con la base
+ * viva deja pasar una URL de QA. Se mira también el host de la base, con el
+ * mismo criterio que `prove-data-layer.mts`: si falta o no se lee, es la de
+ * producción, o el dueño y la app van a bases distintas (se sembraría en una y
+ * se borraría en la otra), no se escribe. Sin imprimir las cadenas: llevan la
+ * contraseña.
+ */
+const endpointDe = (host: string) => host.split(".")[0].replace(/-pooler$/, "");
+const vetoDeBase = (() => {
+  const [duenio, app] = [process.env.DATABASE_URL, process.env.DATABASE_URL_APP].map(hostDe);
+  if (!duenio || !app) return "DATABASE_URL o DATABASE_URL_APP falta o no se lee";
+  if ([duenio, app].some((h) => h.includes(HOST_DE_PRODUCCION))) return "la base es la de PRODUCCIÓN";
+  if (endpointDe(duenio) !== endpointDe(app)) return "DATABASE_URL y DATABASE_URL_APP apuntan a bases distintas";
+  return null;
+})();
+if (paredPropia && vetoDeBase) {
+  console.error(`--pared-propia escribe en la base y no corre contra producción (${vetoDeBase}).`);
+  process.exit(1);
+}
+
+// Los ids se eligen antes de insertar para que el `finally` borre por id
+// aunque la siembra se corte a la mitad.
+const PROPIO = paredPropia
+  ? { tenant: randomUUID(), caso: randomUUID(), cliente: randomUUID(), poliza: randomUUID() }
+  : null;
+// Se enciende antes del primer insert, y no después del último: la limpieza
+// tiene que correr también si la siembra se corta a la mitad, y no tiene que
+// anunciar un borrado si ni siquiera llegó a sembrar.
+let sembrado = false;
 
 // ── Anotar hallazgos ─────────────────────────────────────────────────────────
 
@@ -863,11 +926,10 @@ function auditAdminGuards(): void {
  *
  * ── Por qué esto ya no escribe nada ────────────────────────────────────────
  *
- * El único lugar donde esto corre con credenciales de verdad es el post-deploy
- * de PRODUCCIÓN (QA lo apaga: `correr_pentest: false`, le falta el inquilino
- * de demo). Insertar un caso señuelo, aunque se borre al final, era escribir
- * en la base de un cliente desde un test — la regla que este producto no se
- * puede dar el lujo de romper.
+ * En el post-deploy de PRODUCCIÓN esto corre con credenciales de verdad.
+ * Insertar un caso señuelo, aunque se borre al final, era escribir en la base
+ * de un cliente desde un test — la regla que este producto no se puede dar el
+ * lujo de romper.
  *
  * La versión anterior insertaba el señuelo en DEMO_TENANT_ID, pensando que era
  * el lado inofensivo. No lo es: es la misma base. Y de paso esa elección era
@@ -881,10 +943,20 @@ function auditAdminGuards(): void {
  * que de verdad importa— y de puro no escribir nada queda además más fiel al
  * nombre del archivo: es un ataque, y un atacante no le pide permiso a la
  * base para dejar el señuelo.
+ *
+ * ── Y en QA, con `--pared-propia` ──────────────────────────────────────────
+ *
+ * QA no tiene inquilino de demo, y sin él la pared no se probaba en ningún
+ * lado antes de producción. Ahí la base es descartable, así que se arma lo que
+ * falta: un inquilino efímero hace de B, y el caso, el cliente y la póliza del
+ * señuelo nacen en GMAIL_TENANT_ID con ids elegidos de antemano. Al final se
+ * borra lo que se creó por id y nada más; antes de sembrar barre los restos de
+ * una corrida que murió sin limpiar. Producción la rechaza arriba de todo, por
+ * la URL y por el host de la base.
  */
 async function attackTenantWall(): Promise<void> {
   const TENANT_A = process.env.GMAIL_TENANT_ID;
-  const TENANT_B = process.env.DEMO_TENANT_ID;
+  const TENANT_B = PROPIO ? PROPIO.tenant : process.env.DEMO_TENANT_ID;
 
   /*
    * `DATABASE_URL_APP` entra a la guarda, y no es un detalle de configuración.
@@ -935,10 +1007,12 @@ async function attackTenantWall(): Promise<void> {
   }
 
   console.log("\n" + "─".repeat(70));
-  console.log("LA PARED ENTRE TENANTS — con la base de verdad, sólo lectura\n");
+  console.log(
+    `LA PARED ENTRE TENANTS — con la base de verdad, ${PROPIO ? "con un inquilino y un caso propios" : "sólo lectura"}\n`
+  );
 
   const { db } = await import("@/lib/db");
-  const { cases, claimMessages, customers } = await import("@/lib/db/schema");
+  const { cases, claimMessages, customers, policies, tenants } = await import("@/lib/db/schema");
   const { and, desc, eq, isNotNull, isNull, like, notExists, notInArray, notLike, or } = await import("drizzle-orm");
   const { listCases, listCasesForExport } = await import("@/server/cases/list");
   const { getCaseDetail } = await import("@/server/cases/get");
@@ -946,10 +1020,50 @@ async function attackTenantWall(): Promise<void> {
 
   const query = { page: 1, per_page: 100, sort: "created_at", order: "desc" } as const;
 
-  // El caso más nuevo de TENANT_A. Ninguno se crea acá: es el que ya haya,
-  // así que esto es sólo un SELECT — con el rol dueño, que ignora RLS a
-  // propósito para poder elegir de cualquier tenant, igual que hace
-  // `prove-tenancy.mts` para lo mismo.
+  /*
+   * El señuelo de `--pared-propia`. Cerrado y por `email` a propósito: ni el
+   * barrido de abandonados ni el reintento de extracción levantan un caso
+   * cerrado, y ningún transporte lo confunde con una denuncia en curso. El DNI
+   * tiene nueve dígitos, así que no puede ser el de una persona. La póliza está
+   * para que `polizas_por_dni` y `verificar_poliza` tengan algo que filtrar
+   * desde B; sin ella devolverían vacío con pared o sin pared.
+   */
+  const FALSO = { dni: `8${RUN}001`, poliza: `PP${RUN}` };
+  if (PROPIO) {
+    await barrerRestosDeLaPared(TENANT_A);
+    sembrado = true;
+    await db.insert(tenants).values({ id: PROPIO.tenant, name: `pentest-pared-${RUN}` });
+    await db.insert(customers).values({
+      id: PROPIO.cliente,
+      tenant_id: TENANT_A,
+      full_name: `Titular Pentest ${RUN}`,
+      dni: FALSO.dni,
+    });
+    await db.insert(policies).values({
+      id: PROPIO.poliza,
+      tenant_id: TENANT_A,
+      customer_id: PROPIO.cliente,
+      policy_number: FALSO.poliza,
+      // La restricción deletrea los estados en inglés.
+      status: "active",
+    });
+    await db.insert(cases).values({
+      id: PROPIO.caso,
+      tenant_id: TENANT_A,
+      policy_number: FALSO.poliza,
+      policyholder_name: `Titular Pentest ${RUN}`,
+      status: "cerrado",
+      closed_at: new Date().toISOString(),
+      channel: "email",
+      customer_id: PROPIO.cliente,
+      policy_id: PROPIO.poliza,
+    });
+  }
+
+  // El caso más nuevo de TENANT_A. Sin `--pared-propia` ninguno se crea acá: es
+  // el que ya haya, así que esto es sólo un SELECT — con el rol dueño, que
+  // ignora RLS a propósito para poder elegir de cualquier tenant, igual que hace
+  // `prove-tenancy.mts` para lo mismo. Con ella, es el propio y ningún otro.
   const elegir = async () => {
     const [victim] = await db
       .select({
@@ -961,6 +1075,7 @@ async function attackTenantWall(): Promise<void> {
       .where(
         and(
           eq(cases.tenant_id, TENANT_A),
+          PROPIO ? eq(cases.id, PROPIO.caso) : undefined,
           // Ni los del ensayo ni los del timbre: `pnpm knock` y el ensayo los crean
           // y borran mientras esto corre, y un caso que se borra a mitad no prueba nada.
           notInArray(cases.channel, ["whatsapp_sim", "email_sim"]),
@@ -1077,6 +1192,15 @@ async function attackTenantWall(): Promise<void> {
       !JSON.stringify(byPolicy).includes(victim.policy_number),
       "el agente contándole a un desconocido los datos de una póliza de otra cartera"
     );
+    // La respuesta no repite el número, así que con la póliza propia —única en
+    // la base— el veredicto es que B no la dé por existente.
+    if (PROPIO) {
+      probe(
+        "verificar_poliza no da por existente la póliza de otro inquilino",
+        (byPolicy as { existe?: boolean }).existe !== true,
+        "confirmarle a un desconocido que un número de póliza existe en otra cartera"
+      );
+    }
   }
 
   // Cualquier cliente de TENANT_A con DNI cargado — no hace falta que sea el
@@ -1085,7 +1209,13 @@ async function attackTenantWall(): Promise<void> {
   const [customer] = await db
     .select({ dni: customers.dni })
     .from(customers)
-    .where(and(eq(customers.tenant_id, TENANT_A), isNotNull(customers.dni)))
+    .where(
+      and(
+        eq(customers.tenant_id, TENANT_A),
+        isNotNull(customers.dni),
+        PROPIO ? eq(customers.id, PROPIO.cliente) : undefined
+      )
+    )
     .orderBy(desc(customers.created_at))
     .limit(1);
 
@@ -1205,7 +1335,89 @@ async function attackTenantWall(): Promise<void> {
     "la retención borrando casos de otra aseguradora"
   );
 
-  console.log("\nSólo lectura: nada se escribió ni se borró.");
+  console.log(
+    PROPIO
+      ? "\nSólo se escribió lo propio: el inquilino B y el señuelo de A, que se borran a continuación."
+      : "\nSólo lectura: nada se escribió ni se borró."
+  );
+}
+
+/**
+ * Barre lo que una corrida anterior de `--pared-propia` dejó sin borrar.
+ *
+ * El `finally` de abajo no corre si el proceso muere (el timeout del job, una
+ * cancelación, un corte de red), y esos restos hacen que `prove-tenancy.mts`
+ * tome a B como inquilino real. Sólo se tocan los de más de una hora, para no
+ * pisar a otra corrida en curso: el inquilino se reconoce por el nombre; el
+ * cliente, por el DNI de diez dígitos que se inventa la siembra y su nombre; el
+ * caso, por el cliente.
+ *
+ * Si no puede barrer, lo dice y sigue: no es un hallazgo de esta corrida.
+ */
+async function barrerRestosDeLaPared(tenantA: string): Promise<void> {
+  try {
+    const { db } = await import("@/lib/db");
+    const { cases, customers, tenants } = await import("@/lib/db/schema");
+    const { and, eq, inArray, like, lt } = await import("drizzle-orm");
+    const corte = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const clientes = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.tenant_id, tenantA),
+          like(customers.dni, "8______001"),
+          like(customers.full_name, "Titular Pentest %"),
+          lt(customers.created_at, corte)
+        )
+      );
+    const ids = clientes.map((c) => c.id);
+    if (ids.length) {
+      await db.delete(cases).where(and(eq(cases.tenant_id, tenantA), inArray(cases.customer_id, ids)));
+      // Cascada: se lleva la póliza.
+      await db.delete(customers).where(inArray(customers.id, ids));
+    }
+    // Cascada: se lleva lo que B haya juntado.
+    const inquilinos = await db
+      .delete(tenants)
+      .where(and(like(tenants.name, "pentest-pared-%"), lt(tenants.created_at, corte)))
+      .returning({ id: tenants.id });
+    if (ids.length || inquilinos.length) {
+      console.log(
+        `Barridos ${inquilinos.length} inquilino(s) y ${ids.length} cliente(s) de corridas anteriores.`
+      );
+    }
+  } catch (e) {
+    console.error(`No pude barrer los restos de corridas anteriores: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Borra lo que `--pared-propia` creó, por id y nada más.
+ *
+ * Corre en el `finally` del llamador: también cuando la siembra o una sonda
+ * revienta. Si la limpieza falla, el guion falla con los ids a la vista; un
+ * inquilino huérfano en QA es un olvido que se arregla, uno silencioso no.
+ */
+async function limpiarPared(): Promise<void> {
+  if (!PROPIO || !sembrado || !process.env.DATABASE_URL) return;
+  try {
+    const { db } = await import("@/lib/db");
+    const { cases, customers, tenants } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(cases).where(eq(cases.id, PROPIO.caso));
+    // Cascada: se lleva la póliza.
+    await db.delete(customers).where(eq(customers.id, PROPIO.cliente));
+    // Cascada: se lleva lo que B haya juntado mientras se lo atacaba.
+    await db.delete(tenants).where(eq(tenants.id, PROPIO.tenant));
+    console.log("Borrados el inquilino B, el caso, el cliente y la póliza propios.");
+  } catch (e) {
+    console.error(`No pude limpiar la pared propia: ${(e as Error).message}`);
+    findings.push({
+      what: `la pared propia quedó sin borrar (inquilino ${PROPIO.tenant}, caso ${PROPIO.caso}, cliente ${PROPIO.cliente})`,
+      gain: "—",
+    });
+  }
 }
 
 // ── Parte 3: el agente ───────────────────────────────────────────────────────
@@ -1608,7 +1820,11 @@ if (soloSuperficie) {
       "DATABASE_URL_APP, GMAIL_TENANT_ID y DEMO_TENANT_ID, y esto corre sin base)."
   );
 } else {
-  await attackTenantWall();
+  try {
+    await attackTenantWall();
+  } finally {
+    await limpiarPared();
+  }
 }
 if (doAgent) {
   await attackAgent();

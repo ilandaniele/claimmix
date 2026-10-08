@@ -214,7 +214,7 @@ jobs:
   #
   # Este job es el cinturón de ese mapeo, y hace dos cosas.
   #
-  # Primero exige los tres secretos sin los cuales QA no puede correr NADA, y
+  # Primero exige los cuatro secretos sin los cuales QA no puede correr NADA, y
   # falla en voz alta si falta alguno. La alternativa —que el caller mande el
   # secreto vacío y el job de abajo se rompa con el mensaje del script— también
   # sale roja, pero roja donde no se entiende: "falta DATABASE_URL" en un job
@@ -226,10 +226,14 @@ jobs:
   # Es el único error de esta familia que no se ve en ningún lado hasta que ya
   # pasó.
   #
+  # El cuarto es el inquilino de QA (`QA_GMAIL_TENANT_ID`): el pen test deja ahí
+  # su caso señuelo para atacar la pared, y sin él no hay pared que probar.
+  #
   # Lo que NO es obligatorio se mira igual, y su ausencia apaga un chequeo en
   # vez de romper la corrida: el ensayo sube adjuntos de verdad y necesita
-  # almacenamiento propio y un inquilino propio. Sin eso no corre, y el job
-  # `alcance` de deploy-checks.yml lo nombra como no verificado.
+  # almacenamiento propio. Sin eso no corre, y el job `alcance` de
+  # deploy-checks.yml lo nombra como no verificado y el veredicto de QA sale
+  # rojo: un ensayo apagado no es un ensayo pasado.
   qa_secretos:
     name: Secretos de QA
     runs-on: ubuntu-latest
@@ -261,6 +265,7 @@ jobs:
           [ -n "$BASE" ] || faltan="$faltan QA_DATABASE_URL"
           [ -n "$BASE_APP" ] || faltan="$faltan QA_DATABASE_URL_APP"
           [ -n "$CRON" ] || faltan="$faltan QA_CRON_SECRET"
+          [ -n "$INQUILINO" ] || faltan="$faltan QA_GMAIL_TENANT_ID"
           if [ -n "$faltan" ]; then
             {
               echo "### Contra QA no corrió ningún chequeo"
@@ -271,6 +276,7 @@ jobs:
               echo "Los dos primeros son la rama de Neon de QA, NO la base de"
               echo "producción: el ensayo escribe y borra casos ahí adentro."
               echo "El tercero es el CRON_SECRET del proyecto claimmix-qa."
+              echo "El cuarto es el inquilino de QA: el pen test arma ahí su señuelo."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error title=QA sin secretos::Faltan$faltan - ver el resumen del run."
             exit 1
@@ -309,21 +315,22 @@ jobs:
           # El ensayo sube adjuntos de verdad, y desde el 20/09 QA tiene balde
           # propio para eso: claimmix-qa-attachments, con su propio token. Sin
           # los cuatro QA_R2_* no hay dónde subirlos y el ensayo no corre.
-          if [ -n "$INQUILINO" ] && [ -n "$R2_CUENTA" ] &&
-             [ -n "$R2_LLAVE" ] && [ -n "$R2_SECRETO" ] && [ -n "$R2_BALDE" ]; then
+          if [ -n "$R2_CUENTA" ] && [ -n "$R2_LLAVE" ] &&
+             [ -n "$R2_SECRETO" ] && [ -n "$R2_BALDE" ]; then
             echo "ensayo=1" >> "$GITHUB_OUTPUT"
           else
             echo "ensayo=0" >> "$GITHUB_OUTPUT"
-            echo "::notice title=QA sin ensayo::Faltan QA_GMAIL_TENANT_ID o los QA_R2_* - el ensayo no corre."
+            echo "::notice title=QA sin ensayo::Faltan los QA_R2_* - el ensayo no corre."
           fi
 
   # ── QA: lo que sí puede correr ──────────────────────────────────────────────
   #
-  # Corre el smoke, las dos comparaciones contra el catálogo y —cuando QA tiene
-  # lo suyo— el ensayo. No corre el timbre (QA no lleva Gmail ni WhatsApp: no le
-  # escribe a nadie, a propósito), ni el pen test (le falta el inquilino de
-  # demo), ni la carga (cuatrocientos casos contra los cientos de miles de
-  # producción no comparan con el mismo presupuesto).
+  # Corre el smoke, las dos comparaciones contra el catálogo, el pen test —con
+  # la pared armada con un inquilino propio y los ataques al agente— y, cuando
+  # QA tiene lo suyo, el ensayo. No corre el timbre (QA no lleva Gmail ni
+  # WhatsApp: no le escribe a nadie, a propósito), ni la carga (cuatrocientos
+  # casos contra los cientos de miles de producción no comparan con el mismo
+  # presupuesto).
   #
   # El smoke va liviano: `--deep` sube un archivo a R2 y llama al modelo, y eso
   # no es lo que este run viene a probar. Hasta el 20/09 además toleraba
@@ -349,8 +356,8 @@ jobs:
       endsWith(github.event.deployment.environment, '-qa')
     permissions:
       contents: read
-      # Techo para el ensayo, que pide el token OIDC de WIF. Sin ensayo no se
-      # usa, y un permiso que sobra no hace nada.
+      # Techo para el ensayo y los ataques al agente, que piden el token OIDC de
+      # WIF. Sin ellos no se usa, y un permiso que sobra no hace nada.
       id-token: write
     uses: ./.github/workflows/deploy-checks.yml
     with:
@@ -359,7 +366,9 @@ jobs:
       smoke_profundo: false
       correr_ensayo: ${{ needs.qa_secretos.outputs.ensayo == '1' }}
       correr_timbre: false
-      correr_pentest: false
+      correr_pentest: true
+      pared_propia: true
+      atacar_agente: true
       medir_carga: false
     # Uno por uno y con el nombre de QA de cada lado. `secrets: inherit` acá
     # sería apuntar seis jobs a la base de producción; está contado arriba, en
@@ -380,3 +389,64 @@ jobs:
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
       GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
       VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
+
+  # ── QA: el veredicto, publicado sobre el commit ─────────────────────────────
+  #
+  # Los jobs de arriba cuelgan de un `deployment_status`, y GitHub no los
+  # asocia al commit que se desplegó: un run verde de QA no se ve desde el PR
+  # ni desde la promoción a main. Este job lo vuelve un estado del commit,
+  # `Post-deploy QA`, con el SHA del deploy.
+  #
+  # `always()` porque lo que más importa publicar es el rojo, y que `qa` se
+  # saltee porque `qa_secretos` falló también lo es. Sólo da verde si las dos
+  # cosas pasaron y el ensayo corrió: un QA que no corrió no es un QA que pasó,
+  # y `qa` da success aunque el ensayo se haya apagado por falta de los QA_R2_*.
+  #
+  # El job NO se llama como el estado. Cada corrida, aun las que saltean todo
+  # (los estados intermedios de Vercel y los previews), deja un check run con el
+  # nombre del job sobre el mismo SHA, y un salteado cuenta como aprobado: la
+  # promoción mostraría «Post-deploy QA» pasado antes de que QA corra. Con otro
+  # nombre, el único «Post-deploy QA» es el estado que publica el paso de abajo.
+  # Y el paso sale 1 cuando publica rojo, para que su propio check run no quede
+  # verde junto a un estado rojo.
+  #
+  # Mismo piso de permisos que el resto: sólo puede escribir estados.
+  qa_veredicto:
+    name: Veredicto de QA
+    needs: [qa_secretos, qa]
+    if: >
+      always() &&
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      endsWith(github.event.deployment.environment, '-qa')
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Publicar el veredicto sobre el commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.deployment.sha }}
+          SECRETOS: ${{ needs.qa_secretos.result }}
+          QA: ${{ needs.qa.result }}
+          ENSAYO: ${{ needs.qa_secretos.outputs.ensayo }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$SECRETOS" = "success" ] && [ "$QA" = "success" ]; then
+            if [ "$ENSAYO" = "1" ]; then
+              estado=success
+              descripcion="QA pasó todos sus chequeos"
+            else
+              estado=failure
+              descripcion="QA sin ensayo (faltan QA_R2_*)"
+            fi
+          else
+            estado=failure
+            descripcion="QA falló o no corrió (secretos: $SECRETOS, chequeos: $QA)"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -f state="$estado" \
+            -f context="Post-deploy QA" \
+            -f description="$descripcion" \
+            -f target_url="$RUN_URL"
+          [ "$estado" = "success" ] || exit 1

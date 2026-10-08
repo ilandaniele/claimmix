@@ -543,6 +543,7 @@ pasa todos los tests de comportamiento, porque hace exactamente lo que dice.
 ```bash
 pnpm pentest             # la superficie: gratis, no escribe nada
 pnpm pentest --agent     # + los ataques al agente (gasta tokens)
+pnpm pentest --pared-propia  # la pared con un inquilino y un caso propios: sólo contra QA
 ```
 
 **La superficie** prueba cada ruta de la API sin credenciales. La lista **no
@@ -597,6 +598,16 @@ base viva que nadie montó nunca. Si alguien escribe una consulta sin
 Cada dirección se prueba dos veces: que el dueño **sí** ve lo suyo, y recién
 después que el otro no. Sin la primera, la segunda no prueba nada — no
 encontrar un caso que no existe es gratis.
+
+**`--pared-propia`** es para QA, que no tiene inquilino de demo ni casos de
+verdad. Arma lo que falta —un inquilino B efímero y, en `GMAIL_TENANT_ID`, un
+cliente con DNI ficticio, su póliza y un caso cerrado por `email`— y borra por id
+lo que creó, también si algo revienta a mitad de camino, y al arrancar barre los
+restos de más de una hora de una corrida que murió sin limpiar. Escribe, así que
+se niega con exit 1 si `SMOKE_URL` es el alias de producción, si `DEMO_TENANT_ID`
+está definido, o si `DATABASE_URL` o `DATABASE_URL_APP` faltan, apuntan a la base
+viva o a bases distintas entre sí (la URL dice adónde se ataca, no adónde se
+siembra). El post-deploy de QA lo corre siempre, con `--agent`.
 
 **Se planta si el modelo no está disponible.** En la primera corrida el cupo
 diario del tenant estaba agotado, el agente no contestó nada, y los cuatro
@@ -674,7 +685,7 @@ planta antes de levantar nada.
 | `INTEGRATION_ADMIN_PASSWORD` | la cuenta admin — sin valor por omisión, a propósito |
 | `INTEGRATION_LOGIN_PASSWORD` | la cuenta de los tests que prueban el login |
 | `INTEGRATION_E2E_PASSWORD` | la cuenta de los e2e |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (y opcional `R2_BUCKET`) | el PDF de 8 MB, para `pnpm sembrar-adjunto` |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (y opcional `R2_BUCKET`) | el PDF de 8 MB y el SVG, para `pnpm sembrar-adjunto` |
 
 **Entrecomillá los valores.** Una contraseña con `#` adentro, sin comillas,
 dotenv la corta ahí porque toma el resto como comentario: el sembrado guarda una
@@ -717,6 +728,23 @@ y la fila.
 Esto prueba que la ruta hace streaming desde `next start`; el lado de Vercel
 —que la función responda igual en producción— es una comprobación aparte, de
 una sola vez, que sigue anotada en `docs/PROJECT_STATUS.md`.
+
+#### El SVG con script
+
+`adjunto-svg.spec.ts` pide por HTTP, con la sesión de un analista, un SVG con un
+`<script>` adentro y mira las cabeceras que llegan por el cable: la CSP del
+handler con `sandbox`, `nosniff`, tipo genérico y `attachment`. Lo siembra
+`pnpm sembrar-adjunto --svg` (mismas guardas, mismo balde y mismo caso que el PDF;
+el id es `PLAYWRIGHT_SVG_ATTACHMENT_ID=e2e00000-0000-4000-8000-0000000000f9`) y
+`pnpm sembrar-adjunto --svg --limpiar` lo saca. Sin las credenciales de R2 se
+saltea solo, como el del PDF.
+
+Existe porque Next no pisa una cabecera que `next.config.ts` ya fijó: la CSP de
+`/api` se llevaba puesta la del handler, y el `sandbox` que prueba
+`adjunto-servido.test.ts` nunca llegaba al navegador. Ningún test unitario lo
+ve; sólo la respuesta real. Si falla, el arreglo va en `next.config.ts` (el patrón
+de `/api` tiene que dejar afuera esa ruta, y `tests/unit/csp-de-la-api.test.ts`
+lo vigila), no en el test.
 
 #### La entrega al sistema central (B5)
 
@@ -831,16 +859,15 @@ bloquean el merge.
 - **Tests de integración** — contra el ensayo, si `STAGING_DATABASE_URL` está.
 - **Cobertura** — el piso de `vitest.config.ts`, como trinquete.
 - **Tests E2E** (obligatorio) — Playwright contra su propia base.
-- **Vulnerabilidades** (obligatorio) — `pnpm audit` de alto para arriba, y semgrep.
+- **Vulnerabilidades** (obligatorio) — `pnpm audit` de alto para arriba, y semgrep (`p/typescript`, `p/owasp-top-ten` y `p/secrets`, sin métricas) sobre `src/` y `scripts/`.
 - **Peso del bundle** (obligatorio) — gzip de los chunks contra un presupuesto.
-- **Tests de Gmail** — polling, el stub 410 y la auth de las rutas, todo mock.
 - **Licencias** (obligatorio) — sin GPL/AGPL/LGPL/SSPL.
 - **Aislamiento de tenants** (obligatorio) — `pnpm tenancy` y `pnpm capa-datos`.
 - **Pen test local** (obligatorio) — `pnpm pentest --solo-superficie` contra un build local.
 
 `codeql.yml`:
 
-- **Análisis CodeQL** (obligatorio) — estático, `security-extended`.
+- **Análisis CodeQL** (obligatorio) — estático, `security-extended`, sobre el código y sobre los workflows (`actions`).
 
 `secrets.yml`:
 
@@ -874,7 +901,10 @@ chequeos: el smoke primero, y colgando de él los otros seis.
    la tabla ya no se lee.
 7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
    hacer lo que la capa de datos le pide — y en `audit_log`, que es sólo de
-   alta desde 0032, comprueba que NO tenga UPDATE ni DELETE. Sólo lee.
+   alta desde 0032, comprueba que NO tenga UPDATE ni DELETE. Sólo lee. Le sigue
+   `pnpm tenancy` en el mismo job: que el rol no tenga `BYPASSRLS` ni `SUPERUSER`
+   y que toda tabla con `tenant_id` tenga RLS, `FORCE` y política. Las migraciones
+   de QA y de producción se aplican a mano, y un `ALTER ROLE` no deja registro.
 
 Hay un octavo trabajo que no verifica nada, `alcance`. Corre con `if: always()`
 y escribe en el resumen del run una fila por chequeo: **corrió**, **corrió y

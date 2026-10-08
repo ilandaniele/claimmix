@@ -372,15 +372,17 @@ jobs:
           # una dependencia que sí contesta) y además le entregaría a ese deploy
           # una credencial que no es suya. El de producción sólo viaja al alias
           # de producción; el que no es ninguno de los dos alias cae en
-          # PREVIEW_CRON_SECRET y, si ése falta, queda vacío y el paso no interroga.
+          # PREVIEW_CRON_SECRET y, si ése falta, el paso corta sin interrogar.
           # Se elige por el destino ya resuelto y no por el entorno del
           # deployment, así vale también para el disparo a mano.
-          CRON_SECRET: ${{ steps.destino.outputs.url == 'https://claimmix-qa.vercel.app' && secrets.QA_CRON_SECRET || (steps.destino.outputs.url == 'https://claimmix.vercel.app' && secrets.CRON_SECRET || secrets.PREVIEW_CRON_SECRET) }}
+          #
+          # `a && x || y` cae a `y` cuando `x` está vacío: con QA_CRON_SECRET
+          # sin cargar viajaba el de producción, y con CRON_SECRET sin cargar el
+          # de Preview. Con `'__falta__'` de respaldo nada queda vacío y el
+          # primer comando corta.
+          CRON_SECRET: ${{ steps.destino.outputs.url == 'https://claimmix-qa.vercel.app' && (secrets.QA_CRON_SECRET || '__falta__') || (steps.destino.outputs.url == 'https://claimmix.vercel.app' && (secrets.CRON_SECRET || '__falta__') || (secrets.PREVIEW_CRON_SECRET || '__falta__')) }}
         run: |
-          if [ -z "${CRON_SECRET}" ]; then
-            echo "Sin CRON_SECRET del repositorio no se puede interrogar a /api/health."
-            exit 0
-          fi
+          [ "${CRON_SECRET}" != '__falta__' ] || { echo '::error::Falta el CRON_SECRET de este host (QA_CRON_SECRET, CRON_SECRET o PREVIEW_CRON_SECRET según el destino): no se puede interrogar a /api/health.'; exit 1; }
           COD=$(curl -s -o salud.json -w '%{http_code}' \
             -H "x-vercel-protection-bypass: $BYPASS" \
             -H "Authorization: Bearer $CRON_SECRET" \

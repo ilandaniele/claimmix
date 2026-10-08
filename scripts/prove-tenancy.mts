@@ -201,8 +201,13 @@ try {
     // Esto se hace con el rol que esté probándose. Si ese rol obedece RLS y no
     // hay contexto puesto, no verá nada y el recuento dará uno: por eso la
     // búsqueda corre con el contexto de cada inquilino, más abajo.
+    // Sin el inquilino efímero del pen test (`--pared-propia`): corre al mismo
+    // tiempo contra la misma base, o quedó sin borrar, y no tiene filas en
+    // ninguna tabla. Elegido como segundo, la prueba sale "no concluyente".
     const inquilinos = (
-      await cx.query(`SELECT id::text AS id, name FROM tenants ORDER BY created_at LIMIT 2`)
+      await cx.query(
+        `SELECT id::text AS id, name FROM tenants WHERE name NOT LIKE 'pentest-pared-%' ORDER BY created_at LIMIT 2`
+      )
     ).rows.map((t: { id: string; name: string }) => ({ ...t, name: t.name?.replace(/[\r\n]+/g, " ") }));
     // En CI los nombres de los inquilinos se tapan en el log del job, por si el
     // ensayo se siembra algún día desde datos reales.

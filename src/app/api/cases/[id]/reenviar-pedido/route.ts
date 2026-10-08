@@ -8,7 +8,8 @@
  *
  * 200: { claves, reabierto }. 404: el caso no existe, o la reapertura la pide
  * alguien que no puede cambiarle el estado. 409: RESPUESTA_NO_PERMITIDA con
- * { motivo }. 429: un reenvío por caso cada 30 s.
+ * { motivo }. 429: un reenvío por caso cada 30 s, o el tope de plantillas de
+ * WhatsApp del espacio, con un texto que no dice por qué.
  */
 
 import { type NextRequest } from "next/server";
@@ -55,6 +56,9 @@ export async function POST(
     if (!resultado.ok) {
       if (resultado.motivo === "no_encontrado") {
         return err(new AppError("NOT_FOUND", "El caso no existe."));
+      }
+      if (resultado.motivo === "tope_de_plantillas") {
+        return err(new AppError("RATE_LIMITED", "No se pueden mandar más plantillas de WhatsApp por ahora."));
       }
       return err(new AppError("RESPUESTA_NO_PERMITIDA", undefined, { motivo: resultado.motivo }));
     }

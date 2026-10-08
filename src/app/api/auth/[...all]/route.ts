@@ -77,23 +77,30 @@ async function direccionDelCuerpo(req: NextRequest): Promise<string> {
 }
 
 /**
- * La vuelta del SSO es un GET que consume trabajo: valida un token contra el
- * IdP y crea o vincula una cuenta. Leer la sesión, que también es un GET, sigue
- * sin techo. Va por IP sola, con el mismo cupo que el resto de los intentos de
- * autenticación: el arranque (`sso-inquilino/sign-in`) ya cae en `CON_TECHO`.
+ * Las vueltas de un proveedor son GET que consumen trabajo. La del SSO valida un
+ * token contra el IdP y crea o vincula una cuenta; la de Google hace lo mismo y,
+ * con el alta automática, además puede crear un usuario nuevo. Leer la sesión, que
+ * también es un GET, sigue sin techo. Va por IP sola, con el mismo cupo que el
+ * resto de los intentos de autenticación: el arranque (`sso-inquilino/sign-in`)
+ * ya cae en `CON_TECHO`.
  *
- * Es una navegación del navegador, no una llamada de API: el rechazo es un
- * redirect a /login, no un JSON que la persona vería crudo.
+ * Son navegaciones del navegador, no llamadas de API: el rechazo es un redirect
+ * a /login con un código que la pantalla sabe decir, no un JSON que la persona
+ * vería crudo.
  */
-const RUTA_DE_VUELTA_DEL_SSO = "/sso-inquilino/callback";
+const VUELTAS_CON_TECHO = [
+  { ruta: "/sso-inquilino/callback", error: "sso_fallo" },
+  { ruta: "/callback/google", error: "demasiados_intentos" },
+] as const;
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  if (url.pathname.endsWith(RUTA_DE_VUELTA_DEL_SSO)) {
+  const vuelta = VUELTAS_CON_TECHO.find((v) => url.pathname.endsWith(v.ruta));
+  if (vuelta) {
     const porIp = await topePorIp(getClientIp(req));
     if (!porIp.allowed) {
       const esperar = Math.max(1, Math.ceil((porIp.resetAt - Date.now()) / 1000));
-      return NextResponse.redirect(new URL("/login?error=sso_fallo", url), {
+      return NextResponse.redirect(new URL(`/login?error=${vuelta.error}`, url), {
         headers: { "Retry-After": String(esperar) },
       });
     }

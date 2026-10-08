@@ -69,6 +69,7 @@ import { db } from "@/lib/db";
 // ── scenarios.ts ──────────────────────────────────────────────────────────────
 
 import {
+  escenariosSinRepetir,
   getRandomScenario,
   getScenarioById,
   SCENARIOS,
@@ -100,6 +101,41 @@ describe("getRandomScenario", () => {
   it("returns a scenario filtered by claimType=incendio", () => {
     const s = getRandomScenario("incendio");
     expect(s.case_type).toBe("incendio");
+  });
+});
+
+describe("escenariosSinRepetir", () => {
+  const ids = (lista: Array<{ id: string }>) => lista.map((s) => s.id);
+
+  it("devuelve n escenarios distintos cuando n entra en el pool", () => {
+    const lote = escenariosSinRepetir(undefined, 50);
+    expect(lote).toHaveLength(50);
+    expect(new Set(ids(lote)).size).toBe(50);
+  });
+
+  it("se queda en el ramo pedido y no repite", () => {
+    const delRamo = SCENARIOS.filter((s) => s.case_type === "choque");
+    const lote = escenariosSinRepetir("choque", delRamo.length);
+    expect(lote.every((s) => s.case_type === "choque")).toBe(true);
+    expect(new Set(ids(lote))).toEqual(new Set(ids(delRamo)));
+  });
+
+  it("si n pasa el pool, agrega otra mezcla completa", () => {
+    const delRamo = SCENARIOS.filter((s) => s.case_type === "granizo");
+    const lote = escenariosSinRepetir("granizo", delRamo.length + 3);
+    expect(lote).toHaveLength(delRamo.length + 3);
+    expect(new Set(ids(lote.slice(0, delRamo.length))).size).toBe(delRamo.length);
+    expect(lote.every((s) => s.case_type === "granizo")).toBe(true);
+  });
+
+  it("usa todo el pool cuando el ramo no tiene escenarios", () => {
+    const lote = escenariosSinRepetir("art", 20);
+    expect(lote).toHaveLength(20);
+    expect(new Set(ids(lote)).size).toBe(20);
+  });
+
+  it("n = 0 devuelve una lista vacía", () => {
+    expect(escenariosSinRepetir(undefined, 0)).toEqual([]);
   });
 });
 

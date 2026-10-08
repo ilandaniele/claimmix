@@ -16,6 +16,8 @@
  * plantillas.
  */
 
+import type { ClaveDelServidor } from "@/lib/i18n/es-AR.servidor";
+
 export const REGLAS = [
   "doc_sin_recibir",
   "cierre_sin_listo",
@@ -24,6 +26,15 @@ export const REGLAS = [
   "plan_sin_terminar",
 ] as const;
 export type Regla = (typeof REGLAS)[number];
+
+/** Cómo se llama cada regla de cara a una persona: la pantalla y el aviso diario leen la misma clave. */
+export const TITULO_DE_REGLA: Record<Regla, ClaveDelServidor> = {
+  doc_sin_recibir: "desvios.regla.docSinRecibir",
+  cierre_sin_listo: "desvios.regla.cierreSinListo",
+  derivacion_sin_respuesta: "desvios.regla.derivacionSinRespuesta",
+  plazo_vencido: "desvios.regla.plazoVencido",
+  plan_sin_terminar: "desvios.regla.planSinTerminar",
+};
 
 /** Un documento que se pidió y a las 72 h sigue sin llegar (ni fue declarado inexistente). */
 export const HORAS_DOC_SIN_RECIBIR = 72;

@@ -351,9 +351,23 @@ jobs:
           echo "::add-mask::$SECRETO"
           echo "BETTER_AUTH_SECRET=$SECRETO" >> "$GITHUB_ENV"
 
+      # Con la base presente, el resto de los secretos no es opcional: sin
+      # ellos el sembrado cae a la contraseña por omisión, que está escrita en
+      # el repo, y las cuentas del ensayo quedan con una clave pública. Esa base
+      # la usa también el scope Preview de Vercel. Un fork no llega acá: sin
+      # `STAGING_DATABASE_URL` el paso se saltea entero.
       - name: Sembrar la base del ensayo
         if: env.HAY_ENSAYO != ''
-        run: pnpm sembrar
+        run: |
+          faltan=""
+          for v in INTEGRATION_TEST_PASSWORD INTEGRATION_ADMIN_PASSWORD INTEGRATION_LOGIN_PASSWORD INTEGRATION_E2E_PASSWORD; do
+            [ -n "${!v}" ] || faltan="$faltan $v"
+          done
+          if [ -n "$faltan" ]; then
+            echo "::error title=Sembrado sin claves::Faltan$faltan. Sin ellas el sembrado usaría la contraseña por omisión del repo."
+            exit 1
+          fi
+          pnpm sembrar
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           # Las mismas contrasenas que reciben los e2e, y por eso estan aca.
@@ -509,8 +523,9 @@ jobs:
     env:
       # Mismo motivo que en `integration-tests`.
       HAY_E2E: ${{ secrets.E2E_DATABASE_URL != '' && 'true' || '' }}
-      # Sin credenciales de R2 el spec de 8 MB se saltea solo y lo dice; el job
-      # sigue verde. Mismo estilo de bandera que `HAY_E2E`.
+      # Sin credenciales de R2 el spec de 8 MB se saltea solo y lo dice, así que
+      # «Run E2E tests» corta si faltan (fuera de un fork). Mismo estilo de
+      # bandera que `HAY_E2E`.
       HAY_R2: ${{ secrets.QA_R2_ACCOUNT_ID != '' && 'true' || '' }}
       ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
     # El mismo grupo que `integration-tests`: comparten la base y su cupo.
@@ -639,6 +654,18 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
 
+      # El SVG con `<script>` que abre `adjunto-svg.spec.ts`: mira qué cabeceras
+      # llegan por el cable, no el tamaño. Mismo balde, misma base, otro id.
+      - name: Sembrar el SVG con script
+        if: env.HAY_E2E != '' && env.HAY_R2 != ''
+        run: pnpm sembrar-adjunto --svg
+        env:
+          SEED_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
+
       # Playwright levanta `pnpm start` en CI, no `pnpm dev`: el porqué está en
       # `playwright.config.ts`. Sin base los tests no corren y el build sobra.
       # El build viene del job `build`: un solo `pnpm build` por corrida.
@@ -661,6 +688,26 @@ jobs:
           export BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
           echo "::add-mask::$BETTER_AUTH_SECRET"
           if [ -n "$HAY_E2E" ]; then
+            # Con la base presente, un secreto vacío ya no es un fork: los
+            # specs que se saltean sin credenciales quedarían verdes sin haber
+            # corrido (login, admin contra analista, conversación del caso), y
+            # sin R2 se saltea el adjunto servido, que es control de acceso.
+            faltan=""
+            requeridos="
+              PLAYWRIGHT_TEST_EMAIL PLAYWRIGHT_TEST_PASSWORD
+              PLAYWRIGHT_ANALYST_EMAIL PLAYWRIGHT_ANALYST_PASSWORD
+              PLAYWRIGHT_ADMIN_EMAIL PLAYWRIGHT_ADMIN_PASSWORD
+              PLAYWRIGHT_EMAIL_CASE_ID PLAYWRIGHT_EMPTY_CASE_ID
+              TEST_ANALYST_EMAIL TEST_ANALYST_PASSWORD
+              R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET
+            "
+            for v in $requeridos; do
+              [ -n "${!v}" ] || faltan="$faltan $v"
+            done
+            if [ -n "$faltan" ]; then
+              echo "::error title=E2E sin secretos::Faltan$faltan (los R2_* salen de los QA_R2_*). Esos specs se saltearían en verde."
+              exit 1
+            fi
             pnpm test:e2e --project=chromium
           elif [ "$ES_FORK" = "true" ]; then
             echo "::warning title=E2E sin correr::Falta E2E_DATABASE_URL — normal en un fork. Los e2e NO se probaron en este PR."
@@ -725,16 +772,28 @@ jobs:
           TEST_ANALYST_PASSWORD: ${{ secrets.TEST_ANALYST_PASSWORD }}
           MOCK_AI: "true"
           # El servidor que levanta Playwright también tiene que llegar al bucket
-          # para servir el adjunto de 8 MB. Sin `HAY_R2` el spec se saltea solo.
+          # para servir los adjuntos de 8 MB y del SVG. Sin `HAY_R2` los specs se
+          # saltean solos.
           R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
           PLAYWRIGHT_PDF_ATTACHMENT_ID: ${{ env.HAY_R2 != '' && 'e2e00000-0000-4000-8000-0000000000f8' || '' }}
+          PLAYWRIGHT_SVG_ATTACHMENT_ID: ${{ env.HAY_R2 != '' && 'e2e00000-0000-4000-8000-0000000000f9' || '' }}
 
       - name: Sacar el PDF de 8 MB
         if: always() && env.HAY_E2E != '' && env.HAY_R2 != ''
         run: pnpm sembrar-adjunto --limpiar
+        env:
+          SEED_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
+
+      - name: Sacar el SVG con script
+        if: always() && env.HAY_E2E != '' && env.HAY_R2 != ''
+        run: pnpm sembrar-adjunto --svg --limpiar
         env:
           SEED_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           R2_ACCOUNT_ID: ${{ secrets.QA_R2_ACCOUNT_ID }}
@@ -795,19 +854,29 @@ jobs:
           # hubiera ese dia. Un paquete comprometido en PyPI entraba directo al
           # runner, que tiene el codigo del repositorio.
           #
-          # Lo que sigue sin pinear es `--config=auto`: se baja las reglas de
-          # semgrep.dev en cada corrida, y de paso le manda la URL del
-          # repositorio para elegirlas. Fijar el conjunto pide vendorearlo y
-          # cambia que reglas corren, asi que va aparte. Esto cierra el agujero
-          # de la HERRAMIENTA, que es por donde se ejecuta codigo.
+          # Antes iba `--config=auto`, que exige las metricas encendidas (le
+          # manda a semgrep.dev la URL del repositorio) y deja que el registro
+          # elija las reglas segun el proyecto. Ahora son tres paquetes con
+          # nombre y `--metrics=off`. Los paquetes se siguen bajando del
+          # registro en cada corrida, asi que las reglas no quedan congeladas;
+          # lo que ya no decide es el repo. Vendorearlas cambia que reglas
+          # corren y va aparte.
+          #
+          # Tambien mira scripts/, que no se revisaba: usa el rol propietario
+          # de las bases y en el post-deploy recibe secretos de produccion.
           pip install semgrep==1.176.1 --quiet
-          semgrep --config=auto src/ \
+          semgrep scan \
+            --config p/typescript \
+            --config p/owasp-top-ten \
+            --config p/secrets \
+            --metrics=off \
             --error \
             --quiet \
             --exclude="*.test.ts" \
             --exclude="*.test.tsx" \
             --exclude="*.spec.ts" \
-            --exclude="*.spec.tsx"
+            --exclude="*.spec.tsx" \
+            src/ scripts/
         # Sin `|| true` y sin `continue-on-error`, que es lo que tenía.
         #
         # Con las dos redes puestas, Semgrep venía encontrando 6 hallazgos —cuatro
@@ -899,49 +968,6 @@ jobs:
           echo "  Si el peso nuevo hace falta de verdad, subí el tope en"
           echo "  scripts/medir-peso.mjs y decí en el commit por qué. Un tope que"
           echo "  se sube solo cada vez que alguien lo pasa no es un tope."
-  # ── 9. Tests de Gmail ───────────────────────────────────────────────────────
-  # Replaces the old Postmark intake integration tests (W5: Postmark removed).
-  # Tests Gmail polling, 410 stub, and route auth — all mock-only (no real Gmail creds).
-  integration-tests-email:
-    name: Tests de Gmail
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    continue-on-error: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run Gmail polling integration tests (mock-only)
-        # intake-email-gone.test.ts verifies the 410 stub (AC11).
-        # gmail-poll.test.ts covers the full polling pipeline (AC1-AC4, AC7, AC8, AC13-AC14).
-        # All tests use mocked @/lib/db — no real DB connection needed.
-        run: pnpm vitest run tests/integration/intake-email-gone.test.ts tests/integration/gmail-poll.test.ts tests/integration/rls-email.test.ts tests/integration/llm-email-probes.test.ts
-        env:
-          DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
-          # La capa de datos usa su propio rol. Sin esta variable, cualquier
-          # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
-          DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
-          MOCK_AI: "true"
 
   # ── 10. Licencias ────────────────────────────────────────────────────────────
   license-audit:
@@ -977,9 +1003,11 @@ jobs:
 
   # ── 11. Aislamiento de tenants ───────────────────────────────────────────────
   #
-  # `pnpm tenancy` le pregunta a la base si separa a las aseguradoras; `pnpm
+  # `pnpm permisos` le pregunta al catálogo qué puede hacer el rol de la
+  # aplicación (lo mismo que se pregunta después de cada deploy); `pnpm
+  # tenancy` le pregunta a la base si separa a las aseguradoras; `pnpm
   # capa-datos` prueba que el código que la usa no la deja abierta igual. Los
-  # dos contra el ENSAYO, nunca contra producción — `tenancy` sólo lee, pero
+  # tres contra el ENSAYO, nunca contra producción — `tenancy` sólo lee, pero
   # `capa-datos` puede escribir una fila señuelo si encuentra una fuga (y la
   # borra con el rol dueño), así que no hay margen para apuntarlos a la base de
   # los clientes.
@@ -987,10 +1015,17 @@ jobs:
   # `needs: [integration-tests]` para no pelearse el mismo cupo de la base de
   # ensayo — ver el comentario largo en `integration-tests` sobre la corrida de
   # main y la de un PR encimándose el 2026-09-07.
+  #
+  # `!cancelled()` porque es orden, no dependencia. Los de integración no son
+  # requeridos y éste sí: con ellos en rojo este job quedaba `skipped`, y para
+  # la regla de rama un check salteado cuenta como pasado. Un PR con la
+  # integración caída mostraba los catorce en verde sin haber corrido ni
+  # `pnpm tenancy` ni `pnpm capa-datos`.
   tenencia-capa-datos:
     name: Aislamiento de tenants
     runs-on: ubuntu-latest
     needs: [integration-tests]
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     env:
@@ -1020,9 +1055,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: pnpm tenancy && pnpm capa-datos
+      - name: pnpm permisos && pnpm tenancy && pnpm capa-datos
         run: |
           if [ -n "$HAY_ENSAYO" ]; then
+            pnpm permisos
             pnpm tenancy
             pnpm capa-datos
           elif [ "$ES_FORK" = "true" ]; then

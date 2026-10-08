@@ -1,3 +1,5 @@
+import { clavesDeTurnstile } from "@/server/alta/turnstile";
+
 /**
  * CSP nonce generation and header building.
  *
@@ -62,10 +64,19 @@ function sentryOrigin(): string {
   }
 }
 
+/**
+ * El origen del desafío de /registro, y sólo con las dos claves de Turnstile: con
+ * una sola o ninguna no hay widget, y un permiso para un origen que no usamos es
+ * un permiso que alguien más puede usar.
+ */
+function turnstileOrigin(): string {
+  return clavesDeTurnstile() ? " https://challenges.cloudflare.com" : "";
+}
+
 export function buildCsp(nonce: string): string {
   const directives: string[] = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${turnstileOrigin()}`,
     /*
      * Sin 'unsafe-inline', y eso costó sacar siete `style={{ width }}`.
      *
@@ -95,7 +106,7 @@ export function buildCsp(nonce: string): string {
      * `/demo`. `-nocookie` y no `youtube.com`: no pone cookies hasta que se
      * aprieta play, y esta página es pública y no tiene cartel de consentimiento.
      */
-    "frame-src https://www.youtube-nocookie.com",
+    `frame-src https://www.youtube-nocookie.com${turnstileOrigin()}`,
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",

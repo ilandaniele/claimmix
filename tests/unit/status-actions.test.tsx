@@ -21,7 +21,7 @@ vi.mock(
   () => ({
     ExportToCorePanel: ({ caseId }: { caseId: string }) => (
       <button data-testid="export-core-button" data-case-id={caseId}>
-        Exportar al Core
+        Entregar al sistema central
       </button>
     ),
   })
@@ -68,9 +68,11 @@ describe("StatusActions — listo", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows Exportar al Core button", () => {
+  it("shows Entregar al sistema central button", () => {
     renderStatus("listo");
-    expect(screen.getByTestId("export-core-button")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Entregar al sistema central" })
+    ).toBeInTheDocument();
   });
 
   it("calls onClose when Cerrar is clicked", () => {
@@ -253,6 +255,45 @@ describe("StatusActions — requiere_especialista", () => {
   it("sin puedeDevolverAlAgente, no aparece el botón", () => {
     renderStatus("requiere_especialista");
     expect(screen.queryByTestId("action-devolver-al-agente")).not.toBeInTheDocument();
+  });
+});
+
+describe("StatusActions — no_relevante", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("con puedeMarcarRelevante, muestra «Marcar como relevante» y llama a su handler", () => {
+    const onMarcarRelevante = vi.fn();
+    renderStatus("no_relevante", { puedeMarcarRelevante: true, onMarcarRelevante });
+
+    expect(screen.getByTestId("action-marcar-relevante")).toHaveTextContent("Marcar como relevante");
+    fireEvent.click(screen.getByTestId("action-marcar-relevante"));
+    expect(onMarcarRelevante).toHaveBeenCalledOnce();
+    // Re-analizar se queda: sirve para el descarte por un error del proveedor.
+    expect(screen.getByTestId("action-re-analizar")).toBeInTheDocument();
+  });
+
+  it("sin puedeMarcarRelevante, sólo queda re-analizar", () => {
+    renderStatus("no_relevante", { onMarcarRelevante: vi.fn() });
+
+    expect(screen.queryByTestId("action-marcar-relevante")).not.toBeInTheDocument();
+    expect(screen.getByTestId("action-re-analizar")).toBeInTheDocument();
+  });
+
+  it("con un diálogo abierto o un re-análisis en curso, el botón queda deshabilitado", () => {
+    const props = { puedeMarcarRelevante: true, onMarcarRelevante: vi.fn() };
+    const { unmount } = renderStatus("no_relevante", { ...props, dialogOpen: true });
+    expect(screen.getByTestId("action-marcar-relevante")).toBeDisabled();
+    unmount();
+
+    renderStatus("no_relevante", { ...props, reAnalyzing: true });
+    expect(screen.getByTestId("action-marcar-relevante")).toBeDisabled();
+  });
+
+  it("en otro estado no aparece, aunque se pase el permiso", () => {
+    renderStatus("recibido", { puedeMarcarRelevante: true, onMarcarRelevante: vi.fn() });
+    expect(screen.queryByTestId("action-marcar-relevante")).not.toBeInTheDocument();
   });
 });
 

@@ -106,21 +106,39 @@ describe("InsigniaDeDenuncia", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("en término: gris y con los días", () => {
-    conIdioma(<InsigniaDeDenuncia resultado={{ enTermino: true, dias: 2 }} />);
-    const el = screen.getByText("En término (2 d)");
+  it("sin superar el art. 46: gris y con los días", () => {
+    conIdioma(<InsigniaDeDenuncia resultado={{ dias: 2, superaArt46: false }} />);
+    const el = screen.getByText("2 d del hecho a la denuncia");
     expect(el.className).toContain("text-slate-500");
     expect(el.getAttribute("title")).toContain("art. 46");
   });
 
-  it("fuera de término: rojo y con los días", () => {
-    conIdioma(<InsigniaDeDenuncia resultado={{ enTermino: false, dias: 9 }} />);
-    expect(screen.getByText("Fuera de término (9 d)").className).toContain("text-red-600");
+  it("al superarlo: ámbar, con los días y para revisar", () => {
+    conIdioma(<InsigniaDeDenuncia resultado={{ dias: 9, superaArt46: true }} />);
+    const el = screen.getByText("9 d del hecho a la denuncia · revisar");
+    expect(el.className).toContain("text-amber-600");
+    expect(el.getAttribute("title")).toContain("no una decisión");
+  });
+
+  it("nunca es una condena: ni rojo, ni «término», ni «Late»", () => {
+    for (const resultado of [
+      { dias: 2, superaArt46: false },
+      { dias: 9, superaArt46: true },
+    ]) {
+      for (const locale of ["es-AR", "en-US"] as const) {
+        const { container, unmount } = conIdioma(<InsigniaDeDenuncia resultado={resultado} />, locale);
+        const el = container.firstElementChild as HTMLElement;
+        expect(el.className).not.toContain("text-red-600");
+        expect(el.textContent).not.toMatch(/término|Late/);
+        expect(el.getAttribute("title")).not.toMatch(/término|Late/);
+        unmount();
+      }
+    }
   });
 
   it("en inglés", () => {
-    conIdioma(<InsigniaDeDenuncia resultado={{ enTermino: false, dias: 9 }} />, "en-US");
-    expect(screen.getByText("Late (9 d)")).toBeInTheDocument();
+    conIdioma(<InsigniaDeDenuncia resultado={{ dias: 9, superaArt46: true }} />, "en-US");
+    expect(screen.getByText("9 d from loss to report · review")).toBeInTheDocument();
   });
 });
 

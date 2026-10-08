@@ -12,6 +12,8 @@
  * change retroactively because we edited a price here.
  */
 
+import { entero } from "@/lib/entero";
+
 export const PLANS = ["piloto", "operativo", "profesional", "corporativo", "enterprise"] as const;
 
 export type Plan = (typeof PLANS)[number];
@@ -19,6 +21,9 @@ export type Plan = (typeof PLANS)[number];
 export const BILLING_STATUSES = ["trial", "active", "suspended", "churned"] as const;
 
 export type BillingStatus = (typeof BILLING_STATUSES)[number];
+
+/** Un inquilino en estas condiciones no recibe ni manda mensajes, ni invita a nadie: su servicio está cortado. */
+export const SIN_SERVICIO: ReadonlySet<string> = new Set<BillingStatus>(["suspended", "churned"]);
 
 export interface PlanTerms {
   /** Fixed monthly fee in USD. */
@@ -151,4 +156,62 @@ export function computeMargin(
     margin_usd: toCents(revenue - cost),
     margin_pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : null,
   };
+}
+
+/**
+ * Tokens por día que cada plan puede gastar en IA, sumando a todo el inquilino.
+ * El piloto se puede bajar o subir con AI_PILOTO_DAILY_TOKEN_CAP.
+ */
+export const TOPE_DIARIO_TOKENS: Record<Plan, number> = {
+  piloto: 500_000,
+  operativo: 5_000_000,
+  profesional: 20_000_000,
+  corporativo: 50_000_000,
+  enterprise: 50_000_000,
+};
+
+/** Tokens del p95 por llamada (el promedio medido es 11.771): con el p95 el tope no se pasa. */
+export const TOKENS_P95_POR_LLAMADA = 12_730;
+
+/** Un plan que no está en el catálogo cae al tope más chico, el del piloto. */
+export function topeDiarioDelPlan(plan: string): number {
+  if (isPlan(plan) && plan !== "piloto") return TOPE_DIARIO_TOKENS[plan];
+  const { piloto } = TOPE_DIARIO_TOKENS;
+  return entero("AI_PILOTO_DAILY_TOKEN_CAP", piloto, 1, Number.MAX_SAFE_INTEGER);
+}
+
+/** Cuántas llamadas al modelo caben en un tope diario de tokens (39 para el piloto). */
+export function llamadasDiariasDePrueba(tope: number): number {
+  return Number.isFinite(tope) && tope > 0 ? Math.floor(tope / TOKENS_P95_POR_LLAMADA) : 0;
+}
+
+/** Días que dura la prueba de un espacio que se dio de alta solo. */
+export function diasDePrueba(): number {
+  return entero("ALTA_PRUEBA_DIAS", 30, 1, 90);
+}
+
+/** Las columnas del inquilino que deciden si está en prueba (`autoalta` existe desde la 0048). */
+export interface InquilinoEnPrueba {
+  billing_status?: string | null;
+  trial_ends_at?: string | Date | null;
+  autoalta?: boolean | null;
+}
+
+/**
+ * Prueba sin plan comercial. 'piloto' y 'trial' son los valores por omisión de
+ * `tenants`, así que sólo `autoalta` distingue a un alta sola de un inquilino de
+ * siempre: sin la columna llega `undefined` y esto da false.
+ */
+export function enPrueba(t: InquilinoEnPrueba): boolean {
+  return t.autoalta === true && t.billing_status === "trial";
+}
+
+/**
+ * La fecha de fin ya pasó. No mira `autoalta`: quien la use para cortar algo la
+ * combina con `enPrueba`. Una fecha ilegible cuenta como vencida.
+ */
+export function pruebaVencida(t: InquilinoEnPrueba, ahora: Date): boolean {
+  if (t.billing_status !== "trial" || t.trial_ends_at == null) return false;
+  const fin = new Date(t.trial_ends_at).getTime();
+  return Number.isNaN(fin) || fin <= ahora.getTime();
 }

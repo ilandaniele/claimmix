@@ -98,6 +98,20 @@ describe("reabrirSiEraNoRelevante", () => {
     );
   });
 
+  it("el evento lleva old_status y new_status, que es lo que lee el trayecto", async () => {
+    elCasoEsta("no_relevante");
+
+    await reabrirSiEraNoRelevante(CASE, TENANT);
+
+    const entrada = mockAudit.mock.calls.find(
+      (c) => (c[0] as { event_type?: string })?.event_type === "claim.case_reopened"
+    );
+    expect((entrada![0] as { payload: Record<string, unknown> }).payload).toMatchObject({
+      old_status: "no_relevante",
+      new_status: "recibido",
+    });
+  });
+
   it("un caso en cualquier OTRO estado no se toca", async () => {
     /*
      * El control. Sin él, una función que reabriera siempre pasaría los dos

@@ -27,10 +27,17 @@ import {
   sql,
   type SQL,
 } from "drizzle-orm";
-import { estadosAConsultar } from "@/core/case/filtro-de-estado";
+import {
+  CLAVES_DE_ESTADO,
+  contarPorOpcion,
+  ESTADOS_DE_LA_OPCION,
+  estadosAConsultar,
+  type ClaveDeEstado,
+} from "@/core/case/filtro-de-estado";
 import { ESTADOS_CERRADOS, ESTADOS_ESCALADO, ESTADOS_ESPERANDO_AL_DENUNCIANTE } from "@/core/case/fsm";
 import { limitesDelFiltro } from "@/core/case/plazos";
 import { RANGOS } from "@/core/case/puntaje-complejidad";
+import { TARJETAS_POR_COLUMNA } from "@/core/case/tablero";
 import { medianocheHaceDias } from "@/core/fecha/dia-argentino";
 import { escapeLike, ilikeAny } from "@/lib/db/helpers";
 import {
@@ -41,7 +48,7 @@ import {
 } from "@/data/scope";
 import { cases } from "@/lib/db/schema";
 import type { CaseRow as CasesTableRow } from "@/lib/db/types";
-import type { CaseQuery, Periodo, SortColumn } from "@/lib/schemas/cases";
+import { SeveritySchema, type CaseQuery, type Periodo, type SortColumn } from "@/lib/schemas/cases";
 import { errorCode } from "@/lib/observability/error-code";
 
 /**
@@ -55,6 +62,10 @@ export type CaseRow = CasesTableRow & {
   fecha_siniestro: string | null;
   assigned_name: string | null;
   replied_at: string | null;
+  // Sólo en la vista de descartes (`is_claim=false`), junto con `not_relevant_reason`:
+  // en el resto el listado no los pide.
+  asunto?: string | null;
+  remitente?: string | null;
 };
 
 export interface CaseListResult {
@@ -75,6 +86,16 @@ export interface CaseListResult {
  */
 const vencimientoVigente = sql<string | null>`case when ${cases.status} not in ${[...ESTADOS_CERRADOS]} then ${cases.vence_en} end`;
 
+/**
+ * El caso de afuera en las subconsultas del select, calificado. En un select de
+ * una sola tabla drizzle imprime `${cases.id}` pelado, y adentro de una
+ * subconsulta sobre `extracted_fields`, `outbound_messages` o `claim_messages`
+ * un `"id"` o un `"tenant_id"` pelado se lee como el de la propia subconsulta:
+ * no empareja con nada y vuelve nulo, y el plan deja de correlacionar por fila.
+ */
+const CASO_ID = sql.raw('"cases"."id"');
+const CASO_TENANT = sql.raw('"cases"."tenant_id"');
+
 /** Whitelisted sort columns (SortColumnSchema prevents arbitrary input). */
 const SORT_COLUMNS = {
   created_at: cases.created_at,
@@ -83,6 +104,17 @@ const SORT_COLUMNS = {
   puntaje_complejidad: cases.puntaje_complejidad,
   vence_en: vencimientoVigente,
 } as const satisfies Record<SortColumn, unknown>;
+
+/**
+ * La gravedad como número para ordenar: `low` es 1 y `critical` 4, en el orden
+ * del esquema, así que descendente deja lo crítico primero. Sin severidad da
+ * nulo y `nulls last` lo manda al final. Un `case` y no una columna: es el
+ * único lugar que ordena por esto y no vale un índice.
+ */
+const rangoDeSeveridad = sql`case ${cases.severity} ${sql.join(
+  SeveritySchema.options.map((s, i) => sql`when ${s} then ${i + 1}::int`),
+  sql` `
+)} end`;
 
 /**
  * Las dos columnas que están vacías en la mayoría de los casos —los anteriores
@@ -283,13 +315,19 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
   const { page, per_page, sort, order } = query;
   const sortColumn = SORT_COLUMNS[sort];
   // En «Para responder» va primero el que espera hace más tiempo. El índice
-  // parcial de la 0031 sirve este orden recorrido al revés. En «Mi cola» el
-  // más viejo también va primero: es el que lleva más tiempo sin que nadie lo
-  // mire.
+  // parcial de la 0031 sirve este orden recorrido al revés. En «Mi cola» va
+  // primero lo vencido, después lo más grave, y a igual gravedad el más viejo:
+  // es el que lleva más tiempo sin que nadie lo mire. Los dos terminan en `id`
+  // porque con muchos casos empatados dos páginas seguidas repetían o saltaban filas.
   const orden: SQL[] = query.para_responder
-    ? [asc(cases.para_responder_desde)]
+    ? [asc(cases.para_responder_desde), asc(cases.id)]
     : query.cola === "mia"
-      ? [asc(cases.updated_at)]
+      ? [
+          sql`(${vencimientoVigente} < ${ahora.toISOString()}::timestamptz) desc nulls last`,
+          sql`${rangoDeSeveridad} desc nulls last`,
+          asc(cases.updated_at),
+          asc(cases.id),
+        ]
       : ORDEN_CON_NULOS_AL_FINAL.has(sort)
         ? // Muchos casos comparten puntaje o plazo: sin desempate, dos páginas seguidas pueden repetir o saltear filas.
           [sql`${sortColumn} ${order === "asc" ? sql`asc` : sql`desc`} nulls last`, asc(cases.id)]
@@ -301,14 +339,14 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
       // Fallback inline: a second round-trip fired on nearly every render.
       policy_number: sql<string | null>`coalesce(${cases.policy_number}, (
           select ef.field_value from extracted_fields ef
-           where ef.case_id = ${cases.id}
-             and ef.tenant_id = ${cases.tenant_id}
+           where ef.case_id = ${CASO_ID}
+             and ef.tenant_id = ${CASO_TENANT}
              and ef.field_key = 'policy_number'
         ))`,
       policyholder_name: sql<string | null>`coalesce(${cases.policyholder_name}, (
           select ef.field_value from extracted_fields ef
-           where ef.case_id = ${cases.id}
-             and ef.tenant_id = ${cases.tenant_id}
+           where ef.case_id = ${CASO_ID}
+             and ef.tenant_id = ${CASO_TENANT}
              and ef.field_key = 'full_name'
         ))`,
       // No hay columna `cases.incident_date` con la que hacer coalesce — el
@@ -317,8 +355,8 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
       // extractor, y `canonicalFieldKey` (claim-fields.ts) lo mapea a esta.
       fecha_siniestro: sql<string | null>`(
           select ef.field_value from extracted_fields ef
-           where ef.case_id = ${cases.id}
-             and ef.tenant_id = ${cases.tenant_id}
+           where ef.case_id = ${CASO_ID}
+             and ef.tenant_id = ${CASO_TENANT}
              and ef.field_key = 'accident_date'
         )`,
       claim_type: cases.claim_type,
@@ -344,13 +382,13 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
       mensaje_tardio_resumen: sql<string | null>`case when ${cases.para_responder_desde} is not null then ${cases.mensaje_tardio_resumen} end`,
       assigned_name: sql<string | null>`(select u.full_name from users u where u.id = ${cases.assigned_to})`,
       /*
-       * Seis columnas que este listado devolvía y nadie leía.
+       * Cinco columnas que este listado devolvía y nadie leía.
        *
-       * `email_message_id`, `email_thread_id`, `not_relevant_reason`,
-       * `core_external_id`, `core_error_message` y `core_sent_at` salían en
-       * cada fila de cada página. Los dos únicos consumidores del listado —la
-       * bandeja y `/api/cases`— no tocan ninguna: se usan en el detalle de un
-       * caso y en el worker, que las consultan por su cuenta.
+       * `email_message_id`, `email_thread_id`, `core_external_id`,
+       * `core_error_message` y `core_sent_at` salían en cada fila de cada
+       * página. Los dos únicos consumidores del listado —la bandeja y
+       * `/api/cases`— no tocan ninguna: se usan en el detalle de un caso y en
+       * el worker, que las consultan por su cuenta.
        *
        * No era una fuga, y tampoco es sólo peso. `core_error_message` guarda
        * lo que devolvió el sistema del asegurador cuando falló un envío: texto
@@ -359,7 +397,39 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
        *
        * Si alguna vuelve a hacer falta acá, se agrega — pero que sea porque
        * alguien la va a leer.
+       *
+       * `not_relevant_reason` era la sexta y volvió, pero sólo para la vista de
+       * descartes (`is_claim=false`), que es donde la pantalla la lee. Con ella
+       * van el asunto y el remitente del primer mensaje que entró, para que
+       * quien revisa un descarte vea qué era sin abrirlo. Nunca el cuerpo: es
+       * lo que puede traer el DNI o el teléfono de la persona. Las dos
+       * subconsultas se evalúan después del LIMIT, sólo para las filas de la
+       * página, y el resto de las vistas no cambia ni una columna.
+       *
+       * El caso de afuera va calificado (`CASO_ID`), como en todas las
+       * subconsultas de esta lista.
        */
+      ...(query.is_claim === false
+        ? {
+            not_relevant_reason: cases.not_relevant_reason,
+            asunto: sql<string | null>`(
+                select m.subject from claim_messages m
+                 where m.case_id = ${CASO_ID}
+                   and m.tenant_id = ${CASO_TENANT}
+                   and m.direction = 'inbound'
+                 order by m.received_at asc
+                 limit 1
+              )`,
+            remitente: sql<string | null>`(
+                select m.from_addr from claim_messages m
+                 where m.case_id = ${CASO_ID}
+                   and m.tenant_id = ${CASO_TENANT}
+                   and m.direction = 'inbound'
+                 order by m.received_at asc
+                 limit 1
+              )`,
+          }
+        : {}),
       // Whether the claimant has actually been written back to, on whichever
       // channel they used. Computed from the outbound ledger instead of a
       // column on `cases` so it cannot drift from what was really sent, and
@@ -368,8 +438,8 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
       replied_at: sql<string | null>`(
           select max(om.created_at)
             from outbound_messages om
-           where om.case_id = ${cases.id}
-             and om.tenant_id = ${cases.tenant_id}
+           where om.case_id = ${CASO_ID}
+             and om.tenant_id = ${CASO_TENANT}
              and om.status = 'sent'
         )`,
     })
@@ -387,6 +457,50 @@ export function consultaConteo(datos: ClienteDatos, query: CaseQuery, yo?: strin
     .select({ n: sql<number>`count(*)::int` })
     .from(cases)
     .where(buildCaseFilters(query, yo, ahora));
+}
+
+/**
+ * La consulta del tablero: una rama por columna, unidas con `union all`.
+ *
+ * Con la consulta de la lista, que trae las más nuevas de TODO, una columna con
+ * pocos casos recientes quedaba vacía aunque tuviera cientos, y su «0 de 43» se
+ * leía como un tablero roto. Acá cada columna pide lo suyo: `status in (su
+ * grupo) order by … limit 20`, sobre los mismos índices que la lista.
+ *
+ * Con un filtro de estado, cada rama se queda con la parte de su grupo que el
+ * filtro cubre y la que no cubre nada se saltea. Volver a expandir los estados
+ * con `estadosAConsultar` no saca a nadie de su columna: un estado que también
+ * es clave pertenece a su propia columna.
+ *
+ * drizzle pone cada lado entre paréntesis y conserva su ORDER BY y su LIMIT.
+ * Devuelve `undefined` si no queda ninguna rama: un filtro sólo por
+ * `no_relevante` o `error_core`, que el tablero no dibuja.
+ */
+export function consultaTablero(datos: ClienteDatos, query: CaseQuery, yo?: string, ahora: Date = new Date()) {
+  const pedidos = query.status?.length ? new Set(query.status.flatMap(estadosAConsultar)) : null;
+  const ramas = CLAVES_DE_ESTADO.flatMap((clave) => {
+    const estados = [...ESTADOS_DE_LA_OPCION[clave]].filter((s) => !pedidos || pedidos.has(s));
+    return estados.length > 0
+      ? [
+          consultaListado(
+            datos,
+            { ...query, status: estados as NonNullable<CaseQuery["status"]>, page: 1, per_page: TARJETAS_POR_COLUMNA },
+            yo,
+            ahora
+          ),
+        ]
+      : [];
+  });
+  const [primera, ...resto] = ramas;
+  if (!primera) return undefined;
+  let union = primera;
+  for (const rama of resto) union = union.unionAll(rama) as typeof primera;
+  return union;
+}
+
+/** Cuántos casos hay por estado bajo TODOS los filtros de la consulta: son los totales de las columnas. */
+export function consultaConteoPorEstado(datos: ClienteDatos, query: CaseQuery, yo?: string, ahora: Date = new Date()) {
+  return consultaPorEstado(datos, buildCaseFilters(query, yo, ahora));
 }
 
 /**
@@ -476,6 +590,54 @@ export async function listCases(
       per_page,
       pages: Math.ceil(total / per_page),
     },
+  };
+}
+
+/**
+ * La bandeja en tablero: las más nuevas de cada columna y el total real de cada una.
+ *
+ * Reemplaza a `listCases` cuando la vista es el tablero, no se suma: sigue
+ * siendo un solo viaje con dos sentencias, el conteo por estado y la unión de
+ * `consultaTablero`. La unión sale en el orden de sus ramas y cada rama ya viene
+ * ordenada, así que agrupar por columna no necesita reordenar nada.
+ *
+ * `page` y `per_page` de la consulta no cuentan: el tablero no pagina.
+ */
+export async function listarTablero(
+  ctx: TenantContext,
+  query: CaseQuery,
+  yo?: string
+): Promise<CaseListResult & { totales: Record<ClaveDeEstado, number> }> {
+  // El mismo instante para el conteo y las ramas, igual que en `listCases`.
+  const ahora = new Date();
+
+  let conteo: Array<{ status: string; n: number }>;
+  let filas: Record<string, unknown>[];
+  try {
+    const [porEstado, tarjetas] = await enTenantVarias<
+      [Array<{ status: string; n: number }>, Record<string, unknown>[] | undefined]
+    >(ctx, (db) => {
+      const tablero = consultaTablero(db, query, yo, ahora);
+      const conteoPorEstado = consultaConteoPorEstado(db, query, yo, ahora);
+      return tablero ? [conteoPorEstado, tablero] : [conteoPorEstado];
+    });
+    conteo = porEstado;
+    filas = tarjetas ?? [];
+  } catch (err) {
+    throw new Error(`[listarTablero] query error: ${errorCode(err)}`);
+  }
+
+  const totales = contarPorOpcion(conteo.map(({ status, n }) => ({ status, count: n })));
+
+  return {
+    data: filas as unknown as CaseRow[],
+    meta: {
+      total: Object.values(totales).reduce((suma, n) => suma + n, 0),
+      page: 1,
+      per_page: TARJETAS_POR_COLUMNA,
+      pages: 1,
+    },
+    totales,
   };
 }
 

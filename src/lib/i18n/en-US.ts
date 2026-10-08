@@ -68,9 +68,9 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "status.info_faltante": "Missing info",
   "status.confirmacion_pendiente": "Pending confirmation",
   "status.requiere_especialista": "Requires specialist",
-  "status.listo_para_core": "Ready for Core",
-  "status.enviado_a_core": "Sent to Core",
-  "status.error_core": "Core error",
+  "status.listo_para_core": "Ready to hand off",
+  "status.enviado_a_core": "Sent to core system",
+  "status.error_core": "Hand-off failed",
   "status.no_relevante": "Not relevant",
   "status.en_liquidacion": "In settlement",
   "status.pagado": "Paid",
@@ -116,6 +116,12 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "table.col.assignedTo": "Assigned to",
   "table.col.vencimiento": "Due",
   "table.col.complejidad": "Complexity",
+  "table.col.motivoDescarte": "Dismissal reason",
+  "table.col.asuntoRemitente": "Subject / sender",
+  // Fallback when the dismissed case carries no reason of its own from the model.
+  "noRelevante.motivoPorDefecto": "The AI determined this is not a claim",
+  "noRelevante.marcarRelevante": "Mark as relevant",
+  "noRelevante.marcado": "Marked as relevant: sent back to the agent",
 
   // ── Bandeja actions ────────────────────────────────────────────────────────
   "bandeja.simulate": "Simulate new email",
@@ -186,7 +192,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "tardio.tipo.consulta_estado": "Asks for an update",
   "tardio.tipo.otro": "Something else",
   "tardio.tipo.sin_clasificar": "Not classified",
-  "case.detail.exportToCore": "Export to Core",
+  "case.detail.exportToCore": "Send to core system",
   "case.detail.markComplete": "Mark complete",
   "case.detail.resolveEscalated": "Resolve escalated → Ready",
   "case.detail.processing": "Processing...",
@@ -271,13 +277,17 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "close.error": "Error closing the claim. Please try again.",
   "close.errorFsm": "Invalid state transition.",
 
-  // ── Ready for Core: confirmed by a person (P6) ──────────────────────────────
+  // ── Ready to hand off: confirmed by a person (P6) ──────────────────────────────
   "case.detail.confirmarListo": "Confirm and mark ready",
-  "case.detail.confirmado": "Confirmed as ready for Core",
+  "case.detail.confirmado": "Confirmed as ready to hand off",
   "case.detail.confirmadoPor": "Confirmed by {quien}",
   "case.detail.confirmadoAnonimo": "Confirmed by the team",
-  "case.detail.revisadoListo": "Reviewed: move to Ready for Core",
-  "audit.case.ready_confirmed": "A team member confirmed it as ready for Core",
+  "case.detail.revisadoListo": "Reviewed: mark ready to hand off",
+  "audit.case.ready_confirmed": "A team member confirmed it as ready to hand off",
+  // Marking ready with data or documents still pending: {lista} are their names.
+  "listoConFaltantes.title": "Mark ready with items missing?",
+  "listoConFaltantes.description": "Still missing: {lista}. The agent stops asking for them.",
+  "listoConFaltantes.confirm": "Mark ready anyway",
 
   // ── Escalate dialog ────────────────────────────────────────────────────────
   "escalate.title": "Escalate claim",
@@ -313,6 +323,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "reenvio.motivo.ventana_cerrada": "More than 24 h since their last WhatsApp message",
   "reenvio.motivo.plantilla_sin_aprobar": "The template to write after 24 h is not approved by Meta yet",
   "reenvio.motivo.plantilla_sin_respuesta": "Meta did not answer whether the template is approved: try again shortly",
+  "reenvio.motivo.tope_de_plantillas": "No more WhatsApp templates can be sent from this workspace for now",
   "reenvio.motivo.nada_pendiente": "Nothing left to ask for",
   "reenvio.motivo.reciente": "Asked less than 10 minutes ago",
   "reenvio.motivo.cierre_no_es_abandono": "Closed by a team member: it cannot be reopened here",
@@ -371,7 +382,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "audit.claim.late_message_alerted": "Specialist notified of the new message",
   "audit.claim.workshop_estimate_read": "Workshop estimate read",
   "audit.policy.conditions_uploaded": "Policy conditions uploaded",
-  "audit.claim.case_reopened": "Reopened by a new message",
+  "audit.claim.case_reopened": "Reopened",
   "audit.claim.closed_abandoned": "Closed: the claimant did not reply",
   "audit.claim.field_confirmed": "Value confirmed",
   "audit.claim.field_rejected": "Value discarded",
@@ -400,6 +411,9 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "audit.doc.received": "Document received",
   "audit.ai.extraction_started": "Analysis started",
   "audit.whatsapp.received": "WhatsApp message received",
+  // Who did each history event: the name when there is one, otherwise this.
+  "audit.actor.sistema": "Automatic",
+  "audit.actor.persona": "A team member",
 
   // ── Supplemental pages ─────────────────────────────────────────────────────
   "analisis.title": "Analysis",
@@ -522,9 +536,10 @@ export const enUS: Record<ClaveDelCliente, string> = {
   // B10, B11: vencimiento, denuncia en término y plan de trabajo en la ficha.
   "plazo.art46": "Loss report (art. 46)",
   "plazo.art56": "Insurer pronouncement (art. 56)",
-  "denuncia.enTermino": "On time ({n} d)",
-  "denuncia.fueraDeTermino": "Late ({n} d)",
-  "denuncia.ayuda": "Days between the loss and the report. Law 17,418 allows 3 days (art. 46).",
+  "denuncia.dias": "{n} d from loss to report",
+  "denuncia.revisar": "{n} d from loss to report · review",
+  "denuncia.ayuda":
+    "A signal to review, not a decision. Counted from the loss date the agent read to when the case reached ClaimMix. Art. 46 of Law 17,418 allows 3 days from when the insured learned of the loss, with exceptions; a person on the team assesses it. The insured is not told.",
   "planDeTrabajo.proximos": "Next steps",
   "planDeTrabajo.hechos": "Done",
   "planDeTrabajo.automatico": "automatic",
@@ -570,6 +585,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "case.detail.severity": "Severity",
   "case.detail.noConfirmations": "No pending confirmations.",
   "case.detail.noAttachments": "No attachments.",
+  "case.detail.adjuntosEsperados": "Expected for this claim type:",
+  "case.detail.adjuntosSinEsperados": "This claim type requires no documents.",
   "case.detail.confirmField": "Confirm",
   "case.detail.rejectField": "Reject",
   "case.detail.fieldKey": "Field",
@@ -598,6 +615,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "case.detail.motivo.entregadoPorFuera": "Delivered to the insurer outside the app",
   "case.detail.motivo.topePorRemitente": "Not analysed: the sender exceeded their quota",
   "case.detail.motivo.topePorFormulario": "Not analysed: the form exceeded its daily quota",
+  "case.detail.motivo.clasificador": "Dismissed by the AI classifier",
+  "case.detail.motivo.marcadoRelevante": "Marked as relevant by a person",
 
   // ── Why an attachment was not stored ───────────────────────────────────────
   // These lead with the CAUSE because they are read in two places: the amber
@@ -763,7 +782,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "usuarios.col.rol": "Role",
   "usuarios.enviandoInvitacion": "Inviting...",
   "usuarios.enviarInvitacion": "Invite",
-  "usuarios.error.crear": "Could not create the user. Please try again.",
+  "usuarios.error.crear": "Could not send the invitation. Please try again.",
   "usuarios.error.red": "Network error. Please try again.",
   "usuarios.error.rol": "Could not update the role.",
   "usuarios.error.sesiones": "Could not close the sessions.",
@@ -780,7 +799,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "usuarios.rol.specialist": "Specialist",
   "usuarios.rol.viewer": "Viewer",
   "usuarios.rol.viewerSoloLectura": "Viewer (read-only)",
-  "usuarios.toast.creado": "User created. An invitation email will be sent.",
+  "usuarios.toast.creado": "Invitation sent. The person appears in the list once they accept it.",
   "usuarios.toast.rolActualizado": "Role updated.",
   "usuarios.toast.sesionCerrada": "1 session closed.",
   "usuarios.toast.sesionesCerradas": "{n} sessions closed.",
@@ -1117,6 +1136,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   // ── Floating assistant — the same assistant, in a panel over any page ───
   "asistente.flotante.abrir": "Ask the assistant",
   "asistente.flotante.cerrar": "Close assistant",
+  "asistente.flotante.minimizar": "Hide the assistant button",
+  "asistente.flotante.mostrar": "Show the assistant",
 
   // ── Help — how the interface works, same text in the demo and the app ──
   "ayuda.abrir": "Help: how it works",

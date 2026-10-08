@@ -10,6 +10,13 @@
 import { CLAVES_DE_ESTADO, ESTADOS_DE_LA_OPCION, type ClaveDeEstado } from "./filtro-de-estado";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
+/**
+ * Cuántas tarjetas trae cada columna. El tablero no pagina: pide las más nuevas
+ * de cada una y el «Ver todos» lleva al resto en la lista. Es la perilla de la
+ * Carga: si la consulta del tablero se acerca al tope, se baja a 10.
+ */
+export const TARJETAS_POR_COLUMNA = 20;
+
 export function agruparEnColumnas<T extends { status: string }>(
   filas: readonly T[]
 ): { columnas: Record<ClaveDeEstado, T[]>; fuera: number } {

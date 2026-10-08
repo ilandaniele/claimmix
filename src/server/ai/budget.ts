@@ -9,6 +9,10 @@
  *   - Sin usuario (mail, WhatsApp, formulario): 60 % del inquilino por omisión
  *     (AI_ANONIMO_DAILY_TOKEN_CAP env)
  *   - Monthly project cap: $200 (MONTHLY_BUDGET_USD env, default 200)
+ *   - Pruebas del alta automática: ver `checkBudget`. Un cupo diario de
+ *     llamadas que se reserva antes de llamar, un techo mensual por prueba
+ *     (AI_PRUEBA_MONTHLY_USD_POR_INQUILINO, 1) y un pozo compartido por todas
+ *     (AI_PRUEBAS_MONTHLY_BUDGET_USD, 30).
  *
  * AC10 (budget guard): Returns { exceeded: true, reason } when any cap is hit.
  *
@@ -21,8 +25,21 @@
 
 import "server-only";
 import { and, eq, gte, isNull, ne, sql } from "drizzle-orm";
+import { QueryBuilder } from "drizzle-orm/pg-core";
+import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { resolveDefaultTenantId } from "@/lib/auth/provision";
+import {
+  enPrueba,
+  llamadasDiariasDePrueba,
+  pruebaVencida,
+  topeDiarioDelPlan,
+} from "@/lib/billing/plans";
 import { db, tables } from "@/lib/db";
+import { entero } from "@/lib/entero";
 import { logger } from "@/lib/observability/logger";
+import { liberarCupo, rateLimit, resolveProvider } from "@/lib/rate-limit";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { inquilinoDeLaPlataforma } from "@/server/whatsapp/numeros";
 import {
   enTenant,
   enTenantVarias,
@@ -103,13 +120,31 @@ export function computeCostUsd(
  */
 
 /** Qué tope cortó. `reason` es el texto para una persona; esto, para decidir qué hacer. */
-export type MotivoDelTope = "mensual" | "inquilino" | "anonimo" | "persona";
+export type MotivoDelTope =
+  | "mensual"
+  | "inquilino"
+  | "anonimo"
+  | "persona"
+  | "prueba_vencida"
+  | "suspendido"
+  | "prueba_diaria"
+  | "prueba_mensual"
+  | "pozo_de_pruebas"
+  | "sin_dato";
+
+/** Lo reservado del cupo diario de una prueba: `soltarReserva` lo devuelve si al final no se llama al modelo. */
+export interface ReservaDePrueba {
+  clave: string;
+  ventanas: number[];
+}
 
 export interface BudgetCheckResult {
   /** True if any cap (monthly or daily) has been exceeded. */
   exceeded: boolean;
   reason?: string;
   motivo?: MotivoDelTope;
+  /** Sólo una prueba que pasó: lo que quedó reservado de su cupo diario. */
+  reserva?: ReservaDePrueba;
 }
 
 /**
@@ -224,15 +259,32 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
  *   3. Daily token cap of the calls with no user (only when userId is absent)
  *   4. Per-user daily token cap (if userId provided)
  *
+ *
+ * Un espacio de alta automática (`autoalta`) en prueba tiene además, en este
+ * orden: la prueba vencida o el espacio suspendido, el techo mensual de la
+ * prueba, el pozo de todas las pruebas y, al final, la reserva del cupo diario
+ * de llamadas. Los demás inquilinos no pasan por nada de eso.
+ *
+ * Un error del contador deja pasar a la plataforma —el inquilino por omisión y
+ * la demo— y frena a cualquier otro inquilino con motivo `sin_dato`.
+ *
  * @param tenantId - Tenant whose budget to check.
  * @param userId   - Optional user ID for per-user cap.
+ * @param opciones - `llamadas`: cuántas llamadas al modelo va a hacer quien
+ *                   pregunta. Sólo las pruebas las reservan. Con 0 no se
+ *                   reserva nada: es para mirar el estado (un indicador) sin
+ *                   gastar el cupo, y la prueba se frena por los demás topes.
+ *                   Quien reserva y después no llama al modelo devuelve la
+ *                   `reserva` con `soltarReserva`.
  */
 export async function checkBudget(
   tenantId: string,
-  userId?: string | null
+  userId?: string | null,
+  opciones: { llamadas?: number } = {}
 ): Promise<BudgetCheckResult> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
+  const llamadas = Math.max(0, Math.trunc(opciones.llamadas ?? 1));
   const monthlyCapUsd = readCap(process.env.MONTHLY_BUDGET_USD, 200);
   const tenantDailyTokenCap = readCap(process.env.AI_TENANT_DAILY_TOKEN_CAP, 5_000_000);
   /*
@@ -319,13 +371,34 @@ export async function checkBudget(
    * miran. Es el caso terminal, y a cambio el camino normal —el de siempre—
    * pasa de tres latencias a una.
    */
+  const ahora = new Date();
+  const mesDeIa = `${diaArgentino(ahora).slice(0, 7)}-01`;
   const [mensual, delDia] = await Promise.all([
     sumaMensualDelProyecto(monthStart, demoTenantId),
-    sumasDelDia(tenantCtx, dayStart, userId),
+    sumasDelDia(tenantCtx, dayStart, userId, mesDeIa),
   ]);
 
-  // Falla abierta: un error del contador no puede frenar una denuncia.
-  if (!mensual.ok || !delDia.ok) return { exceeded: false };
+  if (!mensual.ok || !delDia.ok) {
+    // Falla abierta sólo para la plataforma: un error del contador no puede
+    // frenar su intake. Un inquilino cualquiera puede ser una prueba, y de eso
+    // no hay forma de enterarse si el contador no contesta.
+    if (esDeLaPlataforma(tenantId)) return { exceeded: false };
+    return {
+      exceeded: true,
+      motivo: "sin_dato",
+      reason: "No se pudo verificar el presupuesto de IA.",
+    };
+  }
+
+  // Sólo un espacio de alta automática tiene reglas de prueba.
+  const prueba = delDia.filaDelInquilino?.autoalta === true ? delDia.filaDelInquilino : null;
+
+  if (prueba && (prueba.billing_status === "suspended" || prueba.billing_status === "churned")) {
+    return { exceeded: true, motivo: "suspendido", reason: "El espacio está suspendido." };
+  }
+  if (prueba && pruebaVencida(prueba, ahora)) {
+    return { exceeded: true, motivo: "prueba_vencida", reason: "La prueba del espacio terminó." };
+  }
 
   const monthlyCostUsd = mensual.total;
   if (monthlyCostUsd >= monthlyCapUsd) {
@@ -360,30 +433,186 @@ export async function checkBudget(
     };
   }
 
+  if (prueba && enPrueba(prueba)) return topesDeLaPrueba(tenantId, prueba, delDia, mensual, llamadas);
+
   return { exceeded: false };
 }
 
 /**
- * Lo gastado en el mes por el PROYECTO entero, sin la demo.
+ * Lo que sólo mira una prueba, con las cuentas del día y del mes ya leídas.
+ *
+ * La reserva va última a propósito: reservar es gastar cupo, y si otro tope iba
+ * a frenar la llamada igual, el cupo del día se quemaría sin haber llamado a
+ * nada. Cada motivo es un tope distinto, así que el aviso al equipo dice cuál.
+ */
+async function topesDeLaPrueba(
+  tenantId: string,
+  prueba: FilaDelInquilino,
+  delDia: { pruebaUsd: number },
+  mensual: { pruebas: number },
+  llamadas: number
+): Promise<BudgetCheckResult> {
+  const techoUsd = entero("AI_PRUEBA_MONTHLY_USD_POR_INQUILINO", 1, 0, 100_000);
+  if (delDia.pruebaUsd >= techoUsd) {
+    return {
+      exceeded: true,
+      motivo: "prueba_mensual",
+      reason: `Presupuesto mensual de IA de la prueba agotado ($${delDia.pruebaUsd.toFixed(2)} / $${techoUsd}).`,
+    };
+  }
+
+  // Sin cifras: el pozo es la suma de todas las pruebas y `reason` llega a quien preguntó.
+  if (mensual.pruebas >= entero("AI_PRUEBAS_MONTHLY_BUDGET_USD", 30, 0, 1_000_000)) {
+    return {
+      exceeded: true,
+      motivo: "pozo_de_pruebas",
+      reason: "Presupuesto mensual compartido de las pruebas agotado.",
+    };
+  }
+
+  // Mirar no es llamar: sin llamadas a hacer no hay nada que reservar.
+  if (llamadas === 0) return { exceeded: false };
+  return reservarParaLaPrueba(tenantId, prueba.plan, llamadas);
+}
+
+/** La reserva del cupo diario de una prueba, con el resultado que `checkBudget` devuelve. */
+async function reservarParaLaPrueba(
+  tenantId: string,
+  plan: string,
+  llamadas: number
+): Promise<BudgetCheckResult> {
+  const limite = llamadasDiariasDePrueba(topeDiarioDelPlan(plan));
+  const reserva = await reservarLlamadas(tenantId, limite, llamadas);
+  if (reserva === "sin_dato") {
+    return {
+      exceeded: true,
+      motivo: "sin_dato",
+      reason: "No se pudo verificar el presupuesto de IA.",
+    };
+  }
+  if (reserva === "agotado") {
+    return {
+      exceeded: true,
+      motivo: "prueba_diaria",
+      reason: `Cupo diario de llamadas de la prueba agotado (${limite}).`,
+    };
+  }
+  return { exceeded: false, reserva };
+}
+
+/**
+ * Reserva las llamadas de una prueba sin releer los topes: sólo si el inquilino
+ * es una prueba, y con una única lectura, la de su fila. El worker ya leyó el
+ * presupuesto con `checkBudget` antes de extraer; volver a leerlo acá sumaría
+ * las consultas del día a cada mensaje de todos los inquilinos, y haría que un
+ * error del contador cortara a quienes no tienen cupo que reservar.
+ *
+ * Si la fila no se puede leer deja pasar: sin ella no se sabe si es una prueba,
+ * y la llamada al modelo depende de la misma base.
+ */
+export async function reservarSiEsPrueba(tenantId: string, llamadas: number): Promise<BudgetCheckResult> {
+  let fila: FilaDelInquilino | undefined;
+  try {
+    [fila] = await enTenant({ tenantId }, (db) => consultaDelInquilino(db, tenantId));
+  } catch (e) {
+    logger.error({ detalle: (e as { code?: string })?.code }, "budget.fila_del_inquilino_error");
+    return { exceeded: false };
+  }
+  if (!fila || !enPrueba(fila)) return { exceeded: false };
+  return reservarParaLaPrueba(tenantId, fila.plan, llamadas);
+}
+
+const DIA_MS = 24 * 60 * 60_000;
+
+/**
+ * Reserva `llamadas` del cupo diario de la prueba, todas o ninguna.
+ *
+ * Cada llamada es un intento del limitador, y el limitador cuenta de forma
+ * atómica: 50 mensajes a la vez no reservan más que `limite`. Si no alcanza el
+ * cupo para todas, se devuelve lo contado —también el intento que Postgres
+ * contó y rechazó—, para que una reserva de cuatro que no entró no deje
+ * agotado un cupo del que se gastó menos.
+ *
+ * `fallaCerrada`: si el contador no contesta, el limitador responde "no" con
+ * `ventana` 0. Sólo Postgres puede fallar, y a un rechazo suyo de verdad le
+ * pone la ventana del día; en memoria el rechazo también trae 0, pero ahí no
+ * hay error posible.
+ */
+async function reservarLlamadas(
+  tenantId: string,
+  limite: number,
+  llamadas: number
+): Promise<ReservaDePrueba | "agotado" | "sin_dato"> {
+  const clave = claveDeCupo("ia:prueba", tenantId);
+  const cupo = { limit: limite, windowMs: DIA_MS, fallaCerrada: true };
+
+  const intentos = await Promise.all(Array.from({ length: llamadas }, () => rateLimit(clave, cupo)));
+  if (intentos.every((i) => i.allowed)) return { clave, ventanas: intentos.map((i) => i.ventana) };
+
+  await Promise.all(intentos.map((i) => liberarCupo(clave, DIA_MS, i.ventana)));
+  const fallo = resolveProvider() === "postgres" && intentos.some((i) => !i.allowed && i.ventana === 0);
+  return fallo ? "sin_dato" : "agotado";
+}
+
+/**
+ * Devuelve lo que `checkBudget` reservó cuando quien preguntó termina sin llamar
+ * al modelo (otro tope local lo frenó antes). Sin reserva no hace nada, y nunca
+ * lanza: se llama en caminos que ya están rechazando.
+ */
+export async function soltarReserva(reserva: ReservaDePrueba | undefined): Promise<void> {
+  if (!reserva) return;
+  try {
+    await Promise.all(reserva.ventanas.map((v) => liberarCupo(reserva.clave, DIA_MS, v)));
+  } catch (e) {
+    logger.warn({ detalle: (e as { code?: string })?.code }, "budget.reserva_no_devuelta");
+  }
+}
+
+/**
+ * Los inquilinos cuyo intake no puede frenar un error del contador: el de la
+ * plataforma (el del .env, que es el del ensayo y el del timbre) y el de la
+ * demo, que tiene su propio tope en `checkDemoBudget`.
+ */
+function esDeLaPlataforma(tenantId: string): boolean {
+  return [inquilinoDeLaPlataforma(), resolveDefaultTenantId(), getDemoTenantId()].includes(tenantId);
+}
+
+/**
+ * Lo gastado en el mes por el PROYECTO entero, sin la demo, y la parte que puso
+ * el alta automática (`pruebas`, para el pozo de las pruebas).
  *
  * Fuera de `enTenant` a propósito, y el `ne(tenant_id, demo)` lo delata:
  * descontar la demo sólo tiene sentido si la suma cruza inquilinos. Acotada por
  * RLS, esta consulta convertía el tope de US$200 en US$200 POR aseguradora —
  * con cuatro gastando 199 cada una, la tarjeta paga 796 y ninguna se pasa de su
  * propia cuenta.
+ *
+ * Qué inquilinos son de alta automática se resuelve en una subconsulta sobre
+ * `tenants`, no fila por fila de `ai_usage`: `to_jsonb` corre una vez por
+ * inquilino. Es `to_jsonb(tenants.*)` y no la columna porque antes de la 0048
+ * `autoalta` no existe y nombrarla tira 42703. El `QueryBuilder` arma la
+ * subconsulta sin pasar por `db`.
  */
 async function sumaMensualDelProyecto(
   desde: Date,
   demoTenantId: string | null
-): Promise<{ ok: boolean; total: number }> {
+): Promise<{ ok: boolean; total: number; pruebas: number }> {
   try {
+    const autoaltas = new QueryBuilder()
+      .select({ id: tables.tenants.id })
+      .from(tables.tenants)
+      .where(sql`(to_jsonb(${tables.tenants}.*) ->> 'autoalta')::boolean`)
+      .as("autoaltas");
+
     // sin-inquilino: el tope de gasto es del proyecto entero, así que la suma
     // tiene que cruzar inquilinos. Ver el bloque de arriba.
     const [fila] = await db
       .select({
         total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
+        pruebas: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}) filter (where ${autoaltas.id} is not null), 0)::float8`,
       })
       .from(tables.aiUsage)
+      .leftJoin(autoaltas, eq(autoaltas.id, tables.aiUsage.tenant_id))
       .where(
         demoTenantId
           ? and(
@@ -392,12 +621,20 @@ async function sumaMensualDelProyecto(
             )
           : gte(tables.aiUsage.created_at, desde.toISOString())
       );
-    return { ok: true, total: fila?.total ?? 0 };
+    return { ok: true, total: fila?.total ?? 0, pruebas: fila?.pruebas ?? 0 };
   } catch (e) {
     logger.error({ detalle: (e as { code?: string })?.code }, "budget.monthly_check_error");
-    return { ok: false, total: 0 };
+    return { ok: false, total: 0, pruebas: 0 };
   }
 }
+
+/** Lo que el lote del día lee de la fila del inquilino. */
+type FilaDelInquilino = {
+  plan: string;
+  billing_status: string;
+  trial_ends_at: string | null;
+  autoalta: boolean | null;
+};
 
 /**
  * Los tokens del día: los del inquilino y, en el mismo lote, los de la persona
@@ -406,19 +643,35 @@ async function sumaMensualDelProyecto(
  * Sólo se pide la segunda que se va a mirar: mandar una consulta cuyo
  * resultado no se usa es pagar por nada, y el camino sin persona lo usan los
  * crons, el worker y el webhook.
+ *
+ * Con ellas viajan la fila del inquilino y lo que gastó en el mes (`mes` es el
+ * primer día en hora argentina): lo que decide si es una prueba y cuánto le
+ * queda. Siguen siendo un solo viaje.
  */
 async function sumasDelDia(
   ctx: TenantContext,
   desde: Date,
-  userId?: string | null
-): Promise<{ ok: boolean; inquilino: number; anonimo: number; persona: number }> {
+  userId: string | null | undefined,
+  mes: string
+): Promise<{
+  ok: boolean;
+  inquilino: number;
+  anonimo: number;
+  persona: number;
+  filaDelInquilino: FilaDelInquilino | null;
+  pruebaUsd: number;
+}> {
   try {
-    const [[inquilino], [otra]] = await enTenantVarias<[
+    const [[inquilino], [otra], [fila], [delMes]] = await enTenantVarias<[
       Array<{ total: number }>,
       Array<{ total: number }>,
+      FilaDelInquilino[],
+      Array<{ usd: number }>,
     ]>(ctx, (db) => [
       consultaTokensDelDia(db, desde),
       consultaTokensDelDia(db, desde, userId || null),
+      consultaDelInquilino(db, ctx.tenantId),
+      consultaDelMesDeIa(db, mes),
     ]);
 
     const total = otra?.total ?? 0;
@@ -427,11 +680,45 @@ async function sumasDelDia(
       inquilino: inquilino?.total ?? 0,
       anonimo: userId ? 0 : total,
       persona: userId ? total : 0,
+      filaDelInquilino: fila ?? null,
+      pruebaUsd: delMes?.usd ?? 0,
     };
   } catch (e) {
     logger.error({ detalle: (e as { code?: string })?.code }, "budget.daily_check_error");
-    return { ok: false, inquilino: 0, anonimo: 0, persona: 0 };
+    return {
+      ok: false,
+      inquilino: 0,
+      anonimo: 0,
+      persona: 0,
+      filaDelInquilino: null,
+      pruebaUsd: 0,
+    };
   }
+}
+
+/**
+ * La fila del inquilino, con el `id` explícito: hasta la 0048 `tenants` no tiene
+ * RLS y sin el `where` devolvería a todos. `autoalta` va por `to_jsonb`, como en
+ * `sumaMensualDelProyecto`.
+ */
+function consultaDelInquilino(db: ClienteDatos, tenantId: string) {
+  return db
+    .select({
+      plan: tables.tenants.plan,
+      billing_status: tables.tenants.billing_status,
+      trial_ends_at: tables.tenants.trial_ends_at,
+      autoalta: sql<boolean | null>`(to_jsonb(${tables.tenants}.*) ->> 'autoalta')::boolean`,
+    })
+    .from(tables.tenants)
+    .where(eq(tables.tenants.id, tenantId));
+}
+
+/** Lo gastado este mes por el inquilino, del acumulador mensual (la RLS lo acota). */
+function consultaDelMesDeIa(db: ClienteDatos, mes: string) {
+  return db
+    .select({ usd: sql<number>`coalesce(sum(${tables.aiUsageMensual.cost_usd}), 0)::float8` })
+    .from(tables.aiUsageMensual)
+    .where(eq(tables.aiUsageMensual.mes, mes));
 }
 
 /**

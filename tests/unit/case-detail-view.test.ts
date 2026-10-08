@@ -524,6 +524,28 @@ describe("cargarDetalleDeCaso — el nombre de quien tiene el caso", () => {
   });
 });
 
+describe("cargarDetalleDeCaso — los faltantes vigentes", () => {
+  it("missing_docs sale sin repetidos y sin el dato que ya está presente", async () => {
+    const porTabla = new Map(TODO);
+    porTabla.set(missingDocs, [
+      { id: "md-1", doc_key: "dni", satisfied_at: null, declined_at: null },
+      { id: "md-2", doc_key: "dni_asegurado", satisfied_at: null, declined_at: null },
+      { id: "md-3", doc_key: "accident_location", satisfied_at: null, declined_at: null },
+      { id: "md-4", doc_key: "fotos_danos", satisfied_at: null, declined_at: null },
+    ]);
+    porTabla.set(extractedFields, [
+      { id: "ef-1", field_key: "accident_location", field_value: "Bahía Blanca", confidence: "0.80" },
+    ]);
+    espiar(porTabla);
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
+
+    expect(res!.missing_docs.map((d) => d.doc_key)).toEqual(["dni", "fotos_danos"]);
+    // Los campos extraídos siguen enteros: el filtro es sólo de los faltantes.
+    expect(res!.extracted_fields).toHaveLength(1);
+  });
+});
+
 describe("cargarDetalleDeCaso — el plan y la carga del equipo (B9, B11)", () => {
   const PASOS = [
     {
@@ -777,6 +799,36 @@ describe("cargarDetalleDeCaso — cobertura y presupuesto (B6, B21, B23)", () =>
     const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
 
     expect(res!.cobertura!.resultado).toEqual({ veredicto: "no_cubre", motivos: ["fuera_de_vigencia"] });
+  });
+
+  it("la fecha del siniestro toma incident_date cuando falta accident_date", async () => {
+    espiar(conPoliza(POLIZA, [{ id: "ef-1", field_key: "incident_date", field_value: "2026-03-10" }]));
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
+
+    expect(res!.fecha_del_siniestro).toBe("2026-03-10");
+  });
+
+  it("la fecha del siniestro sigue el orden de claves de la cobertura, y una que no se lee no cuenta", async () => {
+    espiar(
+      conPoliza(POLIZA, [
+        { id: "ef-1", field_key: "accident_date", field_value: "ayer a la tarde" },
+        { id: "ef-2", field_key: "fecha_siniestro", field_value: "10/03/2026" },
+        { id: "ef-3", field_key: "incident_date", field_value: "2026-03-11" },
+      ])
+    );
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
+
+    expect(res!.fecha_del_siniestro).toBe("10/03/2026");
+  });
+
+  it("sin ninguna fecha que se lea, la fecha del siniestro es null", async () => {
+    espiar(conPoliza(POLIZA, [{ id: "ef-1", field_key: "accident_date", field_value: "ayer a la tarde" }]));
+
+    const res = await cargarDetalleDeCaso(CTX, CASO, SIN_PLAN);
+
+    expect(res!.fecha_del_siniestro).toBeNull();
   });
 
   it("el PDF subido y sin leer no inventa coberturas", async () => {

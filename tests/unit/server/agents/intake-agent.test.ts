@@ -9,9 +9,11 @@ const {
   mockMarcarParaResponder,
   mockMarcarAunqueSiga,
   mockDownloadMedia,
+  mockCredenciales,
   mockRehost,
 } = vi.hoisted(() => ({
   mockDownloadMedia: vi.fn(),
+  mockCredenciales: vi.fn(),
   mockRehost: vi.fn(),
   mockMarcarParaResponder: vi.fn(),
   mockMarcarAunqueSiga: vi.fn(),
@@ -99,6 +101,11 @@ vi.mock("@/server/worker/extract", () => ({
 
 vi.mock("@/server/whatsapp/cloud-api", () => ({
   downloadWhatsAppMedia: mockDownloadMedia,
+}));
+
+vi.mock("@/server/whatsapp/numeros", () => ({
+  credencialesWhatsApp: mockCredenciales,
+  avisarSinNumero: vi.fn(),
 }));
 
 vi.mock("@/server/email/rehost-attachments", () => ({
@@ -618,8 +625,11 @@ describe("createWhatsAppIntake — el nombre de perfil", () => {
  * acá porque el limitador en memoria del test no mueve el reloj.
  */
 describe("tope por remitente (E12)", () => {
+  const CRED = { accessToken: "test-token", phoneNumberId: "123456", wabaId: "654321", autoalta: false, vencida: false };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCredenciales.mockResolvedValue(CRED);
     mockWriteAuditLog.mockResolvedValue(undefined);
     mockMarcarAunqueSiga.mockResolvedValue(undefined);
     clearAllRateLimits();
@@ -800,6 +810,25 @@ describe("tope por remitente (E12)", () => {
 
     expect(ultimo?.excedente).toBe(false);
     expect(mockDownloadMedia).toHaveBeenCalledTimes(1);
+    expect(mockDownloadMedia).toHaveBeenCalledWith("m20", CRED);
+    expect(mockCredenciales).toHaveBeenCalledWith("tenant-001");
     expect(mockRehost).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin número conectado no se baja nada: el adjunto queda como «no se pudo bajar»", async () => {
+    armarTanda(1);
+    mockCredenciales.mockResolvedValue(null);
+    mockRehost.mockResolvedValue([]);
+
+    await createWhatsAppIntake({
+      tenantId: "tenant-001",
+      from: "5490000000021",
+      body: "mi foto",
+      media: [{ id: "m1", mimeType: "image/jpeg", filename: "foto.jpg" }],
+    });
+
+    expect(mockDownloadMedia).not.toHaveBeenCalled();
+    const { attachments } = mockRehost.mock.calls[0]![0] as { attachments: Array<Record<string, unknown>> };
+    expect(attachments[0]).toMatchObject({ Name: "foto.jpg", rechazoPrevio: "download_failed" });
   });
 });

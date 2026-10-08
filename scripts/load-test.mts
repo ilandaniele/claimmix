@@ -135,7 +135,9 @@ const {
   consultaConteo,
   consultaListado,
   consultaPorEstado,
+  consultaTablero,
   contarPorEstado,
+  listarTablero,
   listCases,
 } = await import("@/server/cases/list");
 const { getCaseDetail } = await import("@/server/cases/get");
@@ -337,6 +339,15 @@ interface Escenario {
 const QUERY = { page: 1, per_page: 25, sort: "created_at", order: "desc" } as const;
 
 /**
+ * Quién mira «Mi cola» en los escenarios que la miden.
+ *
+ * Sin un `yo`, `cola=mia` cierra en falso y no mide nada. `prepararLectura` lo
+ * reemplaza por quien tiene asignado el escalado más nuevo de los últimos 50,
+ * para que la cola incluya también escalados propios y no sólo los sin asignar.
+ */
+let yoDeLaCola = "00000000-0000-0000-0000-000000000000";
+
+/**
  * Los escenarios, y la comprobación de que haya algo que medir.
  *
  * El volumen se cuenta por la MISMA conexión que se mide y no por `db`: el
@@ -373,6 +384,14 @@ async function prepararLectura(): Promise<{
 
   const notas: string[] = [];
 
+  const escalados = await listCases(CTX, { ...QUERY, status: ["escalado"], per_page: 50 } as never);
+  const conEscalados = escalados.data.find((c) => c.assigned_to)?.assigned_to;
+  if (conEscalados) yoDeLaCola = conEscalados;
+  else
+    notas.push(
+      "«Mi cola» se midió sin escalados asignados: sólo entran los escalados sin asignar y los que esperan al denunciante hace más de 48 h."
+    );
+
   /*
    * El caso más viejo, y no el que la base tenga a mano.
    *
@@ -399,6 +418,26 @@ async function prepararLectura(): Promise<{
       name: "bandeja (listado + contadores)",
       run: async () => {
         await Promise.all([listCases(CTX, { ...QUERY } as never), contarPorEstado(CTX)]);
+      },
+    },
+    {
+      // «Mi cola» ordena por vencido, gravedad y antigüedad, y su WHERE es un OR
+      // que no usa el índice de `updated_at`: el Sort recorre todo lo filtrado.
+      // El criterio es el mismo que el del listado: p95 bajo `P95_LECTURA_MS`.
+      name: "bandeja (Mi cola)",
+      run: async () => {
+        await Promise.all([listCases(CTX, { ...QUERY, cola: "mia" } as never, yoDeLaCola), contarPorEstado(CTX)]);
+      },
+    },
+    {
+      // El tablero pide otra cosa a la base: no los veinticinco más nuevos de
+      // todo sino los más nuevos de CADA columna, seis ramas con su propio
+      // LIMIT, y el conteo agrupado por estado. Reemplaza al listado, no se le
+      // suma, pero es otra consulta y se mide aparte. Si el p95 se acerca a
+      // `P95_LECTURA_MS`, bajar `TARJETAS_POR_COLUMNA` a 10.
+      name: "bandeja en tablero",
+      run: async () => {
+        await Promise.all([listarTablero(CTX, { ...QUERY } as never), contarPorEstado(CTX)]);
       },
     },
     {
@@ -832,6 +871,29 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
       // decir que alguien tocó el orden o el filtro y dejó el índice afuera.
       exigeIndice: true,
       consulta: (d: ClienteDatos) => consultaListado(d, { ...QUERY } as never),
+    },
+    {
+      // «Mi cola» ordena por vencido, gravedad, antigüedad e id. Su WHERE es un
+      // OR que no usa el índice de `updated_at`, así que recorrer `cases` es lo
+      // esperado y sólo se imprime; lo que no tiene que aparecer es un Hash
+      // Join, que el listado no tiene. Si el p95 de «bandeja (Mi cola)» llega a
+      // `P95_LECTURA_MS`, sacar la gravedad del orden en `consultaListado` y
+      // volver a medir.
+      name: "Mi cola",
+      exigeIndice: false,
+      consulta: (d: ClienteDatos) => consultaListado(d, { ...QUERY, cola: "mia" } as never, yoDeLaCola),
+      exige: (plan: string) => (/Hash Join/.test(plan) ? "Mi cola agregó un Hash Join" : null),
+    },
+    {
+      // Seis ramas `status in (grupo) order by created_at desc limit 20`, unidas.
+      // Cada una tiene que entrar por su índice y cortar en el LIMIT; lo que no
+      // puede aparecer es un Parallel Append, que las corre enteras en paralelo
+      // y se lleva el corte. Si aparece, bajar `TARJETAS_POR_COLUMNA`.
+      name: "tablero de la bandeja",
+      exigeIndice: false,
+      consulta: (d: ClienteDatos) => consultaTablero(d, { ...QUERY } as never)!,
+      exige: (plan: string) =>
+        /Parallel Append/.test(plan) ? "unió las ramas con un Parallel Append" : null,
     },
     {
       // El `count(*)` que viaja con el listado, sin LIMIT. Es el que crece

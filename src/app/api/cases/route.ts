@@ -18,6 +18,7 @@ import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
 import { CaseQuerySchema } from "@/lib/schemas/cases";
 import { listCases } from "@/server/cases/list";
+import { remitenteYAsuntoParaElRol } from "@/server/cases/pii";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { z } from "zod";
@@ -106,7 +107,8 @@ export async function GET(request: NextRequest) {
     // the JSON shape matches the previous PostgREST response (numbers).
     return ok({
       ...result,
-      data: result.data.map((c) => ({
+      // En la vista de descartes (`is_claim=false`) el asunto y el remitente salen en claro sólo para quien ve el padrón.
+      data: remitenteYAsuntoParaElRol(result.data, userRow.role).map((c) => ({
         ...c,
         confidence_min:
           c.confidence_min === null ? null : Number(c.confidence_min),

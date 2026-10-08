@@ -31,7 +31,7 @@ import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { stripQuotedReply } from "@/core/email/conversation";
 import { isBulkHeader } from "@/server/email/relevance-prefilter";
 import { resolveExtractionEngine } from "@/server/ai/provider";
-import { checkBudget, registrarConsumoDelModelo } from "@/server/ai/budget";
+import { checkBudget, registrarConsumoDelModelo, soltarReserva } from "@/server/ai/budget";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { avisarMensajeTardio } from "@/server/notify/specialist-alert";
 import { admiteParaResponder } from "@/server/cases/para-responder";
@@ -96,13 +96,18 @@ async function clasificar(
   const nada = { tipo: null, resumen: null };
   if (!texto.trim()) return nada;
   if ((await resolveExtractionEngine(tenantId)) === "mock") return nada;
-  if ((await checkBudget(tenantId)).exceeded) return nada;
+  const presupuesto = await checkBudget(tenantId);
+  if (presupuesto.exceeded) return nada;
   // Sin cupo, o sin poder contarlo, se avisa igual pero sin clase.
   const cupo = await rateLimit(
     claveDeCupo("clasificacion-tardia", tenantId, caseId),
     RATE_LIMIT_CONFIGS.CLASIFICACION_TARDIA_POR_CASO
   ).catch(() => null);
-  if (!cupo?.allowed) return nada;
+  if (!cupo?.allowed) {
+    // No se llamó al modelo: la prueba no gasta del cupo diario.
+    await soltarReserva(presupuesto.reserva);
+    return nada;
+  }
 
   const { sistema, usuario } = promptDelMensajeTardio(texto);
   let respuesta: string | null;

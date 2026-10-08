@@ -127,6 +127,17 @@ describe("POST /api/cases/:id/reenviar-pedido", () => {
     expect(body.error.details).toEqual({ motivo });
   });
 
+  it("el tope de plantillas da 429 RATE_LIMITED con un texto que no dice por qué", async () => {
+    mockReenviar.mockResolvedValue({ ok: false, motivo: "tope_de_plantillas" });
+    const res = await llamar();
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(body.error.message).toBe("No se pueden mandar más plantillas de WhatsApp por ahora.");
+    expect(body.error.message).not.toMatch(/prueba|trial|vencid/i);
+    expect(body.error.details).toBeUndefined();
+  });
+
   it("con éxito, contesta 200 con claves y reabierto", async () => {
     mockReenviar.mockResolvedValue({ ok: true, claves: ["full_name", "patente_vehiculo"], reabierto: true });
     const res = await llamar(CASE_ID, { reabrir: true });

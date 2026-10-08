@@ -26,13 +26,16 @@ const store = new Map<string, WindowEntry>();
  * @param key      - Unique identifier (e.g. "ip:email" tuple)
  * @param limit    - Maximum requests allowed within the window
  * @param windowMs - Window duration in milliseconds
- * @returns `{ allowed: boolean; remaining: number; resetAt: number }`
+ * @returns `{ allowed, remaining, resetAt, ventana }`. Acá la ventana es
+ *          deslizante, así que `ventana` es el instante del intento contado
+ *          (0 si no entró): lo único que `liberarIntento` necesita para
+ *          devolver ESE intento y no otro.
  */
 export function checkRateLimit(
   key: string,
   limit: number,
   windowMs: number
-): { allowed: boolean; remaining: number; resetAt: number } {
+): { allowed: boolean; remaining: number; resetAt: number; ventana: number } {
   const now = Date.now();
   const windowStart = now - windowMs;
 
@@ -66,12 +69,16 @@ export function checkRateLimit(
     allowed,
     remaining: Math.max(0, limit - entry.timestamps.length),
     resetAt,
+    ventana: allowed ? now : 0,
   };
 }
 
-/** Devuelve el último intento que se contó para la clave. */
-export function liberarIntento(key: string): void {
-  store.get(key)?.timestamps.pop();
+/** Devuelve el intento contado en `ventana`; si no está (nunca se contó, o ya se descartó) no hace nada. */
+export function liberarIntento(key: string, ventana: number): void {
+  const marcas = store.get(key)?.timestamps;
+  if (!marcas) return;
+  const i = marcas.lastIndexOf(ventana);
+  if (i >= 0) marcas.splice(i, 1);
 }
 
 /**

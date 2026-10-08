@@ -18,9 +18,11 @@
 import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listCases } from "@/server/cases/list";
+import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listarTablero, listCases } from "@/server/cases/list";
+import { remitenteYAsuntoParaElRol } from "@/server/cases/pii";
 import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { esRamoNativo, FORMATO_DE_CLAVE_DE_RAMO, nombreDeRamoPropio } from "@/core/case/ramos";
+import type { ClaveDeEstado } from "@/core/case/filtro-de-estado";
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
 import { PER_PAGE_OPTIONS } from "./per-page";
@@ -34,8 +36,9 @@ import {
   SeveritySchema,
   VencimientoFiltroSchema,
 } from "@/lib/schemas/cases";
-import type { CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severity } from "@/lib/schemas/cases";
+import type { CaseQuery, CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
+import { diasDePrueba } from "@/lib/billing/plans";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
@@ -121,11 +124,14 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   /*
    * `vista` no es un filtro: no entra en `PARAMS_DE_FILTRO`, no lo mira
    * `buildCaseFilters` ni `contarPorEstado`, y un valor que no sea "tablero"
-   * cae en "lista" — la misma pantalla de siempre.
+   * cae en "lista" — la misma pantalla de siempre. Lo único que cambia es
+   * qué consulta corre: la del tablero trae las más nuevas de CADA columna.
    */
   const vista: "lista" | "tablero" = params["vista"] === "tablero" ? "tablero" : "lista";
   const para_responder = params["para_responder"] === "true" ? true : undefined;
   const cola = params["cola"] === "mia" ? "mia" : undefined;
+  // Lo deja /alta al crear el espacio; es sólo un aviso, no consulta nada.
+  const bienvenida = params["bienvenida"] === "1";
 
   const status = valores(statusParam, VALID_STATUSES);
 
@@ -206,31 +212,40 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     pideTipoPropio ? [...VALID_TYPES, ...(await ramosPendientes).map((r) => r.clave)] : VALID_TYPES
   );
 
-  const [initialData, porEstado, ramosPropios] = await Promise.all([
-    listCases({ tenantId }, {
-      status,
-      type,
-      q,
-      desde,
-      page,
-      per_page,
-      sort: "created_at",
-      order: "desc",
-      // Email-intake filters (AC18)
-      channel,
-      severity,
-      fraude,
-      vencimiento,
-      complejidad,
-      is_claim,
-      para_responder,
-      cola,
-    }, userRow.id),
+  const consulta: CaseQuery = {
+    status,
+    type,
+    q,
+    desde,
+    page,
+    per_page,
+    sort: "created_at",
+    order: "desc",
+    // Email-intake filters (AC18)
+    channel,
+    severity,
+    fraude,
+    vencimiento,
+    complejidad,
+    is_claim,
+    para_responder,
+    cola,
+  };
+
+  const [listado, porEstado, ramosPropios] = await Promise.all([
+    vista === "tablero"
+      ? listarTablero({ tenantId }, consulta, userRow.id)
+      : listCases({ tenantId }, consulta, userRow.id),
     // Contadores de las pestañas: sólo búsqueda y período los mueven, nunca
     // los chips de estado/tipo/severidad — ver `consultaPorEstado`.
     contarPorEstado({ tenantId }, buildCaseFilters({ q, desde })),
     ramosPendientes,
   ]);
+
+  // La vista de descartes trae el asunto y el remitente del primer mensaje: en claro sólo para quien ve el padrón.
+  const initialData = { meta: listado.meta, data: remitenteYAsuntoParaElRol(listado.data, userRow.role) };
+  // Los totales de las columnas, bajo todos los filtros: sólo los trae la consulta del tablero.
+  const totalesDelTablero = "totales" in listado ? (listado.totales as Record<ClaveDeEstado, number>) : undefined;
 
   /*
    * El total suma TODAS las filas que devuelve el grupo, no sólo las de los
@@ -276,6 +291,15 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
         </h1>
         <p className="mt-1 text-[13px] text-slate-500">{t("bandeja.subtitle")}</p>
 
+        {bienvenida && (
+          <p
+            role="status"
+            className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-[13px] text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+          >
+            {t("bandeja.bienvenida").replace("{n}", String(diasDePrueba()))}
+          </p>
+        )}
+
         {/*
          * Acá vivían cuatro baldosas —Total, Escalados, Esperando, Listos— y no
          * están más.
@@ -305,7 +329,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
             initialData={initialData}
             scenarios={OPCIONES_DE_ESCENARIO}
             allStatusCounts={allStatusCounts}
-            vista={vista}
+            totalesDelTablero={totalesDelTablero}
             // Una fila con la clave de un ramo del código no es un tipo aparte: el filtro ya lo tiene.
             tiposPropios={ramosPropios
               .filter((r) => !esRamoNativo(r.clave))

@@ -86,7 +86,7 @@ export async function recordarCaso(
   // queda libre para la corrida siguiente.
   if (etapa === null || pedidoReciente(datos.pedido.enviado, ahora)) return null;
 
-  const decision = await decidirConPlantilla(datos, ahora, false);
+  const decision = await decidirConPlantilla(datos, ahora, false, o.tenantId);
   const motivo = decision.ok ? null : decision.motivo;
   // Meta no contestó: es pasajero, la etapa queda para la corrida siguiente.
   if (motivo === "plantilla_sin_respuesta") {

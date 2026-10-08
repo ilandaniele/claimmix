@@ -18,7 +18,7 @@ import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { claveDeCupo, type AmbitoDeCupo } from "@/lib/rate-limit/clave";
-import { checkBudget, registrarConsumoDelModelo } from "@/server/ai/budget";
+import { checkBudget, registrarConsumoDelModelo, soltarReserva } from "@/server/ai/budget";
 import { callGemini, contarTokens, type InlineMedia } from "@/server/ai/gemini-extractor";
 import { resolveExtractionEngine } from "@/server/ai/provider";
 import { PLAZO_DE_CONTEO_MS, TOPE_TOKENS_PDF } from "@/server/worker/adjuntos";
@@ -60,7 +60,13 @@ export async function leerDocumento<T>({
 }): Promise<Lectura<T>> {
   try {
     if ((await resolveExtractionEngine(tenantId, userId)) === "mock") return { sinLeer: "mock" };
-    if ((await checkBudget(tenantId, userId)).exceeded) return { sinLeer: "presupuesto" };
+    const presupuesto = await checkBudget(tenantId, userId);
+    if (presupuesto.exceeded) return { sinLeer: "presupuesto" };
+    // Lo que se rechaza sin llamar al modelo no gasta del cupo diario de una prueba.
+    const sinLlamar = async (motivo: MotivoSinLeer): Promise<{ sinLeer: MotivoSinLeer }> => {
+      await soltarReserva(presupuesto.reserva);
+      return { sinLeer: motivo };
+    };
 
     // Mismo tope que el worker: lo que el modelo cobraría decide, no un
     // contador propio de páginas. Sólo un rechazo habla del archivo; un plazo
@@ -68,15 +74,15 @@ export async function leerDocumento<T>({
     for (const m of media) {
       if (m.mimeType !== "application/pdf") continue;
       const tokens = await contarTokens(m, PLAZO_DE_CONTEO_MS);
-      if (tokens === "rechazo") return { sinLeer: "archivo" };
-      if (typeof tokens !== "number") return { sinLeer: "modelo" };
-      if (tokens > TOPE_TOKENS_PDF) return { sinLeer: "paginas" };
+      if (tokens === "rechazo") return sinLlamar("archivo");
+      if (typeof tokens !== "number") return sinLlamar("modelo");
+      if (tokens > TOPE_TOKENS_PDF) return sinLlamar("paginas");
     }
 
     const cupo = await rateLimit(claveDeCupo(ambito, ...partesDeClave), RATE_LIMIT_CONFIGS[CUPOS[ambito]]).catch(
       () => null
     );
-    if (!cupo?.allowed) return { sinLeer: "cupo" };
+    if (!cupo?.allowed) return sinLlamar("cupo");
 
     const r = await callGemini(sistema, usuario, undefined, undefined, media);
     await registrarConsumoDelModelo(tenantId, r.model, r.usage, userId);

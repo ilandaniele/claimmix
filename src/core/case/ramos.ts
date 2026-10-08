@@ -30,6 +30,17 @@ export const RAMOS_NATIVOS = [
 
 export type RamoNativo = (typeof RAMOS_NATIVOS)[number];
 
+/**
+ * Los ramos con pocos casos reales: tienen reglas, pero todavía no hay base para
+ * fiarse de la extracción y de los pasos sin mirarlos. Sólo avisa en el detalle;
+ * no cambia qué se pide ni quién lo ve.
+ */
+export const RAMOS_EN_CALIBRACION = ["cristales", "rc", "robo_contenido", "accidente_personal"] as const;
+
+export function esRamoEnCalibracion(clave: string | null): boolean {
+  return clave !== null && (RAMOS_EN_CALIBRACION as readonly string[]).includes(clave);
+}
+
 /** El mismo formato que el CHECK de `cases.claim_type` (0044). */
 // Sin zod: este módulo lo importa código que viaja al navegador. El esquema vive en `lib/schemas/cases.ts`.
 export const FORMATO_DE_CLAVE_DE_RAMO = /^[a-z][a-z0-9_]{1,39}$/;

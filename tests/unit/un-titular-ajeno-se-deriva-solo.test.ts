@@ -77,11 +77,16 @@ vi.mock("@/server/notify/specialist-alert", () => ({
   alertSpecialists: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/server/confirmations/derivacion-nueva", () => ({
+  anotarDerivacionSiEsNueva: vi.fn().mockResolvedValue(true),
+}));
+
 import { db } from "@/lib/db";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
 import { writeAuditLog } from "@/lib/audit/log";
 import { deliberate } from "@/server/ai/deliberate";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
+import { anotarDerivacionSiEsNueva } from "@/server/confirmations/derivacion-nueva";
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 
 // ── DB mock (el de una-poliza-vencida, más las tablas que se leen) ────────────
@@ -208,6 +213,9 @@ const estados = (updateSpy: ReturnType<typeof vi.fn>) =>
 const eventos = (tipo: string) =>
   vi.mocked(writeAuditLog).mock.calls.filter((c) => c[0].event_type === tipo);
 
+/** Lo que `escalate()` pidió anotar: el evento de derivación ya no pasa por `writeAuditLog`. */
+const derivacionesAnotadas = () => vi.mocked(anotarDerivacionSiEsNueva).mock.calls.map((c) => c[0]);
+
 const previo = process.env.AGENT_COMPOSE_REPLIES;
 
 beforeEach(() => {
@@ -215,6 +223,7 @@ beforeEach(() => {
   process.env.AGENT_COMPOSE_REPLIES = "off";
   vi.mocked(deliberate).mockResolvedValue(null);
   vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(false);
+  vi.mocked(anotarDerivacionSiEsNueva).mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -255,13 +264,13 @@ describe("un titular ajeno se deriva solo", () => {
     expect(deliberate).not.toHaveBeenCalled();
     expect(alertSpecialists).toHaveBeenCalledTimes(1);
 
-    const derivaciones = eventos("claim.specialist_required");
+    const derivaciones = derivacionesAnotadas();
     expect(derivaciones).toHaveLength(1);
-    expect(derivaciones[0][0].payload).toMatchObject({ reason: RAZON });
+    expect(derivaciones[0].payload).toMatchObject({ reason: RAZON });
 
     // Ni nombres ni documentos en lo que queda escrito o le llega al especialista.
     const escrito = JSON.stringify([
-      derivaciones[0][0].payload,
+      derivaciones[0].payload,
       vi.mocked(alertSpecialists).mock.calls[0][0],
     ]);
     for (const dato of DATOS_DE_PERSONAS) expect(escrito).not.toContain(dato);
@@ -306,7 +315,7 @@ describe("un titular ajeno se deriva solo", () => {
     await correr({ titularAjeno: true }, undefined, claimDeUnFamiliar("critical"));
 
     expect(mensajes().map((m) => m.template)).toEqual(["specialist_escalation"]);
-    expect(eventos("claim.specialist_required")).toHaveLength(1);
+    expect(derivacionesAnotadas()).toHaveLength(1);
     expect(alertSpecialists).toHaveBeenCalledTimes(1);
   });
 
@@ -318,7 +327,7 @@ describe("un titular ajeno se deriva solo", () => {
       polizas: { vigentes: 0, noVigentes: 1, vencioEl: "2020-03-01", derivar: true },
     });
 
-    expect(eventos("claim.specialist_required")).toHaveLength(1);
+    expect(derivacionesAnotadas()).toHaveLength(1);
     expect(alertSpecialists).toHaveBeenCalledTimes(1);
   });
 
@@ -341,7 +350,7 @@ describe("un titular ajeno se deriva solo", () => {
 
     expect(dispatchOutboundEmail).not.toHaveBeenCalled();
     expect(estados(updateSpy).at(-1)).toBe("requiere_especialista");
-    expect(eventos("claim.specialist_required")).toHaveLength(1);
+    expect(derivacionesAnotadas()).toHaveLength(1);
     expect(alertSpecialists).toHaveBeenCalledTimes(1);
   });
 });

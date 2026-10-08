@@ -22,13 +22,32 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { logger } from "@/lib/observability/logger";
+import { entero } from "@/lib/entero";
+import { liberarCupo, rateLimit } from "@/lib/rate-limit";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 
 const GRAPH_API_BASE = "https://graph.facebook.com";
 
+/**
+ * Con qué número y qué token habla cada llamada a Meta. Obligatorio en todo lo
+ * que sale: ningún envío cae por omisión en el .env. Lo arma `credencialesWhatsApp`
+ * (numeros.ts), el único que lee esas variables.
+ */
+export interface CredencialesMeta {
+  phoneNumberId: string;
+  accessToken: string;
+  wabaId: string | null;
+}
+
 /** Default Graph API version; override with WHATSAPP_API_VERSION. */
 function apiVersion(): string {
   return process.env.WHATSAPP_API_VERSION?.trim() || "v22.0";
+}
+
+/** La URL de un recurso de Graph con la versión vigente; para quien consulta y no manda (verificar-en-meta.ts). */
+export function urlDeGraph(ruta: string): string {
+  return `${GRAPH_API_BASE}/${apiVersion()}/${ruta}`;
 }
 
 /*
@@ -316,13 +335,9 @@ export type MediaDeWhatsApp =
  */
 export async function downloadWhatsAppMedia(
   mediaId: string,
-  opts?: { accessToken?: string }
+  cred: Pick<CredencialesMeta, "accessToken">
 ): Promise<MediaDeWhatsApp | null> {
-  const accessToken = opts?.accessToken ?? process.env.WHATSAPP_ACCESS_TOKEN;
-  if (!accessToken) {
-    logger.error({}, "whatsapp.media_download_skipped_no_access_token");
-    return null;
-  }
+  const { accessToken } = cred;
 
   try {
     const metaRes = await fetch(`${GRAPH_API_BASE}/${apiVersion()}/${mediaId}`, {
@@ -484,13 +499,9 @@ export interface SendResult {
 async function enviarAMeta(
   to: string,
   contenido: Record<string, unknown>,
-  opts?: { accessToken?: string; phoneNumberId?: string }
+  cred: Pick<CredencialesMeta, "accessToken" | "phoneNumberId">
 ): Promise<SendResult> {
-  const accessToken = opts?.accessToken ?? process.env.WHATSAPP_ACCESS_TOKEN;
-  const phoneNumberId = opts?.phoneNumberId ?? process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!accessToken || !phoneNumberId) {
-    return { ok: false, error: "WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID not configured" };
-  }
+  const { accessToken, phoneNumberId } = cred;
 
   try {
     const res = await fetch(`${GRAPH_API_BASE}/${apiVersion()}/${phoneNumberId}/messages`, {
@@ -532,9 +543,53 @@ async function enviarAMeta(
 export async function sendWhatsAppText(
   to: string,
   body: string,
-  opts?: { accessToken?: string; phoneNumberId?: string }
+  cred: Pick<CredencialesMeta, "accessToken" | "phoneNumberId">
 ): Promise<SendResult> {
-  return enviarAMeta(to, { type: "text", text: { preview_url: false, body: body.slice(0, 4096) } }, opts);
+  return enviarAMeta(to, { type: "text", text: { preview_url: false, body: body.slice(0, 4096) } }, cred);
+}
+
+/** El `error` de `sendWhatsAppTemplate` cuando el tope de la prueba corta el envío antes de llegar a Meta. */
+export const TOPE_DE_PLANTILLAS = "tope_de_plantillas";
+
+const DIA_MS = 24 * 60 * 60_000;
+
+/** Plantillas por día que puede mandar un espacio en prueba; 0 las corta del todo. */
+export function topeDePlantillasDePrueba(): number {
+  return entero("ALTA_TOPE_PLANTILLAS_PRUEBA_DIA", 3, 0, 1000);
+}
+
+function cupoDePlantillas(vencida: boolean) {
+  return { limit: vencida ? 0 : topeDePlantillasDePrueba(), windowMs: DIA_MS, fallaCerrada: true };
+}
+
+/**
+ * Si a una prueba vigente todavía le entra una plantilla hoy, SIN gastarla: toma
+ * un lugar y lo devuelve en el acto (el limitador no deja mirar sin contar). Es
+ * para quien tiene que saberlo antes de escribir algo —reabrir un caso— y no
+ * puede esperar a que `sendWhatsAppTemplate` diga que no. El que gasta es el
+ * envío. Si el contador no contesta, no hay lugar: igual que al enviar.
+ */
+export async function quedaCupoDePlantilla(tenantId: string): Promise<boolean> {
+  const clave = claveDeCupo("wa:plantilla", tenantId);
+  const cupo = await rateLimit(clave, cupoDePlantillas(false));
+  try {
+    // También el intento rechazado: Postgres lo cuenta y no se libera solo.
+    await liberarCupo(clave, DIA_MS, cupo.ventana);
+  } catch {
+    // Sin devolverlo se pierde un lugar del día, pero esto no puede tirar.
+  }
+  return cupo.allowed;
+}
+
+/**
+ * Lo que `sendWhatsAppTemplate` necesita del número, además de con qué hablar:
+ * de quién es y si cuenta contra el tope de la prueba. Lo arma
+ * `credencialesWhatsApp`, sin otra consulta.
+ */
+export interface CredencialesDePlantilla extends Pick<CredencialesMeta, "accessToken" | "phoneNumberId"> {
+  tenantId: string;
+  enPrueba: boolean;
+  vencida: boolean;
 }
 
 /**
@@ -543,6 +598,11 @@ export async function sendWhatsAppText(
  * no admite el salto que puede traer, por ejemplo, la lista de campos que
  * faltan.
  *
+ * Es lo único de WhatsApp que Meta cobra por envío, así que una prueba tiene
+ * tope por día (`ALTA_TOPE_PLANTILLAS_PRUEBA_DIA`) y, vencida, ninguna. El
+ * cupo se toma ANTES de llamar a Meta y con falla cerrada: si el contador no
+ * contesta, la plantilla no sale. Quien ya paga, y la plataforma, no cuentan.
+ *
  * Never throws.
  */
 export async function sendWhatsAppTemplate(
@@ -550,8 +610,13 @@ export async function sendWhatsAppTemplate(
   nombre: string,
   idioma: string,
   parametros: string[],
-  opts?: { accessToken?: string; phoneNumberId?: string }
+  cred: CredencialesDePlantilla
 ): Promise<SendResult> {
+  if (cred.enPrueba) {
+    const cupo = await rateLimit(claveDeCupo("wa:plantilla", cred.tenantId), cupoDePlantillas(cred.vencida));
+    if (!cupo.allowed) return { ok: false, error: TOPE_DE_PLANTILLAS };
+  }
+
   return enviarAMeta(
     to,
     {
@@ -567,7 +632,7 @@ export async function sendWhatsAppTemplate(
         ],
       },
     },
-    opts
+    cred
   );
 }
 
@@ -589,27 +654,31 @@ const TTL_ESTADO_PLANTILLA_MS: Record<EstadoDePlantilla, number> = {
 const PLAZO_ESTADO_PLANTILLA_MS = 3_000;
 
 /**
- * Caché en memoria del estado de cada plantilla, clave `${nombre}:${idioma}`.
- * Sin esto, cada reenvío fuera de ventana le preguntaría a Meta si la
- * plantilla ya está aprobada — un fetch por cada caso cerrado hace más de 24 h.
+ * Caché en memoria del estado de cada plantilla, clave `${wabaId}:${nombre}:${idioma}`
+ * (las plantillas son por WABA). Sin esto, cada reenvío fuera de ventana le
+ * preguntaría a Meta si la plantilla ya está aprobada — un fetch por cada caso
+ * cerrado hace más de 24 h.
  */
 const cacheDeEstadoDePlantilla = new Map<string, { valor: EstadoDePlantilla; vence: number }>();
 
 /**
  * Si Meta ya aprobó la plantilla para reabrir un pedido después de las 24 h.
  *
- * Sin `WHATSAPP_BUSINESS_ACCOUNT_ID` o sin token no hay a quién preguntarle:
- * devuelve `no_disponible` sin pedir nada y sin tocar la caché, que es el
- * comportamiento de hoy (ventana cerrada, sin plantilla).
+ * Sin la WABA del número no hay a quién preguntarle: devuelve `no_disponible`
+ * sin pedir nada y sin tocar la caché, que es el comportamiento de hoy
+ * (ventana cerrada, sin plantilla).
  */
-export async function estadoDePlantilla(nombre: string, idioma: string): Promise<EstadoDePlantilla> {
-  const clave = `${nombre}:${idioma}`;
+export async function estadoDePlantilla(
+  nombre: string,
+  idioma: string,
+  cred: Pick<CredencialesMeta, "accessToken" | "wabaId">
+): Promise<EstadoDePlantilla> {
+  const { wabaId, accessToken } = cred;
+  if (!wabaId) return "no_disponible";
+
+  const clave = `${wabaId}:${nombre}:${idioma}`;
   const cacheado = cacheDeEstadoDePlantilla.get(clave);
   if (cacheado && cacheado.vence > Date.now()) return cacheado.valor;
-
-  const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-  if (!wabaId || !accessToken) return "no_disponible";
 
   const conCache = (valor: EstadoDePlantilla): EstadoDePlantilla => {
     cacheDeEstadoDePlantilla.set(clave, { valor, vence: Date.now() + TTL_ESTADO_PLANTILLA_MS[valor] });

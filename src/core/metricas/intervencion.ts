@@ -138,6 +138,19 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "sso.rechazado": false,
   "adjuntos.purgados": false,
   "retencion.aplicada": false,
+
+  // Alta automática, planes, números de WhatsApp e invitaciones: del inquilino, no de un caso.
+  "tenant.created": false,
+  "tenant.plan_changed": false,
+  "tenant.suspended": false,
+  "whatsapp.numero_conectado": false,
+  "whatsapp.numero_suspendido": false,
+  "whatsapp.numero_baja": false,
+  "auth.user_invited": false,
+  "auth.invitation_accepted": false,
+  "auth.invitation_rejected": false,
+  // Aviso de la revisión nocturna al inquilino: lo manda el sistema, no gestiona un caso.
+  "quality.desvios_alerted": false,
 };
 
 /**

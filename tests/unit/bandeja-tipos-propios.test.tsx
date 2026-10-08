@@ -12,8 +12,10 @@ import type { ReactElement } from "react";
 
 const m = vi.hoisted(() => ({
   listCases: vi.fn(),
+  listarTablero: vi.fn(),
   cargarRamos: vi.fn(),
   locale: vi.fn(),
+  rol: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
@@ -21,7 +23,7 @@ vi.mock("@/lib/auth/session", () => ({
   getSessionContext: vi.fn(async () => ({ user: { id: "u1" } })),
 }));
 vi.mock("@/lib/auth/user-row", () => ({
-  getUserRow: vi.fn(async () => ({ id: "u1", tenant_id: "t1" })),
+  getUserRow: vi.fn(async () => ({ id: "u1", tenant_id: "t1", role: m.rol() })),
 }));
 vi.mock("@/server/i18n/idioma-de-la-cuenta", () => ({ getAccountLocale: m.locale }));
 vi.mock("@/server/cases/list", () => ({
@@ -29,6 +31,7 @@ vi.mock("@/server/cases/list", () => ({
   contarPorEstado: vi.fn(async () => []),
   desdeDePeriodo: vi.fn(),
   listCases: m.listCases,
+  listarTablero: m.listarTablero,
 }));
 vi.mock("@/server/cases/ramos-del-inquilino", () => ({ cargarRamosDelInquilino: m.cargarRamos }));
 vi.mock("@/server/intake/scenarios", () => ({ OPCIONES_DE_ESCENARIO: [] }));
@@ -44,6 +47,8 @@ const RAMO = {
   documentos: [],
   datos: [],
 };
+
+const TOTALES = { procesando: 43, esperando: 0, confirmacion_pendiente: 0, escalado: 2, listo: 0, cerrado: 0 };
 
 /** Corre la página de servidor y devuelve las props que le pasa a `DashboardClient`. */
 async function propsDelTablero(params: Record<string, string | string[]>) {
@@ -67,8 +72,14 @@ describe("la bandeja con tipos propios", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     m.locale.mockResolvedValue("es-AR");
-    m.listCases.mockResolvedValue({ cases: [], total: 0 });
+    m.listCases.mockResolvedValue({ data: [], meta: { total: 0, page: 1, per_page: 20, pages: 0 } });
+    m.listarTablero.mockResolvedValue({
+      data: [],
+      meta: { total: 0, page: 1, per_page: 20, pages: 1 },
+      totales: TOTALES,
+    });
     m.cargarRamos.mockResolvedValue([RAMO]);
+    m.rol.mockReturnValue("owner");
   });
 
   it("acepta un tipo propio del inquilino en la URL", async () => {
@@ -112,5 +123,54 @@ describe("la bandeja con tipos propios", () => {
     expect((await propsDelTablero({}))?.["tiposPropios"]).toEqual([
       { clave: "flota_camiones", nombre: "Flota de camiones" },
     ]);
+  });
+
+  it("en la vista de descartes el remitente sale en claro sólo para quien ve el padrón", async () => {
+    const fila = { id: "c-1", asunto: "Promo", remitente: "ventas@example.com" };
+    m.listCases.mockResolvedValue({ data: [fila], meta: { total: 1, page: 1, per_page: 20, pages: 1 } });
+
+    const filas = async () => ((await propsDelTablero({}))?.["initialData"] as { data: (typeof fila)[] }).data;
+
+    expect((await filas())[0]?.remitente).toBe("ventas@example.com");
+
+    m.rol.mockReturnValue("viewer");
+    expect((await filas())[0]?.remitente).toBe("[oculto]");
+  });
+
+  it("con vista=tablero pide la consulta del tablero y le pasa los totales de las columnas", async () => {
+    const props = await propsDelTablero({ vista: "tablero", q: "perez", status: "escalado" });
+
+    expect(m.listCases).not.toHaveBeenCalled();
+    expect(m.listarTablero.mock.calls[0]?.[1]).toMatchObject({ q: "perez", status: ["escalado"] });
+    expect(props?.["totalesDelTablero"]).toEqual(TOTALES);
+  });
+
+  it("en el tablero las tarjetas no arrastran los totales dentro de initialData", async () => {
+    const props = await propsDelTablero({ vista: "tablero" });
+
+    expect(props?.["initialData"]).not.toHaveProperty("totales");
+  });
+
+  it("en el tablero el remitente también sale tapado para quien no ve el padrón", async () => {
+    const fila = { id: "c-1", remitente: "ventas@example.com" };
+    m.listarTablero.mockResolvedValue({
+      data: [fila],
+      meta: { total: 1, page: 1, per_page: 20, pages: 1 },
+      totales: TOTALES,
+    });
+    m.rol.mockReturnValue("viewer");
+
+    const filas = ((await propsDelTablero({ vista: "tablero" }))?.["initialData"] as { data: (typeof fila)[] }).data;
+    expect(filas[0]?.remitente).toBe("[oculto]");
+  });
+
+  it("sin vista, o con una que no existe, sigue la lista y no hay totales de tablero", async () => {
+    for (const vista of [undefined, "kanban"]) {
+      m.listCases.mockClear();
+      const props = await propsDelTablero(vista ? { vista } : {});
+      expect(m.listCases).toHaveBeenCalledTimes(1);
+      expect(m.listarTablero).not.toHaveBeenCalled();
+      expect(props?.["totalesDelTablero"]).toBeUndefined();
+    }
   });
 });

@@ -343,6 +343,51 @@ describe("runTool", () => {
   });
 });
 
+describe("historial_del_caso", () => {
+  const PENDIENTE = { satisfied_at: null, declined_at: null };
+
+  it("los documentos salen sin repetidos y sin el dato que ya está presente", async () => {
+    rows.extracted_fields = [
+      { field_key: "accident_location", field_value: "Bahía Blanca", confidence: "0.80" },
+    ];
+    rows.missing_docs = [
+      { doc_key: "dni", ...PENDIENTE },
+      { doc_key: "dni_asegurado", ...PENDIENTE },
+      { doc_key: "accident_location", ...PENDIENTE },
+      { doc_key: "fotos_danos", ...PENDIENTE },
+    ];
+
+    const out = (await runTool("historial_del_caso", {}, CTX)) as {
+      datos: Array<{ campo: string; certeza: number }>;
+      documentos: Array<{ documento: string; estado: string }>;
+    };
+
+    expect(out.documentos).toEqual([
+      { documento: "dni", estado: "pendiente" },
+      { documento: "fotos_danos", estado: "pendiente" },
+    ]);
+    // Los datos van enteros: el filtro es sólo de los pedidos.
+    expect(out.datos).toEqual([{ campo: "accident_location", valor: "Bahía Blanca", certeza: 0.8 }]);
+  });
+
+  it("conserva el estado de lo recibido y de lo que no tienen", async () => {
+    rows.extracted_fields = [];
+    rows.missing_docs = [
+      { doc_key: "dni", satisfied_at: "2026-10-01T00:00:00Z", declined_at: null },
+      { doc_key: "fotos_danos", satisfied_at: null, declined_at: "2026-10-01T00:00:00Z" },
+    ];
+
+    const out = (await runTool("historial_del_caso", {}, CTX)) as {
+      documentos: Array<{ documento: string; estado: string }>;
+    };
+
+    expect(out.documentos).toEqual([
+      { documento: "dni", estado: "recibido" },
+      { documento: "fotos_danos", estado: "no lo tienen" },
+    ]);
+  });
+});
+
 describe("the tool menu", () => {
   it("is all read-only, which is the safety argument", () => {
     // Every side effect travels through the validated plan instead. If a tool

@@ -17,6 +17,7 @@
  *   info_faltante /
  *   confirmacion_pendiente:    reenviar el pedido (P8), «Tomar el control» (D-F2)
  *   cerrado:                   banner de sólo lectura, o «Reabrir y reenviar» (P8)
+ *   no_relevante:              «Marcar como relevante» (admin) + re-analizar
  *
  * Las salidas a mano (`SALIDAS_A_MANO`) piden `puedeCambiarEstado` y un segundo
  * clic: ninguna se deshace.
@@ -56,6 +57,9 @@ interface StatusActionsProps {
   /** E24. Sin esto el botón de «Devolver al agente» no se muestra. */
   puedeDevolverAlAgente?: boolean;
   onDevolverAlAgente?: () => void;
+  /** «Marcar como relevante»: rescata un descartado. Sólo admin; sin esto no se muestra. */
+  puedeMarcarRelevante?: boolean;
+  onMarcarRelevante?: () => void;
 }
 
 function ReAnalyzeButton({
@@ -222,6 +226,8 @@ export function StatusActions({
   onTomarElControl,
   puedeDevolverAlAgente,
   onDevolverAlAgente,
+  puedeMarcarRelevante,
+  onMarcarRelevante,
 }: StatusActionsProps) {
   const t = useT();
   // ── cerrado — read-only banner, o «Reabrir y reenviar» (P8) ────────────────
@@ -566,6 +572,26 @@ export function StatusActions({
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {t("case.detail.devolverAlAgente")}
+          </button>
+        )}
+        <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />
+      </div>
+    );
+  }
+
+  // ── no_relevante — rescatarlo a mano, o re-analizarlo ──────────────────────
+  if (status === "no_relevante") {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {puedeMarcarRelevante && onMarcarRelevante && (
+          <button
+            type="button"
+            onClick={onMarcarRelevante}
+            disabled={dialogOpen || reAnalyzing}
+            data-testid="action-marcar-relevante"
+            className={CLASE_SALIDA}
+          >
+            {t("noRelevante.marcarRelevante")}
           </button>
         )}
         <ReAnalyzeButton onReAnalyze={onReAnalyze} reAnalyzing={reAnalyzing} t={t} />

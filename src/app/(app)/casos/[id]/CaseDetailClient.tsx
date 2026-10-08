@@ -45,6 +45,10 @@ interface CaseDetailClientProps {
   puedeTomarElControl: boolean;
   /** E24. Sin esto no se muestra «Devolver al agente». */
   puedeDevolverAlAgente: boolean;
+  /** Sólo admin. Sin esto no se muestra «Marcar como relevante». */
+  puedeMarcarRelevante?: boolean;
+  /** Lo que todavía falta, con su nombre. Con algo, dejar el caso listo pide una confirmación. */
+  faltantes?: string[];
 }
 
 type Aviso = [ClaveDelCliente, "success" | "info"];
@@ -61,6 +65,8 @@ export function CaseDetailClient({
   puedeCambiarEstado,
   puedeTomarElControl,
   puedeDevolverAlAgente,
+  puedeMarcarRelevante,
+  faltantes = [],
 }: CaseDetailClientProps) {
   const t = useT();
   const router = useRouter();
@@ -70,12 +76,15 @@ export function CaseDetailClient({
   const [showEscalate, setShowEscalate] = useState(false);
   const [showTomarElControl, setShowTomarElControl] = useState(false);
   const [showDevolver, setShowDevolver] = useState(false);
+  // El cuerpo del PATCH que espera la confirmación de dejarlo listo con faltantes.
+  const [showListo, setShowListo] = useState<Record<string, unknown> | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const [reAnalyzing, setReAnalyzing] = useState(false);
   const [marcando, setMarcando] = useState(false);
   const [reenviando, setReenviando] = useState(false);
 
-  const dialogOpen = showClose || showEscalate || showTomarElControl || showDevolver || transitioning;
+  const dialogOpen =
+    showClose || showEscalate || showTomarElControl || showDevolver || showListo !== null || transitioning;
 
   // Las acciones directas hacen lo mismo: pedir, avisar y refrescar. Cambian
   // la ruta, el aviso y qué error se reconoce.
@@ -149,8 +158,13 @@ export function CaseDetailClient({
     accion(setTransitioning, `/api/cases/${caseId}`,
       { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) },
       () => ["case.detail.confirmado", "success"], { 409: "close.errorFsm" });
-  const handleConfirmarListo = () => confirmarListo({ confirmar_listo: true });
-  const handleRevisadoListo = () => confirmarListo({ status: "listo_para_core", confirmar_listo: true });
+  // Con algo pendiente, el agente deja de pedirlo: antes de mandar el PATCH se confirma.
+  const pedirListo = (cuerpo: Record<string, unknown>) => {
+    if (faltantes.length > 0) setShowListo(cuerpo);
+    else confirmarListo(cuerpo);
+  };
+  const handleConfirmarListo = () => pedirListo({ confirmar_listo: true });
+  const handleRevisadoListo = () => pedirListo({ status: "listo_para_core", confirmar_listo: true });
 
   const handleReAnalyze = () =>
     accion(
@@ -159,6 +173,20 @@ export function CaseDetailClient({
       { method: "POST" },
       () => ["case.detail.reAnalyzeStarted", "success"],
       { 429: "case.detail.reAnalyzeRateLimit", 409: "close.errorFsm" }
+    );
+
+  // Un descartado que una persona rescata: el servidor lo re-analiza con `is_claim` en true.
+  const handleMarcarRelevante = () =>
+    accion(
+      setReAnalyzing,
+      `/api/cases/${caseId}/re-analyze`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ marcar_relevante: true }),
+      },
+      () => ["noRelevante.marcado", "success"],
+      { 409: "close.errorFsm", 403: "close.errorFsm", 429: "case.detail.reAnalyzeRateLimit" }
     );
 
   // Si entró algo después de `vistoEn`, el caso sigue marcado: se refresca para
@@ -264,6 +292,8 @@ export function CaseDetailClient({
           onTomarElControl={() => setShowTomarElControl(true)}
           puedeDevolverAlAgente={puedeDevolverAlAgente}
           onDevolverAlAgente={() => setShowDevolver(true)}
+          puedeMarcarRelevante={puedeMarcarRelevante}
+          onMarcarRelevante={handleMarcarRelevante}
         />
       </div>
 
@@ -308,6 +338,16 @@ export function CaseDetailClient({
           variante="devolver"
           onClose={() => setShowDevolver(false)}
           onConfirm={handleDevolverAlAgente}
+        />
+      )}
+
+      {/* Dejarlo listo con faltantes */}
+      {showListo && (
+        <TomarElControlDialog
+          variante="listo"
+          faltantes={faltantes}
+          onClose={() => setShowListo(null)}
+          onConfirm={() => confirmarListo(showListo)}
         />
       )}
 

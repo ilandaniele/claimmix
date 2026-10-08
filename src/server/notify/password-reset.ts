@@ -19,25 +19,36 @@
  * recuperación ES la credencial mientras dura: quien lo lee entra. Anotarlo en
  * un log lo deja en un lugar donde no vence y donde mira más gente que la
  * dueña de la cuenta.
+ *
+ * **El saludo no lleva nombre.** El nombre lo escribe quien administra la
+ * cuenta, y un mail de la plataforma con texto de un tercero es un mail de
+ * phishing con nuestro remitente.
  */
 
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
 
-import { inquilinoDeAltaNueva } from "@/lib/auth/alta-nueva";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { filaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
+import { getT, type Locale } from "@/lib/i18n";
+import { logger } from "@/lib/observability/logger";
+import { clientIpFromHeaders } from "@/lib/rate-limit/index";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
-import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { logger } from "@/lib/observability/logger";
+import { correoDeEnlace } from "./correos-de-alta";
+import {
+  enviarCorreoDelSistema,
+  remitenteDelSistema,
+  type CorreoDelSistema,
+  type ResultadoDeCorreo,
+} from "./remitente-sistema";
 
 export interface PasswordResetEmail {
   /** A quién. */
   email: string;
-  /** Cómo se llama, para no escribirle "Hola null". */
+  /** Better Auth lo pasa, pero no se usa: ver el saludo arriba. */
   name?: string | null;
   /** El id de Better Auth, con el que se averigua de qué aseguradora es. */
   userId: string;
@@ -45,146 +56,102 @@ export interface PasswordResetEmail {
   url: string;
   /** Cuánto dura, en minutos, para poder decírselo. */
   duraMinutos: number;
+  /** El pedido que originó el mail, si Better Auth lo tiene; sin él se lee de las cabeceras de la solicitud en curso. */
+  request?: Request;
 }
 
-function redactar(input: PasswordResetEmail, esAlta: boolean) {
-  const nombre = input.name?.trim().split(/\s+/)[0] ?? null;
-  const saludo = nombre ? `Hola ${nombre},` : "Hola,";
+type Envio = ResultadoDeCorreo | { enviado: false; motivo: "sin_casilla" };
 
-  if (esAlta) {
-    // La contraseña de una cuenta recién creada no la conoce nadie: el enlace
-    // es la única forma de entrar, así que no se le dice que la actual sigue sirviendo.
-    return {
-      subject: "Activar tu cuenta de ClaimMix",
-      text: [
-        saludo,
-        "",
-        "Alguien creó una cuenta de ClaimMix con esta dirección. Si fuiste vos,",
-        "abrí este enlace para elegir tu contraseña y entrar:",
-        "",
-        input.url,
-        "",
-        `El enlace vence en ${input.duraMinutos} minutos y sirve una sola vez.`,
-        "",
-        "Si no fuiste vos, no hace falta que hagas nada: la cuenta no se activa",
-        "hasta que alguien abre el enlace, y este vence solo.",
-      ].join("\n"),
-    };
+/**
+ * El camino de antes, para los inquilinos que no son de alta automática,
+ * mientras no haya remitente del sistema: sale por la casilla conectada de la
+ * aseguradora, que es la que ya usa el producto para hablar con sus asegurados.
+ * Así producción no se queda sin recuperación en el medio de la transición.
+ */
+async function porLaCasillaDelInquilino(
+  tenantId: string,
+  to: string,
+  correo: Omit<CorreoDelSistema, "to">
+): Promise<Envio> {
+  const account = await getGmailAccountForTenant(tenantId);
+  if (!account) {
+    logger.error({
+      tenant_id: tenantId,
+      nota: "Nadie puede recuperar su contraseña en esta aseguradora hasta que haya una casilla conectada.",
+    }, "password_reset.sin_casilla");
+    return { enviado: false, motivo: "sin_casilla" };
   }
 
-  return {
-    subject: "Recuperar el acceso a ClaimMix",
-    text: [
-      saludo,
-      "",
-      "Alguien pidió volver a entrar a tu cuenta de ClaimMix. Si fuiste vos,",
-      "abrí este enlace para poner una contraseña nueva:",
-      "",
-      input.url,
-      "",
-      `El enlace vence en ${input.duraMinutos} minutos y sirve una sola vez.`,
-      "",
-      "Si no fuiste vos, no hace falta que hagas nada: tu contraseña actual",
-      "sigue funcionando y este enlace vence solo. Si te llega esto varias",
-      "veces sin haberlo pedido, avisale a quien administra tu cuenta.",
-    ].join("\n"),
-  };
+  const result = await new GmailSender(account.refreshToken).send({
+    to,
+    from: account.email,
+    subject: correo.asunto,
+    textBody: correo.texto,
+  });
+  return isSendSuccess(result) ? { enviado: true } : { enviado: false, motivo: "no_salio" };
+}
+
+/** Quién pidió el enlace, para contar el cupo por dirección por IP. Nunca lanza: fuera de una solicitud no hay cabeceras. */
+async function ipDelPedido(request?: Request): Promise<string> {
+  try {
+    return clientIpFromHeaders(request ? request.headers : await headers());
+  } catch {
+    return "anonymous";
+  }
 }
 
 /**
  * Manda el enlace, si se puede.
  *
- * De qué casilla sale: la de la aseguradora de esa persona. Es la misma que ya
- * usa el producto para hablar con sus asegurados, así que no hay una segunda
- * configuración de correo que pueda estar mal y no notarse hasta que alguien
- * necesite entrar.
+ * De qué casilla sale: la de la plataforma (`remitente-sistema.ts`), con sus
+ * topes. Sin ella configurada, sólo los inquilinos que no son de alta
+ * automática siguen por su propia casilla; una cuenta sin perfil o de una
+ * prueba no recibe nada, y queda el log.
  */
 export async function sendPasswordResetEmail(
   input: PasswordResetEmail
 ): Promise<void> {
   try {
-    // sin-inquilino: ésta es la consulta que AVERIGUA de qué inquilino es. Es
-    // el mismo arranque que hace el login, y por el mismo motivo: todavía no
-    // hay contexto que fijar porque justamente lo estamos buscando.
-    const [perfil] = await db
-      .select({ tenant_id: users.tenant_id })
-      .from(users)
-      .where(eq(users.id, input.userId))
-      .limit(1);
+    const perfil = await filaDeUsuario(input.userId);
+    const locale: Locale = perfil?.locale === "en-US" ? "en-US" : "es-AR";
+    // Sin perfil es una cuenta de alta sin contraseña: el enlace la activa.
+    const correo = correoDeEnlace(getT(locale), perfil ? "recuperar" : "activar", input.url, input.duraMinutos);
+
+    const envio: Envio =
+      perfil && !perfil.autoalta && !remitenteDelSistema()
+        ? await porLaCasillaDelInquilino(perfil.tenant_id, input.email, correo)
+        : await enviarCorreoDelSistema(
+            { to: input.email, ...correo },
+            // Sin perfil el enlace activa una cuenta de alta, y es del cupo de las altas.
+            { tipo: perfil ? "recuperacion" : "alta", ip: await ipDelPedido(input.request) }
+          );
 
     /*
-     * El alta sin contraseña crea la cuenta SIN perfil: el perfil lo recibe quien
-     * abre este enlace (ver on-password-reset.ts). Si la dirección está habilitada
-     * para el alta, el mail sale por la casilla del inquilino por omisión, que es
-     * donde va a caer el perfil.
+     * Queda asentado igual, con `delivered: false`.
+     *
+     * El registro de auditoría es donde se mira cuando alguien pregunta qué
+     * pasó con una cuenta. «Pidió recuperar y no salió nada» es exactamente
+     * lo que hay que poder ver ahí; si sólo queda en los logs del servidor,
+     * la respuesta a esa pregunta es «no hay nada», que suena a que no pidió.
+     * Sin perfil no hay inquilino a quien anotárselo: queda el log.
      */
-    const tenantId = perfil?.tenant_id ?? (await inquilinoDeAltaNueva(input.email));
-
-    if (!tenantId) {
-      /*
-       * Cuenta sin perfil y sin alta habilitada: existe en Better Auth y no está
-       * atada a ninguna aseguradora. Pasa con quien se dio de alta antes de estar
-       * en la lista permitida.
-       *
-       * No hay casilla desde donde escribirle, y tampoco corresponde: no tiene
-       * acceso a nada que recuperar.
-       */
-      logger.warn({
-        // El id y no la dirección: esto es un registro.
-          user_id: input.userId,
-      }, "password_reset.sin_perfil");
-      return;
-    }
-
-    const account = await getGmailAccountForTenant(tenantId);
-    if (!account) {
-      logger.error({
-        tenant_id: tenantId,
-        nota: "Nadie puede recuperar su contraseña en esta aseguradora hasta que haya una casilla conectada.",
-      }, "password_reset.sin_casilla");
-      /*
-       * Queda asentado igual, con `delivered: false`.
-       *
-       * El registro de auditoría es donde se mira cuando alguien pregunta qué
-       * pasó con una cuenta. «Pidió recuperar y no salió nada» es exactamente
-       * lo que hay que poder ver ahí; si sólo queda en los logs del servidor,
-       * la respuesta a esa pregunta es «no hay nada», que suena a que no pidió.
-       */
+    if (perfil) {
       await writeAuditLog({
-        tenant_id: tenantId,
+        tenant_id: perfil.tenant_id,
         actor_id: null,
         event_type: AuditEvent.PASSWORD_RESET_REQUESTED,
         target_type: "user",
         target_id: input.userId,
-        payload: { delivered: false, motivo: "sin_casilla" },
+        // Ni la dirección ni el enlace: que se pidió, si salió y, si no, por qué.
+        payload: envio.enviado
+          ? { delivered: true }
+          : { delivered: false, motivo: envio.motivo },
       });
-      return;
     }
-
-    const { subject, text } = redactar(input, !perfil);
-    const sender = new GmailSender(account.refreshToken);
-    const result = await sender.send({
-      to: input.email,
-      from: account.email,
-      subject,
-      textBody: text,
-    });
-
-    const entregado = isSendSuccess(result);
-
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: null,
-      event_type: AuditEvent.PASSWORD_RESET_REQUESTED,
-      target_type: "user",
-      target_id: input.userId,
-      // Ni la dirección ni el enlace: que se pidió y si salió.
-      payload: { delivered: entregado },
-    });
 
     logger.info({
         user_id: input.userId,
-      }, entregado ? "password_reset.sent" : "password_reset.send_failed");
+      }, envio.enviado ? "password_reset.sent" : "password_reset.send_failed");
   } catch (err) {
     logger.error({
         error: err instanceof Error ? err.name : "UnknownError",

@@ -18,6 +18,7 @@
 5490000000001
 5490000000021
 5490000000099
+5490000999999
 
 # Números de prueba obviamente sintéticos, ya usados en tests.
 541112345678

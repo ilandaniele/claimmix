@@ -2118,10 +2118,11 @@ Vale anotarlos para que no vuelvan a la lista:
 
 #### Lo que NO se hizo, por otras razones
 
-- **`--config=auto` de semgrep** sigue bajándose las reglas de semgrep.dev en cada
-  corrida, y de paso le manda la URL del repositorio. Se pineó la HERRAMIENTA,
-  que es por donde se ejecuta código; fijar el conjunto de reglas pide
-  vendorearlo y cambia qué reglas corren.
+- **Las reglas de semgrep** se siguen bajando del registro en cada corrida. Se
+  pineó la HERRAMIENTA, que es por donde se ejecuta código, y después se cambió
+  `--config=auto` por `p/typescript`, `p/owasp-top-ten` y `p/secrets` con
+  `--metrics=off`, de modo que ya no le manda la URL del repositorio. Fijar el
+  conjunto de reglas pide vendorearlo y cambia qué reglas corren.
 - **Los CHECK que aceptan `'openai'`** en `tenant_ai_settings` se dejaron: son
   permisivos, no incorrectos, y apretarlos sobre datos vivos es otra
   conversación.
@@ -4198,8 +4199,10 @@ tomar o soltar un caso.
 **B10: vencimientos.** `src/core/case/plazos.ts`. El art. 56 de la Ley 17.418
 (el asegurador se pronuncia dentro de los 30 días de recibida la información
 completa) se ancla a `listo_para_core` y se rotula como orientativo; el art. 46
-(el asegurado denuncia dentro de los 3 días) sólo informa en la ficha si la
-denuncia llegó en término, no vence nada del analista. Además cada aseguradora
+(el asegurado denuncia dentro de los 3 días) sólo informa en la ficha cuántos
+días pasaron del hecho a la denuncia, como señal y no como decisión (ámbar al
+pasar los 3, nunca rojo); no vence nada del analista. La cobertura de la ficha
+también se rotula como orientativa. Además cada aseguradora
 puede definir plazos propios (`tenants.plazos`). Los días son corridos y el
 vencimiento cae al final del día argentino. La bandeja ordena y filtra por
 vencimiento (`vence_en`), la agenda agrupa los casos con plazo, y las insignias

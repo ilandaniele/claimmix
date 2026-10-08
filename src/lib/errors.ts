@@ -7,11 +7,11 @@
  * HTTP status code map:
  *   400  VALIDATION_FAILED
  *   401  MISSING_SESSION | INVALID_CREDENTIALS
- *   403  FORBIDDEN_ROLE | PLAN_REQUERIDO
+ *   403  FORBIDDEN_ROLE | PLAN_REQUERIDO | PLAN_SIN_ENTRENAMIENTO
  *   404  NOT_FOUND
  *   409  FSM_INVALID_TRANSITION | RESPUESTA_NO_PERMITIDA | CONFLICT
  *   413  ARCHIVO_DEMASIADO_GRANDE
- *   422  AI_OUTPUT_INVALID | ARCHIVO_NO_VALIDO
+ *   422  AI_OUTPUT_INVALID | ARCHIVO_NO_VALIDO | DOMINIO_NO_PERMITIDO
  *   429  RATE_LIMITED | AI_BUDGET_EXCEEDED
  *   500  INTERNAL_ERROR
  *   501  NOT_IMPLEMENTED
@@ -28,6 +28,7 @@ export const ErrorCode = {
   NOT_FOUND: "NOT_FOUND",
   FORBIDDEN_ROLE: "FORBIDDEN_ROLE",
   PLAN_REQUERIDO: "PLAN_REQUERIDO",
+  PLAN_SIN_ENTRENAMIENTO: "PLAN_SIN_ENTRENAMIENTO",
   VALIDATION_FAILED: "VALIDATION_FAILED",
   RATE_LIMITED: "RATE_LIMITED",
   AI_BUDGET_EXCEEDED: "AI_BUDGET_EXCEEDED",
@@ -41,6 +42,7 @@ export const ErrorCode = {
   IA_NO_DISPONIBLE: "IA_NO_DISPONIBLE",
   ARCHIVO_DEMASIADO_GRANDE: "ARCHIVO_DEMASIADO_GRANDE",
   ARCHIVO_NO_VALIDO: "ARCHIVO_NO_VALIDO",
+  DOMINIO_NO_PERMITIDO: "DOMINIO_NO_PERMITIDO",
   MIGRACION_PENDIENTE: "MIGRACION_PENDIENTE",
 } as const;
 
@@ -53,6 +55,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   NOT_FOUND: 404,
   FORBIDDEN_ROLE: 403,
   PLAN_REQUERIDO: 403,
+  PLAN_SIN_ENTRENAMIENTO: 403,
   VALIDATION_FAILED: 400,
   RATE_LIMITED: 429,
   AI_BUDGET_EXCEEDED: 429,
@@ -66,6 +69,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   IA_NO_DISPONIBLE: 503,
   ARCHIVO_DEMASIADO_GRANDE: 413,
   ARCHIVO_NO_VALIDO: 422,
+  DOMINIO_NO_PERMITIDO: 422,
   MIGRACION_PENDIENTE: 503,
 };
 
@@ -76,6 +80,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: "El recurso solicitado no existe.",
   FORBIDDEN_ROLE: "No tenés permisos para realizar esta acción.",
   PLAN_REQUERIDO: "Disponible con el Plan Pro.",
+  PLAN_SIN_ENTRENAMIENTO: "El ajuste fino no está disponible en este plan.",
   VALIDATION_FAILED: "Los datos enviados no son válidos.",
   RATE_LIMITED: "Demasiadas solicitudes. Esperá un momento.",
   AI_BUDGET_EXCEEDED: "Presupuesto de IA agotado para hoy.",
@@ -90,6 +95,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   IA_NO_DISPONIBLE: "El asistente no está disponible en este momento. Probá de nuevo en unos minutos.",
   ARCHIVO_DEMASIADO_GRANDE: "El archivo es demasiado grande.",
   ARCHIVO_NO_VALIDO: "El archivo no es del tipo esperado.",
+  DOMINIO_NO_PERMITIDO: "Durante la prueba sólo podés invitar a personas de tu propio dominio de correo.",
   MIGRACION_PENDIENTE: "Falta aplicar una migración de la base.",
 };
 

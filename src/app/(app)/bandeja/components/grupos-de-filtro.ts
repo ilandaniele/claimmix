@@ -31,6 +31,7 @@
 
 import type { ClaveDelCliente } from "@/lib/i18n";
 import { RAMOS_NATIVOS } from "@/core/case/ramos";
+import { claveDeTipo } from "@/lib/i18n/tipos-de-siniestro";
 
 export interface OpcionDeFiltro {
   /** Lo que va al parámetro de la URL. */
@@ -179,6 +180,17 @@ export const GRUPOS_DE_FILTRO: GrupoDeFiltro[] = [
 export interface TipoPropio {
   clave: string;
   nombre: string;
+}
+
+/** El nombre de un tipo en el idioma de la pantalla: el del código, el propio de la aseguradora, o la clave tal cual. */
+export function nombreDelTipo(
+  tipo: string | null,
+  t: (k: ClaveDelCliente) => string,
+  tiposPropios: readonly TipoPropio[]
+): string | null {
+  if (tipo === null) return null;
+  const clave = claveDeTipo(tipo);
+  return clave ? t(clave) : (tiposPropios.find((x) => x.clave === tipo)?.nombre ?? tipo);
 }
 
 /**

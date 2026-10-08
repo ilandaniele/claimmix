@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   enTenant: vi.fn(),
   motor: vi.fn(),
   presupuesto: vi.fn(),
+  soltar: vi.fn(),
   cupo: vi.fn(),
   consumo: vi.fn(),
   gemini: vi.fn(),
@@ -30,7 +31,11 @@ const m = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/data/scope", () => ({ enTenant: m.enTenant }));
 vi.mock("@/server/ai/provider", () => ({ resolveExtractionEngine: m.motor }));
-vi.mock("@/server/ai/budget", () => ({ checkBudget: m.presupuesto, registrarConsumoDelModelo: m.consumo }));
+vi.mock("@/server/ai/budget", () => ({
+  checkBudget: m.presupuesto,
+  registrarConsumoDelModelo: m.consumo,
+  soltarReserva: m.soltar,
+}));
 vi.mock("@/server/ai/gemini-extractor", () => ({ callGemini: m.gemini }));
 vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: m.cupo,
@@ -254,6 +259,27 @@ describe("la clasificación", () => {
     expect(m.cupo).toHaveBeenCalledWith(`clasificacion-tardia:${TENANT_ID}:${CASE_ID}`, expect.anything());
     expect(m.gemini).not.toHaveBeenCalled();
     expect(m.avisar).toHaveBeenCalledWith(expect.objectContaining({ tipo: null, resumen: null }));
+  });
+
+  it("una prueba que se frena sin llamar al modelo devuelve lo que reservó de su cupo diario", async () => {
+    const reserva = { clave: "ia:prueba:t", ventanas: [123] };
+    m.presupuesto.mockResolvedValue({ exceeded: false, reserva });
+    m.cupo.mockResolvedValue({ allowed: false });
+
+    await atender();
+
+    expect(m.soltar).toHaveBeenCalledTimes(1);
+    expect(m.soltar).toHaveBeenCalledWith(reserva);
+  });
+
+  it("si llama al modelo, la reserva se gasta y no se devuelve", async () => {
+    m.presupuesto.mockResolvedValue({ exceeded: false, reserva: { clave: "ia:prueba:t", ventanas: [123] } });
+    respuesta({ tipo: "consulta_estado", resumen: "Pregunta cómo va." });
+
+    await atender();
+
+    expect(m.gemini).toHaveBeenCalled();
+    expect(m.soltar).not.toHaveBeenCalled();
   });
 
   it("si no se puede contar el cupo, tampoco llama al modelo", async () => {

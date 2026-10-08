@@ -70,8 +70,24 @@ process.env.DATABASE_URL = destino;
 process.env.DATABASE_URL_APP = destino;
 process.env.BETTER_AUTH_SECRET ??= "sembrado-".padEnd(40, "x");
 
+/*
+ * En CI no hay contraseña por omisión.
+ *
+ * `Analyst123!` está escrita en este repositorio, y la base de ensayo también
+ * la usa el scope Preview de Vercel. Si faltara el secreto, el sembrado
+ * dejaría las cuentas de ensayo con una clave pública y el job seguiría verde.
+ * GitHub entrega un secreto ausente como cadena vacía, por eso se mira `!valor`.
+ */
+const clavePara = (variable: string, porOmision: string) => {
+  const valor = process.env[variable];
+  if (process.env.CI === "true" && !valor) {
+    throw new Error(`Falta ${variable}: en CI no hay contraseña por omisión.`);
+  }
+  return valor ?? porOmision;
+};
+
 const CORREO = process.env.INTEGRATION_TEST_EMAIL ?? "lucia@seguros-del-sur.com.ar";
-const CLAVE = process.env.INTEGRATION_TEST_PASSWORD ?? "Analyst123!";
+const CLAVE = clavePara("INTEGRATION_TEST_PASSWORD", "Analyst123!");
 const INQUILINO = "10000000-0000-0000-0000-000000000001";
 
 /*
@@ -107,7 +123,7 @@ const ADMIN_CLAVE = process.env.INTEGRATION_ADMIN_PASSWORD;
  * Se arregla el ensayo sin aflojarle al producto.
  */
 const LOGIN_CORREO = process.env.INTEGRATION_LOGIN_EMAIL ?? "sofia@seguros-del-sur.com.ar";
-const LOGIN_CLAVE = process.env.INTEGRATION_LOGIN_PASSWORD ?? CLAVE;
+const LOGIN_CLAVE = clavePara("INTEGRATION_LOGIN_PASSWORD", CLAVE);
 
 /*
  * Y una cuarta, para que los e2e no compartan cuenta con los de integracion.
@@ -121,7 +137,7 @@ const LOGIN_CLAVE = process.env.INTEGRATION_LOGIN_PASSWORD ?? CLAVE;
  * Una cuenta por job y el cupo deja de ser compartido.
  */
 const E2E_CORREO = process.env.INTEGRATION_E2E_EMAIL ?? "paula@seguros-del-sur.com.ar";
-const E2E_CLAVE = process.env.INTEGRATION_E2E_PASSWORD ?? CLAVE;
+const E2E_CLAVE = clavePara("INTEGRATION_E2E_PASSWORD", CLAVE);
 
 /*
  * Los dos casos que piden los e2e de la conversación, con id fijo.

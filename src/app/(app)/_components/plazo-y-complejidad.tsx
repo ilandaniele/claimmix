@@ -1,9 +1,9 @@
 /**
  * Las insignias del equipo para B10 y B13: cuánto falta para el vencimiento
- * del caso, qué tan complejo es y —sólo en la ficha— si la denuncia entró en
- * término. Las usan la bandeja y la ficha, y son texto con color, no píldoras:
- * en una tabla de doce columnas otra píldora más compite con el estado, que es
- * la que tiene que leerse primero.
+ * del caso, qué tan complejo es y —sólo en la ficha— cuántos días pasaron del
+ * hecho a la denuncia. Las usan la bandeja y la ficha, y son texto con color,
+ * no píldoras: en una tabla de doce columnas otra píldora más compite con el
+ * estado, que es la que tiene que leerse primero.
  *
  * Nada de esto sale al asegurado: la pantalla es del equipo y los dos datos no
  * viajan por el mensaje ni por el agente.
@@ -74,19 +74,20 @@ export function InsigniaDeComplejidad({ puntaje }: { puntaje: number | null }) {
 }
 
 /**
- * Si el asegurado denunció dentro de los 3 días del art. 46 (B10). Sin una
- * fecha del hecho que sirva no hay opinión: `resultado` llega `null` y no se
- * pinta nada, en vez de un «en término» que nadie comprobó.
+ * Los días del hecho a la denuncia (B10), como señal para revisar y no como
+ * veredicto: pasados los 3 del art. 46 se pinta en ámbar, nunca en rojo, porque
+ * el plazo admite excepciones y lo evalúa una persona. Sin una fecha del hecho
+ * que sirva `resultado` llega `null` y no se pinta nada.
  */
-export function InsigniaDeDenuncia({ resultado }: { resultado: { enTermino: boolean; dias: number } | null }) {
+export function InsigniaDeDenuncia({ resultado }: { resultado: { dias: number; superaArt46: boolean } | null }) {
   const { t } = useLocale();
   if (resultado === null) return null;
   return (
     <span
-      className={`text-xs whitespace-nowrap ${resultado.enTermino ? "text-slate-500" : "text-red-600 font-medium"}`}
+      className={`text-xs whitespace-nowrap ${resultado.superaArt46 ? "text-amber-600" : "text-slate-500"}`}
       title={t("denuncia.ayuda")}
     >
-      {t(resultado.enTermino ? "denuncia.enTermino" : "denuncia.fueraDeTermino").replace("{n}", String(resultado.dias))}
+      {t(resultado.superaArt46 ? "denuncia.revisar" : "denuncia.dias").replace("{n}", String(resultado.dias))}
     </span>
   );
 }

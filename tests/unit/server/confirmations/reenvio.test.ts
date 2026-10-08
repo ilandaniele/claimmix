@@ -17,6 +17,8 @@ const {
   mockMessengerFor,
   mockWriteAuditLog,
   mockEstadoDePlantilla,
+  mockQuedaCupo,
+  mockCredenciales,
 } = vi.hoisted(() => ({
   enTenantMock: vi.fn(),
   enTenantVariasMock: vi.fn(),
@@ -24,6 +26,8 @@ const {
   mockMessengerFor: vi.fn(),
   mockWriteAuditLog: vi.fn(),
   mockEstadoDePlantilla: vi.fn(),
+  mockQuedaCupo: vi.fn(),
+  mockCredenciales: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -47,6 +51,11 @@ vi.mock("@/server/confirmations/messenger", () => ({
 
 vi.mock("@/server/whatsapp/cloud-api", () => ({
   estadoDePlantilla: mockEstadoDePlantilla,
+  quedaCupoDePlantilla: mockQuedaCupo,
+}));
+
+vi.mock("@/server/whatsapp/numeros", () => ({
+  credencialesWhatsApp: mockCredenciales,
 }));
 
 vi.mock("@/lib/audit/log", async (importOriginal) => ({
@@ -67,6 +76,15 @@ const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const USER_ID = "20000000-0000-0000-0000-000000000001";
 const LEIDO = "2026-09-01T00:00:00.000Z";
+const CRED = {
+  accessToken: "test-token",
+  phoneNumberId: "123456",
+  wabaId: "654321",
+  tenantId: TENANT_ID,
+  autoalta: false,
+  enPrueba: false,
+  vencida: false,
+};
 
 const CTX = {
   user: { id: USER_ID },
@@ -135,6 +153,8 @@ beforeEach(() => {
   mockMessengerFor.mockReturnValue({ send: mockSend });
   mockSend.mockResolvedValue(undefined);
   mockWriteAuditLog.mockResolvedValue(undefined);
+  mockCredenciales.mockResolvedValue(CRED);
+  mockQuedaCupo.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -278,6 +298,28 @@ describe("reenviarPedido — WhatsApp fuera de la ventana", () => {
     );
   });
 
+  it("le pregunta a Meta con la credencial del inquilino del caso", async () => {
+    mockEstadoDePlantilla.mockResolvedValue("aprobada");
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+    configurarEscritura([{ id: CASE_ID }]);
+
+    await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(mockCredenciales).toHaveBeenCalledWith(TENANT_ID);
+    expect(mockEstadoDePlantilla).toHaveBeenCalledWith("reabrir_denuncia", expect.any(String), CRED);
+  });
+
+  it("sin número conectado no le pregunta a Meta: el motivo sigue siendo ventana_cerrada", async () => {
+    mockCredenciales.mockResolvedValue(null);
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: false, motivo: "ventana_cerrada" });
+    expect(mockEstadoDePlantilla).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
   it("con la plantilla pendiente, no manda: el motivo es plantilla_sin_aprobar", async () => {
     mockEstadoDePlantilla.mockResolvedValue("pendiente");
     configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
@@ -296,6 +338,68 @@ describe("reenviarPedido — WhatsApp fuera de la ventana", () => {
 
     expect(r).toEqual({ ok: false, motivo: "ventana_cerrada" });
     expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("con la prueba vencida no manda ni le pregunta a Meta: el motivo es tope_de_plantillas", async () => {
+    mockCredenciales.mockResolvedValue({ ...CRED, autoalta: true, enPrueba: true, vencida: true });
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: false, motivo: "tope_de_plantillas" });
+    expect(mockEstadoDePlantilla).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockWriteAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("con la prueba en curso y lugar en el día, sigue por la plantilla", async () => {
+    mockCredenciales.mockResolvedValue({ ...CRED, autoalta: true, enPrueba: true, vencida: false });
+    mockEstadoDePlantilla.mockResolvedValue("aprobada");
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+    configurarEscritura([{ id: CASE_ID }]);
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: true, claves: ["full_name"], reabierto: false });
+    expect(mockQuedaCupo).toHaveBeenCalledWith(TENANT_ID);
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ porPlantilla: true }) })
+    );
+  });
+
+  it("con la prueba en curso y el tope del día gastado, no reabre, no manda y no audita: tope_de_plantillas", async () => {
+    mockCredenciales.mockResolvedValue({ ...CRED, autoalta: true, enPrueba: true, vencida: false });
+    mockEstadoDePlantilla.mockResolvedValue("aprobada");
+    mockQuedaCupo.mockResolvedValue(false);
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+    configurarEscritura([{ id: CASE_ID }]);
+
+    const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(r).toEqual({ ok: false, motivo: "tope_de_plantillas" });
+    expect(db.update).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockWriteAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("quien ya paga no mira el cupo de las pruebas", async () => {
+    mockEstadoDePlantilla.mockResolvedValue("aprobada");
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+    configurarEscritura([{ id: CASE_ID }]);
+
+    await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(mockQuedaCupo).not.toHaveBeenCalled();
+  });
+
+  it("con la ventana abierta una prueba tampoco mira el cupo: no sale plantilla", async () => {
+    mockCredenciales.mockResolvedValue({ ...CRED, autoalta: true, enPrueba: true, vencida: false });
+    configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: new Date().toISOString() }));
+    configurarEscritura([{ id: CASE_ID }]);
+
+    await reenviarPedido(CTX as never, CASE_ID, false);
+
+    expect(mockQuedaCupo).not.toHaveBeenCalled();
   });
 
   it("si Meta no contesta, el motivo es plantilla_sin_respuesta, no ventana_cerrada", async () => {

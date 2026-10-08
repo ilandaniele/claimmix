@@ -9,7 +9,8 @@
  * `enTenantVarias`— y no con SQL escrito para la ocasión. Una prueba que no pasa
  * por el mismo camino que el código no prueba el código.
  *
- * Necesita DATABASE_URL_APP y dos inquilinos con datos. Sólo lee, salvo las
+ * Necesita DATABASE_URL_APP, DATABASE_URL (el dueño, en la misma base, para listar
+ * los inquilinos) y dos inquilinos con datos. Sólo lee, salvo las
  * secciones 5, 6 y 7, que escriben: un caso marcador (la 5), un uso de IA
  * marcador con un usuario descartable (la 6) y un inquilino descartable con su
  * SSO, su cola de purga y sus casos (la 7). Por eso corren sólo en CI (contra el
@@ -81,15 +82,12 @@ if (!url) {
 function explicar(e: unknown): never {
   const msg = e instanceof Error ? e.message : String(e);
   if (/password authentication failed/i.test(msg)) {
-    console.error("\n✗ La contraseña de DATABASE_URL_APP no autentica.");
+    console.error("\n✗ La contraseña de DATABASE_URL (el rol dueño, con el que se listan los inquilinos) no autentica.");
     console.error("");
     console.error("  El rol existe; lo que no sirve es la contraseña guardada.");
     console.error("  Suele pasar después de rotarla en un lado y no en el otro.");
-    console.error("");
-    console.error("  1. pnpm rol-app --rotar        genera una nueva y la imprime");
-    console.error("  2. pegala en .env.local");
-    console.error("  3. vercel env rm DATABASE_URL_APP production");
-    console.error("     vercel env add DATABASE_URL_APP production");
+    console.error("  La de DATABASE_URL_APP, si falla, sale más abajo como error sin atrapar:");
+    console.error("  se rota con `pnpm rol-app --rotar`.");
     process.exit(2);
   }
   console.error(`\n✗ No se pudo leer la base (${resumenDe(e)}).`);
@@ -129,9 +127,16 @@ console.log("═".repeat(70));
 console.log("CAPA DE DATOS — ¿usa bien el aislamiento que la base ofrece?");
 console.log("═".repeat(70));
 
-// Los inquilinos se leen con una conexión aparte y sin contexto, porque la capa
-// —correctamente— no permite listar inquilinos: no son de nadie.
-const pool = new Pool({ connectionString: url });
+// Los inquilinos se leen con el rol dueño, aparte y sin contexto: la capa
+// —correctamente— no permite listar inquilinos (no son de nadie), y desde la 0048
+// `tenants` tiene RLS forzado, así que el rol de la app, sin contexto, no ve ni
+// una fila. Sólo lee, pero sólo si es la misma base: otro endpoint listaría
+// inquilinos que la app no tiene.
+if (!hosts[0] || endpointDe(hosts[0]) !== endpointDe(hosts[1])) {
+  console.error("✗ Para listar los inquilinos hace falta DATABASE_URL (el rol dueño) en la misma base que DATABASE_URL_APP.");
+  process.exit(2);
+}
+const pool = new Pool({ connectionString: process.env.DATABASE_URL?.trim() });
 let inquilinos: Array<{ id: string; name: string }> = [];
 try {
   inquilinos = (

@@ -22,7 +22,7 @@
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 
-import { getT } from "@/lib/i18n";
+import { getT, type ClaveDelServidor } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 
 import { signInSso } from "./actions";
@@ -38,32 +38,43 @@ export const metadata = {
  * Faltaba entero: la pantalla leía `aviso` y nunca `error`, así que un fallo de
  * Google terminaba redirigiendo a `/login?error=…` y se veía un formulario
  * limpio, sin una palabra. Desde afuera eso es «apreté y no pasó nada».
+ *
+ * Lista cerrada: cada código tiene su texto en los dos idiomas
+ * (`login.errores.<código>`), y cualquier otro cae en el genérico. Better Auth
+ * manda además `error_description` con un texto en inglés que no se muestra
+ * nunca: dice cosas que la persona no tiene por qué leer.
+ *
+ * `registro_cerrado` y `unable_to_create_user` no dicen POR QUÉ se negó un alta
+ * y no nombran el SSO. El SSO sólo aparece en los tres códigos `sso_*`, que
+ * llegan cuando el dominio ya es de una empresa que lo exige.
  */
-export const ERRORES: Record<string, string> = {
-  google_signin_failed:
-    "No pudimos empezar el ingreso con Google. Probá de nuevo o entrá con tu contraseña.",
-  auth_callback_failed:
-    "Google nos devolvió, pero no pudimos completar el ingreso. Entrá con tu contraseña y escribinos si sigue pasando.",
-  account_not_linked:
-    "Ese correo ya tiene una cuenta con contraseña. Entrá con tu contraseña y, una vez adentro, vinculá Google desde Configuración — después el botón te va a funcionar.",
-  /*
-   * Better Auth lo manda cuando el gancho `user.create.before` niega el alta por
-   * Google: el correo no está habilitado o su dominio exige el SSO. Un mismo texto
-   * para los dos, sin decir cuál, y sin mandar a la contraseña a quien no tiene una.
-   */
-  unable_to_create_user:
-    "No pudimos crear una cuenta con ese correo. Si tu empresa usa SSO, entrá con «Entrar con el SSO de mi empresa»; si no, escribinos y lo vemos.",
-  // Del SSO de la empresa (B19): el texto dice qué hacer, no por qué falló por dentro.
-  sso_requerido:
-    "Tu empresa pide entrar con su SSO. Usá «Entrar con el SSO de mi empresa» e ingresá tu correo de la empresa.",
-  sso_otro_inquilino:
-    "Ese correo ya pertenece a otra cuenta de ClaimMix, así que no pudimos darte acceso por acá. Escribinos si creés que es un error.",
-  sso_fallo:
-    "No pudimos completar el ingreso con el SSO de tu empresa. Revisá que el correo sea el de la empresa y probá de nuevo en un rato, o entrá con tu contraseña.",
-  // Google no probó el correo (gancho `user.validateUserInfo`): se le dice qué hacer, no por qué.
-  email_no_verificado:
-    "Google no tiene verificado ese correo, así que no podemos usarlo para entrar. Verificalo en tu cuenta de Google y probá de nuevo, o entrá con tu contraseña si tenés una.",
-};
+export const CODIGOS_DE_ERROR = [
+  "registro_cerrado",
+  "sso_requerido",
+  "sso_otro_inquilino",
+  "sso_fallo",
+  "alta_cerrada",
+  "demasiados_intentos",
+  "email_no_verificado",
+  "invitacion_vencida",
+  "google_signin_failed",
+  "auth_callback_failed",
+  "account_not_linked",
+  "unable_to_create_user",
+] as const;
+
+/** Los avisos que la pantalla sabe decir (`?aviso=`), cada uno con su texto. */
+const AVISOS = {
+  revisa_tu_correo: "login.aviso.revisaTuCorreo",
+  ya_tenes_cuenta: "login.aviso.yaTenesCuenta",
+} as const;
+
+/** La clave del texto de un código; uno que no está en la lista da el genérico. */
+export function claveDeError(codigo: string): ClaveDelServidor {
+  return (CODIGOS_DE_ERROR as readonly string[]).includes(codigo)
+    ? (`login.errores.${codigo as (typeof CODIGOS_DE_ERROR)[number]}` as const)
+    : "login.errores.generico";
+}
 
 /**
  * El código de error, tolerando que venga repetido.
@@ -90,10 +101,7 @@ export default async function LoginPage({
   const locale = await getServerLocale();
   const t = getT(locale);
   const codigo = codigoDeError(error);
-  const mensajeError = codigo
-    ? (ERRORES[codigo] ??
-       "No pudimos completar el ingreso. Entrá con tu contraseña y escribinos si sigue pasando.")
-    : null;
+  const mensajeError = codigo ? t(claveDeError(codigo)) : null;
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-slate-50 px-4 py-10">
@@ -126,13 +134,13 @@ export default async function LoginPage({
           )}
 
           {/* El alta no abre sesión: manda el enlace y acá se avisa. */}
-          {aviso === "revisa_tu_correo" && (
+          {aviso && Object.hasOwn(AVISOS, aviso) && (
             <p
               role="status"
               lang={locale}
               className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600"
             >
-              {t("login.aviso.revisaTuCorreo")}
+              {t(AVISOS[aviso as keyof typeof AVISOS])}
             </p>
           )}
 

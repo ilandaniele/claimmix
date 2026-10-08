@@ -15,6 +15,7 @@ import type { RoleContext } from "@/lib/auth/require-role";
 import { estadoDeRespuesta, type MotivoSinRespuesta } from "@/core/whatsapp/puede-responder";
 import { PLANTILLA_RESPUESTA_HUMANA } from "@/core/whatsapp/plantillas";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
+import { avisarSinNumero, credencialesWhatsApp } from "@/server/whatsapp/numeros";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 
@@ -108,8 +109,14 @@ export async function responderPorWhatsApp(
   } else if (!to) {
     status = "failed";
   } else {
-    const res = await sendWhatsAppText(to, texto);
-    status = res.ok ? "sent" : "failed";
+    const cred = await credencialesWhatsApp(tenantCtx.tenantId);
+    if (cred) {
+      const res = await sendWhatsAppText(to, texto, cred);
+      status = res.ok ? "sent" : "failed";
+    } else {
+      avisarSinNumero(tenantCtx.tenantId, "respuesta_humana");
+      status = "failed";
+    }
   }
 
   if (status === "failed") {

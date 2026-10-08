@@ -14,14 +14,23 @@
  *   2. Cobertura: cuántas tablas con tenant_id tienen RLS, FORCE y política.
  *   3. La prueba de verdad: con el contexto de una aseguradora, ¿se pueden ver
  *      filas de otra? Y sin contexto, ¿se ve algo?
+ *   4. `tenants` y la función que da de alta (0048): cada aseguradora ve y
+ *      toca sólo su fila, y sólo la configuración.
  *
- * Sólo lee. No escribe, no borra, no cambia configuración.
+ * No deja nada escrito. Lo único que intenta escribir va dentro de una
+ * transacción que se deshace, y lo que se prueba con el rol dueño no corre en
+ * la base viva. No borra, no cambia configuración.
  *
  * **Contra qué rol.** Por omisión audita `DATABASE_URL_APP`, que es el rol con
  * el que la aplicación consulta de verdad. Auditar `DATABASE_URL` no sirve:
  * `neondb_owner` es dueño de las tablas y tiene BYPASSRLS por diseño —corre las
  * migraciones—, así que este chequeo siempre daría rojo y el rojo no querría
  * decir nada. La pregunta "¿la base separa?" es sobre el rol restringido.
+ *
+ * **Los inquilinos se listan con DATABASE_URL.** `tenants` tiene RLS: con el
+ * rol de la app y sin contexto no devuelve ninguna fila, así que de ahí no se
+ * puede sacar con qué cruzar. DATABASE_URL tiene que apuntar al mismo
+ * endpoint que el rol de la app; si no, esas pruebas quedan «sin probar».
  *
  * Uso:
  *   pnpm tenancy                    contra DATABASE_URL_APP
@@ -32,8 +41,10 @@
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
+import { randomUUID } from "node:crypto";
+
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { resumenDe, taparEnElLog } from "../tests/e2e/base-de-ensayo";
+import { HOST_DE_PRODUCCION, hostDe, resumenDe, taparEnElLog } from "../tests/e2e/base-de-ensayo";
 
 // Lo que se escapa sin atrapar sale con el mensaje crudo, que puede traer la
 // cadena con la contraseña: al log va sólo el resumen.
@@ -73,6 +84,12 @@ const mal = (t: string) => console.log(`   ✗ ${t}`);
 const nota = (t: string) => console.log(`     ${t}`);
 
 const pool = new Pool({ connectionString: url });
+
+// El rol dueño sólo sirve si es la MISMA base: otro endpoint listaría inquilinos
+// que el rol de la app no tiene. `-pooler` es el mismo endpoint por otra puerta.
+const urlDueno = process.env.DATABASE_URL?.trim();
+const endpointDe = (cadena: string) => hostDe(cadena).replace("-pooler", "");
+const poolDueno = urlDueno && endpointDe(urlDueno) === endpointDe(url) ? new Pool({ connectionString: urlDueno }) : null;
 const problemas: string[] = [];
 // Separado a propósito de `problemas`: «no se pudo probar» no es lo mismo que
 // «falló». Meterlos en la misma bolsa hace que el chequeo anuncie «la base no
@@ -87,6 +104,27 @@ try {
     console.log("═".repeat(70));
     console.log("TENENCIA — ¿separa la base, o sólo el código?");
     console.log("═".repeat(70));
+
+    // Una transacción con el inquilino puesto, siempre deshecha.
+    const enContexto = async <T,>(tenant: string, hacer: () => Promise<T>): Promise<T> => {
+      await cx.query("BEGIN");
+      try {
+        await cx.query("SELECT set_config('claimmix.tenant_id', $1, true)", [tenant]);
+        return await hacer();
+      } finally {
+        await cx.query("ROLLBACK");
+      }
+    };
+
+    // Lo mismo sin poner ningún inquilino.
+    const sinContexto = async <T,>(hacer: () => Promise<T>): Promise<T> => {
+      await cx.query("BEGIN");
+      try {
+        return await hacer();
+      } finally {
+        await cx.query("ROLLBACK");
+      }
+    };
 
     // ── 1. El rol ───────────────────────────────────────────────────────────
     titulo("El rol con el que se conecta la aplicación");
@@ -190,6 +228,29 @@ try {
     // ── 3. La prueba de verdad ──────────────────────────────────────────────
     titulo("La prueba cruzada: dos aseguradoras, una consulta");
 
+    async function listarInquilinos(): Promise<Array<{ id: string; name: string }> | null> {
+      if (!poolDueno) return null;
+      const d = await poolDueno.connect();
+      try {
+        const salta = (
+          await d.query(`SELECT (rolbypassrls OR rolsuper) AS salta FROM pg_roles WHERE rolname = current_user`)
+        ).rows[0]?.salta;
+        if (!salta) return null;
+        // Sin el inquilino efímero del pen test (`--pared-propia`): corre al mismo
+        // tiempo contra la misma base, o quedó sin borrar, y no tiene filas en
+        // ninguna tabla. Elegido como segundo, la prueba sale "no concluyente".
+        return (
+          await d.query(
+            `SELECT id::text AS id, name FROM tenants WHERE name NOT LIKE 'pentest-pared-%' ORDER BY created_at LIMIT 2`
+          )
+        ).rows.map(
+          (t: { id: string; name: string }) => ({ ...t, name: t.name?.replace(/[\r\n]+/g, " ") })
+        );
+      } finally {
+        d.release();
+      }
+    }
+
     // Con qué tabla se cruza.
     //
     // `cases` es la que más significa, pero sólo sirve si dos inquilinos tienen
@@ -201,27 +262,22 @@ try {
     // Esto se hace con el rol que esté probándose. Si ese rol obedece RLS y no
     // hay contexto puesto, no verá nada y el recuento dará uno: por eso la
     // búsqueda corre con el contexto de cada inquilino, más abajo.
-    const inquilinos = (
-      await cx.query(`SELECT id::text AS id, name FROM tenants ORDER BY created_at LIMIT 2`)
-    ).rows.map((t: { id: string; name: string }) => ({ ...t, name: t.name?.replace(/[\r\n]+/g, " ") }));
+    //
+    // La lista de inquilinos, en cambio, va con el rol dueño: `tenants` tiene RLS
+    // desde la 0048 y, sin contexto, el rol de la app ya no ve ni una fila.
+    const inquilinos = await listarInquilinos();
     // En CI los nombres de los inquilinos se tapan en el log del job, por si el
     // ensayo se siembra algún día desde datos reales.
-    taparEnElLog(inquilinos.map((t) => t.name));
+    taparEnElLog((inquilinos ?? []).map((t) => t.name));
 
-    if (inquilinos.length < 2) {
+    if (inquilinos === null) {
+      mal("no se pudo listar los inquilinos: falta DATABASE_URL con el rol dueño, en el mismo endpoint");
+      nota("Con el rol de la app, sin contexto, `tenants` no devuelve nada: no hay con qué cruzar.");
+      sinProbar.push("la prueba cruzada y la de tenants: DATABASE_URL no está o apunta a otro endpoint");
+    } else if (inquilinos.length < 2) {
       nota("Hay menos de dos inquilinos: no se puede cruzar nada. Se salta.");
     } else {
       const [a, b] = inquilinos;
-
-      const enContexto = async <T,>(tenant: string, hacer: () => Promise<T>): Promise<T> => {
-        await cx.query("BEGIN");
-        try {
-          await cx.query("SELECT set_config('claimmix.tenant_id', $1, true)", [tenant]);
-          return await hacer();
-        } finally {
-          await cx.query("ROLLBACK");
-        }
-      };
 
       const cuantasDe = (tabla: string, tenant: string) =>
         enContexto(tenant, async () => {
@@ -314,16 +370,180 @@ try {
         bien(`sin contexto: 0 filas — olvidarse el contexto no filtra nada`);
       }
     }
+
+    // ── 4. tenants y la función de alta (0048) ──────────────────────────────
+    //
+    // Todo con el rol de la app y dentro de una transacción que se deshace.
+    // Las escrituras que NO deben pasar se arman de modo que, si pasaran, no
+    // toquen ninguna fila. La función se prueba hasta donde la lleva ese rol: con
+    // un id distinto del contexto tira 42501, y con un usuario que no existe
+    // contesta 'no_verificado' sin insertar nada. Que el rol de la app pueda
+    // ejecutarla lo mira `pnpm permisos`.
+    titulo("tenants: cada aseguradora ve y toca sólo lo suyo");
+
+    if (!inquilinos?.length) {
+      nota("No hay inquilinos que listar. Se salta.");
+    } else {
+      const [a, b] = inquilinos;
+
+      const nSinCtx = await sinContexto(
+        async () => (await cx.query(`SELECT count(*)::int AS n FROM tenants`)).rows[0].n as number
+      );
+      if (nSinCtx > 0) {
+        mal(`sin contexto se ven ${nSinCtx} inquilino(s)`);
+        problemas.push("sin contexto se ven los inquilinos");
+      } else bien("sin contexto: 0 inquilinos");
+
+      const vistos = await enContexto(a.id, async () =>
+        (await cx.query(`SELECT id::text AS id FROM tenants`)).rows.map((r: { id: string }) => r.id)
+      );
+      if (!vistos.includes(a.id)) {
+        mal("con su contexto la aplicación no ve su propio inquilino");
+        problemas.push("la política de tenants deja afuera al propio inquilino");
+      } else if (vistos.some((id) => id !== a.id)) {
+        mal(`con su contexto se ven ${vistos.length} inquilinos, no uno`);
+        problemas.push("una aseguradora ve la fila de otra en tenants");
+      } else if (b) {
+        bien("con su contexto: sólo la propia");
+      } else {
+        bien("con su contexto: la propia (hay un solo inquilino: lo ajeno no se puede demostrar)");
+      }
+
+      const LLAMADA = `SELECT public.claimmix_crear_inquilino($1::uuid, $2::uuid, 'Empresa de prueba'::text, '+5491100000000'::text, 30, $3::integer) AS r`;
+
+      // Una sentencia, en el contexto de `tenant`, con lo que contestó la base.
+      const intentar = (tenant: string, sentencia: string, params: unknown[] = []) =>
+        enContexto(tenant, async () => {
+          try {
+            const r = await cx.query(sentencia, params);
+            return { ok: true as const, filas: r.rowCount ?? 0, devuelve: r.rows as Array<Record<string, unknown>> };
+          } catch (e) {
+            return { ok: false as const, codigo: (e as { code?: string }).code ?? "?" };
+          }
+        });
+
+      const denegado = async (que: string, motivo: string, tenant: string, sentencia: string, params: unknown[] = []) => {
+        const r = await intentar(tenant, sentencia, params);
+        if (!r.ok && r.codigo === "42501") bien(`${que}: denegado (42501)`);
+        else {
+          mal(`${que}: ${r.ok ? "la base lo dejó pasar" : `falló con ${r.codigo}, no con 42501`}`);
+          problemas.push(motivo);
+        }
+      };
+
+      await denegado(
+        "cambiar el plan",
+        "la app puede cambiar el plan de un inquilino",
+        a.id,
+        `UPDATE tenants SET plan = plan WHERE id = $1`,
+        [a.id]
+      );
+      await denegado(
+        "crear un inquilino con INSERT",
+        "la app puede insertar en tenants",
+        a.id,
+        `INSERT INTO tenants (name) SELECT 'Prueba de tenencia' WHERE false`
+      );
+
+      const config = await intentar(
+        a.id,
+        `UPDATE tenants SET recordatorio_horas = recordatorio_horas WHERE id = $1`,
+        [a.id]
+      );
+      if (config.ok && config.filas === 1) bien("editar su configuración: permitido");
+      else {
+        mal(`editar su configuración: ${config.ok ? `tocó ${config.filas} fila(s)` : `falló con ${config.codigo}`}`);
+        problemas.push("la app no puede editar la configuración de su propio inquilino");
+      }
+
+      if (b) {
+        const ajena = await intentar(
+          a.id,
+          `UPDATE tenants SET recordatorio_horas = recordatorio_horas WHERE id = $1`,
+          [b.id]
+        );
+        if (ajena.ok && ajena.filas === 0) bien("editar la configuración de otro: 0 filas");
+        else {
+          mal(`editar la configuración de otro: ${ajena.ok ? `tocó ${ajena.filas} fila(s)` : `falló con ${ajena.codigo}`}`);
+          problemas.push("una aseguradora puede editar la configuración de otra");
+        }
+      }
+
+      // Con un id que no es el del contexto, la función se niega antes de leer nada.
+      const ajeno = await intentar(a.id, LLAMADA, [randomUUID(), randomUUID(), 10]);
+      const sinFuncion = !ajeno.ok && ajeno.codigo === "42883";
+      if (sinFuncion) {
+        mal("claimmix_crear_inquilino no existe: falta aplicar la 0048");
+        problemas.push("la 0048 no está aplicada en esta base");
+      } else if (!ajeno.ok && ajeno.codigo === "42501") {
+        bien("la función con un id distinto del contexto: denegado (42501)");
+      } else {
+        mal(`la función con un id distinto del contexto: ${ajeno.ok ? "creó algo o contestó" : `falló con ${ajeno.codigo}`}`);
+        problemas.push("claimmix_crear_inquilino acepta un id que no es el del contexto");
+      }
+
+      const nuevo = randomUUID();
+      const sinVerificar = await intentar(nuevo, LLAMADA, [nuevo, randomUUID(), 10]);
+      const resultado = sinVerificar.ok ? (sinVerificar.devuelve[0]?.r as { resultado?: string } | undefined)?.resultado : null;
+      if (resultado === "no_verificado") {
+        bien("la función con un usuario que no existe: 'no_verificado'");
+      } else if (!sinFuncion) {
+        mal("la función con un usuario que no existe no contestó 'no_verificado'");
+        problemas.push("claimmix_crear_inquilino no exige un usuario verificado");
+      }
+
+      // 'alta_cerrada' necesita un usuario verificado y el rol de la app no puede
+      // crearlo: va con el rol dueño, en una transacción que se deshace, y nunca
+      // en la base viva. Con el tope en 0 corta antes de insertar nada.
+      if (!poolDueno) {
+        nota("'alta_cerrada' no se prueba: falta DATABASE_URL con el rol dueño.");
+      } else if (hostDe(urlDueno ?? "").includes(HOST_DE_PRODUCCION)) {
+        nota("'alta_cerrada' no se prueba en la base viva, ni siquiera con ROLLBACK: va contra QA o el ensayo.");
+      } else {
+        const d = await poolDueno.connect();
+        try {
+          const usuario = randomUUID();
+          const inquilino = randomUUID();
+          await d.query("BEGIN");
+          try {
+            await d.query(
+              `INSERT INTO "user" (id, name, email, email_verified) VALUES ($1, 'Prueba de tenencia', $2, true)`,
+              [usuario, `tenencia-${usuario}@example.com`]
+            );
+            await d.query("SELECT set_config('claimmix.tenant_id', $1, true)", [inquilino]);
+            const r = (await d.query(LLAMADA, [inquilino, usuario, 0])).rows[0].r as { resultado?: string };
+            const creados = (await d.query(`SELECT count(*)::int AS n FROM tenants WHERE id = $1`, [inquilino])).rows[0]
+              .n as number;
+            if (r.resultado === "alta_cerrada" && creados === 0) bien("con el tope en 0: 'alta_cerrada' y no se crea nada");
+            else {
+              mal(`con el tope en 0 contestó '${r.resultado}' y quedaron ${creados} inquilino(s)`);
+              problemas.push("claimmix_crear_inquilino ignora el tope diario");
+            }
+          } catch (e) {
+            if ((e as { code?: string }).code === "42883") {
+              mal("claimmix_crear_inquilino no existe: falta aplicar la 0048");
+              problemas.push("la 0048 no está aplicada en esta base");
+            } else throw e;
+          } finally {
+            await d.query("ROLLBACK");
+          }
+        } finally {
+          d.release();
+        }
+      }
+    }
   } finally {
     cx.release();
   }
 } catch (e) {
   console.error(`\n✗ no se pudo verificar (${resumenDe(e)})`);
   await pool.end();
+  await poolDueno?.end();
   process.exit(2);
 }
 
 await pool.end();
+await poolDueno?.end();
 
 // ── Veredicto ───────────────────────────────────────────────────────────────
 console.log("\n" + "─".repeat(70));

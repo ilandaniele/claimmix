@@ -2,7 +2,8 @@
  * ¿La póliza cubre el siniestro, y cuánto cuesta más o menos? (B6, B23)
  *
  * Componente de servidor: el veredicto se calcula en `cargarDetalleDeCaso` y
- * acá sólo se pinta. Es para el equipo; al asegurado no le llega nada de esto.
+ * acá sólo se pinta, rotulado como orientativo. Es para el equipo; al asegurado
+ * no le llega nada de esto.
  */
 
 import type { CoberturaEnPantalla } from "@/server/cases/detail-view";
@@ -33,6 +34,7 @@ export function CoberturaPanel({
   const { resultado, condiciones, monto } = cobertura;
   return (
     <div className="space-y-3">
+      <p className="text-[12px] text-slate-500 dark:text-slate-400">{t("cobertura.orientativa")}</p>
       {condiciones !== "leidas" && (
         <p className="text-[12px] text-amber-700 dark:text-amber-300">{t(`cobertura.condiciones.${condiciones}`)}</p>
       )}

@@ -216,6 +216,8 @@ export async function signInWithGoogle(): Promise<void> {
       body: {
         provider: "google",
         callbackURL: "/bandeja",
+        // Quien entra con Google por primera vez no tiene perfil: va a crear su espacio.
+        newUserCallbackURL: "/alta",
         /*
          * SIN query propia, y es la diferencia entre un mensaje util y uno
          * inutil.

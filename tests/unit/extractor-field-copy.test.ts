@@ -198,7 +198,10 @@ type MockDb = {
  * Build a minimal valid ExtractedClaim with the given extracted_fields.
  * The worker reads extractedClaim.extracted_fields for the field-copy logic.
  */
-function makeExtractedClaim(extractedFields: Record<string, string>): ExtractedClaim {
+function makeExtractedClaim(
+  extractedFields: Record<string, string>,
+  faltantes: string[] = []
+): ExtractedClaim {
   return extraccion({
     extraction_model: "mock-email-v1",
     fields: [],
@@ -209,7 +212,7 @@ function makeExtractedClaim(extractedFields: Record<string, string>): ExtractedC
     confidence: 0.92,
     extracted_fields: extractedFields,
     field_confidences: {},
-    missing_fields: [],
+    missing_fields: faltantes,
     fields_pending_confirmation: [],
     possible_customer_matches: [],
     possible_policy_matches: [],
@@ -336,7 +339,8 @@ beforeEach(() => {
  */
 async function runWorker(
   caseRow: Record<string, unknown>,
-  extractedFields: Record<string, string>
+  extractedFields: Record<string, string>,
+  faltantes: string[] = []
 ): Promise<Array<Record<string, unknown>>> {
   const caseUpdateSpy = vi.fn<(data: Record<string, unknown>) => void>();
   buildDbMocks(caseRow, caseUpdateSpy);
@@ -344,7 +348,7 @@ async function runWorker(
   // The worker calls extractEmailClaimMock() when engine === "mock".
   // denunciaSimuladaVacia devuelve lo mismo: es el otro camino por el que
   // claim-agent.ts llega al mock (E16).
-  const denuncia = makeExtractedClaim(extractedFields);
+  const denuncia = makeExtractedClaim(extractedFields, faltantes);
   vi.mocked(extractEmailClaimMock).mockReturnValue(denuncia);
   vi.mocked(denunciaSimuladaVacia).mockReturnValue(denuncia);
 
@@ -535,6 +539,72 @@ describe("AC14 — reject empty/whitespace extracted values", () => {
       expect(payload.policyholder_name).toBeUndefined();
       expect(payload.policy_number).toBeUndefined();
     }
+  });
+});
+
+// ── Lo que sigue en los faltantes no va a la ficha ───────────────────────────
+
+describe("un dato que sigue en missing_fields no se copia a cases", () => {
+  it("un policy_number de confianza baja no se copia, y el nombre sí", async () => {
+    const payloads = await runWorker(
+      baseCaseRow({ policyholder_name: null, policy_number: null }),
+      { full_name: "Juan Pérez", policy_number: "POL-DUDOSA" },
+      ["policy_number"]
+    );
+
+    for (const payload of payloads) {
+      expect(payload.policy_number).toBeUndefined();
+    }
+    expect(payloads.find((p) => p.policyholder_name !== undefined)?.policyholder_name).toBe("Juan Pérez");
+  });
+
+  it("lo mismo si el faltante llegó con el alias en castellano", async () => {
+    const payloads = await runWorker(
+      baseCaseRow({ policyholder_name: null, policy_number: null }),
+      { full_name: "Juan Pérez", policy_number: "POL-DUDOSA" },
+      ["numero_poliza"]
+    );
+
+    for (const payload of payloads) {
+      expect(payload.policy_number).toBeUndefined();
+    }
+  });
+
+  it("un full_name que sigue faltando no se copia, y la póliza sí", async () => {
+    const payloads = await runWorker(
+      baseCaseRow({ policyholder_name: null, policy_number: null }),
+      { full_name: "Juan Pérez", policy_number: "POL-1234" },
+      ["nombre_asegurado"]
+    );
+
+    for (const payload of payloads) {
+      expect(payload.policyholder_name).toBeUndefined();
+    }
+    expect(payloads.find((p) => p.policy_number !== undefined)?.policy_number).toBe("POL-1234");
+  });
+
+  it("la póliza que encontró el buscador se sigue copiando aunque figurara como faltante", async () => {
+    vi.mocked(findPolicyMatches).mockResolvedValue([
+      {
+        policyId: "policy-uuid-001",
+        policyNumber: "POL-4471-A",
+        policyType: "auto",
+        status: "active",
+        endDate: null,
+        customerDni: null,
+        plates: [],
+        customerName: "Juan Pérez",
+        confidence: 0.95,
+      },
+    ]);
+
+    const payloads = await runWorker(
+      baseCaseRow({ policyholder_name: null, policy_number: null }),
+      { full_name: "Juan Pérez" },
+      ["numero_poliza"]
+    );
+
+    expect(payloads.find((p) => p.policy_number !== undefined)?.policy_number).toBe("POL-4471-A");
   });
 });
 

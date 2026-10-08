@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
@@ -219,6 +219,50 @@ describe("AttachmentsPanel", () => {
     render(<AttachmentsPanel attachments={[GUARDADO]} caseId="c-1" puedeAbrir={false} puedeLeerPresupuesto />);
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  describe("sin adjuntos", () => {
+    const ESPERADOS = [
+      { clave: "fotos_danos", etiqueta: "Fotos de los daños", estado: "pending" as const },
+      { clave: "parte_amistoso", etiqueta: "Parte amistoso", estado: "received" as const },
+      { clave: "licencia_conducir", etiqueta: "Licencia de conducir", estado: "declined" as const },
+    ];
+
+    it("con documentos esperados los lista con su estado", () => {
+      render(<AttachmentsPanel attachments={[]} caseId="c-1" puedeAbrir={false} esperados={ESPERADOS} />);
+
+      expect(screen.getByText("Sin adjuntos.")).toBeInTheDocument();
+      expect(screen.getByText("Se esperan para este tipo de siniestro:")).toBeInTheDocument();
+      const filas = screen.getAllByRole("listitem");
+      expect(filas).toHaveLength(3);
+      expect(within(filas[0]).getByText("Fotos de los daños")).toBeInTheDocument();
+      expect(within(filas[0]).getByText("Falta")).toBeInTheDocument();
+      expect(within(filas[1]).getByText("Recibido")).toBeInTheDocument();
+      expect(within(filas[2]).getByText("No lo tienen")).toBeInTheDocument();
+    });
+
+    it("con una lista vacía dice que el tipo de siniestro no pide documentos", () => {
+      render(<AttachmentsPanel attachments={[]} caseId="c-1" puedeAbrir={false} esperados={[]} />);
+
+      expect(screen.getByText("Sin adjuntos.")).toBeInTheDocument();
+      expect(screen.getByText("Este tipo de siniestro no pide documentos.")).toBeInTheDocument();
+      expect(screen.queryByText("Se esperan para este tipo de siniestro:")).not.toBeInTheDocument();
+    });
+
+    it("sin la prop queda como antes: sólo «Sin adjuntos.»", () => {
+      const { container } = render(<AttachmentsPanel attachments={[]} caseId="c-1" puedeAbrir={false} />);
+
+      expect(container.children).toHaveLength(1);
+      expect(screen.getByText("Sin adjuntos.")).toBeInTheDocument();
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
+      expect(screen.queryByText(/no pide documentos/)).not.toBeInTheDocument();
+    });
+
+    it("con adjuntos, los esperados no se listan", () => {
+      render(<AttachmentsPanel attachments={[GUARDADO]} caseId="c-1" puedeAbrir={false} esperados={ESPERADOS} />);
+
+      expect(screen.queryByText("Se esperan para este tipo de siniestro:")).not.toBeInTheDocument();
+    });
   });
 
   it("sin marcas ni resumen, no pinta nada de más", () => {

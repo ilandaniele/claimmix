@@ -33,6 +33,7 @@ import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import { periodoAntesDelAlta, type BillingPeriod } from "@/lib/billing/period";
+import { esCasoReal } from "@/server/core-sync/lectura";
 
 export interface Statement {
   month: string;
@@ -115,10 +116,12 @@ export async function computeStatement(
 
   if (!tenantRow) return null;
 
+  // Sólo casos de personas: los simulados y los del ensayo no se facturan.
   const inPeriod = and(
     eq(cases.tenant_id, tenantId),
     gte(cases.created_at, range.start),
-    lt(cases.created_at, range.next)
+    lt(cases.created_at, range.next),
+    esCasoReal
   );
 
   // One pass over the period: every bucket an invoice line might need.

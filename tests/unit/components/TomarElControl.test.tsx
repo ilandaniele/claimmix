@@ -1,7 +1,7 @@
 /**
  * «Tomar el control» (D-F2) y su espejo «Devolver al agente» (E24): el botón
  * sólo con el permiso, el diálogo de un solo sentido, y el cuerpo exacto del
- * PATCH.
+ * PATCH. Y dejar un caso listo con faltantes, que pide confirmar antes del PATCH.
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -96,6 +96,154 @@ describe("Tomar el control (D-F2)", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Marcar como relevante", () => {
+  function renderDescartado(puedeMarcarRelevante: boolean) {
+    return render(
+      <LocaleProvider locale="es-AR">
+        <CaseDetailClient
+          caseId="c1"
+          status={"no_relevante" as CaseStatus}
+          caseNumber="#1"
+          paraResponder={false}
+          vistoEn="2026-09-25T12:00:00.000Z"
+          puedeMarcar={false}
+          acciones={SIN_ACCIONES}
+          puedeCambiarEstado={true}
+          puedeTomarElControl={false}
+          puedeDevolverAlAgente={false}
+          puedeMarcarRelevante={puedeMarcarRelevante}
+        />
+      </LocaleProvider>
+    );
+  }
+
+  it("sin el permiso, no aparece el botón", () => {
+    renderDescartado(false);
+    expect(screen.queryByTestId("action-marcar-relevante")).not.toBeInTheDocument();
+  });
+
+  it("al hacer clic, el POST a re-analyze manda {marcar_relevante: true} y avisa", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    renderDescartado(true);
+
+    fireEvent.click(screen.getByTestId("action-marcar-relevante"));
+
+    await screen.findByText("Marcado como relevante: vuelve al agente");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/cases/c1/re-analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ marcar_relevante: true }),
+    });
+  });
+
+  it("si el servidor dice 409 o 403, el aviso es el de «cambio no válido»", async () => {
+    for (const status of [409, 403]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status }));
+      const { unmount } = renderDescartado(true);
+
+      fireEvent.click(screen.getByTestId("action-marcar-relevante"));
+
+      await screen.findByText("Ese cambio de situación no es válido.");
+      unmount();
+    }
+  });
+});
+
+describe("Dejarlo listo con faltantes", () => {
+  const FALTANTES = ["Fotos de los daños", "Hora aproximada"];
+
+  function renderListo(status: CaseStatus, faltantes: string[]) {
+    return render(
+      <LocaleProvider locale="es-AR">
+        <CaseDetailClient
+          caseId="c1"
+          status={status}
+          caseNumber="#1"
+          paraResponder={false}
+          vistoEn="2026-09-25T12:00:00.000Z"
+          puedeMarcar={false}
+          acciones={SIN_ACCIONES}
+          puedeCambiarEstado={true}
+          puedeTomarElControl={false}
+          puedeDevolverAlAgente={false}
+          faltantes={faltantes}
+        />
+      </LocaleProvider>
+    );
+  }
+
+  it("«Revisado» con faltantes los nombra y no manda nada hasta confirmar", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    renderListo("requiere_especialista" as CaseStatus, FALTANTES);
+
+    fireEvent.click(screen.getByTestId("action-revisado-listo"));
+
+    expect(screen.getByText("¿Dejarlo listo con faltantes?")).toBeInTheDocument();
+    expect(
+      screen.getByText("Todavía falta: Fotos de los daños, Hora aproximada. El agente deja de pedirlos.")
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("action-revisado-listo")).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("listo-con-faltantes-confirm-button"));
+
+    await screen.findByText("Quedó confirmado como listo para entregar");
+    expect(fetchMock).toHaveBeenCalledWith("/api/cases/c1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "listo_para_core", confirmar_listo: true }),
+    });
+  });
+
+  it("«Confirmar y dejar listo» con faltantes pide confirmar y manda sólo {confirmar_listo}", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    renderListo("listo_para_core" as CaseStatus, FALTANTES);
+
+    fireEvent.click(screen.getByTestId("action-confirmar-listo"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("listo-con-faltantes-confirm-button"));
+
+    await screen.findByText("Quedó confirmado como listo para entregar");
+    expect(fetchMock).toHaveBeenCalledWith("/api/cases/c1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmar_listo: true }),
+    });
+  });
+
+  it("cancelar cierra el diálogo sin mandar el PATCH", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderListo("requiere_especialista" as CaseStatus, FALTANTES);
+
+    fireEvent.click(screen.getByTestId("action-revisado-listo"));
+    fireEvent.click(screen.getByText("Cancelar"));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sin faltantes no hay diálogo: el PATCH sale directo", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    renderListo("requiere_especialista" as CaseStatus, []);
+
+    fireEvent.click(screen.getByTestId("action-revisado-listo"));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await screen.findByText("Quedó confirmado como listo para entregar");
+    expect(fetchMock).toHaveBeenCalledWith("/api/cases/c1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "listo_para_core", confirmar_listo: true }),
+    });
   });
 });
 

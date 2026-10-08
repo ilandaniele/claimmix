@@ -79,11 +79,15 @@ vi.mock("@/server/notify/specialist-alert", () => ({
   alertSpecialists: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/server/confirmations/derivacion-nueva", () => ({
+  anotarDerivacionSiEsNueva: vi.fn().mockResolvedValue(true),
+}));
+
 import { db } from "@/lib/db";
 import { dispatchOutboundEmail } from "@/server/email/dispatch";
-import { writeAuditLog } from "@/lib/audit/log";
 import { deliberate } from "@/server/ai/deliberate";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
+import { anotarDerivacionSiEsNueva } from "@/server/confirmations/derivacion-nueva";
 
 // ── DB mock builder (idéntico al de orchestrate-post-extraction.test.ts) ──────
 
@@ -172,6 +176,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   setupDbMocks();
   vi.mocked(deliberate).mockResolvedValue(null);
+  vi.mocked(anotarDerivacionSiEsNueva).mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -207,10 +212,7 @@ describe("una póliza vencida no es para pedir papeles", () => {
 
     expect(alertSpecialists).toHaveBeenCalled();
 
-    const entry = vi
-      .mocked(writeAuditLog)
-      .mock.calls.find((c) => c[0].event_type === "claim.specialist_required");
-    expect(entry?.[0].payload).toMatchObject({
+    expect(vi.mocked(anotarDerivacionSiEsNueva).mock.calls[0][0].payload).toMatchObject({
       reason: expect.stringContaining("póliza sin vigencia"),
     });
   });

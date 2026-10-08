@@ -12,6 +12,7 @@ import {
   HORAS_DERIVACION_SIN_RESPUESTA,
   HORAS_DOC_SIN_RECIBIR,
   REGLAS,
+  TITULO_DE_REGLA,
 } from "@/core/desvios/reglas";
 import { esAR as esARCliente } from "@/lib/i18n/es-AR";
 import { esARServidor } from "@/lib/i18n/es-AR.servidor";
@@ -49,6 +50,20 @@ describe("las reglas", () => {
         // El navegador no tiene por qué bajarse un texto que sólo pinta el servidor.
         expect(esARCliente).not.toHaveProperty([clave]);
       }
+    }
+  });
+
+  it("TITULO_DE_REGLA apunta al título de cada regla: lo comparten la pantalla y el correo", () => {
+    const camel = (r: string) => r.replace(/_(\w)/g, (_, c: string) => c.toUpperCase());
+    expect(Object.keys(TITULO_DE_REGLA).sort()).toEqual([...REGLAS].sort());
+    for (const r of REGLAS) expect(TITULO_DE_REGLA[r]).toBe(`desvios.regla.${camel(r)}`);
+  });
+
+  it("el aviso diario tiene sus cuatro textos, en castellano e inglés y sólo en el diccionario de servidor", () => {
+    for (const clave of ["asunto", "cuerpo", "linea", "abrir"].map((k) => `desvios.aviso.${k}`)) {
+      expect(esARServidor).toHaveProperty([clave]);
+      expect(enUSServidor).toHaveProperty([clave]);
+      expect(esARCliente).not.toHaveProperty([clave]);
     }
   });
 });

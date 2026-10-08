@@ -27,7 +27,7 @@
 
 import "server-only";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { isValidTransition } from "@/core/case/fsm";
 import { camposDelPuntaje, clavesPonderadas, puntajeDelCaso } from "@/core/case/puntaje-complejidad";
@@ -42,7 +42,7 @@ import {
   missingDocs,
 } from "@/lib/db/schema";
 import { AppError } from "@/lib/errors";
-import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import { canonicalFieldKey, clavesDelMismoCampo } from "@/lib/labels/claim-fields";
 import type { CaseRow, UserRow } from "@/lib/db/types";
 import type { CaseStatus, ConfirmField } from "@/lib/schemas/cases";
 import { auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
@@ -321,7 +321,7 @@ async function confirmar(
         .where(
           and(
             eq(missingDocs.case_id, caseId),
-            eq(missingDocs.doc_key, fieldKey),
+            inArray(missingDocs.doc_key, clavesDelMismoCampo(fieldKey)),
             isNull(missingDocs.satisfied_at)
           )
         )

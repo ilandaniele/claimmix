@@ -317,3 +317,158 @@ describe("CasesTable — snapshot del render (E19d)", () => {
     expect(container.innerHTML).toMatchSnapshot();
   });
 });
+
+describe("CasesTable — vista de descartes", () => {
+  const descarte = makeCase({
+    id: "00000000-0000-0000-0000-0000000000d1",
+    is_claim: false,
+    claim_type: "robo",
+    channel: "email",
+    status: "no_relevante",
+    asunto: "Promo de fin de mes",
+    remitente: "ventas@example.com",
+    not_relevant_reason: "Es publicidad de un comercio, no una denuncia",
+    confidence_min: "0.91",
+    vence_en: null,
+    puntaje_complejidad: null,
+  } as Partial<CaseRow>);
+
+  function pintar(cases: CaseRow[], descartes = true) {
+    return render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={cases} descartes={descartes} />
+      </LocaleProvider>
+    );
+  }
+
+  it("muestra el asunto, el remitente y el motivo, y saca tipo, respondido y score", () => {
+    pintar([descarte]);
+    expect(screen.getByText("Promo de fin de mes")).toBeInTheDocument();
+    expect(screen.getByText("ventas@example.com")).toBeInTheDocument();
+    expect(screen.getByText("Es publicidad de un comercio, no una denuncia")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Asunto / remitente" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Motivo del descarte" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Asegurado" })).toBeNull();
+    for (const sobra of ["Tipo", "Respondido", "Score"]) {
+      expect(screen.queryByRole("columnheader", { name: sobra })).toBeNull();
+    }
+    expect(screen.queryByText("Robo")).toBeNull();
+  });
+
+  it("sin descartes la tabla sigue igual: asegurado, tipo y score, sin motivo", () => {
+    pintar([descarte], false);
+    expect(screen.getByRole("columnheader", { name: "Asegurado" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Tipo" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Score" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Motivo del descarte" })).toBeNull();
+    expect(screen.queryByText("Promo de fin de mes")).toBeNull();
+  });
+
+  it("un motivo con el texto fijo de antes muestra el texto por defecto, no ese", () => {
+    pintar([
+      {
+        ...descarte,
+        not_relevant_reason: "El clasificador de IA determinó que este email no es un reclamo de seguro",
+      },
+    ]);
+    expect(screen.getByText("La IA determinó que no es una denuncia")).toBeInTheDocument();
+    expect(screen.queryByText(/El clasificador de IA determinó/)).toBeNull();
+  });
+
+  it("sin motivo muestra el texto por defecto", () => {
+    pintar([{ ...descarte, not_relevant_reason: null }]);
+    expect(screen.getByText("La IA determinó que no es una denuncia")).toBeInTheDocument();
+  });
+
+  it("sin asunto pone «(sin asunto)» y sin remitente no pinta renglón", () => {
+    pintar([{ ...descarte, asunto: null, remitente: null }]);
+    expect(screen.getByText("(sin asunto)")).toBeInTheDocument();
+    expect(screen.queryByText("ventas@example.com")).toBeNull();
+  });
+
+  it("el motivo es texto plano: un tag del modelo no se interpreta", () => {
+    const { container } = pintar([{ ...descarte, not_relevant_reason: "<b>negrita</b> y <img src=x>" }]);
+    expect(screen.getByText("<b>negrita</b> y <img src=x>")).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("el piso de ancho suma el motivo y resta lo que no se pinta", () => {
+    const ancho = (c: HTMLElement) => Number(c.querySelector("table")!.style.minWidth.replace("px", ""));
+    const normal = pintar([descarte], false);
+    const completa = ancho(normal.container);
+    normal.unmount();
+    const vista = pintar([descarte]);
+    expect(ancho(vista.container)).not.toBe(completa);
+    expect(ancho(vista.container)).toBeGreaterThan(0);
+  });
+});
+
+describe("CasesTable — columnas vacías", () => {
+  function pintar(cases: CaseRow[]) {
+    return render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={cases} />
+      </LocaleProvider>
+    );
+  }
+  const sinDato = { vence_en: null, puntaje_complejidad: null } as Partial<CaseRow>;
+
+  it("Vence y Complejidad no se pintan si ninguna fila de la página trae dato", () => {
+    pintar([makeCase(sinDato), makeCase({ ...sinDato, id: "00000000-0000-0000-0000-000000000002" })]);
+    expect(screen.queryByRole("columnheader", { name: "Vence" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Complejidad" })).toBeNull();
+  });
+
+  it("alcanza con una fila con dato para que la columna vuelva", () => {
+    pintar([
+      makeCase(sinDato),
+      makeCase({
+        ...sinDato,
+        id: "00000000-0000-0000-0000-000000000002",
+        vence_en: "2026-10-09T12:00:00.000Z",
+        puntaje_complejidad: 40,
+      }),
+    ]);
+    expect(screen.getByRole("columnheader", { name: "Vence" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Complejidad" })).toBeInTheDocument();
+  });
+
+  it("el piso de ancho baja cuando faltan las dos columnas", () => {
+    const ancho = (c: HTMLElement) => Number(c.querySelector("table")!.style.minWidth.replace("px", ""));
+    const con = pintar([makeCase({ vence_en: "2026-10-09T12:00:00.000Z", puntaje_complejidad: 40 } as Partial<CaseRow>)]);
+    const conAncho = ancho(con.container);
+    con.unmount();
+    const sin = pintar([makeCase(sinDato)]);
+    expect(conAncho - ancho(sin.container)).toBe(190);
+  });
+});
+
+describe("CasesTable — respondido de un caso de ensayo", () => {
+  function pintar(c: CaseRow) {
+    return render(
+      <LocaleProvider locale="es-AR">
+        <CasesTable cases={[c]} />
+      </LocaleProvider>
+    );
+  }
+
+  it("un caso de ensayo no queda «sin responder»", () => {
+    for (const channel of ["email_sim", "whatsapp_sim"] as const) {
+      const { unmount } = pintar(makeCase({ channel, replied_at: null, para_responder_desde: null } as Partial<CaseRow>));
+      expect(screen.queryByText("Sin responder")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("un caso real sin respuesta sigue «sin responder»", () => {
+    pintar(makeCase({ channel: "email", replied_at: null, para_responder_desde: null } as Partial<CaseRow>));
+    expect(screen.getByText("Sin responder")).toBeInTheDocument();
+  });
+
+  it("un caso de ensayo con un mensaje tardío sigue para responder", () => {
+    pintar(
+      makeCase({ channel: "email_sim", para_responder_desde: "2026-10-07T10:00:00.000Z" } as Partial<CaseRow>)
+    );
+    expect(screen.getByText(getT("es-AR")("bandeja.paraResponder"))).toBeInTheDocument();
+  });
+});

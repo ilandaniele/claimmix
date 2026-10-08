@@ -15,7 +15,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { HORAS_DERIVACION_SIN_RESPUESTA, HORAS_DOC_SIN_RECIBIR, type Regla } from "@/core/desvios/reglas";
+import {
+  HORAS_DERIVACION_SIN_RESPUESTA,
+  HORAS_DOC_SIN_RECIBIR,
+  type Regla,
+  TITULO_DE_REGLA,
+} from "@/core/desvios/reglas";
 import { REVISION_ROLES } from "@/lib/auth/roles";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
@@ -27,18 +32,18 @@ import { Card } from "../_components/ui";
 
 const TEXTOS: Record<Regla, { titulo: TranslationKey; detalle: TranslationKey; horas?: number }> = {
   doc_sin_recibir: {
-    titulo: "desvios.regla.docSinRecibir",
+    titulo: TITULO_DE_REGLA.doc_sin_recibir,
     detalle: "desvios.detalle.docSinRecibir",
     horas: HORAS_DOC_SIN_RECIBIR,
   },
-  cierre_sin_listo: { titulo: "desvios.regla.cierreSinListo", detalle: "desvios.detalle.cierreSinListo" },
+  cierre_sin_listo: { titulo: TITULO_DE_REGLA.cierre_sin_listo, detalle: "desvios.detalle.cierreSinListo" },
   derivacion_sin_respuesta: {
-    titulo: "desvios.regla.derivacionSinRespuesta",
+    titulo: TITULO_DE_REGLA.derivacion_sin_respuesta,
     detalle: "desvios.detalle.derivacionSinRespuesta",
     horas: HORAS_DERIVACION_SIN_RESPUESTA,
   },
-  plazo_vencido: { titulo: "desvios.regla.plazoVencido", detalle: "desvios.detalle.plazoVencido" },
-  plan_sin_terminar: { titulo: "desvios.regla.planSinTerminar", detalle: "desvios.detalle.planSinTerminar" },
+  plazo_vencido: { titulo: TITULO_DE_REGLA.plazo_vencido, detalle: "desvios.detalle.plazoVencido" },
+  plan_sin_terminar: { titulo: TITULO_DE_REGLA.plan_sin_terminar, detalle: "desvios.detalle.planSinTerminar" },
 };
 
 interface DesviosPageProps {

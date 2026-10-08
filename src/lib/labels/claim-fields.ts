@@ -87,6 +87,11 @@ const FIELD_LABELS: Record<string, FieldLabel> = {
   presupuesto_reparacion: { label: "Presupuesto de la reparación", kind: "documento" },
 };
 
+/** Las claves de la tabla que son un dato que se contesta, no un archivo. */
+export const CLAVES_DE_DATO: readonly string[] = Object.entries(FIELD_LABELS)
+  .filter(([, { kind }]) => kind === "dato")
+  .map(([clave]) => clave);
+
 /**
  * Words that survive a round-trip through snake_case badly.
  *
@@ -204,6 +209,16 @@ const FIELD_ALIASES: Record<string, string> = {
 /** The one key that stands for this field, whichever alias arrived. */
 export function canonicalFieldKey(fieldKey: string): string {
   return FIELD_ALIASES[fieldKey] ?? fieldKey;
+}
+
+/** Los pares (alias, canónica), para quien tiene que armar una consulta por las dos puntas. */
+export const ALIAS_DE_CAMPO: ReadonlyArray<readonly [string, string]> = Object.entries(FIELD_ALIASES);
+
+/** La clave recibida, su canónica y todo alias que apunte a ella, sin repetidos. */
+export function clavesDelMismoCampo(fieldKey: string): string[] {
+  const canonica = canonicalFieldKey(fieldKey);
+  const alias = ALIAS_DE_CAMPO.filter(([, destino]) => destino === canonica).map(([origen]) => origen);
+  return [...new Set([fieldKey, canonica, ...alias])];
 }
 
 // ── What is worth asking someone to confirm ───────────────────────────────────

@@ -10,7 +10,7 @@
  *   f. findCustomerMatches() with extracted fields
  *   g. findPolicyMatches() with extracted policy_number + matched customer
  *   h. Persist results:
- *      - is_claim=false → status='no_relevante', not_relevant_reason set (AC5)
+ *      - is_claim=false → status='no_relevante', not_relevant_reason = lo que dijo el modelo, o null (AC5)
  *      - is_claim=true  → extracted_fields, missing_docs, severity, customer_id, policy_id
  *   i. If severity=high/critical → requires_specialist=true, status='requiere_especialista' (AC11)
  *   j. Log MEMORY_APPLIED if memory hints were used (AC13 groundwork)
@@ -867,12 +867,9 @@ export async function runEmailExtractionWorker(
         await avisarPresupuestoAgotado({ tenantId, motivo: budgetResult.motivo });
       }
       // Escalate so a human can re-trigger once budget resets — never leave the case in procesando.
-      await enTenant(tenantCtx, (db) =>
-        db
-          .update(cases)
-          .set({ status: "escalado", updated_at: new Date().toISOString() })
-          .where(and(eq(cases.id, caseId), inArray(cases.status, ESTADOS_DE_ARRANQUE)))
-      );
+      // Por `escalateCase`, que deja el `ai.extracted` con `new_status`: sin él
+      // el historial no sabe que el caso pasó a escalado.
+      await escalateCase(caseId, tenantCtx, userId, "budget_exceeded", "AI_BUDGET_EXCEEDED");
       return;
     }
 
@@ -1079,22 +1076,31 @@ export async function runEmailExtractionWorker(
         case_id: caseId,
       }, "email_worker.ignored_unclaim");
     } else if (extractedClaim.is_claim === false) {
-      const reason =
-        extractedClaim.not_relevant_reason ||
-        "El clasificador de IA determinó que este email no es un reclamo de seguro.";
+      // Sin motivo del modelo la columna queda nula: la pantalla pone su propio
+      // texto, y acá no se guarda uno fijo que después parezca dicho por el modelo.
+      const motivo = extractedClaim.not_relevant_reason?.trim();
 
-      await enTenant(tenantCtx, (db) =>
+      // Misma guarda que `updateCaseStatus`: si otra mano ya movió el caso, o ya
+      // estaba descartado, no se pisa ni se vuelve a anotar el descarte.
+      const filas = await enTenant(tenantCtx, (db) =>
         db
-        .update(cases)
-        .set({
-          status: "no_relevante",
-          is_claim: false,
-          not_relevant_reason: reason.slice(0, 500),
-          updated_at: new Date().toISOString(),
-        })
-        .where(eq(cases.id, caseId))
+          .update(cases)
+          .set({
+            status: "no_relevante",
+            is_claim: false,
+            not_relevant_reason: motivo ? motivo.slice(0, 500) : null,
+            updated_at: new Date().toISOString(),
+          })
+          .where(and(eq(cases.id, caseId), inArray(cases.status, ESTADOS_DE_ARRANQUE)))
+          .returning({ id: cases.id })
       );
+      if (filas.length === 0) {
+        logger.warn({ case_id: caseId }, "email_worker.not_relevant_not_applied");
+        return;
+      }
 
+      // `reason` es un código fijo, nunca el texto del modelo: el payload de
+      // auditoría no se redacta por campo y ese texto puede traer datos personales.
       await writeAuditLog({
         tenant_id: tenantId,
         actor_id: userId,
@@ -1105,6 +1111,7 @@ export async function runEmailExtractionWorker(
           is_claim: false,
           model: extractedClaim.extraction_model,
           new_status: "no_relevante",
+          reason: "clasificador",
         },
       });
 
@@ -1136,10 +1143,12 @@ export async function runEmailExtractionWorker(
     // Write missing_docs for fields with confidence < 0.60 (AC8).
     // Also include explicit missing_fields from extractor output.
     let missingFieldKeys = [
-      ...new Set([
-        ...lowConfidenceFields.map((f) => f.field_key),
-        ...(extractedClaim.missing_fields ?? []),
-      ]),
+      ...new Set(
+        [
+          ...lowConfidenceFields.map((f) => f.field_key),
+          ...(extractedClaim.missing_fields ?? []),
+        ].map(canonicalFieldKey)
+      ),
     ];
 
     if (missingFieldKeys.length > 0) {
@@ -1337,10 +1346,12 @@ export async function runEmailExtractionWorker(
     // Only write when the column is still null — never overwrite analyst-confirmed data.
     const extractedFullName = extractedClaimFields.full_name;
     const extractedPolicyNumber = extractedClaimFields.policy_number;
-    if (!caseRow.policyholder_name && extractedFullName && typeof extractedFullName === "string" && extractedFullName.trim()) {
+    // Mientras el nombre o la póliza sigan en los faltantes, lo que hay es una lectura de confianza
+    // baja y no va a la ficha. La póliza que encontró el buscador ya salió de la lista y sí se copia.
+    if (!caseRow.policyholder_name && !missingFieldKeys.includes("full_name") && extractedFullName && typeof extractedFullName === "string" && extractedFullName.trim()) {
       caseUpdate.policyholder_name = extractedFullName.trim().slice(0, 200);
     }
-    if (!caseRow.policy_number && extractedPolicyNumber && typeof extractedPolicyNumber === "string" && extractedPolicyNumber.trim()) {
+    if (!caseRow.policy_number && !missingFieldKeys.includes("policy_number") && extractedPolicyNumber && typeof extractedPolicyNumber === "string" && extractedPolicyNumber.trim()) {
       caseUpdate.policy_number = extractedPolicyNumber.trim().slice(0, 100);
     }
 
@@ -2006,10 +2017,12 @@ async function upsertExtractedFields(
 /**
  * Insert missing_docs rows that don't exist yet for this case.
  *
- * NOTE: missing_docs has no unique constraint on (case_id, doc_key) in the
- * Neon schema, so the old `upsert(..., { onConflict: "case_id,doc_key" })` is
- * emulated as insert-if-absent (existing rows — including satisfied ones —
- * are left untouched). Throws on DB error — callers wrap.
+ * NOTE: el índice único (tenant_id, case_id, doc_key) de la 0004 sólo ve la
+ * clave cruda, y `dni` y `dni_asegurado` son dos claves de un mismo dato. Por
+ * eso se compara y se inserta por clave canónica, y el `onConflictDoNothing`
+ * cubre la carrera con otra corrida (sin el índice, se comporta como antes).
+ * Las filas que ya hay —también las satisfechas— no se tocan. Throws on DB
+ * error — callers wrap.
  */
 async function insertMissingDocsIfAbsent(
   caseId: string,
@@ -2023,20 +2036,25 @@ async function insertMissingDocsIfAbsent(
       .where(eq(missingDocs.case_id, caseId))
   );
 
-  const existingKeys = new Set(existing.map((row) => row.doc_key));
-  const newKeys = docKeys.filter((docKey) => !existingKeys.has(docKey));
+  const existingKeys = new Set(existing.map((row) => canonicalFieldKey(row.doc_key)));
+  const newKeys = [...new Set(docKeys.map(canonicalFieldKey))].filter(
+    (docKey) => !existingKeys.has(docKey)
+  );
   if (newKeys.length === 0) return;
 
   await enTenant(tenantCtx, (db) =>
-    db.insert(missingDocs).values(
-      newKeys.map((docKey) => ({
-        case_id: caseId,
-        tenant_id: tenantCtx.tenantId,
-        doc_key: docKey,
-        requested_at: null,
-        satisfied_at: null,
-      }))
-    )
+    db
+      .insert(missingDocs)
+      .values(
+        newKeys.map((docKey) => ({
+          case_id: caseId,
+          tenant_id: tenantCtx.tenantId,
+          doc_key: docKey,
+          requested_at: null,
+          satisfied_at: null,
+        }))
+      )
+      .onConflictDoNothing()
   );
 }
 
@@ -2111,7 +2129,7 @@ async function updateCaseStatus(
   tenantCtx: TenantContext,
   newStatus: "listo" | "esperando" | "escalado",
   confidenceMin: number | null
-): Promise<void> {
+): Promise<boolean> {
   const updatePayload: Partial<CaseInsert> = {
     status: newStatus,
     updated_at: new Date().toISOString(),
@@ -2131,8 +2149,10 @@ async function updateCaseStatus(
     if (filas.length === 0) {
       logger.warn({ case_id: caseId, to: newStatus }, "worker.status_not_applied");
     }
+    return filas.length > 0;
   } catch (err) {
     logger.error({ code: errorCode(err), case_id: caseId }, "worker.failed_to_update_case_status");
+    return false;
   }
 }
 
@@ -2157,7 +2177,7 @@ async function escalateCase(
   errorCode: string,
   extra: Record<string, unknown> = {}
 ): Promise<void> {
-  await updateCaseStatus(caseId, tenantCtx, "escalado", null);
+  const aplicado = await updateCaseStatus(caseId, tenantCtx, "escalado", null);
   await writeAuditLog({
     tenant_id: tenantCtx.tenantId,
     actor_id: userId,
@@ -2169,6 +2189,8 @@ async function escalateCase(
       reason: auditReason,
       error_code: errorCode,
       ...extra,
+      // Con la marca, las métricas no cuentan un escalado que no se aplicó.
+      ...(aplicado ? {} : { status_not_applied: true }),
     },
   });
 }

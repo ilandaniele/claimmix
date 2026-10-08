@@ -1,8 +1,9 @@
 /**
  * El barrido nocturno (B4, B22, B19): los recordatorios corren entre retomar y
  * cerrar, el aviso de cierre después del cierre, la revisión de desvíos al
- * final de los barridos de casos, la purga de adjuntos y la retención sólo en la
- * ventana de las 04 UTC y una vez por día, y si uno falla lo demás corre igual.
+ * final de los barridos de casos y seguida del aviso a cada aseguradora con
+ * desvíos nuevos, la purga de adjuntos y la retención sólo en la ventana de las
+ * 04 UTC y una vez por día, y si uno falla lo demás corre igual.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ const m = vi.hoisted(() => ({
   cerrar: vi.fn(),
   avisar: vi.fn(),
   revisar: vi.fn(),
+  avisarDesvios: vi.fn(),
   purgar: vi.fn(),
   purgaAdjuntos: vi.fn(),
   retencion: vi.fn(),
@@ -28,6 +30,7 @@ vi.mock("@/server/intake/retomar-pendientes", () => ({ retomarExtraccionesPendie
 vi.mock("@/server/confirmations/recordatorios", () => ({ recordarPendientes: m.recordar, avisarCierres: m.avisar }));
 vi.mock("@/server/intake/close-abandoned", () => ({ closeAbandonedConversations: m.cerrar }));
 vi.mock("@/server/desvios/revision-nocturna", () => ({ revisarDesvios: m.revisar }));
+vi.mock("@/server/notify/specialist-alert", () => ({ avisarDesvios: m.avisarDesvios }));
 vi.mock("@/server/storage/purgar-adjuntos", () => ({ purgarAdjuntos: m.purgaAdjuntos }));
 vi.mock("@/server/cases/retencion", () => ({ aplicarRetencion: m.retencion }));
 vi.mock("@/lib/rate-limit/postgres", () => ({ purgeExpiredRateLimits: m.purgar }));
@@ -70,7 +73,8 @@ beforeEach(() => {
   m.recordar.mockImplementation(anota("recordar", { enviados: 3, salteados: 1 }));
   m.cerrar.mockImplementation(anota("cerrar", { closed: 4, caseIds: [] }));
   m.avisar.mockImplementation(anota("avisar", 2));
-  m.revisar.mockImplementation(anota("revisar", { nuevos: 6, porRegla: {}, fallidas: [] }));
+  m.revisar.mockImplementation(anota("revisar", { nuevos: 6, porRegla: {}, porInquilino: {}, fallidas: [] }));
+  m.avisarDesvios.mockResolvedValue(true);
   m.purgar.mockImplementation(anota("purgar", 5));
   m.purgaAdjuntos.mockImplementation(anota("purgaAdjuntos", { modo: "borrar", candidatos: 3, purgados: 2, fallidos: 1 }));
   m.retencion.mockImplementation(
@@ -137,7 +141,12 @@ describe("GET /api/cron/reap-stuck", () => {
   });
 
   it("las reglas que fallaron viajan en el JSON y la ruta sigue en 200", async () => {
-    m.revisar.mockResolvedValue({ nuevos: 1, porRegla: {}, fallidas: ["plazo_vencido", "cierre_sin_listo"] });
+    m.revisar.mockResolvedValue({
+      nuevos: 1,
+      porRegla: {},
+      porInquilino: {},
+      fallidas: ["plazo_vencido", "cierre_sin_listo"],
+    });
 
     const res = await GET(pedido());
 
@@ -160,6 +169,92 @@ describe("GET /api/cron/reap-stuck", () => {
     expect(m.revisar).not.toHaveBeenCalled();
     expect(m.purgar).toHaveBeenCalledOnce();
     expect(await res.json()).toMatchObject({ desvios_nuevos: 0, desvios_fallidas: [] });
+  });
+
+  it("avisa a cada aseguradora con desvíos nuevos, con sus propios conteos, y cuenta los avisos", async () => {
+    m.revisar.mockResolvedValue({
+      nuevos: 3,
+      porRegla: { doc_sin_recibir: 2, plazo_vencido: 1 },
+      porInquilino: { "tenant-a": { doc_sin_recibir: 2 }, "tenant-b": { plazo_vencido: 1 } },
+      fallidas: [],
+    });
+
+    const res = await GET(pedido());
+
+    expect(m.avisarDesvios).toHaveBeenCalledTimes(2);
+    expect(m.avisarDesvios).toHaveBeenCalledWith({ tenantId: "tenant-a", porRegla: { doc_sin_recibir: 2 } });
+    expect(m.avisarDesvios).toHaveBeenCalledWith({ tenantId: "tenant-b", porRegla: { plazo_vencido: 1 } });
+    expect(await res.json()).toMatchObject({ desvios_nuevos: 3, avisos_de_desvios: 2 });
+  });
+
+  it("cuenta los correos que salieron, no las llamadas: un aviso sin destinatarios o con Gmail caído no suma", async () => {
+    m.revisar.mockResolvedValue({
+      nuevos: 3,
+      porRegla: { doc_sin_recibir: 2, plazo_vencido: 1 },
+      porInquilino: { "tenant-a": { doc_sin_recibir: 2 }, "tenant-b": { plazo_vencido: 1 } },
+      fallidas: [],
+    });
+    m.avisarDesvios.mockResolvedValueOnce(false);
+
+    const res = await GET(pedido());
+
+    expect(m.avisarDesvios).toHaveBeenCalledTimes(2);
+    expect(await res.json()).toMatchObject({ desvios_nuevos: 3, avisos_de_desvios: 1 });
+  });
+
+  it("sin desvíos nuevos no avisa a nadie", async () => {
+    const res = await GET(pedido());
+
+    expect(m.avisarDesvios).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ avisos_de_desvios: 0 });
+  });
+
+  it("sin cupo de revisión tampoco avisa: la revisión no corrió", async () => {
+    m.rateLimit.mockResolvedValue({ allowed: false, remaining: 0, retryAfterSeconds: 900 });
+
+    const res = await GET(pedido());
+
+    expect(m.revisar).not.toHaveBeenCalled();
+    expect(m.avisarDesvios).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ avisos_de_desvios: 0 });
+  });
+
+  it("deja de avisar cuando no queda un minuto de la función, y la purga corre igual", async () => {
+    m.revisar.mockResolvedValue({
+      nuevos: 2,
+      porRegla: { plazo_vencido: 2 },
+      porInquilino: { "tenant-a": { plazo_vencido: 1 }, "tenant-b": { plazo_vencido: 1 } },
+      fallidas: [],
+    });
+    // El reloj pasa el margen después del primer aviso: el segundo inquilino no se avisa.
+    m.avisarDesvios.mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.now() + 300_000);
+      return true;
+    });
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(m.avisarDesvios).toHaveBeenCalledOnce();
+    expect(m.avisarDesvios).toHaveBeenCalledWith({ tenantId: "tenant-a", porRegla: { plazo_vencido: 1 } });
+    expect(m.purgar).toHaveBeenCalledOnce();
+    expect(await res.json()).toMatchObject({ desvios_nuevos: 2, avisos_de_desvios: 1 });
+  });
+
+  it("si un aviso revienta no corta la purga y los conteos de la revisión se conservan", async () => {
+    m.revisar.mockResolvedValue({
+      nuevos: 1,
+      porRegla: { plazo_vencido: 1 },
+      porInquilino: { "tenant-a": { plazo_vencido: 1 } },
+      fallidas: [],
+    });
+    m.avisarDesvios.mockRejectedValue(new Error("se cayó"));
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(m.purgar).toHaveBeenCalledOnce();
+    expect(await res.json()).toMatchObject({ desvios_nuevos: 1, avisos_de_desvios: 0 });
   });
 
   it("los recordatorios tienen a lo sumo un minuto y los avisos dejan un minuto antes del plazo", async () => {
@@ -207,6 +302,7 @@ describe("GET /api/cron/reap-stuck", () => {
       avisos_de_cierre: 2,
       desvios_nuevos: 6,
       desvios_fallidas: [],
+      avisos_de_desvios: 0,
       purga: null,
       retencion: null,
       rate_limit_rows_purged: 5,

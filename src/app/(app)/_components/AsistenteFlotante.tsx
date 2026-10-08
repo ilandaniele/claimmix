@@ -22,14 +22,54 @@
  * Una vez abierto, el panel queda montado para siempre (oculto con `hidden` +
  * `inert` al cerrar, en vez de desmontarse) para que `CajaDelAsistente` no
  * pierda su historial de sesión entre cierres.
+ *
+ * La píldora se puede minimizar a una pestaña pegada al borde: tapa menos
+ * pantalla y la elección queda en `localStorage`. Como el tema, ese dato no
+ * vive en React sino afuera, y `useSyncExternalStore` lo lee: el servidor
+ * dibuja la píldora, el cliente corrige después sin aviso de hidratación.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
-import { Sparkles, X } from "lucide-react";
+import { ChevronRight, Sparkles, X } from "lucide-react";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { cn } from "@/lib/utils";
 import { CajaDelAsistente } from "../asistente/_components/CajaDelAsistente";
+
+const CLAVE_MINIMIZADO = "claimmix:asistente-minimizado";
+
+const escuchas = new Set<() => void>();
+
+function suscribir(avisar: () => void): () => void {
+  escuchas.add(avisar);
+  return () => {
+    escuchas.delete(avisar);
+  };
+}
+
+/** El `try` es porque `localStorage` tira en algunos modos privados: sin dato, píldora normal. */
+function estaMinimizado(): boolean {
+  try {
+    return window.localStorage.getItem(CLAVE_MINIMIZADO) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function guardarMinimizado(valor: boolean): void {
+  try {
+    if (valor) window.localStorage.setItem(CLAVE_MINIMIZADO, "true");
+    else window.localStorage.removeItem(CLAVE_MINIMIZADO);
+  } catch {
+    return;
+  }
+  for (const avisar of escuchas) avisar();
+}
+
+/** Lo único que el servidor puede afirmar: nada, así que la píldora de siempre. */
+function instantaneaDelServidor(): boolean {
+  return false;
+}
 
 function PanelDelAsistente({
   abierto,
@@ -102,12 +142,35 @@ export function AsistenteFlotante() {
   const pathname = usePathname();
   const [montada, setMontada] = useState(false);
   const [abierto, setAbierto] = useState(false);
+  const minimizado = useSyncExternalStore(suscribir, estaMinimizado, instantaneaDelServidor);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const botonRef = useRef<HTMLButtonElement>(null);
+  const pestanaRef = useRef<HTMLButtonElement>(null);
+  const enfocarPestana = useRef(false);
+
+  // El foco va a la pestaña sólo cuando la persona minimizó recién: si ya
+  // venía minimizada de antes, cargar la página no le roba el foco a nadie.
+  useEffect(() => {
+    if (!minimizado || !enfocarPestana.current) return;
+    enfocarPestana.current = false;
+    pestanaRef.current?.focus();
+  }, [minimizado]);
 
   function cerrar() {
     setAbierto(false);
     botonRef.current?.focus();
+  }
+
+  function minimizar() {
+    setAbierto(false);
+    enfocarPestana.current = true;
+    guardarMinimizado(true);
+  }
+
+  function mostrar() {
+    guardarMinimizado(false);
+    setMontada(true);
+    setAbierto(true);
   }
 
   function alternar() {
@@ -124,19 +187,43 @@ export function AsistenteFlotante() {
 
   return (
     <>
-      <button
-        ref={botonRef}
-        type="button"
-        onClick={alternar}
-        aria-label={t("asistente.flotante.abrir")}
-        title={t("asistente.flotante.abrir")}
-        aria-expanded={abierto}
-        aria-controls="asistente-flotante-panel"
-        className="fixed bottom-6 right-6 z-40 inline-flex h-12 items-center gap-2 rounded-full bg-violet-600 px-4 text-white shadow-lg transition-colors hover:bg-violet-700 motion-reduce:transition-none"
-      >
-        <Sparkles size={18} />
-        <span className="hidden md:inline text-sm font-medium">{t("asistente.flotante.abrir")}</span>
-      </button>
+      {minimizado ? (
+        <button
+          ref={pestanaRef}
+          type="button"
+          onClick={mostrar}
+          aria-label={t("asistente.flotante.mostrar")}
+          title={t("asistente.flotante.mostrar")}
+          className="fixed bottom-28 right-0 z-40 inline-flex h-10 w-8 items-center justify-center rounded-l-lg bg-violet-600 text-white shadow-lg transition-colors hover:bg-violet-700 motion-reduce:transition-none"
+        >
+          <Sparkles size={16} />
+        </button>
+      ) : (
+        <div className="fixed bottom-6 right-6 z-40 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={minimizar}
+            aria-label={t("asistente.flotante.minimizar")}
+            title={t("asistente.flotante.minimizar")}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-100 motion-reduce:transition-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+          >
+            <ChevronRight size={16} />
+          </button>
+          <button
+            ref={botonRef}
+            type="button"
+            onClick={alternar}
+            aria-label={t("asistente.flotante.abrir")}
+            title={t("asistente.flotante.abrir")}
+            aria-expanded={abierto}
+            aria-controls="asistente-flotante-panel"
+            className="inline-flex h-12 items-center gap-2 rounded-full bg-violet-600 px-4 text-white shadow-lg transition-colors hover:bg-violet-700 motion-reduce:transition-none"
+          >
+            <Sparkles size={18} />
+            <span className="hidden md:inline text-sm font-medium">{t("asistente.flotante.abrir")}</span>
+          </button>
+        </div>
+      )}
       {montada && <PanelDelAsistente abierto={abierto} onClose={cerrar} textareaRef={textareaRef} />}
     </>
   );

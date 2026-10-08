@@ -36,6 +36,7 @@ import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { camposRequeridosDelRamo, clavesQueSatisfacen } from "@/core/case/required-fields";
 import { esRamoNativo } from "@/core/case/ramos";
+import { CONFIANZA_DE_DATO_PRESENTE } from "@/core/case/faltantes-vigentes";
 import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
@@ -63,7 +64,7 @@ export const REQUIRED_CLAIM_FIELDS = [
 export const REQUIRED_CONTACT_FIELDS = ["email", "phone"] as const;
 
 /** Confidence threshold for 'medium' confidence (IC9). */
-export const MEDIUM_CONFIDENCE_LOW = 0.60;
+export const MEDIUM_CONFIDENCE_LOW = CONFIANZA_DE_DATO_PRESENTE;
 /**
  * At or above this, a field is certain enough to act on without asking.
  *

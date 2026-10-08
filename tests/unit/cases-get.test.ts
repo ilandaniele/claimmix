@@ -89,12 +89,16 @@ const AUDITORIA_ESPERADA = [
     event_type: "case.status_changed",
     created_at: "2024-01-15T10:00:00Z",
     reason: "field_confirmation",
+    actor_name: null,
+    con_actor: true,
   },
   {
     id: 2,
     event_type: "case.closed",
     created_at: "2024-01-16T12:00:00Z",
     reason: null,
+    actor_name: null,
+    con_actor: true,
   },
 ];
 
@@ -268,6 +272,62 @@ describe("getCaseDetail — el historial no lleva de más", () => {
     expect(res!.audit_log[0].reason).toBe("field_confirmation");
     // El resto del payload no viaja: `from` y `to` no los muestra nadie.
     expect(JSON.stringify(res!.audit_log)).not.toContain("recibido");
+  });
+
+  it("quién lo hizo sale como nombre y como «hubo una persona», nunca como id", async () => {
+    setupSelectMock({
+      caseRows: [mockCase],
+      extractedRows: [],
+      missingRows: [],
+      auditRows: [
+        { ...mockAuditEntries[0], actor_name: "Lucía Ramallo" },
+        // El agente: sin persona detrás.
+        { ...mockAuditEntries[1], actor_id: null, actor_name: null },
+      ],
+    });
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    expect(res!.audit_log[0]).toMatchObject({ actor_name: "Lucía Ramallo", con_actor: true });
+    expect(res!.audit_log[1]).toMatchObject({ actor_name: null, con_actor: false });
+    expect(JSON.stringify(res!.audit_log)).not.toContain("user-001");
+  });
+
+  it("lo que escribe el sistema no se firma con quien lo disparó", async () => {
+    setupSelectMock({
+      caseRows: [mockCase],
+      extractedRows: [],
+      missingRows: [],
+      auditRows: [
+        // El worker graba el actor de quien tocó Re-analizar en sus eventos automáticos.
+        { ...mockAuditEntries[0], event_type: "ai.extraction_complete", actor_name: "Lucía Ramallo" },
+        { ...mockAuditEntries[1], event_type: "ai.extracted", actor_name: "Lucía Ramallo" },
+        { ...mockAuditEntries[0], id: 3, event_type: "case.re_analyze_triggered", actor_name: "Lucía Ramallo" },
+      ],
+    });
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    expect(res!.audit_log[0]).toMatchObject({ actor_name: null, con_actor: false });
+    expect(res!.audit_log[1]).toMatchObject({ actor_name: null, con_actor: false });
+    expect(res!.audit_log[2]).toMatchObject({ actor_name: "Lucía Ramallo", con_actor: true });
+  });
+
+  it("el nombre sale de la misma consulta, por la PK de users", async () => {
+    setupSelectMock({ caseRows: [mockCase], extractedRows: [], missingRows: [], auditRows: mockAuditEntries });
+    const original = vi.mocked(db.select).getMockImplementation()!;
+    const campos: any[] = [];
+    vi.mocked(db.select).mockImplementation((...args: unknown[]) => {
+      campos.push(args[0]);
+      return (original as (...a: unknown[]) => unknown)(...args) as never;
+    });
+
+    await getCaseDetail(TENANT_ID, "case-uuid-1");
+
+    // Cuatro `select` en total: el nombre no abre una quinta consulta.
+    expect(campos).toHaveLength(4);
+    const { sql } = new PgDialect().sqlToQuery(campos[3].actor_name as SQL);
+    expect(sql).toContain("from users u where u.id = ");
   });
 
   it("un evento sin motivo llega con null, no con undefined", async () => {
@@ -460,6 +520,25 @@ describe("getCaseDetail", () => {
     expect(result).not.toBeNull();
     expect(result!.missing_docs).toHaveLength(1);
     expect(result!.missing_docs[0].doc_key).toBe("foto_oblea_vtv");
+  });
+
+  it("missing_docs sale sin repetidos y sin el dato que ya está presente", async () => {
+    setupSelectMock({
+      caseRows: [mockCase],
+      extractedRows: [
+        { id: "ef-3", case_id: "case-uuid-1", field_key: "accident_location", field_value: "Bahía Blanca", confidence: "0.80" },
+      ],
+      missingRows: [
+        { id: "md-1", doc_key: "dni", satisfied_at: null, declined_at: null },
+        { id: "md-2", doc_key: "dni_asegurado", satisfied_at: null, declined_at: null },
+        { id: "md-3", doc_key: "accident_location", satisfied_at: null, declined_at: null },
+        { id: "md-4", doc_key: "foto_oblea_vtv", satisfied_at: null, declined_at: null },
+      ],
+      auditRows: [],
+    });
+
+    const result = await getCaseDetail(TENANT_ID, "case-uuid-1");
+    expect(result!.missing_docs.map((d) => d.doc_key)).toEqual(["dni", "foto_oblea_vtv"]);
   });
 
   it("includes audit_log when present", async () => {

@@ -42,6 +42,10 @@ const ParamsSchema = z.object({
   id: z.string().uuid("ID de caso inválido."),
 });
 
+// «Marcar como relevante» es un re-análisis de un descartado que además fija `is_claim`.
+// El cuerpo es opcional: sin él, la ruta se comporta como siempre.
+const BodySchema = z.object({ marcar_relevante: z.literal(true).optional() });
+
 // Rate limit: 5 re-analyses per hour per case.
 const RE_ANALYZE_LIMIT = { limit: 5, windowMs: 3_600_000 };
 
@@ -94,6 +98,12 @@ export async function POST(
       }
     );
   }
+
+  const bodyParsed = BodySchema.safeParse((await request.json().catch(() => null)) ?? {});
+  if (!bodyParsed.success) {
+    return err(new AppError("VALIDATION_FAILED", "Cuerpo inválido."));
+  }
+  const marcarRelevante = bodyParsed.data.marcar_relevante === true;
 
   // ── Verify case belongs to tenant (IDOR — explicit tenant_id filter) ─────────
   let caseRow: {
@@ -155,6 +165,10 @@ export async function POST(
     }
   }
 
+  if (marcarRelevante && caseRow.status !== "no_relevante") {
+    return err(new AppError("FSM_INVALID_TRANSITION", "Sólo se marca como relevante un caso descartado."));
+  }
+
   // Un caso ya enviado a Core no vuelve a `procesando`: eso lo desengancharía
   // del envío que ya se hizo. Sólo `sync-to-core` escribe/lee esa transición.
   if (statusParsed.success && statusParsed.data === "enviado_a_core") {
@@ -182,7 +196,12 @@ export async function POST(
       await enTenant(tenantCtx, (db) =>
         db
         .update(cases)
-        .set({ status: "procesando", updated_at: new Date().toISOString() })
+        .set({
+          status: "procesando",
+          updated_at: new Date().toISOString(),
+          // Con `is_claim` en true el clasificador no lo vuelve a descartar (extract.ts, «ignored_unclaim»).
+          ...(marcarRelevante ? { is_claim: true } : {}),
+        })
           .where(and(eq(cases.id, caseId), eq(cases.status, caseRow.status as CaseStatus)))
           .returning({ id: cases.id, status: cases.status })
       )
@@ -203,7 +222,7 @@ export async function POST(
     event_type: "case.re_analyze_triggered",
     target_type: "case",
     target_id: caseId,
-    payload: { previous_status: caseRow.status },
+    payload: { previous_status: caseRow.status, ...(marcarRelevante ? { reason: "marcado_relevante" } : {}) },
     ip,
     ua: request.headers.get("user-agent") ?? undefined,
   });

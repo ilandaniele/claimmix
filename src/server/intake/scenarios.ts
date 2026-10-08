@@ -2808,12 +2808,38 @@ export function getScenarioById(id: string): SimulationScenario | undefined {
   return SCENARIOS_BY_ID.get(id);
 }
 
+/** De dónde sortean los simuladores: los del ramo, o todos si el ramo no tiene. */
+function poolDelRamo(claimType?: ClaimType): SimulationScenario[] {
+  const delTipo = claimType ? SCENARIOS.filter((s) => s.case_type === claimType) : SCENARIOS;
+  // Los ramos nuevos (ART, vida, comercio, consorcio) no tienen escenarios de simulación.
+  return delTipo.length > 0 ? delTipo : SCENARIOS;
+}
+
 /**
  * Get a random scenario for a given claim type.
  */
 export function getRandomScenario(claimType?: ClaimType): SimulationScenario {
-  const delTipo = claimType ? SCENARIOS.filter((s) => s.case_type === claimType) : SCENARIOS;
-  // Los ramos nuevos (ART, vida, comercio, consorcio) no tienen escenarios de simulación.
-  const pool = delTipo.length > 0 ? delTipo : SCENARIOS;
+  const pool = poolDelRamo(claimType);
   return pool[Math.floor(Math.random() * pool.length)]!;
+}
+
+/**
+ * `n` escenarios del ramo sin repetir ninguno, mientras el pool alcance.
+ *
+ * Sortear de a uno con reposición dejaba dos casos con el mismo asegurado en
+ * un lote. Acá se mezcla el pool entero (Fisher-Yates) y se toman los
+ * primeros; si `n` pasa el tamaño del pool se concatena otra mezcla.
+ */
+export function escenariosSinRepetir(claimType: ClaimType | undefined, n: number): SimulationScenario[] {
+  const pool = poolDelRamo(claimType);
+  const elegidos: SimulationScenario[] = [];
+  while (elegidos.length < n) {
+    const mezcla = [...pool];
+    for (let i = mezcla.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [mezcla[i], mezcla[j]] = [mezcla[j]!, mezcla[i]!];
+    }
+    elegidos.push(...mezcla);
+  }
+  return elegidos.slice(0, n);
 }

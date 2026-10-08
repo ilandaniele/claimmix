@@ -4198,8 +4198,10 @@ tomar o soltar un caso.
 **B10: vencimientos.** `src/core/case/plazos.ts`. El art. 56 de la Ley 17.418
 (el asegurador se pronuncia dentro de los 30 días de recibida la información
 completa) se ancla a `listo_para_core` y se rotula como orientativo; el art. 46
-(el asegurado denuncia dentro de los 3 días) sólo informa en la ficha si la
-denuncia llegó en término, no vence nada del analista. Además cada aseguradora
+(el asegurado denuncia dentro de los 3 días) sólo informa en la ficha cuántos
+días pasaron del hecho a la denuncia, como señal y no como decisión (ámbar al
+pasar los 3, nunca rojo); no vence nada del analista. La cobertura de la ficha
+también se rotula como orientativa. Además cada aseguradora
 puede definir plazos propios (`tenants.plazos`). Los días son corridos y el
 vencimiento cae al final del día argentino. La bandeja ordena y filtra por
 vencimiento (`vence_en`), la agenda agrupa los casos con plazo, y las insignias

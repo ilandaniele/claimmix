@@ -163,6 +163,11 @@ export interface EmailClaimPayload {
    * misma llamada: leerlos aparte sería otra llamada por turno.
    */
   media?: { mimeType: string; data: string }[];
+  /**
+   * Una extracción anterior de este caso falló por algo pasajero (plazo, 429 o red: intentos_de_extraccion > 0).
+   * El contador no se reinicia, así que vale para toda extracción posterior del caso: va concisa y a 0,3.
+   */
+  trasCorte?: boolean;
 }
 
 

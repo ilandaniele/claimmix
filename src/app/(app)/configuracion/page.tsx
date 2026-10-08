@@ -28,11 +28,14 @@ import packageJson from "../../../../package.json";
 import { ADMIN_ROLES } from "@/lib/auth/require-role";
 import { CoreSyncPanel } from "./CoreSyncPanel";
 import { MontosPanel } from "./MontosPanel";
+import { NumeroPanel } from "./NumeroPanel";
 import { paraAdmin, ssoParaAdmin } from "./para-admin";
 import { PruebaPanel } from "./PruebaPanel";
 import { SsoPanel } from "./SsoPanel";
 import { esResultadoSso } from "./sso-resultados";
 import { MONTOS_POR_DEFECTO } from "@/core/case/monto-estimado";
+import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
+import { esResultadoDelNumero } from "@/server/alta/numero-resultados";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -85,9 +88,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default async function ConfiguracionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ vinculo?: string; sso?: string }>;
+  searchParams: Promise<{ vinculo?: string; sso?: string; wa?: string }>;
 }) {
-  const { vinculo, sso } = await searchParams;
+  const { vinculo, sso, wa } = await searchParams;
   const locale = await getAccountLocale();
   const t = getT(locale);
 
@@ -114,6 +117,11 @@ export default async function ConfiguracionPage({
     process.env.CONFIDENCE_THRESHOLD ?? "0.70"
   );
   const monthlyBudgetCap = 200; // $200/month — hardcoded default per spec
+
+  // El número por código: la bandera y la 0049 (sin ella, lo de siempre), lo que dejó la última acción y si todavía hay un número por conectar.
+  const automatico = numeroAutomatico() && admin?.prueba?.porCodigo === true;
+  const resultadoDelNumero = esResultadoDelNumero(wa) ? wa : null;
+  const formulariosDelNumero = admin?.prueba?.numero === "pedido" && admin.prueba.dias !== 0;
 
   // System info
   const appVersion = packageJson.version;
@@ -143,10 +151,13 @@ export default async function ConfiguracionPage({
           </div>
         </Section>
 
-        {/* ── Prueba y número de WhatsApp (alta automática, sólo admin, sólo lectura) ── */}
+        {/* ── Prueba y número de WhatsApp (alta automática, sólo admin; el número se conecta con un código si la bandera está prendida) ── */}
         {admin?.prueba && (
           <Section title={t("configuracion.prueba.titulo")}>
-            <PruebaPanel prueba={admin.prueba} t={t} />
+            <PruebaPanel prueba={admin.prueba} t={t} automatico={automatico} />
+            {automatico && (formulariosDelNumero || resultadoDelNumero) && (
+              <NumeroPanel t={t} resultado={resultadoDelNumero} formularios={formulariosDelNumero} />
+            )}
           </Section>
         )}
 

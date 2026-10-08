@@ -40,6 +40,7 @@ import type { CaseQuery, CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severit
 import { Card } from "../_components/ui";
 import { diasDePrueba } from "@/lib/billing/plans";
 import { getT } from "@/lib/i18n";
+import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
 export const VALID_STATUSES: CaseStatus[] = CaseStatusSchema.options;
@@ -296,7 +297,10 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
             role="status"
             className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-[13px] text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
           >
-            {t("bandeja.bienvenida").replace("{n}", String(diasDePrueba()))}
+            {t(numeroAutomatico() ? "bandeja.bienvenidaAutomatica" : "bandeja.bienvenida").replace(
+              "{n}",
+              String(diasDePrueba())
+            )}
           </p>
         )}
 

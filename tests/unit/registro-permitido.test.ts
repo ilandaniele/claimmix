@@ -14,11 +14,12 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import {
   parsearPermitidos,
   puedeRegistrarse,
-  enAltaDeAdmin,
+  enAlta,
   enIngresoPorSso,
-  esAltaDeAdmin,
   ingresoPorSso,
   altaHabilitada,
+  altaAbierta,
+  altaEnCursoPorServidor,
 } from "@/lib/auth/registro-permitido";
 
 /*
@@ -139,44 +140,25 @@ describe("altaHabilitada", () => {
     expect(altaHabilitada("quien.sea@otra.com")).toBe(false);
   });
 
-  it("un admin da de alta a quien quiera, incluso sin variable", async () => {
-    delete process.env.SIGNUP_ALLOWED_EMAILS;
-    await enAltaDeAdmin(async () => {
-      expect(altaHabilitada("de.afuera@cualquiera.com")).toBe(true);
-    });
-  });
-
   /*
-   * La marca no puede sobrevivir al pedido que la puso: si quedara colgada, el
-   * registro de un desconocido que llega despues entraria como si lo hubiera
-   * pedido un admin.
+   * Las puertas del servidor (el enlace del mail, la invitación) las abre quien
+   * llama a `signUpEmail`, y el gancho de alta las reconoce por su cuenta. Ninguna
+   * le abre la lista a una dirección de afuera: un admin invita, no da de alta.
    */
-  it("la marca de admin no se escapa del pedido que la puso", async () => {
-    await enAltaDeAdmin(async () => {
-      expect(esAltaDeAdmin()).toBe(true);
-    });
-    expect(esAltaDeAdmin()).toBe(false);
-
+  it("una puerta del servidor no abre la lista", async () => {
     delete process.env.SIGNUP_ALLOWED_EMAILS;
-    expect(altaHabilitada("de.afuera@cualquiera.com")).toBe(false);
+    for (const camino of ["correo", "invitacion"] as const) {
+      await enAlta(camino, async () => {
+        expect(altaHabilitada("de.afuera@cualquiera.com")).toBe(false);
+      });
+    }
   });
 
-  it("dos pedidos a la vez no se contaminan", async () => {
-    delete process.env.SIGNUP_ALLOWED_EMAILS;
-    let deAdentro = false;
-    let deAfuera = true;
-    await Promise.all([
-      enAltaDeAdmin(async () => {
-        await new Promise((r) => setTimeout(r, 5));
-        deAdentro = altaHabilitada("x@cualquiera.com");
-      }),
-      (async () => {
-        await new Promise((r) => setTimeout(r, 1));
-        deAfuera = altaHabilitada("y@cualquiera.com");
-      })(),
-    ]);
-    expect(deAdentro).toBe(true);
-    expect(deAfuera).toBe(false);
+  it("la puerta no se escapa del pedido que la abrió", async () => {
+    await enAlta("invitacion", async () => {
+      expect(altaEnCursoPorServidor()).toBe("invitacion");
+    });
+    expect(altaEnCursoPorServidor()).toBeUndefined();
   });
 
   /*
@@ -221,12 +203,6 @@ describe("altaHabilitada dentro de un ingreso por SSO", () => {
     expect(altaHabilitada("quien.sea@empresa.com")).toBe(false);
   });
 
-  it("no es una alta de admin", async () => {
-    await enIngresoPorSso(ingreso, async () => {
-      expect(esAltaDeAdmin()).toBe(false);
-    });
-  });
-
   it("dos ingresos de inquilinos distintos a la vez no se contaminan", async () => {
     delete process.env.SIGNUP_ALLOWED_EMAILS;
     const visto: string[] = [];
@@ -241,5 +217,35 @@ describe("altaHabilitada dentro de un ingreso por SSO", () => {
       }),
     ]);
     expect(visto.sort()).toEqual(["a:a:true:false", "b:b:true:false"]);
+  });
+});
+
+describe("altaAbierta", () => {
+  const original = process.env.ALTA_AUTOMATICA;
+  afterEach(() => {
+    if (original === undefined) delete process.env.ALTA_AUTOMATICA;
+    else process.env.ALTA_AUTOMATICA = original;
+  });
+
+  it("apagada y sin lista, no se abre para nadie", () => {
+    delete process.env.ALTA_AUTOMATICA;
+    expect(altaAbierta("quien.sea@example.com")).toBe(false);
+  });
+
+  it("apagada, se abre sólo para la lista", () => {
+    delete process.env.ALTA_AUTOMATICA;
+    process.env.SIGNUP_ALLOWED_EMAILS = "@example.com";
+    expect(altaAbierta("ana@example.com")).toBe(true);
+    expect(altaAbierta("ana@otra.example.org")).toBe(false);
+  });
+
+  it("con ALTA_AUTOMATICA=1 se abre para cualquiera", () => {
+    process.env.ALTA_AUTOMATICA = "1";
+    expect(altaAbierta("quien.sea@example.com")).toBe(true);
+  });
+
+  it.each(["0", "true", "yes", "", " 1"])("%j no la abre: es exactamente «1»", (valor) => {
+    process.env.ALTA_AUTOMATICA = valor;
+    expect(altaAbierta("quien.sea@example.com")).toBe(false);
   });
 });

@@ -617,6 +617,28 @@ export const AuditEvent = {
    * sólo conteos y la fecha de corte.
    */
   RETENCION_APLICADA: "retencion.aplicada",
+
+  // ── Alta automática ────────────────────────────────────────────────────────
+  /**
+   * TENANT_CREATED: una aseguradora se dio de alta sola. Lo escribe
+   * claimmix_crear_inquilino, en la misma transacción que el inquilino. Payload:
+   * { origen, numero_en_revision } — nunca el mail ni el número.
+   */
+  TENANT_CREATED: "tenant.created",
+  /** TENANT_PLAN_CHANGED: cambió el plan de un inquilino (payload { de, a, estado }) o se le extendió la prueba (payload { prueba_hasta }). */
+  TENANT_PLAN_CHANGED: "tenant.plan_changed",
+  /** TENANT_SUSPENDED: el operador suspendió o reactivó un inquilino. Payload: { estado }. */
+  TENANT_SUSPENDED: "tenant.suspended",
+  /** El número de WhatsApp de un inquilino quedó conectado, suspendido o dado de baja. */
+  WHATSAPP_NUMERO_CONECTADO: "whatsapp.numero_conectado",
+  WHATSAPP_NUMERO_SUSPENDIDO: "whatsapp.numero_suspendido",
+  WHATSAPP_NUMERO_BAJA: "whatsapp.numero_baja",
+  /** USER_INVITED: un admin invitó a una persona al espacio. Payload: { rol } — sin el mail. */
+  USER_INVITED: "auth.user_invited",
+  /** INVITATION_ACCEPTED: la persona invitada aceptó y se le creó el perfil. */
+  INVITATION_ACCEPTED: "auth.invitation_accepted",
+  /** INVITATION_REJECTED: la invitación no se pudo aceptar. Payload: { motivo } — un código. */
+  INVITATION_REJECTED: "auth.invitation_rejected",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

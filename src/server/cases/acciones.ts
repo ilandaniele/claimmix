@@ -30,6 +30,7 @@ export type MotivoSinReenvio =
   | "ventana_cerrada"
   | "plantilla_sin_aprobar"
   | "plantilla_sin_respuesta"
+  | "tope_de_plantillas"
   | "nada_pendiente"
   | "reciente"
   | "cierre_no_es_abandono";
@@ -82,7 +83,7 @@ export async function leerEstadoDeAcciones(
     // `deFilasDelReenvio` sigue leyendo sus 8 filas de siempre; ignora las demás.
     const d = deFilasDelReenvio(filas.slice(1));
     const reabrible = d.caso?.status === "cerrado" && d.ultimoCierre === AuditEvent.CASE_CLOSED_ABANDONED;
-    const dec = await decidirConPlantilla(d, new Date(), reabrible);
+    const dec = await decidirConPlantilla(d, new Date(), reabrible, ctx.tenantId);
     const ultimoMovimiento = (filas[9] as Array<{ event_type: string; payload: unknown }>)[0];
     const conCliente = hayClienteDeCoreSync(conCore ? (filas[10] as FilaDeCoreSync[])[0] : null);
     // Con el mock (demo) no se mira: sus casos son todos simulados.

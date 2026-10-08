@@ -38,6 +38,8 @@ const PREFIJOS_EXCLUIDOS = [
   "sso.",
   "retencion.",
   "adjuntos.",
+  // Del alta automática: son del inquilino y de su número de WhatsApp, no de un caso.
+  "whatsapp.",
 ];
 const VALORES_EXCLUIDOS = new Set([
   "agent.memory_config_exported",
@@ -50,6 +52,9 @@ const VALORES_EXCLUIDOS = new Set([
   "tenant.ramo_guardado",
   "tenant.ramo_borrado",
   "tenant.formulario_web_cambiado",
+  "tenant.created",
+  "tenant.plan_changed",
+  "tenant.suspended",
 ]);
 
 const ADJUNTO_RECHAZADO = {

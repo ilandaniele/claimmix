@@ -19,6 +19,13 @@
  * Y la dirección tiene que estar verificada: un admin de un asegurador puede
  * crear un usuario con cualquier mail, así que el texto solo no prueba nada.
  *
+ * Y el espacio tiene que ser el de la casa. Con el alta automática cualquiera
+ * abre un espacio propio y queda como dueño; si esa persona tiene una dirección
+ * de ADMIN_EMAILS (porque alguien la agregó para probar), la sesión de admin y
+ * la dirección alcanzaban para ver y tocar los espacios de todos. Las altas
+ * cruzan inquilinos y escriben con el rol dueño: sólo las abre quien es
+ * operador DESDE el inquilino por defecto.
+ *
  * Falla cerrado: sin ADMIN_EMAILS configurado no hay operador, y la pantalla no
  * la ve nadie. Una lista de clientes que se abre sola cuando falta una variable
  * es exactamente la clase de error que nadie mira hasta que ya pasó.
@@ -26,6 +33,7 @@
 
 import "server-only";
 import { requireAdmin, type AdminContext } from "@/lib/auth/require-admin";
+import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import { AppError } from "@/lib/errors";
 
 /** Las direcciones que operan el producto, normalizadas. */
@@ -44,7 +52,7 @@ export function isOperatorEmail(email: string | null | undefined): boolean {
 }
 
 /**
- * Sesión de admin Y dirección de operador verificada.
+ * Sesión de admin Y dirección de operador verificada Y espacio por defecto.
  *
  * @throws AppError('MISSING_SESSION') — sin sesión
  * @throws AppError('FORBIDDEN_ROLE')  — con sesión, sin ser operador, o sin mail verificado
@@ -53,6 +61,11 @@ export async function requireOperator(): Promise<AdminContext> {
   const ctx = await requireAdmin();
   // La dirección tiene que estar probada, no sólo tipeada: mismo criterio que provision.ts.
   if (ctx.user.emailVerified !== true || !isOperatorEmail(ctx.user.email)) {
+    throw new AppError("FORBIDDEN_ROLE");
+  }
+  // Sin inquilino por defecto configurado no hay casa: falla cerrado, como ADMIN_EMAILS.
+  const casa = resolveDefaultTenantId()?.trim().toLowerCase();
+  if (!casa || ctx.userRow.tenant_id.trim().toLowerCase() !== casa) {
     throw new AppError("FORBIDDEN_ROLE");
   }
   return ctx;

@@ -12,7 +12,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 
-const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent, mockReap, mockRetomar, mockMarcarPendientes } = vi.hoisted(() => {
+const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent, mockReap, mockRetomar, mockMarcarPendientes, mockResolverNumeros } = vi.hoisted(() => {
   const afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
   return {
     afterCallbacks,
@@ -22,6 +22,7 @@ const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent,
     mockReap: vi.fn(),
     mockRetomar: vi.fn(),
     mockMarcarPendientes: vi.fn(),
+    mockResolverNumeros: vi.fn(),
   };
 });
 
@@ -41,11 +42,23 @@ vi.mock("@/server/intake/retomar-pendientes", () => ({
   MINIMO_PARA_RETOMAR_MS: 120_000,
 }));
 
+// El ruteo por número se prueba en tests/unit/whatsapp/numeros.test.ts y en
+// webhook-ruteo.test.ts; acá sólo importa que cada mensaje llegue al inquilino que devuelve.
+vi.mock("@/server/whatsapp/numeros", () => ({
+  resolverNumeros: mockResolverNumeros,
+  inquilinoDeLaPlataforma: () => process.env.WHATSAPP_TENANT_ID?.trim() || null,
+}));
+
 import { GET, POST, maxDuration } from "@/app/api/webhooks/whatsapp/route";
 
 const APP_SECRET = "test-app-secret";
 const VERIFY_TOKEN = "verify-tok";
 const TENANT = "10000000-0000-0000-0000-000000000001";
+const NUMERO = "111111111111111";
+
+beforeEach(() => {
+  mockResolverNumeros.mockImplementation(async (ids: string[]) => new Map(ids.map((id) => [id, TENANT])));
+});
 
 function sign(body: string): string {
   return "sha256=" + createHmac("sha256", APP_SECRET).update(body).digest("hex");
@@ -60,6 +73,7 @@ function metaReq(rawBody: string, signature: string | null): NextRequest {
 const TEXT_PAYLOAD = JSON.stringify({
   object: "whatsapp_business_account",
   entry: [{ changes: [{ value: {
+    metadata: { phone_number_id: NUMERO },
     contacts: [{ wa_id: "5492916426930", profile: { name: "Ilan" } }],
     messages: [{ from: "5492916426930", id: "wamid.1", type: "text", text: { body: "Tuve un choque" } }],
   } }] }],
@@ -164,6 +178,7 @@ describe("/api/webhooks/whatsapp", () => {
     const dosMensajes = JSON.stringify({
       object: "whatsapp_business_account",
       entry: [{ changes: [{ value: {
+        metadata: { phone_number_id: NUMERO },
         contacts: [{ wa_id: "5492916426930", profile: { name: "Ilan" } }],
         messages: [
           { from: "5492916426930", id: "wamid.1", type: "text", text: { body: "Choqué" } },
@@ -207,6 +222,7 @@ describe("/api/webhooks/whatsapp", () => {
     const dosMensajes = JSON.stringify({
       object: "whatsapp_business_account",
       entry: [{ changes: [{ value: {
+        metadata: { phone_number_id: NUMERO },
         contacts: [{ wa_id: "5492916426930", profile: { name: "Ilan" } }],
         messages: [
           { from: "5492916426930", id: "wamid.1", type: "text", text: { body: "Choqué" } },
@@ -268,6 +284,7 @@ describe("/api/webhooks/whatsapp", () => {
     const dosMensajes = JSON.stringify({
       object: "whatsapp_business_account",
       entry: [{ changes: [{ value: {
+        metadata: { phone_number_id: NUMERO },
         contacts: [{ wa_id: "5490000000021", profile: { name: "Ilan" } }],
         messages: [
           { from: "5490000000021", id: "wamid.1", type: "text", text: { body: "Choqué" } },
@@ -460,8 +477,6 @@ describe("/api/webhooks/whatsapp — reentregas de Meta", () => {
 });
 
 describe("/api/webhooks/whatsapp — a qué número le hablaron", () => {
-  const NUESTRO = "111111111111111";
-
   function payload(phoneNumberId: string | null): string {
     return JSON.stringify({
       object: "whatsapp_business_account",
@@ -478,46 +493,37 @@ describe("/api/webhooks/whatsapp — a qué número le hablaron", () => {
     afterCallbacks.length = 0;
     process.env.WHATSAPP_APP_SECRET = APP_SECRET;
     process.env.WHATSAPP_TENANT_ID = TENANT;
-    process.env.WHATSAPP_PHONE_NUMBER_ID = NUESTRO;
     mockCreateWhatsAppIntake.mockResolvedValue({
       caseId: "case-1", tenantId: TENANT, created: true, duplicado: false,
     });
   });
   afterEach(() => {
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
     vi.clearAllMocks();
   });
 
-  it("el mensaje al número que atendemos entra", async () => {
-    const cuerpo = payload(NUESTRO);
+  it("el mensaje a un número con dueño entra a ese inquilino", async () => {
+    const cuerpo = payload(NUMERO);
     const res = await POST(metaReq(cuerpo, sign(cuerpo)));
 
     expect(res.status).toBe(200);
+    expect(mockResolverNumeros).toHaveBeenCalledWith([NUMERO]);
     expect(mockCreateWhatsAppIntake).toHaveBeenCalledTimes(1);
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT }));
   });
 
-  it("el de OTRA WABA no se guarda en la bandeja de ésta", async () => {
-    // Firma válida, evento real, y aún así no es nuestro: una app de Meta puede
-    // estar suscripta a varios números. El inquilino sale de una constante, así
-    // que sin esto la denuncia de la otra aseguradora terminaba acá adentro.
+  it("el de un número que nadie tiene no se guarda en la bandeja de nadie", async () => {
+    // Firma válida, evento real, y aún así no es de ningún inquilino: una app de
+    // Meta puede estar suscripta a varios números.
+    mockResolverNumeros.mockResolvedValue(new Map());
     const espia = vi.spyOn(console, "error").mockImplementation(() => {});
     const cuerpo = payload("999999999999999");
     const res = await POST(metaReq(cuerpo, sign(cuerpo)));
     espia.mockRestore();
 
     expect(mockCreateWhatsAppIntake).not.toHaveBeenCalled();
-    // 200: el evento está bien, el destinatario no somos nosotros. Reintentarlo
+    // 200: el evento está bien, el destinatario no es de nadie. Reintentarlo
     // no lo va a cambiar.
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ignored_other_number: 1 });
-  });
-
-  it("sin número configurado pasa todo, como antes", async () => {
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
-    const cuerpo = payload("999999999999999");
-    const res = await POST(metaReq(cuerpo, sign(cuerpo)));
-
-    expect(res.status).toBe(200);
-    expect(mockCreateWhatsAppIntake).toHaveBeenCalledTimes(1);
   });
 });

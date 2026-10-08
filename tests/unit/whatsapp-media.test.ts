@@ -43,6 +43,18 @@ vi.mock("@/server/whatsapp/cloud-api", async (importOriginal) => {
   };
 });
 
+// El token del número del inquilino: sin esto la descarga leería la base y se llevaría un turno del guion.
+vi.mock("@/server/whatsapp/numeros", () => ({
+  credencialesWhatsApp: vi.fn(async () => ({
+    accessToken: "test-token",
+    phoneNumberId: "123",
+    wabaId: null,
+    autoalta: false,
+    vencida: false,
+  })),
+  avisarSinNumero: vi.fn(),
+}));
+
 vi.mock("@/server/email/rehost-attachments", () => ({
   rehostAndRecordAttachments: espiaDeRehost,
 }));
@@ -154,16 +166,13 @@ describe("parseCloudApiMessages — media", () => {
   });
 });
 
+const CRED = { accessToken: "test-token" };
+
 describe("downloadWhatsAppMedia", () => {
   const realFetch = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
-  });
-
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
   });
 
   it("resolves the id to a URL and fetches it with the token", async () => {
@@ -185,7 +194,7 @@ describe("downloadWhatsAppMedia", () => {
       return new Response(Buffer.from("bytes"), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const file = await downloadWhatsAppMedia("media-1");
+    const file = await downloadWhatsAppMedia("media-1", CRED);
 
     const bajado = loBajado(file);
     expect(bajado.mimeType).toBe("image/jpeg");
@@ -200,7 +209,7 @@ describe("downloadWhatsAppMedia", () => {
       new Response("nope", { status: 404 })
     ) as unknown as typeof fetch;
 
-    await expect(downloadWhatsAppMedia("media-x")).resolves.toBeNull();
+    await expect(downloadWhatsAppMedia("media-x", CRED)).resolves.toBeNull();
   });
 
   it("returns null when the network itself fails", async () => {
@@ -208,16 +217,7 @@ describe("downloadWhatsAppMedia", () => {
       throw new Error("ECONNRESET");
     }) as unknown as typeof fetch;
 
-    await expect(downloadWhatsAppMedia("media-x")).resolves.toBeNull();
-  });
-
-  it("returns null rather than calling Graph with no token", async () => {
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
-    const spy = vi.fn();
-    globalThis.fetch = spy as unknown as typeof fetch;
-
-    await expect(downloadWhatsAppMedia("media-x")).resolves.toBeNull();
-    expect(spy).not.toHaveBeenCalled();
+    await expect(downloadWhatsAppMedia("media-x", CRED)).resolves.toBeNull();
   });
 });
 
@@ -235,13 +235,8 @@ describe("downloadWhatsAppMedia", () => {
 describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
   const realFetch = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
-  });
-
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
   });
 
   /** Las URL que se pidieron, para ver si la del CDN llegó a abrirse. */
@@ -268,7 +263,7 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
   it("con file_size de 100 MB ni abre la conexión con el CDN", async () => {
     const urls = espiar(100 * 1024 * 1024);
 
-    const file = await downloadWhatsAppMedia("media-1");
+    const file = await downloadWhatsAppMedia("media-1", CRED);
 
     // Con los bytes que declaro Meta: el analista ve cuanto pesaba.
     expect(file).toEqual({ demasiadoGrande: true, bytes: 100 * 1024 * 1024 });
@@ -281,7 +276,7 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
     // El control que impide que el arreglo sea «rechazar todo».
     const urls = espiar(1024);
 
-    const file = await downloadWhatsAppMedia("media-1");
+    const file = await downloadWhatsAppMedia("media-1", CRED);
 
     expect(loBajado(file).data.toString()).toBe("bytes");
     expect(urls).toHaveLength(2);
@@ -293,7 +288,7 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
     const enorme = "x".repeat(11 * 1024 * 1024);
     const urls = espiar(undefined, enorme);
 
-    const file = await downloadWhatsAppMedia("media-1");
+    const file = await downloadWhatsAppMedia("media-1", CRED);
 
     // Esto comprueba la FORMA del retorno y nada más: «demasiado grande» y no
     // `null`, que es «no se pudo bajar». Que de esa forma salga después un

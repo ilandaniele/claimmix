@@ -98,20 +98,23 @@ describe("checkRateLimitPostgres", () => {
 });
 
 describe("liberarIntentoPostgres", () => {
-  it("resta uno a la ventana en curso, con una sola sentencia", async () => {
+  const VENTANA = Math.floor(Date.now() / 60_000) * 60_000;
+
+  it("resta uno a la ventana donde se contó, con una sola sentencia", async () => {
     execute.mockResolvedValueOnce({ rowCount: 1 });
 
-    await liberarIntentoPostgres("k", 60_000);
+    await liberarIntentoPostgres("k", 60_000, VENTANA);
 
     expect(execute).toHaveBeenCalledTimes(1);
     const sentencia = JSON.stringify(execute.mock.calls[0][0]);
     expect(sentencia).toContain("hits - 1");
     expect(sentencia).toContain("greatest");
+    expect(sentencia).toContain(new Date(VENTANA).toISOString());
   });
 
   it("no rompe a quien la llama si la base no contesta", async () => {
     execute.mockRejectedValueOnce(new Error("connection reset"));
-    await expect(liberarIntentoPostgres("k", 60_000)).resolves.toBeUndefined();
+    await expect(liberarIntentoPostgres("k", 60_000, VENTANA)).resolves.toBeUndefined();
   });
 });
 

@@ -1,30 +1,37 @@
 /**
  * GET  /api/admin/users  — list analysts in the current tenant (role=admin only)
- * POST /api/admin/users  — create a new user via Better Auth (role=admin only)
+ * POST /api/admin/users  — invite a person to the current tenant (role=admin only)
  *
- * NOTE: POST creates the auth user then updates the profile to the correct tenant/role.
- * The user receives a confirmation email from Better Auth (if email is configured).
+ * NOTE: POST no longer creates anyone. It mails a sealed link (/invitacion); the
+ * account and the profile are born when the person accepts. See
+ * src/server/alta/invitacion.ts.
  */
 
 import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 
+import { dominioDelMail, esDominioPublico } from "@/core/sso";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { ALL_ROLES } from "@/lib/auth/roles";
-import { auth } from "@/lib/auth";
-import { enAltaDeAdmin } from "@/lib/auth/registro-permitido";
+import { resolveBaseURL } from "@/lib/auth/base-url";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
+import { enPrueba, SIN_SERVICIO } from "@/lib/billing/plans";
+import { entero } from "@/lib/entero";
 import { getT } from "@/lib/i18n";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
-import { db } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
-import { ok, err } from "@/lib/api/respond";
+import { accepted, ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/observability/logger";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
-import { getClientIp } from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { getClientIp, rateLimit } from "@/lib/rate-limit/index";
+import { SignUpSchema } from "@/lib/schemas/auth";
+import { DURACION_DE_LA_INVITACION_MS, sellarInvitacion } from "@/server/alta/invitacion";
+import { correoDeInvitacion } from "@/server/notify/correos-de-alta";
+import { enviarCorreoDelSistema, remitenteDelSistema } from "@/server/notify/remitente-sistema";
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
 
@@ -65,139 +72,119 @@ export async function GET() {
 
 // ── POST /api/admin/users ─────────────────────────────────────────────────────
 
-const CreateUserSchema = z.object({
-  full_name: z.string().min(2).max(100),
-  email: z.string().email(),
-  role: z.enum(ALL_ROLES),
-  password: z.string().min(8).optional(),
-});
+/**
+ * Sin `password`, y `.strict()` para que mandarla sea un error y no un campo
+ * ignorado: nadie crea una cuenta con credencial para otra persona.
+ */
+const InviteUserSchema = SignUpSchema.extend({ role: z.enum(ALL_ROLES) }).strict();
+
+const DIA_MS = 24 * 60 * 60_000;
+/** Cuántas invitaciones, de las que no sean pruebas, por día y por espacio. */
+const topeDeInvitaciones = () => entero("ALTA_TOPE_INVITACIONES_DIA", 20, 1, 1000);
+/** Una prueba invita a lo sumo a cinco personas por día. */
+const TOPE_EN_PRUEBA = 5;
 
 export async function POST(request: NextRequest) {
+  let t = getT("es-AR");
   try {
-    const { userRow: adminRow } = await requireAdmin();
+    const { user, userRow: adminRow } = await requireAdmin();
+    t = getT(await resolveAccountLocale(adminRow.locale));
 
-    const body = await request.json();
-    const parsed = CreateUserSchema.safeParse(body);
+    const body = await request.json().catch(() => null);
+    const parsed = InviteUserSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
     }
 
     const { full_name, email, role } = parsed.data;
     if (role === "owner" && adminRow.role !== "owner") {
-      throw new AppError(
-        "FORBIDDEN_ROLE",
-        "Solo un owner puede crear usuarios owner."
-      );
+      throw new AppError("FORBIDDEN_ROLE", t("usuarios.error.soloOwner"));
     }
-
-    // Las direcciones de ADMIN_EMAILS abren la cartera de todas las aseguradoras: no se dan de alta desde un inquilino.
-    if (isOperatorEmail(email)) {
-      const t = getT(await resolveAccountLocale(adminRow.locale));
-      throw new AppError("VALIDATION_FAILED", t("usuarios.error.operador"));
-    }
-
-    // Generate a temporary password if none provided
-    const password = parsed.data.password ?? crypto.randomUUID().replace(/-/g, "");
 
     /*
-     * El alta de un admin no pasa por `SIGNUP_ALLOWED_EMAILS`.
-     *
-     * La lista existe para cerrar el AUTOREGISTRO: quien llega solo a
-     * `/registro` o entra por Google por primera vez. Quien está acá ya pasó
-     * por `requireAdmin`, y si además tuviera que estar en la lista, sumar a
-     * alguien de afuera pediría un cambio de variable de entorno y un redeploy
-     * para una operación que un admin tiene derecho a hacer.
-     *
-     * La marca viaja por `AsyncLocalStorage` y no por una variable de módulo:
-     * el servidor atiende pedidos concurrentes y una bandera global la podría
-     * leer el registro de un desconocido que llegó en el mismo instante.
+     * Un espacio suspendido o dado de baja no invita: nadie podría aceptar (la
+     * invitación ya no se abre), pero el mail saldría igual con nuestro remitente.
+     * Se corta antes del cupo y de mandar nada, y no depende de la dirección.
      */
-    const result = await enAltaDeAdmin(() =>
-      auth.api.signUpEmail({
-        body: { name: full_name, email, password },
-        // No request headers — server-side creation skips cookie setting
-        headers: new Headers(),
-      })
-    );
+    if (SIN_SERVICIO.has(adminRow.billing_status ?? "")) {
+      throw new AppError("FORBIDDEN_ROLE", t("usuarios.error.suspendido"));
+    }
 
-    const newUserId = result.user.id;
+    // Sin remitente no hay invitación posible, y es un estado del servidor, no de la dirección: se dice antes de gastar cupo.
+    if (!remitenteDelSistema()) {
+      throw new AppError("ENVIO_FALLIDO", t("usuarios.error.envio"));
+    }
 
     /*
-     * El perfil se INSERTA, no se actualiza.
-     *
-     * Antes esto era un UPDATE, y tocaba **cero filas**. El hook que crea el
-     * perfil al dar de alta se saltea a quien no está en la lista blanca —y un
-     * usuario recién creado por un admin nunca lo está—, así que no había fila
-     * que actualizar. El resultado: el admin veía "usuario creado", la persona
-     * podía entrar, y no llegaba a ningún dato. Sin un error en el medio, ni en
-     * la pantalla ni en los registros.
-     *
-     * El admin ES la autoridad que aprueba a esta persona: eso es lo que
-     * significa crearla desde acá. Por eso el perfil se crea en este punto, que
-     * es exactamente el "un admin puede atacharla después" que describe
-     * provision.ts.
-     *
-     * `onConflictDoUpdate` por si el hook SÍ corrió —si la dirección estaba en
-     * la lista blanca— para que el rol y el inquilino que eligió el admin
-     * ganen sobre los que puso el alta automática.
-     *
-     * Y cruza el borde entre inquilinos a propósito: toma a alguien que todavía
-     * no es de ninguno y lo mete en el del admin.
+     * El cupo se toma en CADA intento, y la respuesta no depende de que la
+     * dirección tenga o no cuenta. Si el contador no contesta, no se invita.
      */
-    // sin-inquilino: adentro de `enTenant` no vería la fila que va a crear —
-    // el usuario nuevo todavía no pertenece a ningún inquilino.
-    const perfil = await db
-      .insert(users)
-      .values({
-        id: newUserId,
-        tenant_id: adminRow.tenant_id,
-        full_name,
-        role,
-      })
-      .onConflictDoUpdate({
-        target: users.id,
-        set: { tenant_id: adminRow.tenant_id, full_name, role },
-      })
-      .returning({ id: users.id });
-
-    // Que no vuelva a fallar en silencio. Si el perfil no quedó, la cuenta de
-    // Better Auth existe y no sirve para nada: es peor que no haberla creado,
-    // porque el admin cree que la persona ya tiene acceso.
-    if (perfil.length === 0) {
-      logger.error({}, "admin_users.perfil_no_quedo");
-      return err(
-        new AppError(
-          "INTERNAL_ERROR",
-          "La cuenta se creó pero no se le pudo asignar la aseguradora. " +
-            "Avisá antes de que la persona intente entrar."
-        )
-      );
+    const prueba = enPrueba(adminRow);
+    const tope = prueba ? Math.min(topeDeInvitaciones(), TOPE_EN_PRUEBA) : topeDeInvitaciones();
+    const cupo = await rateLimit(claveDeCupo("usuarios:inquilino", adminRow.tenant_id), {
+      limit: tope,
+      windowMs: DIA_MS,
+      fallaCerrada: true,
+    });
+    if (!cupo.allowed) {
+      return err(new AppError("RATE_LIMITED"), undefined, { "Retry-After": String(cupo.retryAfterSeconds) });
     }
+
+    /*
+     * En una prueba sólo se invita a gente del dominio de quien invita, y nunca de
+     * un proveedor abierto: si no, una prueba gratuita sirve para mandar mails con
+     * nuestro remitente a cualquier dirección. Habla del espacio de quien pide,
+     * no de la dirección de un tercero.
+     */
+    if (prueba) {
+      const dominio = dominioDelMail(email);
+      if (!dominio || esDominioPublico(dominio) || dominio !== dominioDelMail(user.email ?? "")) {
+        throw new AppError("DOMINIO_NO_PERMITIDO", t("usuarios.error.dominio"));
+      }
+    }
+
+    /*
+     * Las direcciones de ADMIN_EMAILS abren la cartera de todas las aseguradoras:
+     * no se invitan desde un inquilino. Se mira DESPUÉS del cupo y del filtro de
+     * dominio y se contesta igual que a cualquier otra: un 400 distinto sería un
+     * buscador de quién opera la plataforma, y un admin de una prueba gratuita
+     * puede probar direcciones. Queda asentado, sin sellar ni mandar nada.
+     */
+    const delOperador = isOperatorEmail(email);
+    if (delOperador) logger.warn({ tenant_id: adminRow.tenant_id }, "admin_users.invitacion_a_operador");
 
     await writeAuditLog({
       tenant_id: adminRow.tenant_id,
       actor_id: adminRow.id,
-      event_type: AuditEvent.USER_CREATED,
-      target_type: "user",
-      target_id: newUserId,
-      payload: { role },
+      event_type: AuditEvent.USER_INVITED,
+      target_type: "invitacion",
+      // Sin el mail: el asiento queda en el registro del espacio y no es de quien lo lee.
+      payload: delOperador ? { rol: role, bloqueada: true } : { rol: role },
       ip: getClientIp(request),
       ua: request.headers.get("user-agent") ?? undefined,
     });
+    if (delOperador) return accepted({ estado: "invitacion_enviada" });
 
-    return ok(
-      {
-        id: newUserId,
-        email,
-        full_name,
-        role,
-        message: "Usuario creado. La contraseña temporal debe ser cambiada en el primer inicio de sesión.",
-      },
-      201
+    const token = sellarInvitacion({
+      t: adminRow.tenant_id,
+      e: email,
+      r: role,
+      n: full_name,
+      i: adminRow.id,
+    });
+
+    // El texto es fijo y sin nombres. Que el mail no salga (cupo del remitente, rebote) tampoco cambia la respuesta.
+    const enlace = `${resolveBaseURL()}/invitacion?t=${token}`;
+    const resultado = await enviarCorreoDelSistema(
+      { to: email, ...correoDeInvitacion(t, enlace, DURACION_DE_LA_INVITACION_MS / 3_600_000) },
+      { tipo: "invitacion" }
     );
+    if (!resultado.enviado) logger.warn({ motivo: resultado.motivo }, "admin_users.invitacion_no_salio");
+
+    return accepted({ estado: "invitacion_enviada" });
   } catch (e) {
     if (e instanceof AppError) return err(e);
     logger.error({ detalle: e instanceof Error ? e.message : "unknown" }, "admin_users_post");
-    return err(new AppError("INTERNAL_ERROR", "No se pudo crear el usuario."));
+    return err(new AppError("INTERNAL_ERROR", t("usuarios.error.crear")));
   }
 }

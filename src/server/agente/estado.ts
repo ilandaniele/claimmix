@@ -20,6 +20,10 @@ export interface EstadoDelAgente {
   procesando: number;
 }
 
+/**
+ * `llamadas: 0`: el indicador se dibuja en cada pantalla y mirar no es llamar al
+ * modelo. Si reservara, cada render de una prueba le gastaría el cupo diario.
+ */
 export async function leerEstadoDelAgente(
   ctx: TenantContext
 ): Promise<EstadoDelAgente | null> {
@@ -27,7 +31,7 @@ export async function leerEstadoDelAgente(
     const estado: EstadoDelAgente["estado"] =
       modoDeIa() === "mock"
         ? "modo_prueba"
-        : (await checkBudget(ctx.tenantId)).exceeded
+        : (await checkBudget(ctx.tenantId, null, { llamadas: 0 })).exceeded
           ? "sin_presupuesto"
           : "activo";
 

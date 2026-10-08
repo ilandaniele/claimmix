@@ -1,16 +1,19 @@
 /**
- * Server Action for account creation — /registro page.
+ * Server Actions de /registro.
  *
- * El alta no pide contraseña ni deja sesión. Crea la cuenta con una contraseña
- * al azar que nadie conoce y manda el enlace de restablecimiento al correo: la
- * persona elige la suya desde ahí, y recién entonces `onPasswordReset` verifica
- * el correo y le da el perfil (`provisionUserProfile`, en el inquilino por
- * omisión y con rol "analyst"). Nadie entra sin haber abierto ese enlace.
+ * Los dos caminos empiezan sin escribir ninguna cuenta:
  *
- * Todos los finales terminan en el mismo aviso: una dirección nueva, una que ya
- * tenía cuenta y una que no está habilitada no se distinguen desde afuera. Ni
- * por la respuesta ni por cuánto tarda: todo lo que depende de la dirección
- * (la lista, el hash, el mail) corre en `after`, con la respuesta ya enviada.
+ * - Google guarda lo que escribió la persona en la cookie sellada `cm_alta` y la
+ *   manda a Google; al volver, /alta crea el espacio.
+ * - El correo sólo manda un enlace sellado con todo lo que hace falta. La cuenta
+ *   se crea cuando la persona vuelve de ese enlace (/alta/correo). Quien tipea
+ *   direcciones ajenas no deja filas en la base: sólo cupos del limitador.
+ *
+ * `signUp` termina siempre en el mismo aviso: una dirección nueva, una que ya
+ * tenía cuenta y una que no está habilitada no se distinguen desde afuera. Ni por
+ * la respuesta ni por cuánto tarda: todo lo que depende de la dirección (la base,
+ * la lista, el mail) corre en `after`, con la respuesta ya enviada. Por eso
+ * tampoco llama nunca a `signUpEmail`.
  *
  * NOTE: redirect() must NOT be wrapped in try/catch — it throws a special
  * Next.js internal error to trigger the redirect.
@@ -18,186 +21,173 @@
 
 "use server";
 
-import { randomBytes } from "node:crypto";
-
-import { APIError } from "better-auth/api";
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 
-import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { auth } from "@/lib/auth";
-import { inquilinoDeAltaNueva } from "@/lib/auth/alta-nueva";
-import { resolveDefaultTenantId } from "@/lib/auth/provision";
+import { resolveBaseURL } from "@/lib/auth/base-url";
+import { altaAbierta } from "@/lib/auth/registro-permitido";
+import { isOperatorEmail } from "@/lib/auth/require-operator";
+import { db } from "@/lib/db";
+import { authUsers } from "@/lib/db/schema";
+import { entero } from "@/lib/entero";
+import { getT, type Locale } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/i18n/locale";
+import { logger } from "@/lib/observability/logger";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import {
   RATE_LIMIT_CONFIGS,
   clientIpFromHeaders,
   rateLimit,
   topePorIp,
 } from "@/lib/rate-limit/index";
-import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { SignUpSchema } from "@/lib/schemas/auth";
-import { logger } from "@/lib/observability/logger";
+import { PARAMETRO_DE_VUELTA, ponerCookieDeAlta } from "@/server/alta/cookie";
+import { DURACION_DEL_TOKEN_MS, sellarToken } from "@/server/alta/token-de-registro";
+import { verificarTurnstile } from "@/server/alta/turnstile";
+import { normalizarE164, validarEmpresa } from "@/server/alta/validar";
+import { correoDeEnlace, correoYaTenesCuenta } from "@/server/notify/correos-de-alta";
+import { enviarCorreoDelSistema } from "@/server/notify/remitente-sistema";
+import { dominioExigeSsoEnAlgunInquilino } from "@/server/sso/usuarios";
 
-type SignUpState = {
-  error?: string;
-  fieldErrors?: Record<string, string[]>;
-};
+const AVISO_NEUTRO = "/login?aviso=revisa_tu_correo";
+const ERROR_DE_GOOGLE = "/login?error=google_signin_failed";
 
-const DESTINO = "/login?aviso=revisa_tu_correo";
+const conError = (e: "datos" | "intentos") => `/registro?e=${e}`;
 
-export async function signUp(
-  _prev: SignUpState,
-  formData: FormData
-): Promise<SignUpState> {
-  // ── 1. Validate input ──────────────────────────────────────────────────────
-  const parsed = SignUpSchema.safeParse({
+const DIA_MS = 24 * 60 * 60_000;
+
+/** Lo que piden los dos caminos: la empresa, su WhatsApp y los términos aceptados. */
+function datosDeLaEmpresa(formData: FormData): { empresa: string; numero: string } | null {
+  const empresa = validarEmpresa(formData.get("empresa"));
+  const numero = normalizarE164(formData.get("whatsapp"));
+  if (!empresa.ok || numero === null || formData.get("terminos") !== "on") return null;
+  return { empresa: empresa.empresa, numero };
+}
+
+async function existeCuenta(email: string): Promise<boolean> {
+  // sin-inquilino: la tabla de usuarios de Better Auth no tiene columna de
+  // inquilino, y se pregunta justamente si ese correo ya tiene cuenta.
+  const [fila] = await db.select({ id: authUsers.id }).from(authUsers).where(eq(authUsers.email, email)).limit(1);
+  return fila !== undefined;
+}
+
+/**
+ * Lo que depende de la dirección, ya con la respuesta enviada. A quien ya tiene
+ * cuenta se le avisa a ella; a una nueva se le manda el enlace, siempre que el
+ * alta esté abierta para su dirección. Sin cuenta ni enlace no sale nada.
+ */
+async function mandarElCorreo(input: {
+  email: string;
+  nombre: string;
+  empresa: string;
+  numero: string;
+  locale: Locale;
+  ip: string;
+}): Promise<void> {
+  const { email, nombre, empresa, numero, locale, ip } = input;
+  const t = getT(locale);
+  const base = resolveBaseURL();
+
+  let correo;
+  if (await existeCuenta(email)) {
+    correo = correoYaTenesCuenta(t, `${base}/login`, `${base}/recuperar`);
+  } else {
+    // Cerrada la puerta, una dirección de operación o un dominio con SSO: el mismo silencio.
+    if (!altaAbierta(email) || isOperatorEmail(email) || (await dominioExigeSsoEnAlgunInquilino(email))) {
+      return;
+    }
+    const enlace = `${base}/alta/correo?t=${sellarToken({ e: email, empresa, numero, nombre, locale })}`;
+    correo = correoDeEnlace(t, "activar", enlace, DURACION_DEL_TOKEN_MS / 60_000);
+  }
+
+  // Los cupos del mail (global y por destinatario) los toma el remitente del sistema.
+  const resultado = await enviarCorreoDelSistema({ to: email, ...correo }, { tipo: "alta", ip });
+  if (!resultado.enviado) logger.warn({ motivo: resultado.motivo }, "registro.correo_no_salio");
+}
+
+/** La ruta a la que sigue el pedido por correo. Nunca redirige: de eso se ocupa quien la llama, fuera de todo try/catch. */
+async function destinoDelCorreo(formData: FormData): Promise<string> {
+  const empresa = datosDeLaEmpresa(formData);
+  const cuenta = SignUpSchema.safeParse({
     full_name: formData.get("full_name"),
     email: formData.get("email"),
   });
+  if (!empresa || !cuenta.success) return conError("datos");
 
-  if (!parsed.success) {
-    return {
-      fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
-    };
-  }
-
-  const { full_name, email } = parsed.data;
-
-  // ── 2. Rate limiting (por IP, y el mismo techo por IP sola que el login) ───
   const headerStore = await headers();
   // La misma resolución que la ruta HTTP: prefiere `x-vercel-forwarded-for`,
   // que es la única cabecera que no puede escribir quien llama.
   const ip = clientIpFromHeaders(headerStore);
-  const ua = headerStore.get("user-agent") ?? null;
 
   const rl = await rateLimit(claveDeCupo("auth:up", ip), RATE_LIMIT_CONFIGS.AUTH_SIGN_UP);
   const porIp = await topePorIp(ip);
-  if (!rl.allowed || !porIp.allowed) {
-    const cual = !porIp.allowed ? porIp : rl;
-    return { error: `Demasiados intentos. Intente en ${cual.retryAfterSeconds} segundos.` };
-  }
+  if (!rl.allowed || !porIp.allowed) return conError("intentos");
 
-  // ── 3. Preconditions ───────────────────────────────────────────────────────
-  if (!resolveDefaultTenantId()) {
-    return { error: "El registro no está habilitado. Contactá al administrador." };
-  }
+  // Un desafío no pasado termina como cualquier otro final: sin mail y sin decir por qué.
+  if (!(await verificarTurnstile(formData.get("cf-turnstile-response"), ip))) return AVISO_NEUTRO;
 
   /*
-   * Desde acá nada depende de la dirección que llegó. Si una no habilitada
-   * saliera enseguida y una habilitada pagara el hash y el envío del mail
-   * (cientos de milisegundos), medir lo que tarda bastaría para leer el padrón
-   * de empleados de la aseguradora: la misma enumeración que el aviso neutro
-   * evita en la respuesta. Por eso la lista, el alta y el mail corren después.
+   * Los pedidos por día de una misma IP, con el desafío ya pasado. Cuenta el
+   * pedido y no el mail: depende sólo de la IP, así que decirlo no delata nada de
+   * la dirección. Sin esto, una IP con el desafío resuelto gasta el cupo de mails
+   * de alta de todos a razón de `auth:up` por minuto.
    */
+  const delDia = await rateLimit(claveDeCupo("alta:correo-ip", ip), {
+    limit: entero("ALTA_TOPE_CORREO_POR_IP_DIA", 10, 1, 1000),
+    windowMs: DIA_MS,
+    fallaCerrada: true,
+  });
+  if (!delDia.allowed) return conError("intentos");
+
+  const locale = await getServerLocale();
+  const { email, full_name } = cuenta.data;
   after(() =>
-    crearCuentaYMandarEnlace({ full_name, email, ip, ua, headerStore }).catch((e) => {
+    mandarElCorreo({ email, nombre: full_name, ...empresa, locale, ip }).catch((e) => {
       // Ya se contestó «revisá tu correo»: sin esta línea, una falla de la base
-      // en la lista o en el cupo no deja rastro ni mail.
+      // o del remitente no deja rastro ni mail.
       logger.error({ detalle: e instanceof Error ? e.name : "unknown" }, "registro.alta_no_terminada");
     })
   );
-
-  redirect(DESTINO);
+  return AVISO_NEUTRO;
 }
 
-async function crearCuentaYMandarEnlace(input: {
-  full_name: string;
-  email: string;
-  ip: string;
-  ua: string | null;
-  headerStore: Headers;
-}): Promise<void> {
-  const { full_name, email, ip, ua, headerStore } = input;
+export async function signUp(formData: FormData): Promise<void> {
+  redirect(await destinoDelCorreo(formData));
+}
 
-  /*
-   * El cupo del mail es el mismo de `/recuperar` (`auth:reset`, por IP y
-   * correo), y se descuenta SIEMPRE, antes de mirar la lista. Si sólo lo
-   * gastaran las habilitadas, `/api/auth/request-password-reset` —que descuenta
-   * de la misma clave y contesta 429— diría desde afuera cuáles lo están: el
-   * padrón que el aviso neutro oculta.
-   */
-  const cupoReset = await rateLimit(claveDeCupo("auth:reset", ip, email), RATE_LIMIT_CONFIGS.AUTH_RESET);
+/** La ruta a la que sigue el pedido con Google: la URL de Google, o el error. Nunca redirige. */
+async function destinoDeGoogle(formData: FormData): Promise<string> {
+  const empresa = datosDeLaEmpresa(formData);
+  if (!empresa) return conError("datos");
 
-  /*
-   * La lista de quién puede registrarse, mirada ANTES de llamar a Better Auth.
-   *
-   * Una dirección que no está en la lista, o cuyo dominio exige SSO, termina en
-   * el mismo aviso que una permitida: si contestaran distinto, alcanzaría con
-   * probar direcciones para leer el padrón de empleados de la aseguradora. Es
-   * lo que `registro-no-enumera.test.ts` existe para proteger.
-   */
-  const tenantId = await inquilinoDeAltaNueva(email);
-  if (!tenantId) return;
+  const headerStore = await headers();
+  const porIp = await topePorIp(clientIpFromHeaders(headerStore));
+  if (!porIp.allowed) return conError("intentos");
 
-  // ── 4. Create the auth user ────────────────────────────────────────────────
-  let userId: string | null = null;
   try {
-    const result = await auth.api.signUpEmail({
-      // Sin cookies: el alta ya no abre sesión. La contraseña no la sabe nadie.
-      body: { name: full_name, email, password: randomBytes(32).toString("hex") },
-      headers: new Headers(),
+    const v = await ponerCookieDeAlta({ ...empresa, locale: await getServerLocale(), origen: "google" });
+    // /alta toma la cookie por suya sólo si llega por este viaje (ver cookie.ts).
+    const vuelta = `/alta?${PARAMETRO_DE_VUELTA}=${v}`;
+    const resultado = await auth.api.signInSocial({
+      body: {
+        provider: "google",
+        callbackURL: vuelta,
+        newUserCallbackURL: vuelta,
+        // Sin query propia: Better Auth le agrega el código y un parámetro repetido llega como array.
+        errorCallbackURL: "/login",
+      },
+      headers: headerStore,
     });
-    userId = result.user.id;
+    if (resultado.url) return resultado.url;
   } catch (e) {
-    const code = e instanceof APIError ? e.body?.code : undefined;
-    const yaExiste =
-      e instanceof APIError &&
-      (code === "USER_ALREADY_EXISTS" || /already/i.test(e.body?.message ?? ""));
-    // Que ya exista una cuenta no se dice: sigue por el mismo camino que un alta.
-    // Cualquier otra falla sólo se anota: un error que vieran únicamente las
-    // direcciones habilitadas delataría la lista.
-    if (!yaExiste) {
-      logger.error(
-        { detalle: code ?? (e instanceof Error ? e.name : "unknown") },
-        "registro.auth_api_signupemail"
-      );
-      return;
-    }
+    logger.error({ detalle: e instanceof Error ? e.message : String(e) }, "auth.google.signin_start_failed");
   }
+  return ERROR_DE_GOOGLE;
+}
 
-  /*
-   * Con `autoSignIn: false` Better Auth contesta igual —con un usuario de
-   * mentira y un id al azar— cuando el correo ya tenía cuenta. Que la cuenta
-   * esté en la base es lo único que dice que se creó, y sólo entonces se audita.
-   *
-   * Sin `actor_id`: es una FK a `users`, y la cuenta todavía no tiene perfil.
-   */
-  if (userId) {
-    try {
-      const { internalAdapter } = await auth.$context;
-      if (await internalAdapter.findUserById(userId)) {
-        await writeAuditLog({
-          tenant_id: tenantId,
-          actor_id: null,
-          event_type: AuditEvent.AUTH_SIGN_UP,
-          target_type: "user",
-          target_id: userId,
-          payload: { role: "analyst", self_registered: true },
-          ip,
-          ua,
-        });
-      }
-    } catch {
-      logger.error({ user_id: userId }, "registro.auditoria");
-    }
-  }
-
-  // ── 5. El enlace para elegir la contraseña ─────────────────────────────────
-  if (cupoReset.allowed) {
-    try {
-      await auth.api.requestPasswordReset({
-        body: { email, redirectTo: "/restablecer" },
-        headers: headerStore,
-      });
-    } catch (e) {
-      // Sólo se anota: si fallara a la vista, delataría qué correos tienen cuenta.
-      logger.error(
-        { detalle: e instanceof Error ? e.name : "unknown" },
-        "registro.enlace_no_enviado"
-      );
-    }
-  } else {
-    logger.warn({}, "registro.enlace_sin_cupo");
-  }
+export async function empezarAltaConGoogle(formData: FormData): Promise<void> {
+  redirect(await destinoDeGoogle(formData));
 }

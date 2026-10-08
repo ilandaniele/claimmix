@@ -31,6 +31,7 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { sentenciasPorColumna, sentenciasQuitar } from "./lib/permisos-quitados.mjs";
 import { splitSqlStatements } from "./lib/split-sql.mjs";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
@@ -267,6 +268,10 @@ try {
     );
     await cx.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${ROL_ENSAYO}`);
     await cx.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${ROL_ENSAYO}`);
+    // Los mismos permisos que `claimmix_app` (`create-app-role`): con el GRANT total
+    // de arriba, la sección de permisos de la prueba marcaría rojo al ensayo.
+    for (const sql of sentenciasQuitar(ROL_ENSAYO)) await cx.query(sql);
+    for (const { sql } of sentenciasPorColumna(ROL_ENSAYO)) await cx.query(sql);
     // Para que una tabla futura no nazca sin permisos y rompa en producción.
     await cx.query(
       `ALTER DEFAULT PRIVILEGES IN SCHEMA public
@@ -328,9 +333,11 @@ try {
       // la lista de procesos y en el log de CI, y ésta lleva la contraseña del
       // rol. `prove-tenancy` lee DATABASE_URL_APP cuando no recibe --url. De
       // paso se va el `&` de "?sslmode=require&..." que cmd partía en Windows.
+      // DATABASE_URL va con la rama: el dueño de `.env.local` es otro endpoint, y
+      // `prove-tenancy` lista los inquilinos con el dueño de la misma base.
       execSync(`npx tsx --tsconfig tsconfig.rehearsal.json scripts/prove-tenancy.mts`, {
         stdio: "inherit",
-        env: { ...process.env, DATABASE_URL_APP: urlRolFinal },
+        env: { ...process.env, DATABASE_URL: urlRama, DATABASE_URL_APP: urlRolFinal },
       });
       salida = 0;
     } catch (e) {

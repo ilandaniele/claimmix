@@ -1,128 +1,174 @@
 /**
- * SignUpForm — client component for the /registro page.
+ * SignUpForm — el formulario de /registro, de servidor y sin JavaScript propio.
  *
- * Mirrors SignInForm (React 19 useActionState + useTransition).
- * Submits to the signUp server action; the action always redirects to /login
- * with the "revisá tu correo" notice (no session, no password here).
+ * Un solo paso con dos botones que mandan a acciones distintas: «Continuar con
+ * Google» (empezarAltaConGoogle) y «Crear cuenta con mi correo» (signUp). La
+ * empresa, el WhatsApp y los términos son de los dos; el nombre y el correo, sólo
+ * del segundo, así que no llevan `required`: el navegador no puede frenar a quien
+ * va por Google. Los valida la acción.
+ *
+ * El botón del correo existe sólo si hay remitente del sistema: sin él no hay
+ * cómo mandar el enlace. El desafío de Turnstile, sólo si están las dos claves, y
+ * sólo frena ese botón. Su script lleva el nonce de la CSP.
  */
 
-"use client";
+import Link from "next/link";
 
-import { useActionState, useTransition } from "react";
-import { signUp } from "./actions";
+import type { getT } from "@/lib/i18n";
 
-type FormState = {
-  error?: string;
-  fieldErrors?: Record<string, string[]>;
-};
+import { empezarAltaConGoogle, signUp } from "./actions";
 
-const initialState: FormState = {};
+const CLASE_DEL_CAMPO =
+  "w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/15 dark:border-slate-600 dark:placeholder-slate-500";
 
-const inputClass =
-  "w-full rounded-xl border border-slate-300 bg-white dark:border-slate-600 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-500/20 disabled:cursor-not-allowed disabled:opacity-50";
+const CLASE_DE_LA_ETIQUETA = "mb-1.5 block text-sm font-medium text-slate-700";
 
-export function SignUpForm() {
-  const [state, formAction] = useActionState<FormState, FormData>(
-    signUp,
-    initialState
-  );
-  const [isPending, startTransition] = useTransition();
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    startTransition(() => {
-      formAction(formData);
-    });
-  }
-
+export function SignUpForm({
+  t,
+  conCorreo,
+  claveDeTurnstile,
+  nonce,
+}: {
+  t: ReturnType<typeof getT>;
+  conCorreo: boolean;
+  /** La clave PÚBLICA del sitio; null si no hay desafío. */
+  claveDeTurnstile: string | null;
+  nonce: string | undefined;
+}) {
   return (
-    <form onSubmit={handleSubmit} noValidate aria-label="Formulario de registro">
-      {state.error && (
-        <div
-          role="alert"
-          aria-live="assertive"
-          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
-          {state.error}
-        </div>
-      )}
-
-      {/* Full name */}
-      <div className="mb-4">
-        <label
-          htmlFor="full_name"
-          className="mb-1.5 block text-sm font-medium text-slate-700"
-        >
-          Nombre completo
+    <form aria-label={t("registro.titulo")} className="space-y-4">
+      <div>
+        <label htmlFor="registro-empresa" className={CLASE_DE_LA_ETIQUETA}>
+          {t("alta.empresa")}
         </label>
         <input
-          id="full_name"
-          name="full_name"
+          id="registro-empresa"
+          name="empresa"
           type="text"
-          autoComplete="name"
+          autoComplete="organization"
           required
-          aria-required="true"
-          aria-describedby={state.fieldErrors?.full_name ? "full-name-error" : undefined}
-          aria-invalid={!!state.fieldErrors?.full_name}
-          className={inputClass}
-          placeholder="Juan Pérez"
-          disabled={isPending}
+          minLength={2}
+          maxLength={80}
+          className={CLASE_DEL_CAMPO}
         />
-        {state.fieldErrors?.full_name && (
-          <p id="full-name-error" role="alert" className="mt-1 text-xs text-red-600">
-            {state.fieldErrors.full_name[0]}
-          </p>
-        )}
       </div>
-
-      {/* Email */}
-      <div className="mb-6">
-        <label
-          htmlFor="email"
-          className="mb-1.5 block text-sm font-medium text-slate-700"
-        >
-          Correo electrónico
+      <div>
+        <label htmlFor="registro-whatsapp" className={CLASE_DE_LA_ETIQUETA}>
+          {t("alta.whatsapp")}
         </label>
         <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
+          id="registro-whatsapp"
+          name="whatsapp"
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
           required
-          aria-required="true"
-          aria-describedby={state.fieldErrors?.email ? "email-error" : undefined}
-          aria-invalid={!!state.fieldErrors?.email}
-          className={inputClass}
-          placeholder="analista@aseguradora.com"
-          disabled={isPending}
+          placeholder="+54 9 …"
+          aria-describedby="registro-whatsapp-ayuda"
+          className={CLASE_DEL_CAMPO}
         />
-        {state.fieldErrors?.email && (
-          <p id="email-error" role="alert" className="mt-1 text-xs text-red-600">
-            {state.fieldErrors.email[0]}
-          </p>
-        )}
+        <p id="registro-whatsapp-ayuda" className="mt-1.5 text-xs text-slate-500">
+          {t("alta.whatsapp.ayuda")}
+        </p>
       </div>
+      <label className="flex items-start gap-2.5 text-sm text-slate-600">
+        <input
+          type="checkbox"
+          name="terminos"
+          required
+          className="mt-0.5 size-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+        />
+        <span>
+          {t("alta.terminos.prefijo")}{" "}
+          <Link href="/terms" className="font-medium text-slate-800 underline underline-offset-2">
+            {t("alta.terminos.terminos")}
+          </Link>{" "}
+          {t("alta.terminos.conector")}{" "}
+          <Link href="/privacy" className="font-medium text-slate-800 underline underline-offset-2">
+            {t("alta.terminos.privacidad")}
+          </Link>
+        </span>
+      </label>
 
-      {/* Submit */}
       <button
         type="submit"
-        disabled={isPending}
-        aria-busy={isPending}
-        className="w-full rounded-full bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-slate-900/50 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        formAction={empezarAltaConGoogle}
+        className="flex w-full items-center justify-center gap-2.5 rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/25 dark:border-slate-600"
       >
-        {isPending ? (
-          <span className="flex items-center justify-center gap-2">
-            <span
-              className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
-              aria-hidden="true"
-            />
-            Creando cuenta…
-          </span>
-        ) : (
-          "Crear cuenta"
-        )}
+        <GoogleIcon />
+        {t("registro.google")}
       </button>
+
+      {conCorreo && (
+        <>
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            <span className="h-px flex-1 bg-slate-200" />
+            <span className="uppercase tracking-[0.08em]">{t("registro.o")}</span>
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
+          <div>
+            <label htmlFor="registro-nombre" className={CLASE_DE_LA_ETIQUETA}>
+              {t("usuarios.form.nombre")}
+            </label>
+            <input
+              id="registro-nombre"
+              name="full_name"
+              type="text"
+              autoComplete="name"
+              maxLength={100}
+              className={CLASE_DEL_CAMPO}
+            />
+          </div>
+          <div>
+            <label htmlFor="registro-correo" className={CLASE_DE_LA_ETIQUETA}>
+              {t("auth.signIn.email")}
+            </label>
+            <input
+              id="registro-correo"
+              name="email"
+              type="email"
+              autoComplete="email"
+              maxLength={254}
+              aria-describedby="registro-correo-ayuda"
+              className={CLASE_DEL_CAMPO}
+            />
+            <p id="registro-correo-ayuda" className="mt-1.5 text-xs text-slate-500">
+              {t("registro.sinContraseña.ayuda")}
+            </p>
+          </div>
+
+          {claveDeTurnstile && (
+            <>
+              <div className="cf-turnstile" data-sitekey={claveDeTurnstile} />
+              <script
+                src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+                async
+                defer
+                nonce={nonce}
+              />
+            </>
+          )}
+
+          <button
+            type="submit"
+            formAction={signUp}
+            className="w-full rounded-full bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/30"
+          >
+            {t("registro.correo.crear")}
+          </button>
+        </>
+      )}
     </form>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 48 48" className="h-4 w-4 shrink-0" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
   );
 }

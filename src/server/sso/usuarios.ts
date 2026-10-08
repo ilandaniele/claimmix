@@ -115,9 +115,9 @@ export function dominioExigeSso(userId: string): Promise<boolean> {
 
 /**
  * ¿Este mail, todavía sin cuenta, es de un dominio que exige SSO en `tenantId`,
- * el inquilino donde esa cuenta aterrizaría? Una sola consulta. Es lo que impide
- * crear una cuenta por contraseña (o por Google) a la que el gancho de sesión
- * después le negaría la sesión: quedaría creada y sin uso.
+ * el inquilino donde esa cuenta aterrizaría? Una sola consulta. La usa /invitacion
+ * para no crear por contraseña (o por Google) una cuenta a la que el gancho de
+ * sesión después le negaría la sesión: quedaría creada y sin uso.
  */
 export function correoExigeSso(email: string, tenantId: string): Promise<boolean> {
   const dominio = dominioDelMail(email);
@@ -131,6 +131,27 @@ export function correoExigeSso(email: string, tenantId: string): Promise<boolean
         .where(and(eq(ssoSettings.dominio, dominio), EXIGE_SSO))
         .limit(1)
     );
+    return filas.length > 0;
+  });
+}
+
+/**
+ * ¿Algún inquilino exige SSO para el dominio de este mail? Una sola consulta, sin
+ * inquilino. Es lo que impide crear por contraseña o por Google una cuenta a la que
+ * el gancho de sesión después le negaría la entrada: el alta nueva no cae en ningún
+ * inquilino, así que no hay uno a quien preguntarle.
+ */
+export function dominioExigeSsoEnAlgunInquilino(email: string): Promise<boolean> {
+  const dominio = dominioDelMail(email);
+  if (!dominio) return Promise.resolve(false);
+  return sinSsoQueExigir(async () => {
+    // sin-inquilino: el alta precede a todo inquilino; se pregunta si el dominio
+    // está reservado por el SSO de alguno.
+    const filas = await db
+      .select({ uno: sql<number>`1` })
+      .from(ssoSettings)
+      .where(and(eq(ssoSettings.dominio, dominio), EXIGE_SSO))
+      .limit(1);
     return filas.length > 0;
   });
 }

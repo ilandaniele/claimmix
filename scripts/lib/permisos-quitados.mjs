@@ -22,6 +22,17 @@
  *   vacía desde ahí, y cancelar una purga es un UPDATE que hace el dueño.
  * - ai_usage_mensual (0046): lo escribe el trigger de `ai_usage` con SECURITY
  *   DEFINER; la app sólo lo lee, así que no puede falsear lo que ve el tablero.
+ * - tenants (0048): la app no crea ni borra inquilinos (lo hace la función
+ *   claimmix_crear_inquilino) y el UPDATE queda sólo en las columnas de
+ *   PERMISOS_POR_COLUMNA: plan, estado de cobro y prueba los fija el operador.
+ * - whatsapp_numeros (0048): la app sólo lo lee; escriben la función de alta y el
+ *   rol dueño, así que una falla de la app no puede quedarse con un número ajeno.
+ * - account, session y verification (0048): hashes de contraseña, tokens de
+ *   sesión y de restablecimiento. Better Auth y `cerrarSesiones` usan el rol
+ *   dueño; la app no tiene nada que hacer ahí. De account se recuperan por
+ *   columna las dos que no guardan secretos (PERMISOS_POR_COLUMNA).
+ * - user (0048): la app lee el mail y el nombre para los cruces, pero no los
+ *   escribe: eso lo hace Better Auth.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
@@ -33,4 +44,61 @@ export const PERMISOS_QUITADOS = {
   formulario_web: ["DELETE"],
   adjuntos_por_purgar: ["UPDATE", "DELETE"],
   ai_usage_mensual: ["INSERT", "UPDATE", "DELETE"],
+  tenants: ["INSERT", "UPDATE", "DELETE"],
+  whatsapp_numeros: ["INSERT", "UPDATE", "DELETE"],
+  account: ["SELECT", "INSERT", "UPDATE", "DELETE"],
+  session: ["SELECT", "INSERT", "UPDATE", "DELETE"],
+  verification: ["SELECT", "INSERT", "UPDATE", "DELETE"],
+  user: ["INSERT", "UPDATE", "DELETE"],
 };
+
+/**
+ * Lo que `claimmix_app` SÍ puede, columna por columna, sobre una tabla a la que
+ * PERMISOS_QUITADOS le sacó el permiso entero. Un REVOKE de tabla también borra
+ * los permisos por columna: `create-app-role` los concede DESPUÉS del bucle y
+ * `pnpm permisos` exige exactamente este conjunto.
+ *
+ * - tenants.UPDATE (0048): las siete columnas de configuración que el equipo
+ *   edita desde la app. Todo lo demás (plan, cobro, prueba, contacto, nombre,
+ *   autoalta) es del operador.
+ * - account.SELECT (0048): `provider_id` y `user_id` bastan para saber por qué
+ *   proveedor entró una persona (exigir SSO); no guardan ningún secreto.
+ */
+export const PERMISOS_POR_COLUMNA = {
+  tenants: {
+    UPDATE: [
+      "specialist_alert_emails",
+      "recordatorio_horas",
+      "rangos_de_monto",
+      "reglas_asignacion",
+      "plazos",
+      "plan_por_tipo",
+      "pesos_puntaje",
+    ],
+  },
+  account: {
+    SELECT: ["provider_id", "user_id"],
+  },
+};
+
+/**
+ * Las sentencias que dejan a `rol` con los permisos de `claimmix_app`, para
+ * `create-app-role` y para el rol del ensayo de tenencia. Van después del
+ * `GRANT … ON ALL TABLES`, que lo volvería a conceder todo. En una base todavía
+ * sin migrar la tabla no existe: no hay nada que sacar ni que dar. El nombre va
+ * entre comillas porque `user` es palabra reservada.
+ */
+export const sentenciasQuitar = (rol) =>
+  Object.entries(PERMISOS_QUITADOS).map(
+    ([tabla, privilegios]) =>
+      `DO $$ BEGIN IF to_regclass('public."${tabla}"') IS NOT NULL THEN REVOKE ${privilegios.join(", ")} ON public."${tabla}" FROM ${rol}; END IF; END $$`,
+  );
+
+/** Van después de `sentenciasQuitar`: un REVOKE de tabla también borra los permisos por columna. */
+export const sentenciasPorColumna = (rol) =>
+  Object.entries(PERMISOS_POR_COLUMNA).flatMap(([tabla, porPrivilegio]) =>
+    Object.entries(porPrivilegio).map(([privilegio, columnas]) => ({
+      sql: `DO $$ BEGIN IF to_regclass('public."${tabla}"') IS NOT NULL THEN GRANT ${privilegio} (${columnas.join(", ")}) ON public."${tabla}" TO ${rol}; END IF; END $$`,
+      resumen: `${privilegio} sólo en ${tabla} (${columnas.join(", ")})`,
+    })),
+  );

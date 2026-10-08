@@ -10,6 +10,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { exigirSinPrueba } from "@/lib/auth/exigir-sin-prueba";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import {
@@ -43,7 +44,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { user, userRow } = await requireAdmin();
+    const ctx = await requireAdmin();
+    exigirSinPrueba(ctx);
+    const { user, userRow } = ctx;
 
     const parsed = PostSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) {

@@ -36,6 +36,7 @@ import {
 } from "@/lib/schemas/cases";
 import type { CaseStatus, ClaimType, FraudRiskLevel, Periodo, Severity } from "@/lib/schemas/cases";
 import { Card } from "../_components/ui";
+import { diasDePrueba } from "@/lib/billing/plans";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 
@@ -126,6 +127,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
   const vista: "lista" | "tablero" = params["vista"] === "tablero" ? "tablero" : "lista";
   const para_responder = params["para_responder"] === "true" ? true : undefined;
   const cola = params["cola"] === "mia" ? "mia" : undefined;
+  // Lo deja /alta al crear el espacio; es sólo un aviso, no consulta nada.
+  const bienvenida = params["bienvenida"] === "1";
 
   const status = valores(statusParam, VALID_STATUSES);
 
@@ -275,6 +278,15 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
               : t("bandeja.title")}
         </h1>
         <p className="mt-1 text-[13px] text-slate-500">{t("bandeja.subtitle")}</p>
+
+        {bienvenida && (
+          <p
+            role="status"
+            className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-[13px] text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+          >
+            {t("bandeja.bienvenida").replace("{n}", String(diasDePrueba()))}
+          </p>
+        )}
 
         {/*
          * Acá vivían cuatro baldosas —Total, Escalados, Esperando, Listos— y no

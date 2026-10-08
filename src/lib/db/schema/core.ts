@@ -82,9 +82,40 @@ export const tenants = pgTable("tenants", {
   plazos: jsonb("plazos").$type<PlazoPropio[]>(),
   plan_por_tipo: jsonb("plan_por_tipo").$type<Plan>(),
   pesos_puntaje: jsonb("pesos_puntaje").$type<Pesos>(),
+  // Lo creó el alta automática (migración 0048). Ninguna consulta sobre tenants
+  // puede pedir todas las columnas: antes de la 0048 esta no existe (lo vigila
+  // `pnpm arquitectura`).
+  autoalta: boolean("autoalta").notNull().default(false),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
+});
+
+/**
+ * El número de WhatsApp de cada inquilino y su estado (migración 0048).
+ *
+ * La app sólo lo lee: escriben la función claimmix_crear_inquilino y el rol
+ * dueño. Un id de Meta y un número E.164 pertenecen a una sola fila viva
+ * (`estado <> 'baja'`); los índices únicos parciales viven en la migración.
+ * `token_cifrado` NULL = el token del usuario de sistema de la plataforma.
+ */
+export const whatsappNumeros = pgTable("whatsapp_numeros", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenant_id: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  numero_e164: text("numero_e164").notNull(),
+  estado: text("estado", {
+    enum: ["pedido", "conectado", "suspendido", "baja"],
+  })
+    .notNull()
+    .default("pedido"),
+  phone_number_id: text("phone_number_id"),
+  waba_id: text("waba_id"),
+  token_cifrado: text("token_cifrado"),
+  creado_en: timestamp("creado_en", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  conectado_en: timestamp("conectado_en", { withTimezone: true, mode: "string" }),
+  actualizado_en: timestamp("actualizado_en", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
 });
 
 export const users = pgTable("users", {

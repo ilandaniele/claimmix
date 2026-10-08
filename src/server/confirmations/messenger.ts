@@ -32,6 +32,7 @@ import {
   type OrigenDelValor,
 } from "@/server/email/render";
 import { olvidarEstadoDePlantilla, sendWhatsAppTemplate, sendWhatsAppText } from "@/server/whatsapp/cloud-api";
+import { avisarSinNumero, credencialesWhatsApp } from "@/server/whatsapp/numeros";
 import { PLANTILLA_REABRIR, textoDeReabrir } from "@/core/mensajes/reabrir-denuncia";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
@@ -632,6 +633,21 @@ export const whatsappMessenger: AgentMessenger = {
         return await simulatedWhatsappMessenger.send(message);
       }
 
+      // El número de este inquilino, antes de gastar el redactor: sin número no
+      // se manda, y el intento queda anotado como fallido con el texto de piso.
+      const cred = await credencialesWhatsApp(message.tenantId);
+      if (!cred) {
+        avisarSinNumero(message.tenantId, "messenger");
+        await recordOutbound(
+          message,
+          message.data.porPlantilla === true
+            ? textoDeReabrir(parametrosDeReabrir(message))
+            : (renderForWhatsApp(message) ?? ""),
+          "failed"
+        );
+        return false;
+      }
+
       // Fuera de la ventana de 24 h con la plantilla aprobada: el piso, el
       // redactor y el pie no corren — Meta sólo deja mandar el cuerpo exacto
       // que aprobó, con sus dos variables.
@@ -643,7 +659,8 @@ export const whatsappMessenger: AgentMessenger = {
           message.to,
           PLANTILLA_REABRIR.nombre,
           PLANTILLA_REABRIR.idioma,
-          params
+          params,
+          cred
         );
         if (!res.ok) olvidarEstadoDePlantilla();
         await anotarEnvio(message, outboundId, finalBody, res);
@@ -669,7 +686,7 @@ export const whatsappMessenger: AgentMessenger = {
        * cambio.
        */
       const outboundId = await reservarSalida(message, finalBody);
-      const res = await sendWhatsAppText(message.to, finalBody);
+      const res = await sendWhatsAppText(message.to, finalBody, cred);
       await anotarEnvio(message, outboundId, finalBody, res);
       return res.ok;
     } catch (err) {

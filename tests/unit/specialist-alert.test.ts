@@ -70,6 +70,8 @@ const condicionDelTenant: unknown[] = [];
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
+/** El `window_start` que el limitador anotó al contar el intento. */
+const VENTANA_DEL_CUPO = 1_790_000_000_000;
 
 /**
  * The module makes four different selects. They are told apart by the table
@@ -646,7 +648,7 @@ describe("avisarMensajeTardio", () => {
   });
 
   beforeEach(() => {
-    mockCupo.mockResolvedValue({ allowed: true });
+    mockCupo.mockResolvedValue({ allowed: true, ventana: VENTANA_DEL_CUPO });
   });
 
   function tardio(tipo: "consulta_estado" | null = "consulta_estado", resumen: string | null = "Pregunta cuándo le pagan") {
@@ -734,13 +736,15 @@ describe("avisarMensajeTardio", () => {
   it("pasado el tope del caso no manda ni audita", async () => {
     // Veinte mensajes a un caso cerrado no son veinte correos a la guardia.
     database({ listaDelTenant: ["guardia@aseguradora.com"] });
-    mockCupo.mockResolvedValue({ allowed: false });
+    mockCupo.mockResolvedValue({ allowed: false, ventana: VENTANA_DEL_CUPO });
 
     await tardio();
 
     expect(mockCupo).toHaveBeenCalledWith(`aviso-tardio:${TENANT}:${CASE}`, { limit: 3, windowMs: 24 * 60 * 60_000 });
     expect(mockSend).not.toHaveBeenCalled();
     expect(mockAudit).not.toHaveBeenCalled();
+    // Lo que no se contó no se devuelve: otro llamador quedaría con un cupo que no gastó.
+    expect(mockLiberar).not.toHaveBeenCalled();
   });
 
   it("un mensaje ya avisado no gasta el tope", async () => {
@@ -756,7 +760,7 @@ describe("avisarMensajeTardio", () => {
 
     mockSend.mockResolvedValueOnce({ error: "gmail dijo que no" });
     await tardio();
-    expect(mockLiberar).toHaveBeenCalledWith(`aviso-tardio:${TENANT}:${CASE}`, 24 * 60 * 60_000);
+    expect(mockLiberar).toHaveBeenCalledWith(`aviso-tardio:${TENANT}:${CASE}`, 24 * 60 * 60_000, VENTANA_DEL_CUPO);
 
     mockLiberar.mockClear();
     mockSend.mockResolvedValueOnce({ providerMessageId: "sent-1" });

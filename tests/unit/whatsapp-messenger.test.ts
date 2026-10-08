@@ -44,6 +44,11 @@ vi.mock("@/server/whatsapp/cloud-api", () => ({
   olvidarEstadoDePlantilla: vi.fn(),
 }));
 
+vi.mock("@/server/whatsapp/numeros", () => ({
+  credencialesWhatsApp: vi.fn(),
+  avisarSinNumero: vi.fn(),
+}));
+
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),
 }));
@@ -63,6 +68,7 @@ import {
 } from "@/server/confirmations/messenger";
 import { db } from "@/lib/db";
 import { sendWhatsAppText, sendWhatsAppTemplate, olvidarEstadoDePlantilla } from "@/server/whatsapp/cloud-api";
+import { avisarSinNumero, credencialesWhatsApp } from "@/server/whatsapp/numeros";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
@@ -80,6 +86,13 @@ import type { EmailTemplate } from "@/server/email/render";
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
 const TO = "5491100000000";
+const CRED = {
+  accessToken: "test-token",
+  phoneNumberId: "123456",
+  wabaId: "654321",
+  autoalta: false,
+  vencida: false,
+};
 
 let inserted: Record<string, unknown>[];
 let updated: Array<{ id: string; status: string }>;
@@ -114,6 +127,7 @@ beforeEach(() => {
   });
   (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
   (sendWhatsAppTemplate as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+  (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(CRED);
 });
 
 function sentBody(): string {
@@ -124,6 +138,7 @@ function sentBody(): string {
 function resetSend() {
   vi.clearAllMocks();
   (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+  (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(CRED);
 }
 
 async function send(template: EmailTemplate, data: Record<string, unknown>) {
@@ -586,6 +601,66 @@ describe("whatsappMessenger — a un número inventado no le escribe nadie", () 
     });
 
     expect(sendWhatsAppText).toHaveBeenCalled();
+  });
+});
+
+/*
+ * Cada inquilino habla con su número: la credencial sale de `credencialesWhatsApp`
+ * y nunca del entorno. Sin número conectado no se manda nada ni se gasta el redactor.
+ */
+describe("whatsappMessenger — el número del inquilino", () => {
+  it("manda con la credencial de ESE inquilino", async () => {
+    await send("missing_information_request", { caseId: CASE, missingFields: ["policy_number"] });
+
+    expect(credencialesWhatsApp).toHaveBeenCalledWith(TENANT);
+    expect(sendWhatsAppText).toHaveBeenCalledWith(TO, expect.any(String), CRED);
+  });
+
+  it("sin número: no llama a Meta ni al redactor, lo anota y deja la fila como failed", async () => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const ok = await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "missing_information_request",
+      data: { caseId: CASE, missingFields: ["policy_number"] },
+    });
+
+    expect(ok).toBe(false);
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
+    expect(sendWhatsAppTemplate).not.toHaveBeenCalled();
+    expect(callGemini).not.toHaveBeenCalled();
+    expect(avisarSinNumero).toHaveBeenCalledWith(TENANT, "messenger");
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]?.status).toBe("failed");
+  });
+
+  it("sin número tampoco manda la plantilla de reabrir", async () => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      porPlantilla: true,
+    });
+
+    expect(sendWhatsAppTemplate).not.toHaveBeenCalled();
+    expect(inserted[0]?.status).toBe("failed");
+    expect(inserted[0]?.rendered_body).toBe(textoDeReabrir([CASE, "Número de póliza"]));
+  });
+
+  it("un número de prueba no consulta credenciales: no sale nada", async () => {
+    await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: "5490000123456",
+      template: "missing_information_request",
+      data: { caseId: CASE, missingFields: ["policy_number"] },
+    });
+
+    expect(credencialesWhatsApp).not.toHaveBeenCalled();
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
   });
 });
 
@@ -1103,7 +1178,8 @@ describe("whatsappMessenger — reabrir con plantilla", () => {
       TO,
       PLANTILLA_REABRIR.nombre,
       PLANTILLA_REABRIR.idioma,
-      [CASE, "Número de póliza"]
+      [CASE, "Número de póliza"],
+      CRED
     );
   });
 

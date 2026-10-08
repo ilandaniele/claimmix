@@ -21,6 +21,8 @@ const SAVED = { ...process.env };
 
 beforeEach(() => {
   process.env.ADMIN_EMAILS = "operador@example.com";
+  // El operador además tiene que estar en el espacio de la casa (el de `ctx`).
+  process.env.GOOGLE_DEFAULT_TENANT_ID = "t1";
 });
 
 afterEach(() => {

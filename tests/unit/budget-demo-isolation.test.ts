@@ -22,28 +22,33 @@ vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: () => ({
-      from: () => ({
-        where: (w: unknown) => {
-          captured.push({ where: w });
-          return Promise.resolve([rows.shift() ?? {}]);
-        },
+vi.mock("@/lib/db", async () => {
+  const esquema = await vi.importActual<typeof import("@/lib/db/schema")>("@/lib/db/schema");
+  const where = (w: unknown) => {
+    captured.push({ where: w });
+    return Promise.resolve([rows.shift() ?? {}]);
+  };
+  return {
+    db: {
+      select: () => ({
+        from: () => ({ where, leftJoin: () => ({ where }) }),
       }),
-    }),
-  },
-  tables: {
-    aiUsage: {
-      tenant_id: { name: "tenant_id" },
-      user_id: { name: "user_id" },
-      created_at: { name: "created_at" },
-      cost_usd: { name: "cost_usd" },
-      prompt_tokens: { name: "prompt_tokens" },
-      completion_tokens: { name: "completion_tokens" },
     },
-  },
-}));
+    tables: {
+      // `tenants` y `aiUsageMensual` de verdad: el tope arma una subconsulta con ellas.
+      tenants: esquema.tenants,
+      aiUsageMensual: esquema.aiUsageMensual,
+      aiUsage: {
+        tenant_id: { name: "tenant_id" },
+        user_id: { name: "user_id" },
+        created_at: { name: "created_at" },
+        cost_usd: { name: "cost_usd" },
+        prompt_tokens: { name: "prompt_tokens" },
+        completion_tokens: { name: "completion_tokens" },
+      },
+    },
+  };
+});
 
 import { checkBudget, checkDemoBudget, getDemoTenantId } from "@/server/ai/budget";
 
@@ -289,6 +294,8 @@ describe("checkBudget — el tope de lo que entra sin usuario", () => {
 
   it("si el contador se rompe, falla abierto aunque el tope esté en cero", async () => {
     process.env.AI_ANONIMO_DAILY_TOKEN_CAP = "0";
+    // Fallar abierto es de la plataforma; cualquier otro inquilino falla cerrado.
+    process.env.GMAIL_TENANT_ID = REAL;
     const { db } = await import("@/lib/db");
     vi.spyOn(db, "select").mockImplementation(() => {
       throw new Error("connection reset");

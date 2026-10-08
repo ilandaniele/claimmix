@@ -7,6 +7,8 @@ type Traducir = (clave: TranslationKey) => string;
 interface Props {
   prueba: PruebaDelEspacio;
   t: Traducir;
+  /** El número por código está prendido y puede andar en este espacio (`prueba.porCodigo`): lo conecta solo, desde `NumeroPanel`. */
+  automatico?: boolean;
 }
 
 function Fila({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
@@ -21,14 +23,22 @@ function Fila({ etiqueta, children }: { etiqueta: string; children: React.ReactN
 /**
  * Cuánto le queda a la prueba y cómo anda el número de WhatsApp, de un espacio
  * del alta automática. Es de servidor y es sólo para leer: no hay nada que
- * editar, el número lo conecta el operador.
+ * editar, el número lo conecta el operador, o el propio admin desde
+ * `NumeroPanel` si el número por código está prendido.
  *
  * Un espacio sin fila de número dice lo mismo que uno con el número pedido, así
  * nadie se entera de si el que pidió ya lo tenía otro espacio (H3).
  */
-export function PruebaPanel({ prueba, t }: Props) {
+export function PruebaPanel({ prueba, t, automatico }: Props) {
   const { dias, numero } = prueba;
-  const ayuda = numero === "conectado" ? null : t(`configuracion.prueba.ayuda.${numero}`);
+  const ayuda =
+    numero === "conectado"
+      ? null
+      : t(
+          numero === "pedido" && automatico && dias !== 0
+            ? "configuracion.prueba.ayuda.pedidoAutomatico"
+            : `configuracion.prueba.ayuda.${numero}`
+        );
   return (
     <div className="divide-y divide-slate-50">
       {dias !== null && (

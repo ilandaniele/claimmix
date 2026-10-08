@@ -631,6 +631,8 @@ export const AuditEvent = {
   TENANT_SUSPENDED: "tenant.suspended",
   /** El número de WhatsApp de un inquilino quedó conectado, suspendido o dado de baja. */
   WHATSAPP_NUMERO_CONECTADO: "whatsapp.numero_conectado",
+  /** Graph agregó el número de un inquilino a la WABA, todavía sin verificar. Payload: { via, phone_number_id }. */
+  WHATSAPP_NUMERO_AGREGADO: "whatsapp.numero_agregado",
   WHATSAPP_NUMERO_SUSPENDIDO: "whatsapp.numero_suspendido",
   WHATSAPP_NUMERO_BAJA: "whatsapp.numero_baja",
   /** USER_INVITED: un admin invitó a una persona al espacio. Payload: { rol } — sin el mail. */

@@ -35,13 +35,13 @@ export type ResultadoDeMeta =
   | { ok: true; nombreVerificado: string | null }
   | { ok: false; motivo: MotivoDeMeta };
 
-const PLAZO_GRAPH_MS = 10_000;
+export const PLAZO_GRAPH_MS = 10_000;
 
 /** La WABA tiene decenas de números, no miles; el tope corta un `paging` que nunca termina. */
 const PAGINAS_MAXIMAS = 10;
 
 /** Solo ids de Graph: dígitos. Lo tipeado va en la URL y no puede traer `/`, `?` ni `..`. */
-const ID_DE_GRAPH = /^\d{5,30}$/;
+export const ID_DE_GRAPH = /^\d{5,30}$/;
 
 type RespuestaDeGraph = { ok: true; cuerpo: unknown } | { ok: false; inexistente: boolean };
 
@@ -63,20 +63,55 @@ function texto(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
-/** ¿Figura `phoneNumberId` entre los números de la WABA? `null` si Graph no contestó. */
-async function estaEnLaWaba(wabaId: string, phoneNumberId: string, accessToken: string): Promise<boolean | null> {
+/** Una fila de `/phone_numbers`: lo que Graph no trajo, o no era un texto, queda en `null`. */
+export interface FilaDeLaWaba {
+  id: string | null;
+  display: string | null;
+  nombre: string | null;
+}
+
+/**
+ * Los números de la WABA, página por página, con los campos que se pidan.
+ *
+ * `null` si Graph no contestó: una página que no es 2xx, la red caída o un
+ * `data` que no es una lista. `completa: false` si se cortó sin ver todo, porque
+ * se agotaron las páginas o el `paging` anunció otra sin cursor para pedirla;
+ * quien cuenta filas (el tope de la WABA) tiene que tratarlo como «no sé».
+ * Si `parar` da true para una fila, se corta ahí y la lista llega hasta ella.
+ */
+export async function recorrerLaWaba(
+  wabaId: string,
+  campos: "id" | "id,display_phone_number" | "id,display_phone_number,verified_name",
+  accessToken: string,
+  parar?: (fila: FilaDeLaWaba) => boolean
+): Promise<{ filas: FilaDeLaWaba[]; completa: boolean } | null> {
+  const filas: FilaDeLaWaba[] = [];
   let despues: string | null = null;
   for (let pagina = 0; pagina < PAGINAS_MAXIMAS; pagina++) {
     const sufijo: string = despues ? `&after=${encodeURIComponent(despues)}` : "";
-    const r = await pedir(urlDeGraph(`${wabaId}/phone_numbers?fields=id&limit=100${sufijo}`), accessToken);
+    const r = await pedir(urlDeGraph(`${wabaId}/phone_numbers?fields=${campos}&limit=100${sufijo}`), accessToken);
     if (!r.ok) return null;
-    const cuerpo = r.cuerpo as { data?: Array<{ id?: unknown }>; paging?: { cursors?: { after?: unknown }; next?: unknown } };
+    const cuerpo = r.cuerpo as {
+      data?: Array<{ id?: unknown; display_phone_number?: unknown; verified_name?: unknown }>;
+      paging?: { cursors?: { after?: unknown }; next?: unknown };
+    };
     if (!Array.isArray(cuerpo.data)) return null;
-    if (cuerpo.data.some((n) => texto(n?.id) === phoneNumberId)) return true;
-    despues = cuerpo.paging?.next ? texto(cuerpo.paging.cursors?.after) : null;
-    if (!despues) return false;
+    for (const n of cuerpo.data) {
+      const fila = { id: texto(n?.id), display: texto(n?.display_phone_number), nombre: texto(n?.verified_name) };
+      filas.push(fila);
+      if (parar?.(fila)) return { filas, completa: true };
+    }
+    if (!cuerpo.paging?.next) return { filas, completa: true };
+    despues = texto(cuerpo.paging.cursors?.after);
+    if (!despues) return { filas, completa: false };
   }
-  return false;
+  return { filas, completa: false };
+}
+
+/** ¿Figura `phoneNumberId` entre los números de la WABA? `null` si Graph no contestó. */
+async function estaEnLaWaba(wabaId: string, phoneNumberId: string, accessToken: string): Promise<boolean | null> {
+  const r = await recorrerLaWaba(wabaId, "id", accessToken, (f) => f.id === phoneNumberId);
+  return r && r.filas.some((f) => f.id === phoneNumberId);
 }
 
 export async function verificarEnMeta(pedido: {

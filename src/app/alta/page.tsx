@@ -33,6 +33,7 @@ import { getUserRowOrThrow } from "@/lib/auth/user-row";
 import { getT, type ClaveDelServidor, type Locale } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { leerCookieDeAlta, PARAMETRO_DE_VUELTA } from "@/server/alta/cookie";
+import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { ERRORES_DE_ALTA, type ErrorDeAlta } from "@/server/alta/validar";
 
 import { crearMiEspacio } from "./actions";
@@ -177,6 +178,7 @@ export default async function AltaPage({
           />
           <p id="alta-whatsapp-ayuda" className="mt-1.5 text-xs text-slate-500">
             {t("alta.whatsapp.ayuda")}
+            {numeroAutomatico() ? ` ${t("alta.whatsapp.aviso")}` : null}
           </p>
         </div>
         <label className="flex items-start gap-2.5 text-sm text-slate-600">

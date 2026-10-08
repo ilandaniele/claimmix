@@ -433,7 +433,8 @@ export async function callGemini(
   apiKey?: string | null,
   modelOverride?: string,
   /** Images or documents to look at alongside the text. */
-  media?: InlineMedia[]
+  media?: InlineMedia[],
+  generacion?: { temperature?: number }
 ): Promise<{ text: string | null; usage: GeminiUsage; model: string }> {
   const { endpoint, authHeaders, model } = await destinoGemini("generateContent", apiKey, modelOverride);
 
@@ -463,7 +464,7 @@ export async function callGemini(
       },
     ],
     generationConfig: {
-      temperature: 0,
+      temperature: generacion?.temperature ?? 0,
       maxOutputTokens: 8192,
       responseMimeType: "application/json",
       ...(isThinkingModel ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
@@ -592,6 +593,20 @@ export function esPasajero(e: unknown): boolean {
   return code === "TIMEOUT" || status === 429 || (e.cause as { red?: unknown })?.red === true;
 }
 
+/** La frase que comparten la corrección de MAX_TOKENS y la de la retoma tras un corte. */
+const SE_CONCISO =
+  "Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema.";
+
+/**
+ * Para un caso que ya tuvo una extracción sin terminar (plazo, 429 o red; el
+ * contador no distingue cuál ni se reinicia): el mismo prompt a temperatura 0
+ * repite la misma secuencia, y si se desbocó la primera vez se desboca igual.
+ * Las extracciones siguientes del caso salen concisas y a 0,3.
+ */
+export const CORRECCION_TRAS_CORTE =
+  "\n\nIMPORTANT: A previous attempt to answer this same message did not finish in time. " + SE_CONCISO;
+export const TEMPERATURA_TRAS_CORTE = 0.3;
+
 // ── Email claim extractor (primary production path) ───────────────────────────
 
 /**
@@ -624,7 +639,12 @@ export async function extractEmailClaimGemini(
       payload.agentTraining,
       payload.learning,
       payload.channel
-    ) + schemaSuffix();
+    ) + schemaSuffix() + (payload.trasCorte ? CORRECCION_TRAS_CORTE : "");
+
+  const generacion = payload.trasCorte ? { temperature: TEMPERATURA_TRAS_CORTE } : undefined;
+  if (payload.trasCorte) {
+    logger.info({ case_id: logCaseId, tenant_id: logTenantId }, "ai.email_extraction.tras_corte");
+  }
 
   const userMessage =
     "Analyze the email provided in the system prompt and return the structured JSON extraction.";
@@ -643,7 +663,9 @@ export async function extractEmailClaimGemini(
   // ── Attempt 1 ─────────────────────────────────────────────────────────────
   const t1 = Date.now();
   try {
-    const { text, usage } = await callGemini(systemPrompt, userMessage, tenantKey, model, payload.media);
+    const { text, usage } = await callGemini(
+      systemPrompt, userMessage, tenantKey, model, payload.media, generacion
+    );
     const latency1 = Date.now() - t1;
     totalPromptTokens = usage.promptTokens;
     totalCompletionTokens = usage.completionTokens;
@@ -760,7 +782,7 @@ export async function extractEmailClaimGemini(
     const correccion = sinArchivos || pasajero
       ? ""
       : lastErrMeta?.code === "MAX_TOKENS"
-        ? "\n\nIMPORTANT: Your previous response was cut off because it exceeded the length limit. Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema."
+        ? "\n\nIMPORTANT: Your previous response was cut off because it exceeded the length limit. " + SE_CONCISO
         : "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
 
     const stricterSystem = systemPrompt + correccion;
@@ -768,7 +790,7 @@ export async function extractEmailClaimGemini(
     const t2 = Date.now();
     try {
       const { text, usage } = await callGemini(
-        stricterSystem, userMessage, tenantKey, model, sinArchivos ? undefined : payload.media
+        stricterSystem, userMessage, tenantKey, model, sinArchivos ? undefined : payload.media, generacion
       );
       const latency2 = Date.now() - t2;
       totalPromptTokens += usage.promptTokens;

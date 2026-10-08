@@ -168,22 +168,24 @@ for (const tabla of Object.keys(PERMISOS_QUITADOS)) {
   if (e.existe) sinColumna.push(...desviosDe(tabla, await privilegiosDe(tabla)));
 }
 
-// La 0048 se aplica a mano: sin ella no hay función, ni tabla de números, ni columna.
+// La 0048 y la 0049 se aplican a mano: sin ellas no hay funciones, ni tabla de números, ni columna.
 const [m] = (await sql`
   select
     to_regprocedure('public.claimmix_crear_inquilino(uuid, uuid, text, text, integer, integer, inet)') is not null as funcion,
+    to_regprocedure('public.claimmix_numero_automatico(uuid, uuid, text, text, text, text, inet)') is not null as numero,
     to_regclass('public.whatsapp_numeros') is not null as numeros,
     exists (
       select 1 from pg_attribute
       where attrelid = to_regclass('public.tenants') and attname = 'autoalta' and not attisdropped
     ) as columna
-`) as Array<{ funcion: boolean; numeros: boolean; columna: boolean }>;
+`) as Array<{ funcion: boolean; numero: boolean; numeros: boolean; columna: boolean }>;
 const sinMigrar = [
   ...(m.funcion ? [] : ["la función claimmix_crear_inquilino"]),
   ...(m.numeros ? [] : ["la tabla whatsapp_numeros"]),
   ...(m.columna ? [] : ["la columna tenants.autoalta"]),
 ];
 if (sinMigrar.length) sinColumna.push(`0048 sin aplicar en esta base: falta ${sinMigrar.join(", ")}`);
+if (!m.numero) sinColumna.push("0049 sin aplicar en esta base: falta la función claimmix_numero_automatico");
 
 // `tenants` no tiene tenant_id: su política compara la propia columna id.
 const [rlsTenants] = (await sql`
@@ -216,23 +218,28 @@ for (const [tabla, porPrivilegio] of Object.entries(PERMISOS_POR_COLUMNA)) {
   }
 }
 
-// EXECUTE para el rol y cerrada a PUBLIC (`REVOKE ... FROM PUBLIC` de la 0048).
-if (m.funcion) {
+// EXECUTE para el rol y cerrada a PUBLIC (`REVOKE ... FROM PUBLIC` de la 0048 y la 0049).
+const FUNCIONES_DEL_ALTA: Array<[string, string, boolean]> = [
+  ["claimmix_crear_inquilino", "public.claimmix_crear_inquilino(uuid, uuid, text, text, integer, integer, inet)", m.funcion],
+  ["claimmix_numero_automatico", "public.claimmix_numero_automatico(uuid, uuid, text, text, text, text, inet)", m.numero],
+];
+for (const [nombre, firma, existe] of FUNCIONES_DEL_ALTA) {
+  if (!existe) continue;
   const [f] = (await sql`
     select coalesce(has_function_privilege(${rol}::name, p.oid, 'EXECUTE'), false) as puede,
            coalesce(p.proacl is not null and not exists (
              select 1 from aclexplode(p.proacl) x where x.grantee = 0 and x.privilege_type = 'EXECUTE'
            ), false) as cerrada
     from pg_proc p
-    where p.oid = to_regprocedure('public.claimmix_crear_inquilino(uuid, uuid, text, text, integer, integer, inet)')::oid
+    where p.oid = to_regprocedure(${firma})::oid
   `) as Array<{ puede: boolean; cerrada: boolean }>;
-  if (!f.puede) sinColumna.push("claimmix_crear_inquilino: el rol no puede ejecutarla");
-  if (!f.cerrada) sinColumna.push("claimmix_crear_inquilino: PUBLIC puede ejecutarla");
+  if (!f.puede) sinColumna.push(`${nombre}: el rol no puede ejecutarla`);
+  if (!f.cerrada) sinColumna.push(`${nombre}: PUBLIC puede ejecutarla`);
 }
 
 if (sinColumna.length === 0) {
   console.log("   ✓ tenants, whatsapp_numeros, account, session, verification y user con lo mismo que dice la lista");
-  console.log("   ✓ permisos por columna exactos y la función de alta cerrada a PUBLIC");
+  console.log("   ✓ permisos por columna exactos y las funciones del alta cerradas a PUBLIC");
 } else {
   console.log(`   ✗ ${sinColumna.length} desvío(s):`);
   for (const d of sinColumna) console.log(`      · ${d}`);

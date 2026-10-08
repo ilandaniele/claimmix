@@ -144,6 +144,7 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "tenant.plan_changed": false,
   "tenant.suspended": false,
   "whatsapp.numero_conectado": false,
+  "whatsapp.numero_agregado": false,
   "whatsapp.numero_suspendido": false,
   "whatsapp.numero_baja": false,
   "auth.user_invited": false,

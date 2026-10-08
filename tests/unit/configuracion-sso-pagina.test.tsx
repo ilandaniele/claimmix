@@ -36,6 +36,10 @@ vi.mock("@/app/(app)/configuracion/sso-actions", () => ({
   cambiarSso: vi.fn(),
   probarSso: vi.fn(),
 }));
+vi.mock("@/app/(app)/configuracion/numero-actions", () => ({
+  pedirCodigoDelNumero: vi.fn(),
+  verificarCodigoDelNumero: vi.fn(),
+}));
 // Los paneles de cliente de las demás secciones no se prueban acá.
 for (const modulo of [
   "ConfiguracionClient",

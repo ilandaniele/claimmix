@@ -30,7 +30,7 @@ vi.mock("@/data/scope", async () => {
     return { rows: m.filas.actuales as unknown[][] };
   });
   return {
-    enTenant: (ctx: { tenantId: string }, armar: (d: unknown) => unknown) => {
+    enControl: (ctx: { tenantId: string }, armar: (d: unknown) => unknown) => {
       m.contextos.push(ctx.tenantId);
       return Promise.resolve(armar(db));
     },

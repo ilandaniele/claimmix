@@ -37,9 +37,9 @@ vi.mock("@/lib/db", async () => {
 vi.mock("@/data/scope", async () => {
   const puente = await (await import("../mocks/puente-de-alcance")).puenteSobreLibDb();
   return {
-    enTenant: (ctx: unknown, armar: (db: unknown) => unknown) => {
+    enControl: (ctx: unknown, armar: (db: unknown) => unknown) => {
       h.contextos.push(ctx);
-      return puente.enTenant(ctx, armar);
+      return puente.enControl(ctx, armar);
     },
   };
 });

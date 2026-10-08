@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enControl, type TenantContext } from "@/data/scope";
 import { gmailAccounts } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { logger } from "@/lib/observability/logger";
@@ -108,7 +108,7 @@ export async function getGmailAccountForTenant(
   const tenantCtx: TenantContext = { tenantId };
   try {
     const data = firstRow(
-      await enTenant(tenantCtx, (db) =>
+      await enControl(tenantCtx, (db) =>
         db
           .select({
             id: gmailAccounts.id,

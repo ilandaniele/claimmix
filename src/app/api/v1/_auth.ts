@@ -10,6 +10,7 @@
 
 import "server-only";
 
+import { esBaseInexistente } from "@/data/bases";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { err } from "@/lib/api/respond";
 import { coreSyncSettings } from "@/lib/db/schema";
@@ -52,6 +53,8 @@ export async function autenticarClave(request: Request): Promise<TenantContext |
     );
     guardado = fila?.hash ?? null;
   } catch (e) {
+    // La clave nombra un inquilino sin base (nunca la tuvo o se dio de baja): igual que una clave mala.
+    if (esBaseInexistente(e)) return rechazar();
     if (!esFaltaDe0036(e)) throw e;
   }
 

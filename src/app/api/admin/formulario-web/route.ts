@@ -10,7 +10,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { slugAlAzar, slugValido } from "@/core/web/formulario";
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { ok, err } from "@/lib/api/respond";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { requireAdmin } from "@/lib/auth/require-admin";
@@ -38,7 +38,7 @@ export async function GET() {
   try {
     const { userRow } = await requireAdmin();
     const formulario = firstRow(
-      await enTenant({ tenantId: userRow.tenant_id }, (db) => consultaFormularioWeb(db)).catch(faltaLa0044)
+      await enControl({ tenantId: userRow.tenant_id }, (db) => consultaFormularioWeb(db)).catch(faltaLa0044)
     );
     return ok({ formulario: formulario ?? null });
   } catch (e) {
@@ -59,7 +59,7 @@ export async function PUT(request: NextRequest) {
     let guardado;
     try {
       guardado = firstRow(
-        await enTenant({ tenantId }, (db) =>
+        await enControl({ tenantId }, (db) =>
           consultaGuardarFormularioWeb(db, tenantId, { slug, activo: parsed.data.activo, userId: user.id })
         ).catch(faltaLa0044)
       );

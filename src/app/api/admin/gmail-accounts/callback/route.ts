@@ -5,7 +5,7 @@ import { tables } from "@/lib/db";
 import { encryptRefreshToken, inquilinoDeLaCasilla } from "@/server/email/gmail/accounts";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { esCasillaDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { codigoPg } from "@/server/core-sync/config";
 import { logger } from "@/lib/observability/logger";
 import {
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
     const refreshTokenEncrypted = encryptRefreshToken(tokens.refresh_token);
 
     try {
-      await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+      await enControl({ tenantId: userRow.tenant_id }, (db) =>
         db
           .insert(t)
           .values({

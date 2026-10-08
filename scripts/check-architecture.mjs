@@ -49,7 +49,7 @@ import { join } from "node:path";
  * configuración en una sola consulta; `cerrarSesionesDelDominio` borra sesiones,
  * que no son de un inquilino, de las cuentas de ese inquilino. Sin ese filtro
  * «exigir» de una aseguradora tocaba a las cuentas de otra con un mail del mismo
- * dominio. `correoExigeSso`, que sí conoce el inquilino, va por `enTenant`.
+ * dominio. `correoExigeSso`, que sí conoce el inquilino, va por `enControl`.
  */
 const TOPE_FILTROS = 13;
 
@@ -1206,6 +1206,7 @@ console.log("\n▸ enControl sólo desde su lista");
     "src/app/api/admin/gmail-accounts/callback/route.ts",
     "src/app/api/admin/formulario-web/route.ts",
     "src/server/web/formulario-del-inquilino.ts",
+    "src/app/(app)/agente/page.tsx",
     "src/server/sso/config.ts",
     "src/server/sso/usuarios.ts",
     "src/server/sso/panel.ts",
@@ -1235,6 +1236,48 @@ console.log("\n▸ enControl sólo desde su lista");
     for (const x of sueltos) console.log(`     ${x}`);
     console.log("     Si lo que tocan vive en control, sumalos a ARCHIVOS_CON_ENCONTROL;");
     console.log("     si es del inquilino, va enTenant.");
+  }
+}
+
+// ── 23. Lo que es de control no vuelve a enTenant ─────────────────────────
+//
+// Casillas de Gmail, formulario, SSO y la membresía que mira el panel de
+// sesiones viven en control (`TABLAS_DE_CONTROL`, scripts/lib/permisos-por-perfil.mjs).
+// Estos archivos sólo tocan esas tablas: si alguno vuelve a `enTenant`, con la
+// bandera apagada anda igual —hay una sola base— y con ella prendida la
+// consulta cae en la base del cliente, donde esas tablas están vacías o no
+// existen. Es una lista a mano, y sumar un archivo es deliberado.
+console.log("\n▸ Lo de control va por enControl");
+{
+  const SOLO_DE_CONTROL = [
+    "src/server/email/gmail/accounts.ts",
+    "src/app/api/admin/gmail-accounts/route.ts",
+    "src/app/api/admin/gmail-accounts/callback/route.ts",
+    "src/app/api/admin/formulario-web/route.ts",
+    "src/server/web/formulario-del-inquilino.ts",
+    "src/server/sso/config.ts",
+    "src/server/sso/usuarios.ts",
+    "src/server/sso/panel.ts",
+    "src/app/api/admin/sso/route.ts",
+    "src/app/api/admin/users/[id]/sessions/route.ts",
+  ];
+  const VUELVEN = /\benTenant(?:Varias|DeUsuarioVarias)?\b/;
+  const faltan = SOLO_DE_CONTROL.filter((f) => !existsSync(f));
+  const vuelven = SOLO_DE_CONTROL.filter(
+    (f) => existsSync(f) && VUELVEN.test(sinComentarios(readFileSync(f, "utf8")))
+  );
+  if (faltan.length > 0) {
+    mal(`${faltan.length} archivo(s) de la lista de control ya no existen`);
+    for (const x of faltan) console.log(`     ${x}`);
+    console.log("     Si se movieron, actualizá SOLO_DE_CONTROL en este chequeo.");
+  }
+  if (vuelven.length > 0) {
+    mal(`${vuelven.length} archivo(s) de control usan enTenant`);
+    for (const x of vuelven) console.log(`     ${x}`);
+    console.log("     Sus tablas viven en control: va enControl.");
+  }
+  if (faltan.length === 0 && vuelven.length === 0) {
+    bien(`${SOLO_DE_CONTROL.length} archivo(s) de control, ninguno usa enTenant`);
   }
 }
 

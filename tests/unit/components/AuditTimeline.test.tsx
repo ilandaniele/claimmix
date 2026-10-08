@@ -55,6 +55,8 @@ const VALORES_EXCLUIDOS = new Set([
   "tenant.created",
   "tenant.plan_changed",
   "tenant.suspended",
+  // El aviso de desvíos es del inquilino (target_type tenant), no cuelga de un caso.
+  "quality.desvios_alerted",
 ]);
 
 const ADJUNTO_RECHAZADO = {
@@ -115,6 +117,35 @@ describe("AuditTimeline", () => {
     }
   });
 
+  // Quién hizo cada cosa: el nombre cuando se conoce, y si no, ni el id ni un hueco.
+  describe("autoría del evento", () => {
+    const EVENTO = { id: 8, event_type: "case.assigned", created_at: "2026-09-01T10:07:00Z", reason: null };
+
+    it("muestra el nombre de la persona", () => {
+      render(<AuditTimeline events={[{ ...EVENTO, actor_name: "Lucía Ramallo", con_actor: true }]} />);
+
+      expect(screen.getByTestId("autor-del-evento")).toHaveTextContent("Lucía Ramallo");
+    });
+
+    it("un evento sin persona detrás se lee «Automático»", () => {
+      render(<AuditTimeline events={[{ ...EVENTO, actor_name: null, con_actor: false }]} />);
+
+      expect(screen.getByTestId("autor-del-evento")).toHaveTextContent("Automático");
+    });
+
+    it("una persona que ya no tiene nombre se lee «Alguien del equipo»", () => {
+      render(<AuditTimeline events={[{ ...EVENTO, actor_name: null, con_actor: true }]} />);
+
+      expect(screen.getByTestId("autor-del-evento")).toHaveTextContent("Alguien del equipo");
+    });
+
+    it("sin dato de autoría no afirma nada", () => {
+      render(<AuditTimeline events={[EVENTO]} />);
+
+      expect(screen.queryByTestId("autor-del-evento")).not.toBeInTheDocument();
+    });
+  });
+
   it("un mensaje de WhatsApp se lee como tal, no como email", () => {
     render(
       <AuditTimeline
@@ -147,6 +178,9 @@ describe("AuditTimeline", () => {
     ["tomar_el_control", "Tomar el control"],
     ["tope_por_remitente", "No se analizó: el remitente superó su cupo"],
     ["tope_por_formulario", "No se analizó: el formulario superó su cupo diario"],
+    ["marcado_relevante", "Lo marcó como relevante una persona"],
+    ["clasificador", "Lo descartó el clasificador de IA"],
+    ["budget_exceeded", "No se analizó: se terminó el cupo de IA"],
     ["devolver_al_agente", "Devolver al agente"],
     // Los salteos del recordatorio (B4) guardan el motivo de `decidirReenvio` tal cual.
     ["plantilla_sin_aprobar", "La plantilla para escribirle después de 24 h todavía no está aprobada por Meta"],

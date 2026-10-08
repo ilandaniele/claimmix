@@ -20,7 +20,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { cases, rawMessages } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
-import { getRandomScenario, getScenarioById } from "@/server/intake/scenarios";
+import { escenariosSinRepetir, getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { checkBudget } from "@/server/ai/budget";
@@ -225,19 +225,21 @@ export async function POST(request: NextRequest): Promise<Response> {
       code: string | null;
     }> = [];
 
-    // Resolve a fixed scenario if scenario_id is supplied; otherwise pick randomly each iteration.
+    // Resolve a fixed scenario if scenario_id is supplied; otherwise pick the whole batch without repeats.
     const fixedScenario = scenario_id ? getScenarioById(scenario_id) : undefined;
     if (scenario_id && !fixedScenario) {
       throw new AppError("VALIDATION_FAILED", `ID de escenario inválido: ${scenario_id}.`);
     }
 
+    // Sin escenario fijo se sortea el lote entero junto, así no salen dos casos del mismo escenario (mismo asegurado) mientras el pool alcance.
+    const sorteados = fixedScenario ? [] : escenariosSinRepetir(claim_type, count);
+
     for (let i = 0; i < count; i++) {
-      const scenario = fixedScenario ?? getRandomScenario(claim_type);
+      const scenario = fixedScenario ?? sorteados[i]!;
 
       const rawText = scenario.raw_text;
       const finalClaimType: ClaimType = scenario.case_type;
       const policyholderName = scenario.policyholder_name;
-      const policyNumber = scenario.policy_number;
 
       try {
         const newCase = firstRow(
@@ -246,8 +248,6 @@ export async function POST(request: NextRequest): Promise<Response> {
               .insert(cases)
               .values({
                 tenant_id: userRow.tenant_id,
-                policy_number: policyNumber,
-                policyholder_name: policyholderName,
                 claim_type: finalClaimType,
                 status: "procesando",
                 confidence_min: null,

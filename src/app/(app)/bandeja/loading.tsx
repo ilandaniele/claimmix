@@ -17,14 +17,6 @@ export default function BandejaLoading() {
       <div className="px-6 pb-5 pt-1">
         <div className="h-8 w-64 animate-pulse rounded-lg bg-slate-200" />
         <div className="mt-2 h-4 w-80 animate-pulse rounded bg-slate-100" />
-        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <div
-              key={i}
-              className="h-[104px] animate-pulse rounded-2xl border border-slate-200 bg-white"
-            />
-          ))}
-        </div>
       </div>
       <div className="flex-1 overflow-hidden px-6 pb-8">
         <div className="h-full rounded-2xl border border-slate-200 bg-white p-5 shadow-md">

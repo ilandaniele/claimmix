@@ -25,6 +25,7 @@ import { isReservedTestNumber } from "@/core/phone/reserved";
 import { nombraCulpaOLey } from "@/core/ai/nombra-culpa";
 import { EMAIL_RE } from "@/core/text/contacto";
 import { DOMINIO_RE } from "@/core/case/mensaje-tardio";
+import { REGLAS, TITULO_DE_REGLA, type Regla } from "@/core/desvios/reglas";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
@@ -251,22 +252,25 @@ function renderAlert(input: SpecialistAlertInput, caseUrl: string) {
 
 /** Un aviso a los especialistas: a quién, cómo se audita y qué dice. */
 interface Aviso {
-  /** El caso del que se avisa. Sin él el aviso es del inquilino entero (el presupuesto): no hay simulado, marca previa ni enlace. */
+  /** El caso del que se avisa. Sin él el aviso es del inquilino entero (el presupuesto, los desvíos): no hay simulado ni marca previa, y el enlace es el de `ruta`. */
   caseId?: string;
   tenantId: string;
   evento:
     | typeof AuditEvent.SPECIALIST_ALERTED
     | typeof AuditEvent.LATE_MESSAGE_ALERTED
-    | typeof AuditEvent.AI_BUDGET_ALERTED;
+    | typeof AuditEvent.AI_BUDGET_ALERTED
+    | typeof AuditEvent.DESVIOS_ALERTED;
   /** Lo que distingue a este aviso de otro del mismo caso: el mensaje, en el tardío. */
   marca?: { message_id: string };
+  /** Adónde lleva el enlace de un aviso sin caso. */
+  ruta?: string;
   /** Datos que van a la auditoría junto a la marca. */
-  payload?: Record<string, string>;
+  payload?: Record<string, string | number>;
   /** Prefijo de los registros. */
   log: string;
   /** Tope de correos, contado sólo cuando el aviso de verdad iba a salir y devuelto si no salió. */
   cupo?: { clave: string; config: { limit: number; windowMs: number } };
-  render: (caseUrl: string) => { subject: string; text: string };
+  render: (enlace: string) => { subject: string; text: string };
 }
 
 /**
@@ -375,7 +379,55 @@ export async function avisarPresupuestoAgotado(input: PresupuestoAgotadoInput): 
   });
 }
 
-async function avisar(aviso: Aviso): Promise<void> {
+export interface DesviosNuevosInput {
+  tenantId: string;
+  /** Cuántos desvíos nuevos dejó la revisión de anoche en cada regla: sólo conteos, nunca un caso. */
+  porRegla: Partial<Record<Regla, number>>;
+}
+
+/**
+ * Avisa que la revisión nocturna encontró desvíos nuevos (B22).
+ *
+ * Sin él la lista de /desvios es la única huella y nadie la abre. Es un aviso
+ * de inquilino, como el del presupuesto: un correo por día, con los conteos por
+ * regla y el enlace a la pantalla, nunca nombres, pólizas ni números de caso.
+ * Les llega a los mismos que el resto de los avisos (`recipientsFor`, sin lista
+ * ni rol propios) y nunca a un analista por tener casos asignados.
+ *
+ * Devuelve si el correo salió, para que el barrido cuente avisos y no llamadas.
+ */
+export async function avisarDesvios(input: DesviosNuevosInput): Promise<boolean> {
+  const { tenantId, porRegla } = input;
+  const reglas = REGLAS.filter((r) => (porRegla[r] ?? 0) > 0);
+  const total = reglas.reduce((suma, r) => suma + (porRegla[r] ?? 0), 0);
+  if (total === 0) return false;
+
+  return avisar({
+    tenantId,
+    evento: AuditEvent.DESVIOS_ALERTED,
+    ruta: "/desvios",
+    payload: { nuevos: total, ...Object.fromEntries(reglas.map((r) => [r, porRegla[r] ?? 0])) },
+    log: "desvios_alert",
+    cupo: {
+      clave: claveDeCupo("aviso-desvios", tenantId),
+      config: RATE_LIMIT_CONFIGS.AVISO_DESVIOS_POR_INQUILINO,
+    },
+    render: (enlace) => ({
+      subject: t("desvios.aviso.asunto").replace("{n}", String(total)),
+      text: [
+        t("desvios.aviso.cuerpo"),
+        "",
+        ...reglas.map((r) =>
+          t("desvios.aviso.linea").replace("{regla}", t(TITULO_DE_REGLA[r])).replace("{n}", String(porRegla[r]))
+        ),
+        ...(enlace ? ["", t("desvios.aviso.abrir").replace("{link}", enlace)] : []),
+      ].join("\n"),
+    }),
+  });
+}
+
+/** Devuelve si el correo salió: sin destinatarios, sin casilla, sin cupo o con el envío caído, no. */
+async function avisar(aviso: Aviso): Promise<boolean> {
   const { caseId, tenantId } = aviso;
   const contexto = caseId ? { case_id: caseId } : { tenant_id: tenantId };
   let cupoGastado: { clave: string; windowMs: number; ventana: number } | undefined;
@@ -388,10 +440,10 @@ async function avisar(aviso: Aviso): Promise<void> {
         // should be able to see the alert was deliberately withheld, not
         // wonder whether it silently failed.
         logger.info(contexto, `${aviso.log}.skipped_simulated`);
-        return;
+        return false;
       }
 
-      if (await alreadyAlerted({ ...aviso, caseId })) return;
+      if (await alreadyAlerted({ ...aviso, caseId })) return false;
     }
 
     const recipients = await recipientsFor(tenantId);
@@ -399,13 +451,13 @@ async function avisar(aviso: Aviso): Promise<void> {
       // Worth an error, not a shrug: the promise made to the claimant has no
       // owner, and the only way to find that out is to look for this line.
       logger.error({ ...contexto, tenant_id: tenantId }, `${aviso.log}.no_recipients`);
-      return;
+      return false;
     }
 
     const account = await getGmailAccountForTenant(tenantId);
     if (!account) {
       logger.error(contexto, `${aviso.log}.no_mailbox`);
-      return;
+      return false;
     }
 
     // El cupo se gasta sólo si hay a quién y desde dónde mandar.
@@ -413,13 +465,14 @@ async function avisar(aviso: Aviso): Promise<void> {
       const cupo = await rateLimit(aviso.cupo.clave, aviso.cupo.config);
       if (!cupo.allowed) {
         logger.warn(contexto, `${aviso.log}.tope`);
-        return;
+        return false;
       }
       cupoGastado = { clave: aviso.cupo.clave, windowMs: aviso.cupo.config.windowMs, ventana: cupo.ventana };
     }
 
     const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "";
-    const { subject, text } = aviso.render(caseId && base ? `${base}/casos/${caseId}` : "");
+    const ruta = caseId ? `/casos/${caseId}` : aviso.ruta;
+    const { subject, text } = aviso.render(ruta && base ? `${base}${ruta}` : "");
 
     const sender = new GmailSender(account.refreshToken);
     const result = await sender.send({
@@ -460,6 +513,7 @@ async function avisar(aviso: Aviso): Promise<void> {
       await liberarCupo(cupoGastado.clave, cupoGastado.windowMs, cupoGastado.ventana);
     }
   }
+  return entregado;
 }
 
 /**

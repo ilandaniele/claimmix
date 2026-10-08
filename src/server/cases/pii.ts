@@ -107,3 +107,35 @@ export function mensajesSinPiiSiNoCorresponde<T extends MensajeConTexto>(
     from_addr: m.from_addr ? OCULTO : m.from_addr,
   }));
 }
+
+interface FilaConRemitenteYAsunto {
+  asunto?: string | null;
+  remitente?: string | null;
+}
+
+/**
+ * El asunto y el remitente de la vista de descartes, según el rol.
+ *
+ * La lista de «No relevantes» muestra de dónde vino cada mail para que se vea
+ * qué se descartó, y eso es exactamente lo que `/api/customers` no le da a un
+ * analista: la dirección de la persona y lo que escribió en el asunto, donde a
+ * veces va el DNI o la póliza. Sale en claro para `CUSTOMER_PII_ROLES`; el resto
+ * ve el asunto enmascarado y la dirección oculta, igual que en `agent-run`.
+ *
+ * Las filas sin esos campos —todas las de las demás vistas— pasan iguales.
+ */
+export function remitenteYAsuntoParaElRol<T extends FilaConRemitenteYAsunto>(
+  filas: readonly T[],
+  rol: string
+): T[] {
+  if (CUSTOMER_PII_ROLES.includes(rol as UserRole)) return [...filas];
+
+  return filas.map((f) => {
+    if (f.asunto === undefined && f.remitente === undefined) return f;
+    return {
+      ...f,
+      asunto: sinIdentificadores(f.asunto),
+      remitente: f.remitente ? OCULTO : f.remitente,
+    };
+  });
+}

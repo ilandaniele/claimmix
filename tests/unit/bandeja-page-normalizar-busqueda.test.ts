@@ -18,6 +18,7 @@ vi.mock("@/server/cases/list", () => ({
   contarPorEstado: vi.fn(async () => []),
   desdeDePeriodo: vi.fn(),
   listCases: vi.fn(async () => ({ cases: [], total: 0 })),
+  listarTablero: vi.fn(async () => ({ cases: [], total: 0, totales: {} })),
 }));
 vi.mock("@/server/intake/scenarios", () => ({ OPCIONES_DE_ESCENARIO: [] }));
 

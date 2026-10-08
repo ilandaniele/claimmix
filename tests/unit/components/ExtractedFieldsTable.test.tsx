@@ -74,4 +74,16 @@ describe("ExtractedFieldsTable", () => {
 
     expect(screen.getAllByRole("meter")).toHaveLength(1);
   });
+
+  it("los datos que el ramo pide, hora y provincia, también llevan su barra", () => {
+    show([
+      field({ id: "1", field_key: "hora_siniestro", field_value: "14:30", confidence: 0.8 }),
+      field({ id: "2", field_key: "provincia_siniestro", field_value: "Buenos Aires", confidence: 0.7 }),
+    ]);
+
+    const barras = screen.getAllByRole("meter");
+    expect(barras).toHaveLength(2);
+    expect(barras[0]).toHaveAttribute("aria-label", "Confianza: 80%");
+    expect(barras[1]).toHaveAttribute("aria-label", "Confianza: 70%");
+  });
 });

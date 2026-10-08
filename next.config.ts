@@ -65,8 +65,15 @@ const nextConfig: NextConfig = {
          * navegación del navegador que devuelve `Content-Disposition:
          * attachment`. La directiva que más aprieta habría roto la exportación
          * que usan los analistas todos los días.
+         *
+         * Menos el adjunto servido, `/api/cases/:id/attachments/:attachmentId`,
+         * que fija su propia CSP (con `sandbox`, salvo el PDF). Next no pisa
+         * una cabecera que la config ya puso: con esta CSP acá, la del handler
+         * se perdía y el `sandbox` nunca llegaba al navegador. El lookahead
+         * deja afuera sólo esa ruta, no `.../presupuesto`.
+         * `tests/e2e/adjunto-svg.spec.ts` lo mira en la respuesta real.
          */
-        source: "/api/(.*)",
+        source: "/api/((?!cases/[^/]+/attachments/[^/]+$).*)",
         headers: [
           {
             key: "Content-Security-Policy",

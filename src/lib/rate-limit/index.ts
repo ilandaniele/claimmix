@@ -198,6 +198,13 @@ export const RATE_LIMIT_CONFIGS = {
   AVISO_PRESUPUESTO_POR_INQUILINO: { limit: 1, windowMs: 24 * 60 * 60_000 },
 
   /**
+   * AVISO_DESVIOS_POR_INQUILINO: 1 correo por día a los especialistas con los
+   * desvíos nuevos de la revisión nocturna. La revisión es una por día; el cupo
+   * está para que un reintento del barrido no repita el correo a la guardia.
+   */
+  AVISO_DESVIOS_POR_INQUILINO: { limit: 1, windowMs: 24 * 60 * 60_000 },
+
+  /**
    * AVISO_TARDIO_POR_CASO: 3 correos a los especialistas por día y por caso.
    * Cada mensaje tardío avisa una vez; sin tope, quien escribe veinte veces a
    * un caso cerrado le manda veinte correos a la guardia.

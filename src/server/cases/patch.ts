@@ -192,6 +192,11 @@ export async function patchCase(
   // fuera, o sigue la liquidación. Fuera del grafo como la devolución.
   const salidaAMano = hacia !== undefined && esSalidaAMano(desde, hacia);
 
+  // La arista `no_relevante → recibido` es del camino de ingreso (llegó un mensaje) y de «Marcar como relevante».
+  if (hacia !== undefined && desde === "no_relevante") {
+    throw new AppError("FSM_INVALID_TRANSITION", "Un caso descartado se rescata con «Marcar como relevante».");
+  }
+
   if (hacia !== undefined && !salidaAMano) {
     const validationError = validateTransition(desde, hacia);
     if (validationError) {

@@ -16,11 +16,12 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { CASE_EDITOR_ROLES, CORE_SYNC_ROLES, CUSTOMER_PII_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
+import { ADMIN_ROLES, CASE_EDITOR_ROLES, CORE_SYNC_ROLES, CUSTOMER_PII_ROLES, puedeCambiarEstado } from "@/lib/auth/roles";
 import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
 import { ESTADOS_CERRADOS } from "@/core/case/fsm";
 import { claveDeTituloDeFabrica } from "@/core/case/plan-de-trabajo";
-import { denunciaEnTermino } from "@/core/case/plazos";
+import { diasHastaLaDenuncia } from "@/core/case/plazos";
+import { motivoPropioDelDescarte } from "@/core/case/motivo-del-descarte";
 import type { TenantContext } from "@/data/scope";
 import {
   cargarDetalleDeCaso,
@@ -41,7 +42,7 @@ import {
   FraudRiskBadge,
   InjurySeverityBadge,
 } from "./_components/RiskBadges";
-import { AttachmentsPanel } from "./_components/AttachmentsPanel";
+import { AttachmentsPanel, type Esperado } from "./_components/AttachmentsPanel";
 import { CoberturaPanel, VeredictoDeCobertura } from "./_components/CoberturaPanel";
 import { ResponsabilidadPanel, VeredictoDeResponsabilidad } from "./_components/ResponsabilidadPanel";
 import { ReclamoTerceroPanel } from "./_components/ReclamoTerceroPanel";
@@ -60,9 +61,10 @@ import { getT, type TranslationKey } from "@/lib/i18n";
 import { textoDelMotivo } from "@/lib/i18n/motivo-de-core";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
-import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
+import { canonicalFieldKey, isDocument, labelForField } from "@/lib/labels/claim-fields";
 import { estadoDelDocumento } from "@/core/case/estado-del-documento";
-import { esRamoSinCalibrar } from "@/core/case/required-docs";
+import { clavesDeDocumentosObligatorios, esRamoSinCalibrar } from "@/core/case/required-docs";
+import { esRamoEnCalibracion } from "@/core/case/ramos";
 import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
 import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
@@ -159,6 +161,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     plan,
     carga,
     plazo_titulo,
+    fecha_del_siniestro,
     cobertura,
     responsabilidad,
     cartas,
@@ -179,6 +182,26 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     ? "—"
     : nombreDeTipo(claveDelRamo, t, ramoPropio ? [ramoPropio] : [], locale);
   const ramoSinCalibrar = claveDelRamo ? esRamoSinCalibrar(claveDelRamo, ramoPropio) : false;
+  const ramoEnCalibracion = !ramoSinCalibrar && esRamoEnCalibracion(claveDelRamo);
+
+  // Lo que todavía falta (B4): lo mismo se le avisa a quien lo deja listo.
+  const pendientes = missing_docs.filter((d) => estadoDelDocumento(d) === "pending");
+
+  // Los archivos que se esperan: los ya pedidos, y si no se pidió ninguno, lo que exige el ramo. Sin ramo no se sabe qué esperar.
+  const archivosPedidos = missing_docs.filter((d) => labelForField(d.doc_key).kind === "documento");
+  const esperados: Esperado[] | undefined = !claveDelRamo
+    ? undefined
+    : archivosPedidos.length > 0
+      ? archivosPedidos.map((d) => ({
+          clave: d.doc_key,
+          etiqueta: etiquetaDeCampo(d.doc_key, t),
+          estado: estadoDelDocumento(d),
+        }))
+      : (ramoPropio?.documentos ?? clavesDeDocumentosObligatorios(claveDelRamo)).map((clave) => ({
+          clave,
+          etiqueta: etiquetaDeCampo(clave, t),
+          estado: "pending" as const,
+        }));
 
   const isEmailCase =
     caseRow.channel === "email" || caseRow.channel === "email_sim" || caseRow.channel === "web";
@@ -241,8 +264,8 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
   const puedeEnviarAlCore = (CORE_SYNC_ROLES as string[]).includes(me.role);
   // La opinión de responsabilidad y el reclamo de un tercero son para quien trabaja el caso (B18, B24).
   const esEditor = (CASE_EDITOR_ROLES as string[]).includes(me.role);
-  // El art. 46 y el vencimiento (B10) son del equipo: al asegurado no se los decimos.
-  const denuncia = esEditor ? denunciaEnTermino(fieldValues.get("accident_date") ?? null, caseRow.created_at) : null;
+  // El art. 46 y el vencimiento (B10) son del equipo: al asegurado no se los decimos. La fecha es la misma de la cobertura.
+  const denuncia = esEditor ? diasHastaLaDenuncia(fecha_del_siniestro, caseRow.created_at) : null;
   // Un caso cerrado puede conservar el plazo (el barrido de abandono no lo limpia): no se muestra como vencido.
   const venceEn = ESTADOS_CERRADOS.has(caseRow.status as CaseStatus) ? null : caseRow.vence_en;
   // El art. 46 no se guarda como vencimiento (`PlazosSchema` reserva la clave): sólo corren el art. 56 y los propios.
@@ -323,11 +346,17 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               {ramoSinCalibrar && (
                 <Pill tone="espera">{t("case.detail.ramoSinCalibrar")}</Pill>
               )}
+              {ramoEnCalibracion && <Pill>{t("case.detail.ramoEnCalibracion")}</Pill>}
               <StatusBadge status={caseRow.status as CaseStatus} />
             </div>
             {ramoSinCalibrar && (
               <p className="mb-3 text-[12.5px] text-slate-500">
                 {t("case.detail.ramoSinCalibrarAyuda")}
+              </p>
+            )}
+            {ramoEnCalibracion && (
+              <p className="mb-3 text-[12.5px] text-slate-500">
+                {t("case.detail.ramoEnCalibracionAyuda")}
               </p>
             )}
 
@@ -410,6 +439,8 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
             puedeCambiarEstado={puedeCambiarEstadoCaso}
             puedeTomarElControl={puedeTomarElControlCaso}
             puedeDevolverAlAgente={puedeDevolverAlAgenteCaso}
+            puedeMarcarRelevante={(ADMIN_ROLES as string[]).includes(me.role)}
+            faltantes={pendientes.map((d) => etiquetaDeCampo(d.doc_key, t))}
           />
         </div>
       </Card>
@@ -421,30 +452,25 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
         * arriba de todo: es lo primero que alguien que abre el caso necesita
         * saber, no algo que hay que bajar a buscar.
         */}
-      {(() => {
-        const pendientes = missing_docs.filter(
-          (d) => estadoDelDocumento(d) === "pending"
-        );
-        return pendientes.length > 0 ? (
-          <div className="mb-6">
-            <PanelSection
-              id="pendientes"
-              tono="atencion"
-              titulo={t("case.detail.pendientesTitulo")}
-            >
-              <ul className="space-y-1">
-                {pendientes.map((d) => (
-                  <li key={d.id}>
-                    <a href="#missing-docs-heading" className="text-sm text-slate-700 hover:underline">
-                      {etiquetaDeCampo(d.doc_key, t)}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </PanelSection>
-          </div>
-        ) : null;
-      })()}
+      {pendientes.length > 0 ? (
+        <div className="mb-6">
+          <PanelSection
+            id="pendientes"
+            tono="atencion"
+            titulo={t("case.detail.pendientesTitulo")}
+          >
+            <ul className="space-y-1">
+              {pendientes.map((d) => (
+                <li key={d.id}>
+                  <a href="#missing-docs-heading" className="text-sm text-slate-700 hover:underline">
+                    {etiquetaDeCampo(d.doc_key, t)}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </PanelSection>
+        </div>
+      ) : null}
 
       {/* Two-column layout: left = main content, right = docs + audit */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -635,6 +661,11 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
                         ? t("common.no")
                         : null}
                   </Field>
+                  {caseRow.is_claim === false && (
+                    <Field label={t("case.detail.notRelevantReason")}>
+                      {motivoPropioDelDescarte(caseRow.not_relevant_reason) ?? t("noRelevante.motivoPorDefecto")}
+                    </Field>
+                  )}
                   <Field label={t("case.detail.severity")}>
                     {caseRow.severity ? (
                       <SeverityBadge severity={caseRow.severity} />
@@ -784,6 +815,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
               caseId={caseRow.id}
               puedeAbrir={(CASE_EDITOR_ROLES as string[]).includes(me.role)}
               puedeLeerPresupuesto={puedeCambiarEstadoCaso}
+              esperados={esperados}
             />
           </PanelSection>
 

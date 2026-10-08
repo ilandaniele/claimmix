@@ -5,14 +5,17 @@
  * al final del día ARGENTINO, contado en días corridos.
  */
 
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   DIAS_POR_VENCER,
   PLAZOS_LEGALES,
   PlazosSchema,
-  denunciaEnTermino,
   diasAlVencimiento,
+  diasHastaLaDenuncia,
   estadoDelVencimiento,
   finDelDia,
   limitesDelFiltro,
@@ -186,30 +189,40 @@ describe("diasAlVencimiento", () => {
   });
 });
 
-describe("denunciaEnTermino (art. 46)", () => {
-  it("en término con el hecho el 01/09 y la denuncia el 04/09", () => {
-    expect(denunciaEnTermino("2026-09-01", "2026-09-04T15:00:00Z")).toEqual({ enTermino: true, dias: 3 });
+describe("diasHastaLaDenuncia (art. 46)", () => {
+  it("con el hecho el 01/09 y la denuncia el 04/09 son 3 días y no supera el art. 46", () => {
+    expect(diasHastaLaDenuncia("2026-09-01", "2026-09-04T15:00:00Z")).toEqual({ dias: 3, superaArt46: false });
   });
 
-  it("fuera de término con la denuncia el 05/09", () => {
-    expect(denunciaEnTermino("2026-09-01", "2026-09-05T15:00:00Z")).toEqual({ enTermino: false, dias: 4 });
+  it("con la denuncia el 05/09 son 4 días y supera el art. 46", () => {
+    expect(diasHastaLaDenuncia("2026-09-01", "2026-09-05T15:00:00Z")).toEqual({ dias: 4, superaArt46: true });
   });
 
   it("cuenta el día argentino: las 22:00 del 04/09 todavía son 04/09", () => {
-    expect(denunciaEnTermino("2026-09-01", "2026-09-05T01:00:00Z")).toEqual({ enTermino: true, dias: 3 });
+    expect(diasHastaLaDenuncia("2026-09-01", "2026-09-05T01:00:00Z")).toEqual({ dias: 3, superaArt46: false });
   });
 
   it("acepta AAAA-MM-DD y dd/mm/aaaa", () => {
-    expect(denunciaEnTermino("01/09/2026", "2026-09-02T15:00:00Z")).toEqual({ enTermino: true, dias: 1 });
-    expect(denunciaEnTermino("2026-09-01", new Date("2026-09-02T15:00:00Z"))).toEqual({ enTermino: true, dias: 1 });
+    expect(diasHastaLaDenuncia("01/09/2026", "2026-09-02T15:00:00Z")).toEqual({ dias: 1, superaArt46: false });
+    expect(diasHastaLaDenuncia("2026-09-01", new Date("2026-09-02T15:00:00Z"))).toEqual({ dias: 1, superaArt46: false });
   });
 
   it("una fecha inválida, ausente o posterior a la denuncia da null", () => {
-    expect(denunciaEnTermino("ayer", "2026-09-04T15:00:00Z")).toBeNull();
-    expect(denunciaEnTermino("31/02/2026", "2026-09-04T15:00:00Z")).toBeNull();
-    expect(denunciaEnTermino(null, "2026-09-04T15:00:00Z")).toBeNull();
-    expect(denunciaEnTermino("2026-09-01", null)).toBeNull();
-    expect(denunciaEnTermino("2026-09-10", "2026-09-04T15:00:00Z")).toBeNull();
+    expect(diasHastaLaDenuncia("ayer", "2026-09-04T15:00:00Z")).toBeNull();
+    expect(diasHastaLaDenuncia("31/02/2026", "2026-09-04T15:00:00Z")).toBeNull();
+    expect(diasHastaLaDenuncia(null, "2026-09-04T15:00:00Z")).toBeNull();
+    expect(diasHastaLaDenuncia("2026-09-01", null)).toBeNull();
+    expect(diasHastaLaDenuncia("2026-09-10", "2026-09-04T15:00:00Z")).toBeNull();
+  });
+
+  it("es una señal para la ficha: no la lee nada más de src/", () => {
+    // La FSM, el puntaje, la asignación, la bandeja y los prompts no pueden depender de ella.
+    const lectores = (readdirSync("src", { recursive: true, encoding: "utf8" }) as string[])
+      .filter((f) => /\.tsx?$/.test(f))
+      .map((f) => f.replaceAll("\\", "/"))
+      .filter((f) => readFileSync(join("src", f), "utf8").includes("diasHastaLaDenuncia"))
+      .sort();
+    expect(lectores).toEqual(["app/(app)/casos/[id]/page.tsx", "core/case/plazos.ts"]);
   });
 });
 

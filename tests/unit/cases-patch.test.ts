@@ -202,6 +202,18 @@ describe("patchCase — FSM validation", () => {
     ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
   });
 
+  // Un descartado se rescata con «Marcar como relevante», que le avisa al agente;
+  // el PATCH lo dejaría en `recibido` sin que nadie lo procese.
+  it("throws FSM_INVALID_TRANSITION for no_relevante → recibido, ni siquiera para un admin", async () => {
+    const descartado = { ...listoCase, status: "no_relevante" };
+    setupPatchMocks([descartado], [{ ...descartado, status: "recibido" }]);
+
+    await expect(
+      patchCase("case-1", { status: "recibido" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
   it("throws FSM_INVALID_TRANSITION for procesando → cerrado", async () => {
     const procesandoCase = { ...listoCase, status: "procesando" };
     setupPatchMocks([procesandoCase], [{ ...procesandoCase, status: "cerrado" }]);

@@ -639,6 +639,13 @@ export const AuditEvent = {
   INVITATION_ACCEPTED: "auth.invitation_accepted",
   /** INVITATION_REJECTED: la invitación no se pudo aceptar. Payload: { motivo } — un código. */
   INVITATION_REJECTED: "auth.invitation_rejected",
+  /**
+   * DESVIOS_ALERTED: se avisó a los especialistas de los desvíos nuevos que
+   * dejó la revisión nocturna (B22). Uno por inquilino y por día, sin actor; el
+   * objetivo es el inquilino, no un caso. Payload: { nuevos, <regla>: n, …,
+   * recipients, delivered } — sólo conteos.
+   */
+  DESVIOS_ALERTED: "quality.desvios_alerted",
 } as const;
 
 export type AuditEventType = (typeof AuditEvent)[keyof typeof AuditEvent];

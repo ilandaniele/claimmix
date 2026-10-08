@@ -98,7 +98,8 @@ export async function reabrirSiEraNoRelevante(
       event_type: AuditEvent.CASE_REOPENED,
       target_type: "case",
       target_id: caseId,
-      payload: { desde: "no_relevante", motivo: "mensaje_entrante" },
+      // `old_status`/`new_status` son lo que lee el trayecto: sin ellos la vuelta a `recibido` no se ve.
+      payload: { desde: "no_relevante", motivo: "mensaje_entrante", old_status: "no_relevante", new_status: "recibido" },
     });
 
     logger.info({

@@ -227,8 +227,7 @@ Okta o Google Workspace de una aseguradora. Lo prueba el piloto.
   secretos (sobre cada cambio y semanal) y un pen test local sin credenciales.
   Nombres de los jobs: `typecheck`, `lint`, `unit-tests`, `build`,
   `integration-tests`, `cobertura`, `security-audit`, `bundle-size`,
-  `integration-tests-email`, `license-audit`, `tenencia-capa-datos`,
-  `pen-test-local`.
+  `license-audit`, `tenencia-capa-datos`, `pen-test-local`.
 - **Después de cada deploy** corren las pruebas contra el alias real: `pnpm
   smoke`, el ensayo de conversaciones completas, `pnpm pentest` (mitad gratis) y
   la carga.

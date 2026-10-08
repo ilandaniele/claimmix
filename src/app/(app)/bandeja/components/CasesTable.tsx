@@ -14,9 +14,10 @@ import { ClaseDelTardio } from "./ClaseDelTardio";
 import { useLocale } from "@/lib/i18n/LocaleContext";
 import { formatAge, formatDate } from "@/lib/utils";
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
+import { motivoPropioDelDescarte } from "@/core/case/motivo-del-descarte";
 import type { CaseStatus, Severity } from "@/lib/schemas/cases";
-import { claveDeTipo } from "@/lib/i18n/tipos-de-siniestro";
-import type { TipoPropio } from "./grupos-de-filtro";
+import { AseguradoYPoliza } from "./AseguradoYPoliza";
+import { nombreDelTipo, type TipoPropio } from "./grupos-de-filtro";
 
 function formatCaseId(id: string): string {
   const suffix = id.replace(/-/g, "").slice(-8).toUpperCase();
@@ -26,6 +27,35 @@ function formatCaseId(id: string): string {
 const SOLO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 type Columna = { id: string; header: string; cell: (row: CaseRow, marcado: boolean) => ReactNode };
+
+/**
+ * El ancho mínimo de cada columna. Con todas las de la lista a la vista suman
+ * 1260: la tabla se achica restando las que no se pintan y se agranda con la
+ * que suma la vista de descartes. La selección y la papelera no cuentan, igual
+ * que antes.
+ */
+const ANCHO_MINIMO: Record<string, number> = {
+  fecha_siniestro: 110,
+  policyholder_name: 200,
+  claim_type: 90,
+  channel: 80,
+  status: 120,
+  replied_at: 120,
+  confidence_min: 100,
+  created_at: 80,
+  severity: 80,
+  vence_en: 90,
+  puntaje_complejidad: 100,
+  assigned_to: 90,
+  motivo_descarte: 260,
+};
+
+/** Un descarte no tiene tipo, no se le responde y no tiene score que valga: la vista los saca. */
+const COLUMNAS_QUE_NO_SON_DE_UN_DESCARTE: ReadonlySet<string> = new Set([
+  "claim_type",
+  "replied_at",
+  "confidence_min",
+]);
 
 interface CasesTableProps {
   cases: CaseRow[];
@@ -41,6 +71,8 @@ interface CasesTableProps {
   desde?: "para_responder";
   /** Los tipos de siniestro propios de la aseguradora: su nombre en vez de la clave. */
   tiposPropios?: readonly TipoPropio[];
+  /** La vista de «No relevantes»: asunto y remitente en vez del asegurado, y el motivo del descarte. */
+  descartes?: boolean;
 }
 
 export function CasesTable({
@@ -49,6 +81,7 @@ export function CasesTable({
   seleccionando = false,
   desde,
   tiposPropios = [],
+  descartes = false,
 }: CasesTableProps) {
   const { t, locale } = useLocale();
   const router = useRouter();
@@ -84,6 +117,10 @@ export function CasesTable({
       return next;
     });
   }, []);
+
+  // Vence y Complejidad vienen vacías en casi todos los casos: si ninguna fila de la página trae dato, no ocupan lugar.
+  const sinVencimientos = cases.every((c) => c.vence_en === null);
+  const sinPuntajes = cases.every((c) => c.puntaje_complejidad === null);
 
   const columns = useMemo<Columna[]>(
     () => [
@@ -231,38 +268,57 @@ export function CasesTable({
        */
       {
         id: "policyholder_name",
-        header: t("table.col.policyholder"),
+        header: t(descartes ? "table.col.asuntoRemitente" : "table.col.policyholder"),
         cell: (row: CaseRow) => {
-          const nombre = row.policyholder_name;
-          const poliza = row.policy_number;
-          if (!nombre && !poliza) return <Vacio />;
-          return (
-            <div className="min-w-0 max-w-[13rem]">
-              {nombre ? (
-                <span className="block truncate text-[13.5px] font-semibold text-slate-900" title={nombre}>
-                  {nombre}
+          // Un descarte casi nunca tiene asegurado: lo que dice qué era es el asunto y quién lo mandó.
+          if (descartes) {
+            return (
+              <div className="min-w-0 max-w-[13rem]">
+                <span
+                  className="block truncate text-[13.5px] font-semibold text-slate-900"
+                  title={row.asunto || undefined}
+                >
+                  {row.asunto || t("messages.thread.no_subject")}
                 </span>
-              ) : (
-                <Vacio />
-              )}
-              {poliza && (
-                <span className="mt-0.5 block whitespace-nowrap font-mono text-[11.5px] text-slate-500">
-                  {poliza}
-                </span>
-              )}
-            </div>
-          );
+                {row.remitente && (
+                  <span
+                    className="mt-0.5 block truncate text-[11.5px] text-slate-500"
+                    title={row.remitente}
+                  >
+                    {row.remitente}
+                  </span>
+                )}
+              </div>
+            );
+          }
+          return <AseguradoYPoliza nombre={row.policyholder_name} poliza={row.policy_number} />;
         },
       },
+      ...(descartes
+        ? [
+            {
+              id: "motivo_descarte",
+              header: t("table.col.motivoDescarte"),
+              cell: (row: CaseRow) => {
+                // Texto plano: es lo que escribió el modelo, no se interpreta.
+                const motivo =
+                  motivoPropioDelDescarte(row.not_relevant_reason) ?? t("noRelevante.motivoPorDefecto");
+                return (
+                  <span className="line-clamp-2 max-w-[22rem] text-[13px] text-slate-700" title={motivo}>
+                    {motivo}
+                  </span>
+                );
+              },
+            } as Columna,
+          ]
+        : []),
       {
         id: "claim_type",
         header: t("table.col.type"),
         cell: (row: CaseRow) => {
-          const type = row.claim_type ?? "";
-          const clave = claveDeTipo(type);
           return (
             <span className="whitespace-nowrap text-[13.5px] text-slate-700">
-              {clave ? t(clave) : (tiposPropios.find((x) => x.clave === type)?.nombre ?? type)}
+              {nombreDelTipo(row.claim_type, t, tiposPropios)}
             </span>
           );
         },
@@ -293,8 +349,13 @@ export function CasesTable({
           const paraResponder = Boolean(row.para_responder_desde);
 
           // Non-claims are answered by design with silence, so "sin responder"
-          // would read as a backlog item when it is the correct outcome.
-          if (!paraResponder && row.is_claim === false) {
+          // would read as a backlog item when it is the correct outcome. Lo
+          // mismo un caso de ensayo: no sale ningún mensaje real, y quedaría
+          // «sin responder» para siempre.
+          if (
+            !paraResponder &&
+            (row.is_claim === false || row.channel === "email_sim" || row.channel === "whatsapp_sim")
+          ) {
             return <Vacio />;
           }
 
@@ -435,9 +496,14 @@ export function CasesTable({
             } as Columna,
           ]
         : []),
-    ],
+    ].filter(
+      (c) =>
+        !(descartes && COLUMNAS_QUE_NO_SON_DE_UN_DESCARTE.has(c.id)) &&
+        !(c.id === "vence_en" && sinVencimientos) &&
+        !(c.id === "puntaje_complejidad" && sinPuntajes)
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, onDeleteMany, seleccionando, toggleOne, desde, tiposPropios]
+    [t, onDeleteMany, seleccionando, toggleOne, desde, tiposPropios, descartes, sinVencimientos, sinPuntajes]
   );
 
   if (cases.length === 0) {
@@ -447,6 +513,8 @@ export function CasesTable({
       </div>
     );
   }
+
+  const minWidth = columns.reduce((suma, c) => suma + (ANCHO_MINIMO[c.id] ?? 0), 0);
 
   return (
     <div>
@@ -504,16 +572,18 @@ export function CasesTable({
         */}
       <div role="region" aria-label={t("bandeja.tableLabel")}>
         {/*
-          * `min-w-[1260px]`: sin un piso, `table-auto` reparte lo que haya y
+          * `minWidth`: sin un piso, `table-auto` reparte lo que haya y
           * con la ventana angosta las últimas columnas —severidad, asignación—
           * se estrujaban hasta quedar ilegibles, sin nada que permitiera
           * llegar a ellas. Con el piso, el contenedor de arriba (que ya es
           * `overflow-auto`) muestra una barra para correr la tabla al costado.
-          * El número es la suma de los anchos mínimos de las columnas; por
-          * encima de eso manda `w-full` y nada cambia.
+          * El número es la suma de los anchos mínimos de las columnas que se
+          * pintan (`ANCHO_MINIMO`); por encima de eso manda `w-full` y nada
+          * cambia.
           */}
         <table
-          className="w-full min-w-[1260px] table-auto text-left"
+          className="w-full table-auto text-left"
+          style={{ minWidth }}
           aria-label={t("bandeja.tableLabel")}
         >
           <thead className="sticky top-0 z-10 bg-slate-50">

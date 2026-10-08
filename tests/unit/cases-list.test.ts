@@ -38,12 +38,16 @@ vi.mock("@/lib/db/helpers", async (importOriginal) => {
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   buildCaseFilters,
+  consultaConteoPorEstado,
   consultaListado,
   consultaPorEstado,
+  consultaTablero,
   desdeDePeriodo,
+  listarTablero,
   listCases,
   listCasesForExport,
 } from "@/server/cases/list";
+import { TARJETAS_POR_COLUMNA } from "@/core/case/tablero";
 import { ESTADOS_CERRADOS } from "@/core/case/fsm";
 import { db } from "@/lib/db";
 import { enTenant, enTenantVarias } from "@/data/scope";
@@ -278,24 +282,65 @@ describe("buildCaseFilters — «Para responder»", () => {
 
 describe("consultaListado — orden de «Para responder»", () => {
   // Un cliente de drizzle que no se conecta: sólo arma el SQL.
-  async function ordenDe(query: Partial<typeof baseQuery> & { para_responder?: true; cola?: "mia" }) {
+  async function consulta(query: Partial<typeof baseQuery> & { para_responder?: true; cola?: "mia"; is_claim?: boolean }) {
     const { drizzle } = await import("drizzle-orm/pg-proxy");
     const datos = drizzle(async () => ({ rows: [] }));
-    return consultaListado(datos as never, { ...baseQuery, ...query }, "yo-1")
-      .toSQL()
-      .sql.split(" order by ")[1];
+    return consultaListado(datos as never, { ...baseQuery, ...query }, "yo-1").toSQL();
+  }
+  async function ordenDe(query: Parameters<typeof consulta>[0]) {
+    return (await consulta(query)).sql.split(" order by ")[1];
   }
 
-  it("primero el que espera respuesta hace más tiempo", async () => {
-    expect(await ordenDe({ para_responder: true })).toMatch(/^"cases"\."para_responder_desde" asc /);
+  it("primero el que espera respuesta hace más tiempo, y a igual espera por id", async () => {
+    expect(await ordenDe({ para_responder: true })).toMatch(
+      /^"cases"\."para_responder_desde" asc, "cases"\."id" asc limit /
+    );
   });
 
   it("sin la sección ordena por la columna pedida", async () => {
     expect(await ordenDe({})).toMatch(/^"cases"\."created_at" desc /);
   });
 
-  it("«Mi cola» ordena por lo más viejo primero", async () => {
-    expect(await ordenDe({ cola: "mia" })).toMatch(/^"cases"\."updated_at" asc /);
+  it("«Mi cola» ordena primero lo vencido, después la gravedad, después lo más viejo y por último el id", async () => {
+    const orden = await ordenDe({ cola: "mia" });
+    const posiciones = [
+      orden.indexOf('"cases"."vence_en" end <'),
+      orden.indexOf('case "cases"."severity" when'),
+      orden.indexOf('"cases"."updated_at" asc'),
+      orden.indexOf('"cases"."id" asc'),
+    ];
+    expect(posiciones.every((p) => p >= 0)).toBe(true);
+    expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones);
+    expect(orden).toMatch(/\) desc nulls last, case "cases"\."severity"/);
+    expect(orden).toMatch(/end desc nulls last, "cases"\."updated_at" asc, "cases"\."id" asc limit /);
+  });
+
+  it("lo vencido se mide contra el mismo instante que el conteo y sólo si el caso sigue abierto", async () => {
+    const ahora = new Date("2026-10-07T12:00:00.000Z");
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    const { sql, params } = consultaListado(datos as never, { ...baseQuery, cola: "mia" }, "yo-1", ahora).toSQL();
+    expect(params).toContain(ahora.toISOString());
+    expect(sql.split(" order by ")[1]).toContain('case when "cases"."status" not in (');
+  });
+
+  it("el rango de gravedad ordena crítico antes que bajo", async () => {
+    const { sql, params } = await consulta({ cola: "mia" });
+    const cuando = sql.split(" order by ")[1].match(/when \$(\d+) then \$(\d+)::int/g) ?? [];
+    expect(cuando).toHaveLength(4);
+    const rango = (nivel: string) => {
+      const i = params.indexOf(nivel);
+      return Number(params[i + 1]);
+    };
+    expect(rango("critical")).toBeGreaterThan(rango("high"));
+    expect(rango("high")).toBeGreaterThan(rango("medium"));
+    expect(rango("medium")).toBeGreaterThan(rango("low"));
+    // Descendente: el rango más alto va primero.
+    expect(sql.split(" order by ")[1]).toMatch(/end desc nulls last, "cases"\."updated_at"/);
+  });
+
+  it("la bandeja general no cambia: created_at desc, sin desempate", async () => {
+    expect(await ordenDe({})).toMatch(/^"cases"\."created_at" desc limit /);
   });
 
   it("selecciona el nombre del analista asignado", async () => {
@@ -318,6 +363,38 @@ describe("consultaListado — orden de «Para responder»", () => {
     // Ni la reserva ni nada del texto del mensaje salen al listado.
     expect(sql).not.toContain("mensaje_tardio_de");
     expect(sql).not.toContain("body_text");
+  });
+
+  it("en la vista de descartes trae el motivo, el asunto y el remitente del primer mensaje que entró, y nunca el cuerpo", async () => {
+    const { sql } = await consulta({ is_claim: false });
+    expect(sql).toContain('"not_relevant_reason"');
+    expect(sql).toContain("claim_messages");
+    expect(sql).toContain("select m.subject from claim_messages m");
+    expect(sql).toContain("select m.from_addr from claim_messages m");
+    expect(sql).toContain("m.direction = 'inbound'");
+    expect(sql).toContain("order by m.received_at asc");
+    expect(sql).not.toContain("body_text");
+    expect(sql).not.toContain("body_html");
+    // El caso de afuera va calificado: pelado, `"id"` se lee como el de `claim_messages`.
+    expect(sql).toContain('m.case_id = "cases"."id"');
+  });
+
+  it("las subconsultas del select correlacionan con el caso de afuera, calificado", async () => {
+    for (const query of [{}, { is_claim: false }, { cola: "mia" as const }]) {
+      const { sql } = await consulta(query);
+      // Pelado, `"id"` se lee como el de la propia subconsulta y no empareja con nada.
+      expect(sql).not.toMatch(/\b(ef|om|m)\.(case_id|tenant_id) = "(id|tenant_id)"/);
+      expect(sql).toMatch(/ef\.case_id = "cases"\."id"\s+and ef\.tenant_id = "cases"\."tenant_id"/);
+      expect(sql).toMatch(/om\.case_id = "cases"\."id"\s+and om\.tenant_id = "cases"\."tenant_id"/);
+    }
+  });
+
+  it("sin is_claim=false el plan por defecto no cambia: ni mensajes ni motivo", async () => {
+    for (const query of [{}, { is_claim: true }, { cola: "mia" as const }, { para_responder: true as const }]) {
+      const { sql } = await consulta(query);
+      expect(sql).not.toContain("claim_messages");
+      expect(sql).not.toContain("not_relevant_reason");
+    }
   });
 });
 
@@ -421,6 +498,174 @@ describe("consultaPorEstado", () => {
     const sql = consultaPorEstado(datos as never, where).toSQL().sql;
     expect(sql).toContain("where");
     expect(sql).toContain("ilike");
+  });
+});
+
+describe("consultaTablero", () => {
+  type Pedido = { status?: string[]; cola?: "mia"; q?: string; page?: number; per_page?: number };
+  async function datosSinConexion() {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    return drizzle(async () => ({ rows: [] })) as never;
+  }
+  async function tablero(query: Pedido = {}) {
+    const consulta = consultaTablero(await datosSinConexion(), { ...baseQuery, ...query } as never, "yo-1");
+    return consulta?.toSQL();
+  }
+  const veces = (texto: string, parte: string) => texto.split(parte).length - 1;
+
+  it("las seis ramas correlacionan sus subconsultas con el caso de afuera, calificado", async () => {
+    const { sql } = (await tablero())!;
+    expect(sql).not.toMatch(/\b(ef|om)\.(case_id|tenant_id) = "(id|tenant_id)"/);
+    expect(veces(sql, 'om.case_id = "cases"."id"')).toBe(6);
+  });
+
+  it("una rama por columna, unidas con union all y cada una con su propio límite", async () => {
+    const { sql, params } = (await tablero())!;
+    expect(veces(sql, " union all ")).toBe(5);
+    expect(veces(sql, " limit ")).toBe(6);
+    expect(params.filter((p) => p === TARJETAS_POR_COLUMNA)).toHaveLength(6);
+    // Cada lado entre paréntesis: sin eso el ORDER BY y el LIMIT de la primera rama serían de toda la unión.
+    expect(sql.startsWith("(")).toBe(true);
+    expect(veces(sql, ") union all (select ")).toBe(5);
+    expect(veces(sql, "order by")).toBe(6);
+  });
+
+  it("cada rama pide los estados de su columna y de ninguna otra", async () => {
+    const { sql, params } = (await tablero())!;
+    expect(veces(sql, '"cases"."status" in (')).toBe(6);
+    expect(params).toContain("requiere_especialista");
+    expect(params).toContain("listo_para_core");
+    expect(params).toContain("procesando");
+  });
+
+  it("no lleva ningún predicado de inquilino escrito a mano", async () => {
+    const { sql } = (await tablero())!;
+    // Las subconsultas correlacionadas emparejan contra el caso de afuera; el filtro por inquilino lo pone la RLS.
+    expect(sql).not.toMatch(/tenant_id" = \$\d/);
+    expect(sql).not.toMatch(/where[^()]*"cases"\."tenant_id" =/);
+  });
+
+  it("el tablero no pagina: ignora page y per_page de la consulta", async () => {
+    const { sql, params } = (await tablero({ page: 4, per_page: 100 }))!;
+    expect(params).not.toContain(100);
+    expect(params).not.toContain(300);
+    expect(params.filter((p) => p === TARJETAS_POR_COLUMNA)).toHaveLength(6);
+    expect(sql).not.toContain("offset");
+  });
+
+  it("con un estado pedido queda una sola rama y no hay unión", async () => {
+    const { sql } = (await tablero({ status: ["escalado"] }))!;
+    expect(sql).not.toContain("union all");
+    expect(veces(sql, " limit ")).toBe(1);
+  });
+
+  it("un filtro de estado se queda con la parte de cada columna que cubre", async () => {
+    const { sql, params } = (await tablero({ status: ["escalado", "listo"] }))!;
+    expect(veces(sql, " union all ")).toBe(1);
+    expect(params).toContain("requiere_especialista");
+    expect(params).not.toContain("procesando");
+  });
+
+  it("un estado crudo cae en la rama de su columna, no en una aparte", async () => {
+    const { sql, params } = (await tablero({ status: ["requiere_especialista"] }))!;
+    expect(sql).not.toContain("union all");
+    expect(params).toContain("requiere_especialista");
+  });
+
+  it("un filtro que ninguna columna dibuja no arma consulta", async () => {
+    expect(await tablero({ status: ["no_relevante"] })).toBeUndefined();
+  });
+
+  it("«Mi cola» conserva su orden en cada rama", async () => {
+    const { sql } = (await tablero({ cola: "mia" }))!;
+    expect(veces(sql, '"cases"."updated_at" asc, "cases"."id" asc limit ')).toBe(6);
+    expect(veces(sql, 'case "cases"."severity" when')).toBe(6);
+  });
+
+  it("los demás filtros viajan en cada rama", async () => {
+    const { sql } = (await tablero({ q: "juan" }))!;
+    expect(veces(sql, "ilike")).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("consultaConteoPorEstado", () => {
+  async function conteo(query: Parameters<typeof consultaConteoPorEstado>[1]) {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const datos = drizzle(async () => ({ rows: [] }));
+    return consultaConteoPorEstado(datos as never, query, "yo-1").toSQL().sql;
+  }
+
+  it("cuenta por estado bajo los mismos filtros que la lista", async () => {
+    const sql = await conteo({ ...baseQuery, q: "juan", cola: "mia" } as never);
+    expect(sql).toContain("count(*)::int");
+    expect(sql).toContain("group by");
+    expect(sql).toContain("ilike");
+    expect(sql).toContain("48 hours");
+    expect(sql).not.toContain("limit");
+  });
+
+  it("también bajo el filtro de estado: los totales de las columnas son los de lo que se ve", async () => {
+    const sql = await conteo({ ...baseQuery, status: ["escalado"] } as never);
+    expect(sql).toContain('"cases"."status" in (');
+  });
+});
+
+describe("listarTablero", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("devuelve las tarjetas tal como llegan y el total real de cada columna", async () => {
+    const tarjetas = [
+      { id: "a", status: "procesando" },
+      { id: "b", status: "procesando" },
+      { id: "c", status: "requiere_especialista" },
+    ];
+    vi.mocked(enTenantVarias).mockResolvedValue([
+      [
+        { status: "procesando", n: 30 },
+        { status: "requiere_especialista", n: 2 },
+        { status: "no_relevante", n: 9 },
+      ],
+      tarjetas,
+    ] as never);
+
+    const resultado = await listarTablero(CTX, baseQuery as never, "yo-1");
+
+    expect(resultado.data).toEqual(tarjetas);
+    expect(resultado.totales.procesando).toBe(30);
+    expect(resultado.totales.escalado).toBe(2);
+    expect(resultado.totales.listo).toBe(0);
+    // Lo que el tablero no dibuja no entra en el total.
+    expect(resultado.meta).toMatchObject({ total: 32, page: 1, per_page: TARJETAS_POR_COLUMNA });
+  });
+
+  it("corre el conteo y la unión en un solo viaje, para el inquilino del contexto", async () => {
+    vi.mocked(enTenantVarias).mockResolvedValue([[], []] as never);
+    await listarTablero(CTX, baseQuery as never, "yo-1");
+    expect(enTenantVarias).toHaveBeenCalledWith({ tenantId: TENANT_ID }, expect.any(Function));
+
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const armar = vi.mocked(enTenantVarias).mock.calls[0][1] as (db: unknown) => unknown[];
+    expect(armar(drizzle(async () => ({ rows: [] })))).toHaveLength(2);
+  });
+
+  it("si ninguna columna entra en el filtro corre sólo el conteo y no devuelve tarjetas", async () => {
+    vi.mocked(enTenantVarias).mockResolvedValue([[{ status: "no_relevante", n: 4 }]] as never);
+
+    const resultado = await listarTablero(CTX, { ...baseQuery, status: ["no_relevante"] } as never);
+
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const armar = vi.mocked(enTenantVarias).mock.calls[0][1] as (db: unknown) => unknown[];
+    expect(armar(drizzle(async () => ({ rows: [] })))).toHaveLength(1);
+    expect(resultado.data).toEqual([]);
+    expect(resultado.meta.total).toBe(0);
+  });
+
+  it("si la consulta falla, lleva el código de Postgres", async () => {
+    const err = Object.assign(new Error("relation does not exist"), { code: "42P01" });
+    vi.mocked(enTenantVarias).mockRejectedValue(err);
+    await expect(listarTablero(CTX, baseQuery as never)).rejects.toThrow("[listarTablero] query error: 42P01");
   });
 });
 

@@ -39,11 +39,15 @@ const { colaDeFilas } = vi.hoisted(() => ({ colaDeFilas: [] as unknown[][] }));
  */
 const wheres: unknown[] = [];
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
+
+vi.mock("@/lib/db", async () => {
+  // `cases` va de verdad: así el `where` se puede pasar a SQL y mirar el filtro.
+  const { cases } = await import("@/lib/db/schema");
   const consulta = () => {
     const filas = colaDeFilas.shift() ?? [];
     const q: Record<string, unknown> = {};
-    for (const m of ["from", "groupBy", "orderBy", "innerJoin", "leftJoin"]) {
+    for (const m of ["from", "groupBy", "orderBy", "innerJoin", "leftJoin", "limit"]) {
       q[m] = () => q;
     }
     q.where = (w: unknown) => {
@@ -69,8 +73,14 @@ vi.mock("@/lib/db", () => {
         trial_ends_at: col("trial_ends_at"),
         created_at: col("created_at"),
       },
-      cases: { tenant_id: col("tenant_id"), created_at: col("created_at"), is_claim: col("is_claim") },
-      aiUsage: { tenant_id: col("tenant_id"), created_at: col("created_at"), cost_usd: col("cost_usd") },
+      cases,
+      aiUsage: {
+        tenant_id: col("tenant_id"),
+        created_at: col("created_at"),
+        prompt_tokens: col("prompt_tokens"),
+        completion_tokens: col("completion_tokens"),
+        cost_usd: col("cost_usd"),
+      },
       billingInvoices: {
         tenant_id: col("tenant_id"),
         month: col("month"),
@@ -86,6 +96,11 @@ vi.mock("@/server/ai/budget", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
+import { resolveBillingPeriod } from "@/lib/billing/period";
+import { CANALES_REALES } from "@/lib/schemas/cases";
+import { computeStatement } from "@/server/billing/statement";
 import { listTenantSummaries } from "@/server/billing/tenant-summary";
 
 const DEMO = "20000000-0000-0000-0000-000000000002";
@@ -233,5 +248,71 @@ describe("la cartera lee la factura congelada", () => {
 
     expect(tenants).toHaveLength(1);
     expect(tenants[0]!.id).toBe(UNO);
+  });
+});
+
+/** El `where` de la consulta de casos, tal como lo manda Postgres. */
+function sqlDeCasos(indice: number): string {
+  return new PgDialect().sqlToQuery(wheres[indice] as SQL).sql;
+}
+
+describe("la facturación no cuenta casos simulados ni de ensayo", () => {
+  const canales = CANALES_REALES.map((c) => `'${c}'`).join(", ");
+
+  /** Las tres consultas de `computeStatement`, en orden. */
+  function liquidacionCon(casos: { total: number; billable: number; rejected: number; unresolved: number }) {
+    colaDeFilas.length = 0;
+    colaDeFilas.push(
+      [{ ...tenant(UNO, "Seguros del Sur"), activated_at: null }],
+      [casos],
+      [{ calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 }]
+    );
+  }
+
+  it("la liquidación del mes cuenta sólo canales reales y deja afuera al ensayo", async () => {
+    liquidacionCon({ total: 3, billable: 3, rejected: 0, unresolved: 0 });
+
+    await computeStatement(UNO, resolveBillingPeriod(MES)!);
+
+    // La 1ª consulta es la del tenant; la de casos es la 2ª.
+    const where = sqlDeCasos(1);
+    expect(where).toContain(`"cases"."channel" in (${canales})`);
+    expect(where).toContain("not exists");
+    expect(where).toContain('from "claim_messages"');
+    // El período sigue acotando: el filtro suma, no reemplaza.
+    expect(where).toContain('"cases"."created_at" >=');
+    expect(where).toContain('"cases"."created_at" <');
+  });
+
+  it("la cartera cuenta sólo canales reales y deja afuera al ensayo", async () => {
+    baseCon({ tenants: [tenant(UNO, "Seguros del Sur")] });
+
+    await listTenantSummaries(MES);
+
+    // La 1ª consulta es la de tenants; la de casos es la 2ª.
+    const where = sqlDeCasos(1);
+    expect(where).toContain(`"cases"."channel" in (${canales})`);
+    expect(where).toContain("not exists");
+    expect(where).toContain('from "claim_messages"');
+    expect(where).toContain('"cases"."created_at" >=');
+    expect(where).toContain('"cases"."created_at" <');
+  });
+
+  it("la liquidación y la cartera dan el mismo total del mes", async () => {
+    // Las dos leen lo que la base les devuelve con el mismo filtro: 30
+    // denuncias reales son 100 de abono + 20 excedentes × 2 en las dos pantallas.
+    liquidacionCon({ total: 40, billable: 30, rejected: 6, unresolved: 4 });
+    const liquidacion = await computeStatement(UNO, resolveBillingPeriod(MES)!);
+
+    baseCon({
+      tenants: [tenant(UNO, "Seguros del Sur")],
+      casos: [{ tenant_id: UNO, total: 40, billable: 30 }],
+    });
+    const { tenants } = await listTenantSummaries(MES);
+
+    expect(liquidacion?.invoice.total_usd).toBe(140);
+    expect(tenants[0]!.invoice_total_usd).toBe(liquidacion?.invoice.total_usd);
+    expect(tenants[0]!.billable_claims).toBe(liquidacion?.volume.billable_claims);
+    expect(tenants[0]!.total_cases).toBe(liquidacion?.volume.total_cases);
   });
 });

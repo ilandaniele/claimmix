@@ -729,6 +729,20 @@ console.log("\n▸ Un preview no hace cola con producción");
 // Un fork es el único motivo legítimo para avisar y seguir: GitHub no le
 // entrega secretos por diseño, y eso no es un descuido de nadie. Cualquier
 // otro camino que avise y no corte es un check mintiendo sobre haber corrido.
+//
+// `::notice` cuenta igual que `::warning`: un salteo que avisa bajito pasaba el
+// invariante. Y un `exit 1` en otra rama del mismo bloque no corta el aviso,
+// que es de por sí una rama que sigue; por eso `::notice` sólo se salva con
+// `ES_FORK` o figurando acá, con su motivo.
+const AVISOS_PERMITIDOS = [
+  {
+    archivo: "post-deploy.yml",
+    titulo: "QA sin ensayo",
+    // Sin los QA_R2_* el ensayo de QA se apaga a propósito, y el job
+    // `alcance` lo nombra en el resumen del run.
+    motivo: "apaga el ensayo de QA y `alcance` lo escribe como «NO corrió»",
+  },
+];
 console.log("\n▸ Ningún job avisa y aprueba con el secreto vacío");
 {
   const flujos = existsSync(".github/workflows")
@@ -755,12 +769,16 @@ console.log("\n▸ Ningún job avisa y aprueba con el secreto vacío");
         }
       }
 
-      if (!cuerpo.includes("::warning")) continue;
+      const avisos = (cuerpo.match(/::(?:warning|notice)\b[^\n]*/g) ?? []).filter(
+        (a) => !AVISOS_PERMITIDOS.some((p) => p.archivo === nombre && a.includes(`title=${p.titulo}`))
+      );
+      if (avisos.length === 0) continue;
       // La forma real: un `if [ -z "$X" ]`, o un `if [ -n "$X" ]` con su `else`.
       const guardaVacio = /if\s*\[\s*-z\s*"[^"]*"\s*\]/.test(cuerpo);
       const guardaLleno = /if\s*\[\s*-n\s*"[^"]*"\s*\]/.test(cuerpo) && /\belse\b/.test(cuerpo);
       if (!guardaVacio && !guardaLleno) continue;
-      if (cuerpo.includes("exit 1") || cuerpo.includes("ES_FORK")) continue;
+      const corta = cuerpo.includes("exit 1") && !avisos.some((a) => a.startsWith("::notice"));
+      if (corta || cuerpo.includes("ES_FORK")) continue;
       mudos.push(`${nombre}:${i + 1}`);
     }
   }
@@ -774,7 +792,8 @@ console.log("\n▸ Ningún job avisa y aprueba con el secreto vacío");
     for (const m of mudos) console.log(`     .github/workflows/${m}`);
     console.log("     Un fork no recibe secretos por diseño: ahí avisar y seguir está");
     console.log("     bien. En cualquier otro camino falta un `exit 1` — sin él, un");
-    console.log("     check requerido queda en verde sin haber corrido nada.");
+    console.log("     check requerido queda en verde sin haber corrido nada. Si el");
+    console.log("     salteo es a propósito, va a AVISOS_PERMITIDOS con su motivo.");
   }
 }
 
@@ -1115,6 +1134,52 @@ console.log("\n▸ Sólo el panel del operador escribe tenants y whatsapp_numero
     for (const x of sueltos) console.log(`     ${x}`);
     console.log("     Una acción nueva sobre un inquilino o su número va en `panel-operador.ts`:");
     console.log("     una sentencia con su asiento de auditoría y detrás de `requireOperator`.");
+  }
+}
+
+// ── 21. Un secreto elegido por condición no cae al de otro ambiente ───────
+//
+// `cond && secrets.A || secrets.B` parece un if/else y no lo es: con A vacío,
+// `&&` devuelve la cadena vacía, que es falsa, y la expresión sigue con B. Con
+// `QA_CRON_SECRET` sin cargar, el `CRON_SECRET` de producción viajaba a
+// claimmix-qa; en la Carga, con `CRON_SECRET` vacío, llegaba el de Preview.
+// Un secreto cruzaba de ambiente y el paso seguía como si nada.
+//
+// La forma segura le pone a cada rama un respaldo que no es de nadie,
+// `cond && (secrets.A || '__falta__') || (secrets.B || '__falta__')`, y el paso
+// corta si quedó `__falta__`.
+//
+console.log("\n▸ Ningún secreto elegido por condición cae al de otro ambiente");
+{
+  const flujos = existsSync(".github/workflows")
+    ? readdirSync(".github/workflows").filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    : [];
+  const culpables = [];
+
+  for (const nombre of flujos) {
+    const texto = readFileSync(`.github/workflows/${nombre}`, "utf8");
+    // Sin comentarios: los workflows EXPLICAN el defecto citando la expresión.
+    // Misma razón que en las invariantes 15, 17 y 18.
+    const sinComentar = texto
+      .split(/\r?\n/)
+      .map((l) => l.replace(/(^|\s)#.*$/, "$1"))
+      .join("\n");
+    // Un `secrets.X` pelado a la derecha de `&&` y seguido de `||`. El seguro
+    // lleva paréntesis, así que `&& (secrets.X ||` no entra.
+    for (const m of sinComentar.matchAll(/&&\s*secrets\.\w+\s*\|\|/g)) {
+      culpables.push(`${nombre}:${sinComentar.slice(0, m.index).split("\n").length}`);
+    }
+  }
+
+  if (flujos.length === 0) {
+    console.log("     (no hay workflows: nada que comprobar)");
+  } else if (culpables.length === 0) {
+    bien("cada rama lleva su respaldo: un secreto vacío no se reemplaza por otro");
+  } else {
+    mal(`${culpables.length} expresión(es) caen al secreto de otro ambiente si el primero está vacío`);
+    for (const c of culpables) console.log(`     .github/workflows/${c}`);
+    console.log("     Escribilo `cond && (secrets.A || '__falta__') || (secrets.B || '__falta__')`");
+    console.log("     y cortá el paso si el valor quedó '__falta__'.");
   }
 }
 

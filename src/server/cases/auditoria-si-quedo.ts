@@ -24,8 +24,12 @@ import "server-only";
 import { and, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import { auditLog, cases } from "@/lib/db/schema";
 import type { ClienteDatos } from "@/data/scope";
-import { ipValida, type AuditEventType } from "@/lib/audit/log";
+import { ESTADOS_ESCALADO } from "@/core/case/fsm";
+import { EVENTOS_DE_INTERVENCION } from "@/core/metricas/intervencion";
+import { EVENTOS_CON_ESTADO } from "@/core/metricas/transiciones";
+import { AuditEvent, ipValida, type AuditEventType } from "@/lib/audit/log";
 import type { CaseStatus } from "@/lib/schemas/cases";
+import { DEL_CASO, HACIA, SE_APLICO, literales } from "@/server/metrics/trayecto";
 
 type FilaDeAuditoria = {
   caseId: string;
@@ -104,4 +108,69 @@ export function auditoriaSiCambia(
     sql`${JSON.stringify(a.payload)}::jsonb || jsonb_build_object('from', ${cases.status}::text, 'old_status', ${cases.status}::text, 'to', ${hacia}::text, 'new_status', ${hacia}::text)`,
     and(eq(cases.id, a.caseId), inArray(cases.status, a.desde), ne(cases.status, hacia))
   );
+}
+
+/**
+ * El momento desde el que una derivación vuelve a ser nueva: el último de los
+ * dos, o `-infinity` si el caso nunca salió del agente.
+ *
+ * - Una persona tocó el caso (cualquier intervención con actor, menos Re-analizar:
+ *   lo pide una persona pero el caso sigue siendo del agente) o
+ * - el caso salió de los escalados y volvió: un paso a un estado que no es de
+ *   derivación, o una reapertura. La extracción no cuenta: es la corrida del
+ *   agente, y el worker la anota DESPUÉS de derivar, con el estado que calculó antes.
+ *
+ * Los eventos van como literales, por lo mismo que en `trayecto`: sólo así
+ * Postgres usa `idx_audit_log_trayecto`.
+ */
+const INTERVENCIONES_DE_PERSONA = literales(
+  EVENTOS_DE_INTERVENCION.filter((e) => e !== "case.re_analyze_triggered")
+);
+const CAMBIOS_DE_ESTADO = literales(
+  EVENTOS_CON_ESTADO.filter((e) => e !== AuditEvent.EXTRACTION_COMPLETE && e !== AuditEvent.AI_EXTRACTED)
+);
+const ESCALADOS = literales([...ESTADOS_ESCALADO]);
+
+const ANCLA = sql`coalesce(greatest(
+  (select max(a.created_at) from audit_log a
+    where ${DEL_CASO} and a.event_type in (${INTERVENCIONES_DE_PERSONA}) and a.actor_id is not null),
+  (select max(a.created_at) from audit_log a
+    where ${DEL_CASO} and a.event_type in (${CAMBIOS_DE_ESTADO}) and ${HACIA} not in (${ESCALADOS})
+      and ${SE_APLICO})
+), '-infinity'::timestamptz)`;
+
+/**
+ * Un `claim.specialist_required` guardado sólo si el caso no tiene ya uno de
+ * este episodio de derivación.
+ *
+ * `escalate()` puede correr más de una vez sobre el mismo caso —dos ramas de
+ * la misma vuelta, una vuelta que repite—, y `setStatus` acepta que el estado
+ * sea el mismo. Sin esto cada pasada dejaba su fila, y su mensaje al
+ * asegurado. Un episodio es lo que hay desde que el caso volvió al agente
+ * (ver `ANCLA`): ahí empieza uno nuevo.
+ *
+ * No alcanza con el NOT EXISTS: en READ COMMITTED dos transacciones que corren
+ * a la vez ven las dos «no existe». Quien llama toma antes el lock del caso en
+ * el mismo lote (ver `anotarDerivacionSiEsNueva`).
+ *
+ * Devuelve la fila que insertó; sin fila, la derivación no era nueva.
+ */
+export function auditoriaSiEsDerivacionNueva(
+  db: ClienteDatos,
+  a: FilaDeAuditoria & { payload: SQL<Record<string, unknown>> }
+) {
+  return auditoriaDesdeElCaso(
+    db,
+    a,
+    a.payload,
+    and(
+      eq(cases.id, a.caseId),
+      sql`not exists (
+        select 1 from audit_log x
+         where x.target_type = 'case' and x.target_id = ${cases.id}::text and x.tenant_id = ${cases.tenant_id}
+           and x.event_type = ${literales([AuditEvent.SPECIALIST_REQUIRED])}
+           and x.created_at > ${ANCLA}
+      )`
+    )
+  ).returning({ id: auditLog.id });
 }

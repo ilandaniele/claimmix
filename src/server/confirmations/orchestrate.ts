@@ -61,6 +61,7 @@ import {
   type CriteriosDeTrabajo,
 } from "@/server/cases/efectos-de-transicion";
 import { auditoriaSiCambia } from "@/server/cases/auditoria-si-quedo";
+import { anotarDerivacionSiEsNueva } from "@/server/confirmations/derivacion-nueva";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 import { deliberate } from "@/server/ai/deliberate";
 import {
@@ -1638,7 +1639,7 @@ async function inicialesDelTitularAjeno(
  * be in touch; until `alertSpecialists` existed, nothing made that true — the
  * case changed status and waited for somebody to notice it.
  */
-async function escalate(opts: {
+export async function escalate(opts: {
   caseId: string;
   tenantId: string;
   /** Con qué criterios del equipo se autoasigna al traspasar. */
@@ -1699,6 +1700,18 @@ async function escalate(opts: {
   }
 
   /*
+   * Una derivación, un evento, un mensaje. Si el caso ya tiene el evento de
+   * este episodio —otra rama de la vuelta, una vuelta que repite—, el asegurado
+   * ya recibió su mensaje: se anota primero y el mensaje sale sólo si el
+   * evento era nuevo.
+   */
+  const nueva = await anotarDerivacionSiEsNueva({
+    tenantId,
+    caseId,
+    payload: redactObject({ severity, reason: opts.reason }),
+  });
+
+  /*
    * Dos mensajes en la misma vuelta no pueden tirar para lados opuestos.
    *
    * Un familiar del titular escribe por el auto del padre, y el conflicto con
@@ -1712,10 +1725,15 @@ async function escalate(opts: {
    * a un chat que ya no lee nadie.
    *
    * Lo que NO se suprime nunca es nada de lo de abajo. El caso queda en
-   * `requiere_especialista`, el evento se registra y al especialista se le
-   * avisa.
+   * `requiere_especialista`, el evento se registra una vez por episodio y al
+   * especialista se le avisa.
    */
-  if (opts.yaLeEscribimos) {
+  if (!nueva) {
+    logger.info({
+        case_id: caseId,
+        reason: "already_escalated",
+      }, "escalation.claimant_message_skipped");
+  } else if (opts.yaLeEscribimos) {
     logger.info({
         case_id: caseId,
         reason: "already_written_this_round",
@@ -1740,15 +1758,6 @@ async function escalate(opts: {
       inReplyToMessageId: opts.inReplyToMessageId,
     });
   }
-
-  await writeAuditLog({
-    tenant_id: tenantId,
-    actor_id: null,
-    event_type: AuditEvent.SPECIALIST_REQUIRED,
-    target_type: "case",
-    target_id: caseId,
-    payload: redactObject({ severity, reason: opts.reason }),
-  });
 
   await alertSpecialists({
     caseId,

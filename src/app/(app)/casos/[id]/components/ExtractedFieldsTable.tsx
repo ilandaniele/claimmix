@@ -1,5 +1,6 @@
 "use client";
 
+import { CAMPOS_REQUERIDOS_POR_RAMO } from "@/core/case/required-fields";
 import { useT } from "@/lib/i18n/LocaleContext";
 import { canonicalFieldKey, CAMPOS_CLAVE } from "@/lib/labels/claim-fields";
 import { etiquetaDeCampo, tieneEtiqueta, valorParaMostrar } from "@/lib/labels/etiqueta-de-campo";
@@ -20,7 +21,8 @@ interface ExtractedFieldsTableProps {
   hoy: string;
 }
 
-const CAMPOS_CLAVE_SET = new Set(CAMPOS_CLAVE);
+// Los campos clave y los datos que el código le pide a algún ramo (hora, provincia, patente).
+const CAMPOS_CLAVE_SET = new Set([...CAMPOS_CLAVE, ...Object.values(CAMPOS_REQUERIDOS_POR_RAMO).flat()]);
 
 /** Un email sin arroba no es un dato: es ruido que el extractor a veces deja. */
 function esEmailInvalido(canon: string, valor: string): boolean {

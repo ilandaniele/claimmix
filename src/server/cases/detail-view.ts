@@ -37,6 +37,7 @@ import { asc, eq, sql } from "drizzle-orm";
 import { esMotivoSinLeer, type MotivoSinLeer } from "@/core/ai/sin-leer";
 import { evaluarCobertura, type PolizaParaCobertura, type ResultadoDeCobertura } from "@/core/case/cobertura";
 import { dia } from "@/core/case/contradicciones";
+import { faltantesVigentes } from "@/core/case/faltantes-vigentes";
 import type { MontoEstimado } from "@/core/case/monto-estimado";
 import { esCandidatoAPresupuesto, type LecturaGuardada } from "@/core/case/presupuesto-taller";
 import {
@@ -179,6 +180,8 @@ export interface DetalleDeCaso {
    * quien mira no edita. La ficha cae a la clave.
    */
   plazo_titulo: string | null;
+  /** La fecha del hecho que leyó el agente, la misma que usa la cobertura; la ficha cuenta con ella los días hasta la denuncia. */
+  fecha_del_siniestro: string | null;
   /** `null` si la póliza no se pudo leer: mejor sin panel que con un veredicto falso. */
   cobertura: CoberturaEnPantalla | null;
   /** La opinión orientativa de responsabilidad (B18), o `null` si no hay o no tiene la forma. */
@@ -391,18 +394,23 @@ function campo(
   return null;
 }
 
+/** «ayer» en accident_date no tapa una fecha que sí se lee en incident_date. */
+function fechaDelSiniestro(campos: readonly ExtractedFieldRow[]): string | null {
+  return campo(campos, ["accident_date", "fecha_siniestro", "incident_date"], (v) => dia(v) !== null);
+}
+
 function coberturaDelCaso(
   caseRow: CaseRow,
   campos: readonly ExtractedFieldRow[],
-  poliza: PolizaEnCaso | null | undefined
+  poliza: PolizaEnCaso | null | undefined,
+  fecha: string | null
 ): CoberturaEnPantalla | null {
   if (poliza === undefined) return null;
   const monto = caseRow.monto_estimado ?? null;
   const resultado = evaluarCobertura({
     poliza,
     tipo: caseRow.claim_type,
-    // «ayer» en accident_date no tapa una fecha que sí se lee en incident_date.
-    fechaDelSiniestro: campo(campos, ["accident_date", "fecha_siniestro", "incident_date"], (v) => dia(v) !== null),
+    fechaDelSiniestro: fecha,
     provincia: campo(campos, clavesQueSatisfacen("provincia_siniestro")),
     patente: campo(campos, clavesQueSatisfacen("patente_vehiculo")),
     monto,
@@ -535,17 +543,20 @@ export async function cargarDetalleDeCaso(
       caseRow.policy_id ? fetchPoliza(ctx, caseRow.policy_id) : Promise.resolve(null),
     ]);
 
+  const fecha_del_siniestro = fechaDelSiniestro(extracted_fields);
+
   return {
     case: caseRow,
     extracted_fields,
-    missing_docs,
+    missing_docs: faltantesVigentes(missing_docs, extracted_fields),
     audit_log,
     confirmations,
     attachments,
     messages,
     hayMasMensajes: messages.length >= MENSAJES_A_MOSTRAR,
     ...trabajo,
-    cobertura: coberturaDelCaso(caseRow, extracted_fields, poliza),
+    fecha_del_siniestro,
+    cobertura: coberturaDelCaso(caseRow, extracted_fields, poliza, fecha_del_siniestro),
     // Una opinión que quedó de antes de que el caso se reclasificara no se muestra.
     responsabilidad: esChoque(caseRow.claim_type) ? leerResponsabilidad(caseRow.responsabilidad) : null,
     cartas,

@@ -33,6 +33,8 @@ vi.mock("@/server/cases/gap-analyzer", () => ({ analyzeEmailClaimGaps: vi.fn() }
 vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { resolveFieldConfirmation } from "@/server/cases/confirm-field";
 import { analyzeEmailClaimGaps } from "@/server/cases/gap-analyzer";
 import { mensajesEntrantes } from "@/server/cases/inbound-messages";
@@ -73,6 +75,7 @@ function setupUpdateMock() {
   const whereFn = vi.fn().mockResolvedValue(undefined);
   const setFn = vi.fn().mockReturnValue({ where: whereFn });
   vi.mocked(db.update).mockReturnValue({ set: setFn } as any);
+  return whereFn;
 }
 
 describe("resolveFieldConfirmation — claves canónicas (F1)", () => {
@@ -93,5 +96,19 @@ describe("resolveFieldConfirmation — claves canónicas (F1)", () => {
     expect(valuesFn).toHaveBeenCalledWith(
       expect.objectContaining({ field_key: "policy_number", field_value: "AR-000111" })
     );
+  });
+
+  it("confirmar dni cierra también la fila dni_asegurado: el UPDATE lleva las dos claves", async () => {
+    setupSelectMocks();
+    setupInsertMock();
+    const whereFn = setupUpdateMock();
+
+    const input = { field_key: "dni", value: "30145882", action: "correct" as const };
+    await resolveFieldConfirmation({ tenantId: "tenant-1" }, "case-1", input, analista);
+
+    const consultas = whereFn.mock.calls.map(([filtro]) => new PgDialect().sqlToQuery(filtro as SQL));
+    const deFaltantes = consultas.find((q) => q.sql.includes('"missing_docs"."doc_key" in'));
+    expect(deFaltantes).toBeDefined();
+    expect(deFaltantes!.params).toEqual(expect.arrayContaining(["dni", "dni_asegurado"]));
   });
 });

@@ -149,6 +149,8 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "auth.user_invited": false,
   "auth.invitation_accepted": false,
   "auth.invitation_rejected": false,
+  // Aviso de la revisión nocturna al inquilino: lo manda el sistema, no gestiona un caso.
+  "quality.desvios_alerted": false,
 };
 
 /**

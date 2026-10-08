@@ -22,6 +22,7 @@ import { db, tables } from "@/lib/db";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period";
 import { getDemoTenantId } from "@/server/ai/budget";
+import { esCasoReal } from "@/server/core-sync/lectura";
 
 export interface TenantSummary {
   id: string;
@@ -87,7 +88,8 @@ export async function listTenantSummaries(month?: string | null): Promise<{
     .where(
       and(
         gte(tables.cases.created_at, range.start),
-        lt(tables.cases.created_at, range.next)
+        lt(tables.cases.created_at, range.next),
+        esCasoReal
       )
     )
     .groupBy(tables.cases.tenant_id);

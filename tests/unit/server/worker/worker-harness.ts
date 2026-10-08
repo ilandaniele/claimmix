@@ -63,6 +63,7 @@ export function filaDeCaso(
  *   · `conversacion` —si viene— como los mensajes entrantes del caso,
  *   · `propuestos` como las confirmaciones pendientes,
  *   · `guardados` como los valores de `extracted_fields` que lee el puntaje,
+ *   · `faltantesExistentes` —si viene— como las claves que `missing_docs` ya tiene,
  *   · nada en los demás,
  *   · y le pasa a `espiaDeUpdate` todo lo que se escriba con `.set(...)`,
  *   · y a `espiaDeFiltro`, si viene, cada `.set(...)` con su `.where(...)`.
@@ -80,6 +81,7 @@ export function dbSimulado(
     propuestos = {},
     guardados = {},
     guardadosFallan = false,
+    faltantesExistentes,
     cabecerasDelUltimo,
     casoMovido = false,
     espiaDeFiltro,
@@ -101,6 +103,7 @@ export function dbSimulado(
     const entrantes = !!columnas && "profile_name" in columnas;
     const pendientes = !!columnas && "suggested_value" in columnas;
     const deCampos = !!columnas && "field_key" in columnas && "field_value" in columnas;
+    const deFaltantes = !!faltantesExistentes && !!columnas && "doc_key" in columnas;
     const deLaMarca = pendienteAlSoltar && !!columnas && "pending" in columnas;
 
     const limit = vi.fn().mockImplementation(() => {
@@ -143,7 +146,9 @@ export function dbSimulado(
               ? guardadosFallan
                 ? Promise.reject(new Error("se cayó la base"))
                 : Promise.resolve(Object.entries(guardados).map(([field_key, field_value]) => ({ field_key, field_value })))
-              : { limit, orderBy, where }
+              : deFaltantes
+                ? Promise.resolve(faltantesExistentes.map((doc_key) => ({ doc_key })))
+                : { limit, orderBy, where }
         ),
         limit,
         orderBy,
@@ -205,6 +210,8 @@ export interface Conversacion {
   guardados?: Record<string, string>;
   /** La lectura de los campos guardados falla. */
   guardadosFallan?: boolean;
+  /** Las claves que `missing_docs` ya tiene cuando el worker anota los faltantes. */
+  faltantesExistentes?: string[];
   /** Cabeceras del último entrante, para E17: `spf=fail` sale sin autenticar. */
   cabecerasDelUltimo?: Cabecera[];
   /** El caso ya no es del agente: todo `UPDATE` con guarda no matchea ninguna fila (E2). */
@@ -270,6 +277,7 @@ export function registrarMocks(opciones: {
     propuestos,
     guardados,
     guardadosFallan,
+    faltantesExistentes,
     cabecerasDelUltimo,
     casoMovido,
     espiaDeFiltro,
@@ -281,6 +289,7 @@ export function registrarMocks(opciones: {
     propuestos,
     guardados,
     guardadosFallan,
+    faltantesExistentes,
     cabecerasDelUltimo,
     casoMovido,
     espiaDeFiltro,

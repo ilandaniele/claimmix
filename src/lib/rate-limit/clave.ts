@@ -30,6 +30,7 @@ export type AmbitoDeCupo =
   | "denuncia-slug-dia"
   | "email"
   | "aviso-presupuesto"
+  | "aviso-desvios"
   | "batch-simulate"
   | "re-analyze"
   | "whatsapp"

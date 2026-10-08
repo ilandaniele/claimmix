@@ -61,7 +61,7 @@ describe("las etiquetas del CSV", () => {
     // Los cuatro que citaba el informe, por nombre.
     expect(tipoEnEs("rc")).toBe("Resp. Civil");
     expect(tipoEnEs("robo_contenido")).toBe("Robo de contenido");
-    expect(etiquetasDeEstado(t).listo_para_core).toBe("Listo para Core");
+    expect(etiquetasDeEstado(t).listo_para_core).toBe("Listo para entregar");
     expect(etiquetasDeEstado(t).requiere_especialista).toBe("Requiere especialista");
   });
 

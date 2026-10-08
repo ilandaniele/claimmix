@@ -18,6 +18,7 @@ vi.mock("@/lib/db/schema", () => ({
     locale: "locale",
   },
   tenants: { id: "id", plan: "plan" },
+  tenantBases: { tenant_id: "tenant_id", estado: "estado", creada_at: "creada_at" },
 }));
 
 import {
@@ -48,7 +49,9 @@ function conFila(fila: unknown | null) {
   mockSelect.mockReturnValue({
     from: () => ({
       innerJoin: () => ({
-        where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }),
+        leftJoin: () => ({
+          where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }),
+        }),
       }),
     }),
   });

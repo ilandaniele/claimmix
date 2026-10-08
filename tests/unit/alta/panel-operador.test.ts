@@ -188,6 +188,34 @@ describe("conectarNumero", () => {
     expect(await pedirConexion({ phoneNumberId: ID_PLATAFORMA })).toBe("ok");
   });
 
+  it("un id que figura en NUMEROS_DE_DEV es del otro ambiente: denegado antes de preguntarle a Meta ni escribir", async () => {
+    process.env.NUMEROS_DE_DEV = `${ID_DEL_CLIENTE}, 100000000000555`;
+    const g = graph();
+    base();
+
+    expect(await pedirConexion()).toBe("de_otro_ambiente");
+    expect(g.fetchFalso).not.toHaveBeenCalled();
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("el número pedido figura en NUMEROS_DE_DEV, con o sin el 9: también es del otro ambiente", async () => {
+    process.env.NUMEROS_DE_DEV = "+541100000000";
+    const g = graph();
+    base();
+
+    expect(await pedirConexion()).toBe("de_otro_ambiente");
+    expect(g.fetchFalso).not.toHaveBeenCalled();
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("con NUMEROS_DE_DEV sin ese id ni ese número, conecta como siempre", async () => {
+    process.env.NUMEROS_DE_DEV = "100000000000555,+541112345678";
+    graph();
+    base();
+
+    expect(await pedirConexion()).toBe("ok");
+  });
+
   it("H20: un id dado de baja en otro espacio hace menos de 30 días está en cuarentena", async () => {
     graph();
     base({ escritura: { resultado: "en_cuarentena" } });
@@ -583,7 +611,7 @@ describe("resultadoDelPanel", () => {
     const devueltos = [
       "ok", "no_aplica", "migracion_pendiente", "datos_invalidos", "id_de_la_plataforma", "en_cuarentena",
       "numero_duplicado", "id_ocupado", "sin_credencial", "waba_distinta", "meta_no_responde", "id_inexistente",
-      "numero_distinto", "fuera_de_la_waba",
+      "numero_distinto", "fuera_de_la_waba", "de_otro_ambiente",
     ];
     for (const r of devueltos) expect(resultadoDelPanel(r), r).toBe(r);
   });

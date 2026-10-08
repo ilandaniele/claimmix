@@ -24,8 +24,10 @@ import { ShieldCheck } from "lucide-react";
 
 import { getT, type ClaveDelServidor } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { urlDelOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 
 import { signInSso } from "./actions";
+import { PistaDelOtroAmbiente } from "./PistaDelOtroAmbiente";
 import { SignInForm } from "./SignInForm";
 
 export const metadata = {
@@ -102,6 +104,7 @@ export default async function LoginPage({
   const t = getT(locale);
   const codigo = codigoDeError(error);
   const mensajeError = codigo ? t(claveDeError(codigo)) : null;
+  const otroAmbiente = urlDelOtroAmbiente("/login");
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-slate-50 px-4 py-10">
@@ -203,6 +206,7 @@ export default async function LoginPage({
               Crear cuenta
             </Link>
           </p>
+          {otroAmbiente && <PistaDelOtroAmbiente texto={t("login.otroAmbiente")} url={otroAmbiente} />}
         </div>
       </div>
     </main>

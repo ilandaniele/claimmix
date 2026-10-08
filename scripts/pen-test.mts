@@ -36,7 +36,8 @@ import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 
 import { findRoutes, routePattern, routeToUrl } from "./lib/rutas-api.mjs";
-import { HOST_DE_PRODUCCION, hostDe } from "../tests/e2e/base-de-ensayo";
+import { hostDe } from "../tests/e2e/base-de-ensayo";
+import { vetadoBase, vetadoWeb } from "./lib/hosts-vetados.mjs";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
@@ -54,7 +55,7 @@ const soloSuperficie = args.includes("--solo-superficie");
 // `--solo-superficie` gana: sin base no hay agente que atacar, aunque alguien
 // pase los dos flags juntos.
 const doAgent = args.includes("--agent") && !soloSuperficie;
-const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app").replace(
+const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix-dev.vercel.app").replace(
   /\/+$/,
   ""
 );
@@ -72,17 +73,11 @@ const paredPropia = args.includes("--pared-propia") && !soloSuperficie;
  * `DEMO_TENANT_ID` también la frena: sólo existe donde existe la demo, o sea en
  * producción. En QA no se define y la pared se arma con un inquilino propio.
  */
-const apuntaAProduccion = (() => {
-  try {
-    return new URL(BASE).hostname === "claimmix.vercel.app";
-  } catch {
-    return true;
-  }
-})();
+const apuntaAProduccion = vetadoWeb(BASE);
 if (paredPropia && (apuntaAProduccion || process.env.DEMO_TENANT_ID)) {
   console.error(
     "--pared-propia escribe en la base y no corre contra producción " +
-      "(SMOKE_URL es claimmix.vercel.app o DEMO_TENANT_ID está definido)."
+      "(SMOKE_URL es un alias de ClaimMix con datos reales o DEMO_TENANT_ID está definido)."
   );
   process.exit(1);
 }
@@ -100,7 +95,9 @@ const endpointDe = (host: string) => host.split(".")[0].replace(/-pooler$/, "");
 const vetoDeBase = (() => {
   const [duenio, app] = [process.env.DATABASE_URL, process.env.DATABASE_URL_APP].map(hostDe);
   if (!duenio || !app) return "DATABASE_URL o DATABASE_URL_APP falta o no se lee";
-  if ([duenio, app].some((h) => h.includes(HOST_DE_PRODUCCION))) return "la base es la de PRODUCCIÓN";
+  if ([process.env.DATABASE_URL, process.env.DATABASE_URL_APP].some((c) => vetadoBase(c))) {
+    return "la base es la de PRODUCCIÓN";
+  }
   if (endpointDe(duenio) !== endpointDe(app)) return "DATABASE_URL y DATABASE_URL_APP apuntan a bases distintas";
   return null;
 })();

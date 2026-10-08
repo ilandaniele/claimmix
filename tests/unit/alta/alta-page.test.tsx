@@ -150,6 +150,37 @@ describe("/alta con el formulario", () => {
     expect(container.querySelector("#alta-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
   });
 
+  it("debajo del formulario, el texto fijo para quien ya tiene una empresa en ClaimMix", async () => {
+    const { container } = await pintar();
+
+    const texto = screen.getByText("¿Tu empresa ya usa ClaimMix? Pedile a un admin que te invite.");
+    const formulario = container.querySelector("#alta-form")!;
+    expect(formulario.contains(texto)).toBe(false);
+    expect(formulario.compareDocumentPosition(texto) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(texto.querySelector("a, button, input")).toBeNull();
+  });
+
+  it("el texto fijo no consulta nada: la única lectura de la base es la del perfil", async () => {
+    await pintar();
+
+    expect(h.fila).toHaveBeenCalledTimes(1);
+    expect(h.fila).toHaveBeenCalledWith("u-1");
+  });
+
+  it("el texto fijo, en inglés", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintar();
+
+    expect(screen.getByText("Does your company already use ClaimMix? Ask an admin to invite you.")).toBeInTheDocument();
+  });
+
+  it("el texto fijo es del formulario: no aparece en las pantallas sin formulario", async () => {
+    sesion({ emailVerified: false });
+    await pintar();
+
+    expect(screen.queryByText(/ya usa ClaimMix/)).toBeNull();
+  });
+
   it("pide los términos con los enlaces a /terms y /privacy", async () => {
     await pintar();
 

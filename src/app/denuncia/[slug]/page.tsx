@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 
 import { CAMPO as CAMPO_BASE, ETIQUETA } from "@/components/estilos-de-formulario";
 import { patronHtml } from "@/components/patron-html";
 import { PATRON_DE_CORREO, PATRON_DE_NOMBRE, PATRON_DE_TELEFONO } from "@/core/web/formulario";
 import { getT, type Locale } from "@/lib/i18n";
+import { esSlugDeOtroAmbiente, urlDelOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 import { codigoPg } from "@/server/core-sync/config";
 import { inquilinoDelFormulario } from "@/server/web/formulario";
 import { firmarToken } from "@/server/web/token";
@@ -36,6 +37,9 @@ export default async function DenunciaWebPage({
   searchParams: Promise<{ r?: string | string[] }>;
 }) {
   const { slug } = await params;
+  // El formulario es de dev y el enlace viejo sigue impreso o embebido: de acá se va, sin mirar la base.
+  const destino = esSlugDeOtroAmbiente(slug) ? urlDelOtroAmbiente(`/denuncia/${slug}`) : null;
+  if (destino) permanentRedirect(destino);
   const { r } = await searchParams;
   const formulario = await inquilinoDelFormulario(slug).catch((e) => {
     // Sin la 0044 no hay formularios: la página no existe todavía.

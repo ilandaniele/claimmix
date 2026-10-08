@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    # Sin `prd` a propósito: tests/unit/ci-prd.test.ts lo fija.
     branches: [main, qa]
   push:
     branches: [main]

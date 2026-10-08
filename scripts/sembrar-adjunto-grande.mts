@@ -19,7 +19,8 @@
  * viven denuncias reales es exactamente lo que no hay que hacer.
  */
 import * as dotenv from "dotenv";
-import { HOST_DE_PRODUCCION, hostDe } from "../tests/e2e/base-de-ensayo";
+import { hostDe } from "../tests/e2e/base-de-ensayo";
+import { vetadoBase } from "./lib/hosts-vetados.mjs";
 dotenv.config({ path: ".env.local" });
 
 const destino = process.env.SEED_DATABASE_URL?.trim() ?? process.env.STAGING_DATABASE_URL?.trim();
@@ -63,7 +64,7 @@ if (!host) {
   console.error("✗ La cadena de destino no es una URL válida.");
   process.exit(2);
 }
-if (host.includes(HOST_DE_PRODUCCION)) {
+if (vetadoBase(destino)) {
   console.error(`✗ ${host} es la base de PRODUCCIÓN. Los e2e no corren ahí.`);
   process.exit(2);
 }

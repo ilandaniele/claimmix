@@ -29,6 +29,7 @@ import { PLAN_CATALOG, isPlan, type Plan } from "@/lib/billing/plans";
 import { db } from "@/lib/db";
 import { conteoDe, filasDe } from "@/lib/db/filas";
 import { topeGlobalDelDia } from "@/server/alta/crear-inquilino";
+import { esNumeroDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 import { codigoPg } from "@/server/core-sync/config";
 import { idDeLaPlataforma, inquilinoDeLaPlataforma } from "@/server/whatsapp/numeros";
 import { verificarEnMeta, type MotivoDeMeta } from "@/server/whatsapp/verificar-en-meta";
@@ -46,6 +47,7 @@ export type ResultadoDeConexion =
   | MotivoDeMeta
   | "datos_invalidos"
   | "id_de_la_plataforma"
+  | "de_otro_ambiente"
   | "en_cuarentena"
   | "numero_duplicado"
   | "id_ocupado";
@@ -59,6 +61,7 @@ export const RESULTADOS_DEL_PANEL = [
   "no_confirmado",
   "falla",
   "id_de_la_plataforma",
+  "de_otro_ambiente",
   "en_cuarentena",
   "numero_duplicado",
   "id_ocupado",
@@ -306,6 +309,8 @@ function esLaPlataforma(tenantId: string): boolean {
  * número (`verificarEnMeta`). Se rechaza si:
  *   - el id es el de la plataforma y el inquilino no lo es: sería mandar la
  *     bandeja de la casa a otro espacio;
+ *   - el id o el número están en `NUMEROS_DE_DEV`: son del otro ambiente, que
+ *     comparte la app de Meta, y conectarlos acá le sacaría el webhook;
  *   - el id tuvo una fila dada de baja en OTRO inquilino hace menos de 30 días
  *     (cuarentena: se dio de baja por algo);
  *   - otro inquilino ya tiene ese número vivo;
@@ -332,6 +337,7 @@ export async function conectarNumero(
   if (!fila) return "no_aplica";
 
   if (phoneNumberId === idDeLaPlataforma() && !esLaPlataforma(fila.tenantId)) return "id_de_la_plataforma";
+  if (esNumeroDeOtroAmbiente(phoneNumberId, fila.numeroE164)) return "de_otro_ambiente";
 
   const enMeta = await verificarEnMeta({ phoneNumberId, wabaId, numeroE164: fila.numeroE164 });
   if (!enMeta.ok) return enMeta.motivo;

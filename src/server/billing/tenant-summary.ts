@@ -18,11 +18,33 @@
 
 import "server-only";
 import { and, eq, gte, lt, ne, sql } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { db, tables, type DbDueno } from "@/lib/db";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period";
 import { getDemoTenantId } from "@/server/ai/budget";
+import { paraCadaBase } from "@/server/bases/cada-base";
 import { esCasoReal } from "@/server/core-sync/lectura";
+
+/** Cuánto se tarda como máximo en pasar por las bases de los clientes. */
+const MS_PARA_RECORRER = 30_000;
+
+/**
+ * La consulta en cada base de cliente, con las filas juntas.
+ *
+ * Con `BASE_POR_CLIENTE=1` los casos y las facturas congeladas viven en la base de
+ * cada inquilino. Una base que no se pudo leer, o que no entró en el tiempo, no se
+ * saltea: la cartera mostraría el total de otros clientes como si fuera el de todos,
+ * y eso no se corrige solo. Sin la bandera es una sola consulta, como siempre.
+ */
+async function enCadaBase<T>(consulta: (db: DbDueno) => PromiseLike<T[]>): Promise<T[]> {
+  const { resultados, pendientes, fallas } = await paraCadaBase(async (base) => consulta(base), {
+    hasta: Date.now() + MS_PARA_RECORRER,
+  });
+  if (pendientes + fallas > 0) {
+    throw new Error(`[cartera] no se pudo leer ${pendientes + fallas} base(s) de cliente: los números quedarían incompletos.`);
+  }
+  return resultados.flat();
+}
 
 export interface TenantSummary {
   id: string;
@@ -78,21 +100,23 @@ export async function listTenantSummaries(month?: string | null): Promise<{
     .orderBy(tables.tenants.created_at);
 
   // sin-inquilino: Idem: agrega casos de todos los inquilinos en una sola pasada.
-  const caseRows = await db
-    .select({
-      tenant_id: tables.cases.tenant_id,
-      total: sql<number>`count(*)::int`,
-      billable: sql<number>`count(*) filter (where is_claim is true)::int`,
-    })
-    .from(tables.cases)
-    .where(
-      and(
-        gte(tables.cases.created_at, range.start),
-        lt(tables.cases.created_at, range.next),
-        esCasoReal
+  const caseRows = await enCadaBase((db) =>
+    db
+      .select({
+        tenant_id: tables.cases.tenant_id,
+        total: sql<number>`count(*)::int`,
+        billable: sql<number>`count(*) filter (where is_claim is true)::int`,
+      })
+      .from(tables.cases)
+      .where(
+        and(
+          gte(tables.cases.created_at, range.start),
+          lt(tables.cases.created_at, range.next),
+          esCasoReal
+        )
       )
-    )
-    .groupBy(tables.cases.tenant_id);
+      .groupBy(tables.cases.tenant_id)
+  );
 
   // sin-inquilino: Idem: el consumo de IA de todos, para la misma pantalla.
   const usageRows = await db
@@ -129,14 +153,16 @@ export async function listTenantSummaries(month?: string | null): Promise<{
    *
    * sin-inquilino: mismo reporte de dueño que las consultas de arriba.
    */
-  const congeladas = await db
-    .select({
-      tenant_id: tables.billingInvoices.tenant_id,
-      total_usd: tables.billingInvoices.total_usd,
-      billable_claims: tables.billingInvoices.billable_claims,
-    })
-    .from(tables.billingInvoices)
-    .where(eq(tables.billingInvoices.month, range.month));
+  const congeladas = await enCadaBase((db) =>
+    db
+      .select({
+        tenant_id: tables.billingInvoices.tenant_id,
+        total_usd: tables.billingInvoices.total_usd,
+        billable_claims: tables.billingInvoices.billable_claims,
+      })
+      .from(tables.billingInvoices)
+      .where(eq(tables.billingInvoices.month, range.month))
+  );
 
   const facturaPorInquilino = new Map(congeladas.map((f) => [f.tenant_id, f]));
 

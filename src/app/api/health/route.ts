@@ -20,6 +20,10 @@
  * `?deep=1` additionally spends money: a real upload to R2 and a real call to
  * the model. The default checks configuration and connectivity only, so it is
  * free to call often.
+ *
+ * Con `BASE_POR_CLIENTE=1`, `?deep=1` suma además `bases`: cuántas bases de cliente
+ * hay, en qué estado y si alguna (o control) quedó atrás de las migraciones que el
+ * código espera. Sin la bandera la respuesta no tiene esa clave. Ver `./bases.ts`.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -31,9 +35,11 @@ import { filasDe } from "@/lib/db/filas";
 import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
+import { basePorCliente } from "@/data/bases";
 import { enTenant } from "@/data/scope";
 
 const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
+import { medirBases } from "./bases";
 import {
   chequearAdjuntos,
   chequearCasosTrabados,
@@ -63,7 +69,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const deep = req.nextUrl.searchParams.get("deep") === "1";
 
-  const checks = await Promise.all([
+  const [medida, ...checks] = await Promise.all([
+    deep && basePorCliente() ? medirBases() : null,
     checkDatabase(),
     checkDataLayer(),
     checkSchema(),
@@ -88,6 +95,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     chequearEnvios(),
     chequearAdjuntos(),
   ]);
+  if (medida) checks.push(medida.chequeo);
 
   const worst: Status = checks.some((c) => c.status === "down")
     ? "down"
@@ -103,6 +111,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       environment: process.env.VERCEL_ENV ?? "local",
       checked_at: new Date().toISOString(),
       checks,
+      ...(medida?.bases ? { bases: medida.bases } : {}),
     },
     // 503 so anything watching a URL notices without parsing the body.
     { status: worst === "down" ? 503 : 200 }

@@ -1174,7 +1174,7 @@ describe("un número del otro ambiente", () => {
   });
 
   it("un número que no está en la lista sigue", async () => {
-    process.env.NUMEROS_DE_DEV = "+5491100009999, 100000000000999";
+    process.env.NUMEROS_DE_DEV = "5490000000001, 5490000000021";
 
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
   });

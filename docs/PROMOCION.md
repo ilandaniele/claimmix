@@ -21,6 +21,11 @@ Vercel Auth y contra la base de ensayo (paso 5); no toca QA ni producción. `qa`
 su propia rama de Neon —no la del ensayo, que la CI ya usa: ver el paso 4—. `main` despliega a producción. **A QA y a producción llega un despliegue por
 promoción, no uno por PR**, que es lo que hace que entre en el plan gratuito.
 
+Hay un tercer escalón en camino: `claimmix-prd`, la producción de verdad, con una base
+por cliente. Desde que exista, el proyecto `claimmix` pasa a ser **dev**, y «producción» en
+este documento sigue queriendo decir `claimmix` hasta la sección
+[Prd](#prd-producción-de-verdad-en-su-propio-proyecto), que usa los nombres nuevos.
+
 ## Qué gatea cada paso
 
 ### Antes de mergear a `qa` o a `main`
@@ -516,6 +521,268 @@ distinto del de producción y del de QA, que sólo lee `load-tests.yml`. Y
 `BETTER_AUTH_SECRET` y `QA_BETTER_AUTH_SECRET` ya no se leen en ningún workflow
 —cada job que importa `@/lib/auth` genera el suyo por corrida—, así que se pueden
 borrar del repositorio.
+
+## Prd: producción de verdad, en su propio proyecto
+
+Hasta acá «producción» fue el proyecto `claimmix`. Con prd en marcha ese proyecto pasa a
+ser **dev** (conserva su `project_id`, el pool WIF `vercel`, los secretos, la base y los
+datos reales) y la producción de los clientes es un proyecto nuevo, `claimmix-prd`. Esta
+sección usa los nombres nuevos. El estado de cada paso, y qué falta, está en
+[PROJECT_STATUS.md](PROJECT_STATUS.md).
+
+### Los ambientes
+
+| ambiente | proyecto de Vercel | rama | base | dominio |
+|---|---|---|---|---|
+| dev | `claimmix` | `main` | `ep-proud-resonance`, datos reales; `BASE_POR_CLIENTE` apagado para siempre | `claimmix-dev.vercel.app` |
+| qa | `claimmix-qa` | `qa` | `ep-wispy-flower` | `claimmix-qa.vercel.app` |
+| prd | `claimmix-prd` | `prd` | proyecto de Neon `claimmix-prd` (plan Free, `aws-sa-east-1`): la base de control `neondb` y una `t_<hex>` por cliente | `claimmix-prd.vercel.app`, y `claimmix.vercel.app` después del move |
+
+Fuera de Vercel hay dos más, y ninguno recibe tráfico: `claimmix-ensayo`, un proyecto de
+Neon aparte que sólo usa `pnpm bases:probar` (secretos `ENSAYO_BASES_DATABASE_URL` y
+`ENSAYO_BASES_DATABASE_URL_APP`), y la rama `production` del proyecto de Neon de Veltra
+(`STAGING_DATABASE_URL`), que sólo usa `ci.yml`.
+
+prd tiene todo propio: el bucket `claimmix-prd-attachments` de R2, el pool WIF `vercel-prd`
+(su condición mira el proyecto `claimmix-prd`), el topic de Pub/Sub `gmail-push-prd` con su
+suscripción `gmail-push-prd-sub`, y `CRON_SECRET`, `BETTER_AUTH_SECRET` y clave de cifrado
+nuevos. Comparte con dev la app de Meta, la WABA (con su token) y el cliente OAuth de
+Google. Por eso los webhooks de dev necesitan un override en Meta, y prd lleva las guardas
+«de otro ambiente»: `SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV` y
+`URL_DEL_OTRO_AMBIENTE` (ver `.env.example`).
+
+### El camino a prd
+
+```
+… →  PR de qa a main  →  deploy de dev  →  PR de main a prd  →  deploy de prd
+```
+
+- La rama `prd` se crea una vez, por API, desde el SHA de `main` (crea la referencia, no
+  es un push de cambios). Después sólo avanza con un PR de `main` a `prd`. Nunca un push
+  directo; con el repositorio privado GitHub no impone la regla, así que se sostiene a mano.
+- **A lo sumo una promoción a prd por día.** El plan Hobby tiene un tope de deploys por día
+  y, con tres proyectos en el mismo repositorio, llegar al tope deja a todos sin deploy y
+  sin ensayo del agente durante 24 h. Si ya hubo una promoción hoy, la siguiente espera a
+  mañana; si se juntaron varios cambios, van todos en un solo PR.
+- `ci.yml`, `codeql.yml` y `secrets.yml` se disparan con PRs hacia `main` y `qa`, no hacia
+  `prd` (`tests/unit/ci-prd.test.ts` lo fija): el commit que llega a prd ya los pasó dos
+  veces y repetirlos gastaría minutos de Actions. Lo que se mira antes de mergear es a
+  mano: que el PR traiga un commit de `main` cuyo post-deploy de dev terminó en verde.
+- Después del deploy corre el job `PRD` de `post-deploy.yml` (el smoke liviano y
+  `/api/health?deep=1`, que falla si `bases.desfase`) y, cada dos horas, el barrido de
+  `barrer-trabados.yml`. Los dos usan `secrets.PRD_CRON_SECRET` y `vars.PRD_URL`. No hay
+  ensayo del agente, ni pen test, ni timbre, ni carga en prd: ver «Después de cada deploy»
+  en [TESTING.md](TESTING.md).
+
+### El Ignored Build Step, en los tres proyectos
+
+Con tres proyectos conectados al mismo repositorio, cada push construiría en los tres y se
+comería el cupo de despliegues del plan gratuito. Cada proyecto ignora las ramas que no son
+suyas, en **Settings → Build and Deployment → Ignored Build Step → Custom** (exit 1
+construye, exit 0 saltea):
+
+```bash
+# claimmix-qa: sólo qa
+if [ "$VERCEL_GIT_COMMIT_REF" = "qa" ]; then exit 1; else exit 0; fi
+
+# claimmix-prd: sólo prd
+if [ "$VERCEL_GIT_COMMIT_REF" = "prd" ]; then exit 1; else exit 0; fi
+
+# claimmix (dev): saltea qa y prd; construye main y las vistas previas
+if [ "$VERCEL_GIT_COMMIT_REF" = "qa" ] || [ "$VERCEL_GIT_COMMIT_REF" = "prd" ]; then exit 0; else exit 1; fi
+```
+
+`claimmix` no se limita a `main` porque sus vistas previas siguen haciendo falta: el k6 de
+`load-tests.yml` mide contra ellas (paso 5). Y `claimmix-prd` además lleva
+**Settings → Environments → Production → Branch Tracking → `prd`**, como `claimmix-qa` lleva `qa`
+(paso 2).
+
+Antes de pisar nada, leer por la API (sólo lectura) el comando que tiene hoy cada proyecto, y
+confirmar con un deploy reciente que `VERCEL_GIT_COMMIT_REF` trae el nombre de la rama y no un
+SHA, que es lo que sí pasa con `deployment.ref` (ver la primera trampa, más abajo). Mirar también
+**Production Overrides**: un comando ahí pisa al de Project Settings.
+
+El job `PRD` no entra en el reparto por rama sino por el nombre del entorno: dev es
+`Production – claimmix`, qa termina en `-qa` y prd termina en `-prd`, y cada job de
+`post-deploy.yml` mira el suyo.
+
+### Las dos fases
+
+El trabajo va en dos fases. En la primera prd existe, sirve el dominio y anda con **una sola
+base**, como dev; la segunda le pone una base por cliente.
+
+**Fase 1: prd con una sola base, `ALTA_AUTOMATICA=0` y `BASE_POR_CLIENTE=0`.** Cada paso dice
+quién lo hace: el dueño (cuentas de Google, Cloudflare, Meta, y todo lo que pide un
+navegador) o el asistente.
+
+1. Asistente: poner el Ignored Build Step de arriba en `claimmix` y en `claimmix-qa`.
+2. Asistente: el alias `claimmix-dev.vercel.app` en el proyecto `claimmix`, sirviendo el mismo
+   deploy de dev. Los workflows ya lo usan como URL por defecto: tiene que existir antes de
+   que esos cambios lleguen a `main`.
+3. Dueño: en Google Cloud, los orígenes y los redirect URIs de `claimmix-dev.vercel.app` y de
+   `claimmix-prd.vercel.app` (las mismas rutas que hoy tiene `claimmix.vercel.app`, la del
+   callback de las casillas de Gmail incluida), y la pantalla de consentimiento publicada:
+   con los scopes de Gmail sin verificar hay un tope de 100 usuarios, compartido entre dev y
+   prd. En Cloudflare, los dos hostnames en el widget de Turnstile.
+4. Asistente: el inventario de dev, con SELECT sobre la base de dev: números conectados,
+   casillas de Gmail, slugs de formulario, SSO, claves de API v1, invitaciones y
+   verificaciones vivas. Llena `SLUGS_DE_DEV`, `NUMEROS_DE_DEV` y `CASILLAS_DE_DEV`.
+5. Asistente: el override de Meta hacia `claimmix-dev` por cada número conectado (el real
+   incluido) y por cada WABA, verificado con un GET. Dueño: la suscripción de Pub/Sub de
+   dev pasa a empujar a `claimmix-dev`, y se avisa a los clientes de dev con SSO o API v1
+   que cambien el redirect URI del IdP y la URL base.
+6. Asistente: mergear P15, P18 y P16 por el camino de siempre (PR a `qa`, `pnpm check`
+   completo contra QA, PR de `qa` a `main`).
+7. Dueño: `npx neonctl auth`. Asistente: el proyecto de Neon `claimmix-prd` en
+   `aws-sa-east-1`, con la misma versión de Postgres que dev, y la cadena del dueño en
+   `.env.prd.local`. El endpoint de su base de control va en `HOST_DE_BASE_PRD` de
+   `scripts/lib/hosts-vetados.mjs`: mientras sea `null`, los scripts de bases se niegan a
+   correr contra prd.
+8. **Bloqueante.** Asistente: las migraciones hasta la 0049, en orden, sobre `neondb` de prd
+   (`psql -v ON_ERROR_STOP=1 -f` por cada archivo de `neon/migrations`). **La cadena nunca
+   corrió sobre una base vacía**: un fallo se arregla con una migración nueva, nunca
+   editando una vieja. Después `pnpm esquemas` contra dev, el rol de la app (`pnpm rol-app`,
+   `pnpm permisos`) y el inquilino casa: una fila fija en `tenants`, con
+   `DEFAULT_TENANT_ID` igual a su id y sin autoalta. El operador entra por `ADMIN_EMAILS`.
+9. Asistente: el proyecto de Vercel `claimmix-prd` (repositorio, rama `prd`, Ignored Build
+   Step, OIDC, alias `claimmix-prd.vercel.app`). Dueño: el pool WIF `vercel-prd` sin tocar
+   el pool `vercel` ni la clave local, el bucket `claimmix-prd-attachments` con un token
+   limitado a ese bucket, y el topic `gmail-push-prd` con la suscripción `gmail-push-prd-sub`
+   empujando a `https://claimmix-prd.vercel.app/api/webhooks/gmail`. Ese alias queda para
+   siempre: la suscripción no cambia con el move.
+10. Asistente: las variables de prd. El dueño completa los secretos en `.env.prd.local`
+    (copiando el token de WhatsApp sin el comentario de su línea) y se cargan con
+    `node scripts/sync-vercel-env.mjs --project claimmix-prd --archivo .env.prd.local`; ese script
+    se niega a leer `.env.local` para prd. Qué lleva está en la lista de abajo.
+11. Asistente: `gh secret set PRD_CRON_SECRET`, `gh variable set PRD_URL --body
+    https://claimmix-prd.vercel.app` y la rama `prd`, creada por API desde el SHA de `main`.
+12. Asistente: el primer deploy de prd (PR de `main` a `prd`), el login del operador en
+    `claimmix-prd.vercel.app`, `/admin/altas`, `GET /api/health?deep=1` y el job `PRD` en verde.
+13. El move del dominio, en el orden de la sección siguiente.
+14. Dueño: mirar los minutos de Actions (Settings → Billing and plans → Usage). El barrido
+    de prd suma unas 360 corridas por mes al cupo de 2000 minutos del repositorio privado.
+
+**Fase 2: una base por cliente.** `BASE_POR_CLIENTE` es de ida (ver abajo), así que va
+detrás de pruebas y de un orden fijo:
+
+1. Asistente: aplicar la 0050 (`tenant_bases` con su lease y `schema_migrations`) a mano en
+   QA, en dev, en staging y en la base de control de prd, y después `pnpm esquemas`.
+2. Asistente: mergear P1 a P14 y P17 con el flag apagado. Un cambio que toca autorización o
+   secretos (P1, P4, P6, P7, P8, P13, P18) lo revisa Fable, y sin cuota, Opus 5.5.
+3. Asistente: crear el proyecto de Neon `claimmix-ensayo` y cargar sus dos secretos en
+   GitHub.
+4. **Bloqueante.** Asistente: `pnpm bases:probar` en verde, y el job `Bases por cliente` de
+   `ci.yml` también (capa 9 de [TESTING.md](TESTING.md)).
+5. Asistente: la promoción a prd (la de ese día), con el job `PRD` en verde.
+6. Asistente: llevar control de prd al día con el registro:
+   `node scripts/migrar-bases.mjs --env prd --dry` y después sin `--dry`.
+7. Asistente: la base del inquilino casa. Antes se borran de control los casos de prueba
+   que casa haya creado en la fase 1, porque quedarían huérfanos. Después,
+   `pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/preparar-base.mts --env prd --tenant <DEFAULT_TENANT_ID>`
+   hasta que su fila de `tenant_bases` diga `lista`. No se deshace.
+8. Asistente: `BASE_POR_CLIENTE=1` en `claimmix-prd` y un redeploy. El login del operador
+   anda, y `GET /api/health?deep=1` devuelve `bases.lista` en 1 y `bases.desfase` en
+   `false`.
+9. Asistente: el perfil control. `node scripts/migrar-bases.mjs --env prd --perfil control`,
+   `pnpm permisos --perfil control` y `pnpm permisos --perfil cliente --base t_<hex de casa>`.
+   Ese día los logs de control van a mostrar 42501: cada uno delata una escritura de negocio
+   que se olvidó de mover a la base del cliente, y hay que mirarlos.
+10. Asistente: abrir el alta, con `ALTA_AUTOMATICA=1`, y probarla de punta a punta con una
+    cuenta de prueba (Google, Gmail y un número de prueba que provee el dueño). Después
+    se borra su base con `node scripts/purgar-bases.mjs --env prd --tenant <prueba> --apply`.
+    No se deshace.
+11. Dueño: la verificación del negocio en Meta. Mientras no esté, Meta deja 2 números en la
+    WABA y hoy entra uno solo (`ALTA_NUMEROS_MAXIMOS_WABA`).
+12. Dueño, opcional y último: renombrar el proyecto `claimmix` a `claimmix-dev`. Antes se
+    lee (sólo lectura) el proveedor del pool `vercel`: si su condición o su mapeo dependen
+    del nombre del proyecto, no se renombra.
+
+**Lo que lleva `claimmix-prd`:**
+
+- `BASE_POR_CLIENTE`: `0` en la fase 1, `1` en la fase 2.
+- `ALTA_AUTOMATICA`: `0` hasta el paso 10 de la fase 2.
+- `ALTA_TOPE_GLOBAL_DIA=5`, `ALTA_TOPE_BASES=30` y `ALTA_TOPE_MB=350`: el plan Free de Neon
+  tiene 500 MB por proyecto.
+- `DEFAULT_TENANT_ID`: el inquilino casa.
+- `SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV` y
+  `URL_DEL_OTRO_AMBIENTE=https://claimmix-dev.vercel.app`.
+- `PUBSUB_TOPIC`: el de prd. Vertex con el proveedor del pool `vercel-prd`.
+- Presupuestos de IA: US$ 50 en total, US$ 1 por inquilino de prueba y US$ 30 para todos los
+  de prueba juntos.
+- `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` cargadas: las casillas por inquilino las usan.
+- Vacías a propósito: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`,
+  `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL` y `DEMO_TENANT_ID`. prd no tiene número ni casilla
+  propios hasta que un cliente los conecte.
+
+### El move del dominio, en este orden y sin plan B
+
+`claimmix.vercel.app` es hoy el alias de dev, y está impreso, embebido en webhooks y
+registrado en Google, Meta y Cloudflare. Pasa a prd sin soltarlo en ningún momento, y sólo
+cuando todo lo que apunta a él ya apunta a otro lado:
+
+1. prd está desplegado y probado en `claimmix-prd.vercel.app` (pasos 9 a 12 de la fase 1).
+2. El alias `claimmix-dev.vercel.app` sirve el mismo deploy de dev (paso 2).
+3. Google OAuth y Turnstile aceptan los tres hosts (paso 3).
+4. Los webhooks de dev ya no dependen del dominio: overrides de Meta por número y por WABA
+   verificados con un GET, y la suscripción de Pub/Sub de dev empujando a `claimmix-dev`
+   (paso 5).
+5. dev pasa `NEXT_PUBLIC_SITE_URL` a `https://claimmix-dev.vercel.app` (y `NEXT_PUBLIC_APP_URL`
+   si está cargada), redeploya, y se prueba el login con Google y con correo en
+   `claimmix-dev`. Las invitaciones y verificaciones vivas se reenvían desde dev.
+6. El move, atómico:
+
+   ```
+   POST https://api.vercel.com/v1/projects/claimmix/domains/claimmix.vercel.app/move
+   {"projectId": "<id de claimmix-prd>"}
+   ```
+
+   **Si responde un error, se aborta.** El dominio sigue en dev, prd sigue en
+   `claimmix-prd.vercel.app` y decide el dueño. **Nunca `DELETE` y después `POST`**: entre
+   los dos el dominio no tiene dueño, y los webhooks de Meta y de Gmail que apuntan ahí
+   caen en el vacío. Puede que Vercel no deje mover un `*.vercel.app` entre proyectos; es
+   un bloqueante abierto.
+7. prd pasa `NEXT_PUBLIC_SITE_URL` a `https://claimmix.vercel.app` y redeploya;
+   `vars.PRD_URL` pasa a la misma URL (`gh variable set PRD_URL --body https://claimmix.vercel.app`),
+   y se comprueba con `curl -I` y un login.
+8. Se miran 24 h los logs de `claimmix-prd` (`vercel logs`):
+   `whatsapp.webhook.numero_desconocido`, `webhooks_gmail.mailbox_not_connected`,
+   `INVALID_ORIGIN` y los 404 de `/denuncia`. Cada aparición se corrige con el override o el
+   slug que faltaba. Un número de dev sin override, o una WABA sin override, llega a prd
+   después del move y se descarta con 200; Meta no reintenta y el mensaje se pierde.
+
+### BASE_POR_CLIENTE es de ida
+
+Con `BASE_POR_CLIENTE=1` cada inquilino vive en su base y la de control ya no tiene sus datos
+de negocio. **Apagarla con clientes vivos los deja sin datos.** Para frenar el crecimiento se
+pone `ALTA_AUTOMATICA=0` (o se baja `ALTA_TOPE_GLOBAL_DIA` a 0) y se arregla hacia adelante,
+con una migración o un fix. Dev, QA y staging la dejan en `0` siempre.
+
+### Migrar después de un cambio de esquema
+
+Una migración nueva no se aplica sola en ninguna base. Con el flag prendido hay que llevarla
+a control y a cada `t_<hex>` existente:
+
+```bash
+node scripts/migrar-bases.mjs --env prd --dry   # qué haría
+node scripts/migrar-bases.mjs --env prd         # control, y después cada base `lista`
+pnpm bases:empaquetar                           # la cadena que aplica el workflow a una base NUEVA
+```
+
+`pnpm bases:empaquetar --comprobar` falla en `ci.yml` si la cadena empaquetada quedó atrás de
+`neon/migrations`. Entre que sale el código y que se migran las bases hay una ventana en la
+que faltan columnas, y la ve el post-deploy: `bases.desfase`.
+
+### Lo que queda abierto
+
+1. La cadena de migraciones nunca corrió sobre una base vacía (paso 8 de la fase 1 y paso 4 de
+   la 2).
+2. Meta permite 2 números en la WABA hasta verificar el negocio.
+3. La pantalla de consentimiento de Google tiene que estar publicada, y sus scopes de Gmail
+   sin verificar tienen un tope de 100 usuarios que comparten dev y prd.
+4. Hay que confirmar que Vercel acepta mover un `*.vercel.app` entre proyectos.
+5. Los términos de Vercel Hobby son de uso no comercial, y prd con clientes que pagan choca
+   con eso. El dueño decidió no usar planes pagos; queda señalado.
+6. `HOST_DE_BASE_PRD` sigue en `null` hasta crear el proyecto de Neon.
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 

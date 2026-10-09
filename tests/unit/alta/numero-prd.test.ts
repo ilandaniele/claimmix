@@ -363,7 +363,7 @@ describe("un número del otro ambiente", () => {
     ["por su número", NUMERO],
     ["por su número escrito con otro formato", "+54 11 0000-0000"],
   ])("%s: no sale a Meta, no se guarda, no se espeja, avisa y devuelve los cupos", async (_cual, enLaLista) => {
-    process.env.NUMEROS_DE_DEV = `+5491155550000, ${enLaLista}`;
+    process.env.NUMEROS_DE_DEV = `5490000000001, ${enLaLista}`;
 
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
 
@@ -387,7 +387,7 @@ describe("un número del otro ambiente", () => {
   it("sin NUMEROS_DE_DEV, o con otros números en la lista, el alta sigue", async () => {
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
 
-    process.env.NUMEROS_DE_DEV = "+5491155550000, 100000000000999";
+    process.env.NUMEROS_DE_DEV = "5490000000001, 5490000000021";
     h.orden.length = 0;
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
     expect(h.aviso).not.toHaveBeenCalledWith("de_otro_ambiente", TENANT);

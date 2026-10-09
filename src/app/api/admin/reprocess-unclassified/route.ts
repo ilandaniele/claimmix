@@ -13,6 +13,8 @@
  * Tenant scoping: this is a SYSTEM path that intentionally scans cases across
  * ALL tenants (like the Gmail poller); each selected row carries its own
  * tenant_id, which is forwarded to the worker for downstream scoping.
+ * Con `BASE_POR_CLIENTE=1` busca y marca en la base de cada cliente, una tras otra,
+ * y el tope de 50 es de toda la llamada, no de cada base.
  *
  * Response shape (always 200 on partial or full success):
  *   { data: { triggered: number, case_ids: string[], failed: string[] } }
@@ -25,7 +27,8 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { and, asc, inArray, isNull, or } from "drizzle-orm";
-import { db, tables } from "@/lib/db";
+import { tables } from "@/lib/db";
+import { paraCadaBase } from "@/server/bases/cada-base";
 import { getWorkerBaseUrl } from "@/server/email/dispatch-url";
 import { internalAuthHeaders, isInternalRequest } from "@/lib/security/internal-auth";
 import { logger } from "@/lib/observability/logger";
@@ -42,6 +45,9 @@ const CHANNELS = ["email", "email_sim"] as const;
 
 /** Max cases dispatched per call. */
 const BATCH_LIMIT = 50;
+
+/** Cuánto puede tardar el recorrido por las bases antes de despachar lo que juntó. */
+const PLAZO_DE_BUSQUEDA_MS = 20_000;
 
 interface UnclassifiedCase {
   id: string;
@@ -62,20 +68,48 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let cases: UnclassifiedCase[];
   try {
-    // sin-inquilino: Reproceso de sistema: junta los casos sin clasificar de todos los
-    // inquilinos a propósito. Cada fila trae su tenant_id y con ése se sigue.
-    cases = await db
-      .select({ id: t.id, tenant_id: t.tenant_id })
-      .from(t)
-      .where(
-        and(
-          inArray(t.channel, [...CHANNELS]),
-          inArray(t.status, [...OPEN_STATUSES]),
-          or(isNull(t.severity), isNull(t.claim_type))
-        )
-      )
-      .orderBy(asc(t.created_at))
-      .limit(BATCH_LIMIT);
+    let restan = BATCH_LIMIT;
+    const { resultados } = await paraCadaBase(
+      async (db) => {
+        if (restan <= 0) return [];
+        // sin-inquilino: Reproceso de sistema: junta los casos sin clasificar de todos los
+        // inquilinos a propósito. Cada fila trae su tenant_id y con ése se sigue.
+        const encontrados: UnclassifiedCase[] = await db
+          .select({ id: t.id, tenant_id: t.tenant_id })
+          .from(t)
+          .where(
+            and(
+              inArray(t.channel, [...CHANNELS]),
+              inArray(t.status, [...OPEN_STATUSES]),
+              or(isNull(t.severity), isNull(t.claim_type))
+            )
+          )
+          .orderBy(asc(t.created_at))
+          .limit(restan);
+        if (encontrados.length === 0) return encontrados;
+        restan -= encontrados.length;
+
+        // ── Reset to 'procesando' so the worker actually runs ─────────────────────
+        // The worker only processes recibido/procesando/info_faltante and SKIPS
+        // escalado/listo. Since this endpoint now re-drives escalado cases (provider
+        // failures), flip them to procesando first — otherwise they're silently
+        // skipped with wrong_status and the retry is a no-op.
+        try {
+          // sin-inquilino: Idem: marca las mismas filas que juntó la consulta de arriba.
+          await db
+            .update(t)
+            .set({ status: "procesando", updated_at: new Date().toISOString() })
+            .where(inArray(t.id, encontrados.map((row) => row.id)));
+        } catch (e) {
+          logger.error({
+              error_code: (e as { code?: string })?.code ?? "unknown",
+            }, "reprocess_unclassified.reset_failed");
+        }
+        return encontrados;
+      },
+      { hasta: Date.now() + PLAZO_DE_BUSQUEDA_MS }
+    );
+    cases = resultados.flat();
   } catch (e) {
     logger.error({
         error_code: (e as { code?: string })?.code ?? "unknown",
@@ -92,23 +126,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { data: { triggered: 0, case_ids: [], failed: [] } },
       { status: 200 }
     );
-  }
-
-  // ── Reset to 'procesando' so the worker actually runs ─────────────────────────
-  // The worker only processes recibido/procesando/info_faltante and SKIPS
-  // escalado/listo. Since this endpoint now re-drives escalado cases (provider
-  // failures), flip them to procesando first — otherwise they're silently
-  // skipped with wrong_status and the retry is a no-op.
-  try {
-    // sin-inquilino: Idem: marca las mismas filas que juntó la consulta de arriba.
-    await db
-      .update(t)
-      .set({ status: "procesando", updated_at: new Date().toISOString() })
-      .where(inArray(t.id, cases.map((row) => row.id)));
-  } catch (e) {
-    logger.error({
-        error_code: (e as { code?: string })?.code ?? "unknown",
-      }, "reprocess_unclassified.reset_failed");
   }
 
   // ── Dispatch /api/worker/extract for each case ────────────────────────────────

@@ -36,7 +36,7 @@ import { and, asc, eq, gt, isNull, lt, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { leerModo, type ModoDeBorrado } from "@/core/retencion";
-import { db } from "@/lib/db";
+import { db as dbDueno, type DbDueno } from "@/lib/db";
 import { adjuntosPorPurgar, claimAttachments } from "@/lib/db/schema";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
@@ -69,7 +69,7 @@ const masNueva = alias(adjuntosPorPurgar, "mas_nueva");
 
 // Exportadas para `pnpm capa-datos` (sección 7), que las corre contra el ensayo con R2 simulado y marcando sólo filas propias.
 /** Los vencidos, los más viejos primero. */
-export async function vencidos(): Promise<Pendiente[]> {
+export async function vencidos(db: DbDueno = dbDueno): Promise<Pendiente[]> {
   // sin-inquilino: Barrido de sistema: la cola es de TODOS los inquilinos y el
   // rol de la aplicación no puede actualizarla ni borrarla, sólo encolar.
   return db
@@ -115,7 +115,10 @@ export async function vencidos(): Promise<Pendiente[]> {
  * Una sola sentencia marca todo lo de la corrida: lo borrado como purgado, lo que falló con un intento más.
  * Un objeto borrado cierra también las filas más viejas de su mismo path, que ya no tienen nada que purgar.
  */
-export async function marcar(resultados: Array<{ id: string; ok: boolean; storage_path: string }>): Promise<void> {
+export async function marcar(
+  resultados: Array<{ id: string; ok: boolean; storage_path: string }>,
+  db: DbDueno = dbDueno
+): Promise<void> {
   const valores = sql.join(
     resultados.map((r) => sql`(${r.id}::uuid, ${r.ok}::boolean, ${r.storage_path}::text)`),
     sql`, `
@@ -135,11 +138,14 @@ export async function marcar(resultados: Array<{ id: string; ok: boolean; storag
  *
  * @returns `null` si la purga está apagada, sin haber consultado nada.
  */
-export async function purgarAdjuntos({ hasta }: { hasta: number }): Promise<ResultadoPurga | null> {
+export async function purgarAdjuntos(
+  { hasta }: { hasta: number },
+  db: DbDueno = dbDueno
+): Promise<ResultadoPurga | null> {
   const modo = leerModo(process.env.PURGA_ADJUNTOS_MODO);
   if (modo === "apagado") return null;
 
-  const pendientes = await vencidos();
+  const pendientes = await vencidos(db);
 
   if (modo === "simular") {
     logger.info({ candidatos: pendientes.length }, "purga_adjuntos.simulada");
@@ -152,7 +158,9 @@ export async function purgarAdjuntos({ hasta }: { hasta: number }): Promise<Resu
     hechos.push({ pendiente, ok: await deleteAttachment(pendiente.storage_path) });
   }
 
-  if (hechos.length > 0) await marcar(hechos.map((h) => ({ id: h.pendiente.id, ok: h.ok, storage_path: h.pendiente.storage_path })));
+  if (hechos.length > 0) {
+    await marcar(hechos.map((h) => ({ id: h.pendiente.id, ok: h.ok, storage_path: h.pendiente.storage_path })), db);
+  }
 
   /*
    * Un rastro por caso, sólo con conteos: lo que se borró y lo que no. Sin paths ni

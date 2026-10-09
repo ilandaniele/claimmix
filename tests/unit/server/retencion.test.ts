@@ -349,3 +349,21 @@ describe("aplicarRetencion: el reloj y los fallos", () => {
     });
   });
 });
+
+describe("aplicarRetencion: la base que le pasan (P10)", () => {
+  it("lista los inquilinos en esa base, y no en la de siempre", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const propias: string[] = [];
+    const propia = drizzle(async (sql) => {
+      propias.push(sql);
+      return { rows: [[A]] };
+    });
+
+    const r = await aplicarRetencion({ hasta: enUnaHora() }, AHORA, propia as never);
+
+    expect(r?.inquilinos).toBe(1);
+    expect(propias).toHaveLength(1);
+    expect(m.propias).toEqual([]);
+    expect(m.porInquilino.map((c) => c.tenantId)).toEqual([A]);
+  });
+});

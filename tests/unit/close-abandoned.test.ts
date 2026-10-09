@@ -316,3 +316,24 @@ describe("el silencio de alguien a quien nunca le preguntamos", () => {
     expect(avisos.join(" ")).not.toContain("close_abandoned.sin_preguntar");
   });
 });
+
+describe("closeAbandonedConversations: la base que le pasan (P10)", () => {
+  it("cierra en esa base, y no en la de siempre", async () => {
+    const subconsulta: Record<string, unknown> = {};
+    Object.assign(subconsulta, {
+      from: () => subconsulta,
+      where: () => subconsulta,
+      limit: () => subconsulta,
+      then: (r: (v: unknown) => void) => r([]),
+    });
+    const update = vi.fn().mockReturnValue({
+      set: () => ({ where: () => ({ returning: () => Promise.resolve([{ id: "caso-1", tenant_id: "t-1" }]) }) }),
+    });
+
+    const res = await closeAbandonedConversations({ update, select: () => subconsulta } as never);
+
+    expect(res).toEqual({ closed: 1, caseIds: ["caso-1"] });
+    expect(update).toHaveBeenCalledOnce();
+    expect(db.update).not.toHaveBeenCalled();
+  });
+});

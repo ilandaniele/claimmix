@@ -16,14 +16,19 @@ import { readFileSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSelect, mockUpdate, mockRunIntakeAgent } = vi.hoisted(() => ({
+const { mockSelect, mockUpdate, mockRunIntakeAgent, mockDbDeBase } = vi.hoisted(() => ({
+  mockDbDeBase: vi.fn(),
   mockSelect: vi.fn(),
   mockUpdate: vi.fn(),
   mockRunIntakeAgent: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/db", () => ({ db: { select: mockSelect, update: mockUpdate }, tables: {} }));
+vi.mock("@/lib/db", () => ({
+  db: { select: mockSelect, update: mockUpdate },
+  dbDeBase: mockDbDeBase,
+  tables: {},
+}));
 vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 vi.mock("@/server/agents/intake-agent", () => ({ runIntakeAgent: mockRunIntakeAgent }));
 
@@ -219,5 +224,57 @@ describe("marcarPendientes", () => {
 
     expect(errores.join(" ")).toContain("retomar_pendientes.marcar_fallo");
     expect(errores.join(" ")).toContain("40001");
+  });
+});
+
+describe("retomarExtraccionesPendientes: la base de cada cliente (P10)", () => {
+  const TENANT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const SAVED = process.env.BASE_POR_CLIENTE;
+
+  /** Una base propia con un solo caso pendiente. */
+  const selectDelCliente = vi.fn().mockReturnValue({
+    from: () => ({ where: () => ({ limit: () => Promise.resolve([{ id: "caso-del-cliente", tenant_id: TENANT }]) }) }),
+  });
+
+  beforeEach(() => {
+    mockDbDeBase.mockReset();
+    mockDbDeBase.mockReturnValue({ select: selectDelCliente });
+    devuelve([]);
+  });
+
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.BASE_POR_CLIENTE;
+    else process.env.BASE_POR_CLIENTE = SAVED;
+  });
+
+  it("con el flag apagado y un inquilino mira la base de siempre", async () => {
+    delete process.env.BASE_POR_CLIENTE;
+
+    await retomarExtraccionesPendientes({ tenantId: TENANT });
+
+    expect(mockDbDeBase).not.toHaveBeenCalled();
+    expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("con el flag prendido y un inquilino mira la base de ese inquilino", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+
+    const r = await retomarExtraccionesPendientes({ tenantId: TENANT });
+
+    expect(mockDbDeBase).toHaveBeenCalledWith("t_aaaaaaaabbbbccccddddeeeeeeeeeeee");
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(r).toEqual({ retomados: 1, caseIds: ["caso-del-cliente"] });
+    expect(mockRunIntakeAgent).toHaveBeenCalledWith(expect.objectContaining({ caseId: "caso-del-cliente", tenantId: TENANT }));
+  });
+
+  it("la base que le pasan manda sobre la del inquilino", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+    const propia = { select: vi.fn().mockReturnValue({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }) };
+
+    const r = await retomarExtraccionesPendientes({ tenantId: TENANT }, propia as never);
+
+    expect(mockDbDeBase).not.toHaveBeenCalled();
+    expect(propia.select).toHaveBeenCalledTimes(1);
+    expect(r.retomados).toBe(0);
   });
 });

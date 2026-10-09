@@ -12,18 +12,48 @@
  * falte se ve como que la aplicación anda bien y no guarda nada.
  *
  * Esto pregunta al catálogo, no adivina. Sólo lee.
+ *
+ * Uso:
+ *   pnpm permisos                                  el perfil único, contra DATABASE_URL_APP
+ *   pnpm permisos --perfil cliente --base t_<hex>  la base de un cliente (BASE_POR_CLIENTE)
+ *   pnpm permisos --perfil control                 la base de control
+ *
+ * Los perfiles son los de `scripts/lib/permisos-por-perfil.mjs`. `--base` cambia
+ * sólo el nombre de la base en la cadena de DATABASE_URL_APP.
  */
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { neon } from "@neondatabase/serverless";
+import { cadenaConBase } from "@/data/bases";
+import {
+  ESPEJADAS_DE_SOLO_LECTURA,
+  TABLAS_DE_CONTROL,
+  TABLAS_SOLO_DE_CONTROL,
+} from "./lib/permisos-por-perfil.mjs";
 import { PERMISOS_POR_COLUMNA, PERMISOS_QUITADOS } from "./lib/permisos-quitados.mjs";
 
-const url = process.env.DATABASE_URL_APP?.trim();
-if (!url) {
+const argumento = (nombre: string) => {
+  const i = process.argv.indexOf(nombre);
+  return i === -1 ? null : (process.argv[i + 1] ?? "");
+};
+const PERFIL = argumento("--perfil") ?? "unico";
+const BASE = argumento("--base");
+if (!["unico", "cliente", "control"].includes(PERFIL)) {
+  console.error(`--perfil espera unico, cliente o control (recibí "${PERFIL}")`);
+  process.exit(2);
+}
+if (BASE !== null && !/^t_[0-9a-f]{32}$/.test(BASE)) {
+  console.error(`--base espera t_ y 32 hex en minúscula (recibí "${BASE}")`);
+  process.exit(2);
+}
+
+const cadena = process.env.DATABASE_URL_APP?.trim();
+if (!cadena) {
   console.error("Falta DATABASE_URL_APP.");
   process.exit(2);
 }
+const url = BASE === null ? cadena : cadenaConBase(cadena, BASE);
 
 /**
  * Traducir el error del driver a algo accionable.
@@ -54,6 +84,7 @@ const sql = neon(url);
 
 console.log("═".repeat(70));
 console.log(`PERMISOS — qué puede hacer "${rol}" sobre cada tabla`);
+if (PERFIL !== "unico") console.log(`perfil ${PERFIL}${BASE === null ? "" : ` · base ${BASE}`}`);
 console.log("═".repeat(70));
 
 /** Las tablas con columna de inquilino: las que la capa toca. */
@@ -101,9 +132,29 @@ async function privilegiosDe(tabla: string) {
   return p;
 }
 
+const TODOS = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+const ESCRITURA = ["INSERT", "UPDATE", "DELETE"];
+
+/**
+ * Lo que el rol NO tiene que tener sobre una tabla, según el perfil.
+ *
+ * Es `PERMISOS_QUITADOS` más lo que cada perfil quita (ver `permisos-por-perfil.mjs`):
+ * el cliente pierde las tablas de control enteras y la escritura de lo espejado y
+ * de `tenants`; control pierde la escritura de todo lo que no es suyo.
+ */
+function quitadosDe(tabla: string): readonly string[] {
+  const base: readonly string[] = PERMISOS_QUITADOS[tabla as keyof typeof PERMISOS_QUITADOS] ?? [];
+  if (PERFIL === "cliente") {
+    if (TABLAS_SOLO_DE_CONTROL.includes(tabla)) return TODOS;
+    if (ESPEJADAS_DE_SOLO_LECTURA.includes(tabla) || tabla === "tenants") return [...new Set([...base, ...ESCRITURA])];
+  }
+  if (PERFIL === "control" && !TABLAS_DE_CONTROL.includes(tabla)) return [...new Set([...base, ...ESCRITURA])];
+  return base;
+}
+
 /** Lo quitado a propósito (`permisos-quitados.mjs`) falla al revés: por TENERLO. */
 function desviosDe(tabla: string, p: Awaited<ReturnType<typeof privilegiosDe>>): string[] {
-  const quitados: readonly string[] = PERMISOS_QUITADOS[tabla as keyof typeof PERMISOS_QUITADOS] ?? [];
+  const quitados = quitadosDe(tabla);
   const tiene = { SELECT: p.leer, INSERT: p.insertar, UPDATE: p.actualizar, DELETE: p.borrar };
   const privilegios = Object.keys(tiene) as Array<keyof typeof tiene>;
   const falta = privilegios.filter((x) => !quitados.includes(x) && !tiene[x]);
@@ -129,7 +180,11 @@ console.log(`\n▸ ${tablas.length} tabla(s) con columna de inquilino`);
 
 if (faltantes.length === 0) {
   const excepciones = Object.entries(PERMISOS_QUITADOS).map(([tabla, sin]) => `${tabla} sin ${sin.join(", ")}`);
-  console.log(`   ✓ el rol puede leer, insertar, actualizar y borrar en todas — salvo ${excepciones.join("; ")}`);
+  console.log(
+    PERFIL === "unico"
+      ? `   ✓ el rol puede leer, insertar, actualizar y borrar en todas — salvo ${excepciones.join("; ")}`
+      : `   ✓ cada una con lo que dice el perfil ${PERFIL}`
+  );
 } else {
   console.log(`   ✗ ${faltantes.length} con permisos incompletos:`);
   for (const f of faltantes) console.log(`      · ${f}`);
@@ -160,7 +215,8 @@ if (sinPolitica.length === 0) {
 // lista, más los permisos por columna y la función que crea inquilinos.
 console.log("\n▸ Tablas sin columna de inquilino");
 const sinColumna: string[] = [];
-for (const tabla of Object.keys(PERMISOS_QUITADOS)) {
+const sinInquilino = new Set([...Object.keys(PERMISOS_QUITADOS), ...(PERFIL === "cliente" ? TABLAS_SOLO_DE_CONTROL : [])]);
+for (const tabla of sinInquilino) {
   if (tablas.some((t) => t.tabla === tabla)) continue;
   const [e] = (await sql`select to_regclass('public.' || quote_ident(${tabla})) is not null as existe`) as Array<{
     existe: boolean;
@@ -202,7 +258,9 @@ if (!rlsTenants.rls || !rlsTenants.forzado || rlsTenants.politicas === 0) {
 
 // Cada columna con el permiso que le toca: ni una más, ni una menos.
 for (const [tabla, porPrivilegio] of Object.entries(PERMISOS_POR_COLUMNA)) {
-  for (const [privilegio, permitidas] of Object.entries(porPrivilegio)) {
+  for (const [privilegio, columnas] of Object.entries(porPrivilegio)) {
+    // El perfil cliente le quita al rol la tabla entera: ninguna columna.
+    const permitidas = PERFIL === "cliente" && TABLAS_SOLO_DE_CONTROL.includes(tabla) ? [] : columnas;
     const filas = (await sql`
       select a.attname::text as columna,
              has_column_privilege(${rol}::name, 'public.' || quote_ident(${tabla}), a.attname::text, ${privilegio}) as tiene

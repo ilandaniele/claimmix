@@ -61,7 +61,7 @@ const TAMBIEN_EN_CLIENTE = [
 export const TABLAS_SOLO_DE_CONTROL = TABLAS_DE_CONTROL.filter((t) => !TAMBIEN_EN_CLIENTE.includes(t));
 
 /** Lo espejado: en la base del cliente la app lo lee y nada más. */
-const ESPEJADAS_DE_SOLO_LECTURA = ["users", "user", "whatsapp_numeros"];
+export const ESPEJADAS_DE_SOLO_LECTURA = ["users", "user", "whatsapp_numeros"];
 
 /** Las columnas de `tenants` que el equipo edita desde la configuración del inquilino. */
 export const COLUMNAS_DE_CONFIG = PERMISOS_POR_COLUMNA.tenants.UPDATE;

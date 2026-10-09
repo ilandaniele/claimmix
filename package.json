@@ -49,6 +49,7 @@
     "arquitectura": "node scripts/check-architecture.mjs",
     "permisos": "tsx --tsconfig tsconfig.rehearsal.json scripts/prove-grants.mts",
     "bases:empaquetar": "node scripts/empaquetar-bases.mjs",
+    "bases:probar": "tsx --tsconfig tsconfig.rehearsal.json scripts/probar-bases.mts",
     "flujos": "vitest run --config vitest.workflows.config.ts",
     "listo": "pnpm permisos && pnpm capa-datos && pnpm tenancy && pnpm arquitectura",
     "cobertura": "vitest run --coverage",

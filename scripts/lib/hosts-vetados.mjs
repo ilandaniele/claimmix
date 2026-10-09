@@ -26,10 +26,29 @@ export const HOSTS_WEB = new Set(
 const HOST_QA = "claimmix-qa.vercel.app";
 
 /**
+ * Endpoint de la base de control de claimmix-prd (proyecto Neon `claimmix-prd`).
+ * Mientras sea `null`, los scripts de bases se niegan a correr contra prd: se
+ * completa al crear el proyecto, con el prefijo del host sin el sufijo ni
+ * `-pooler`.
+ */
+export const HOST_DE_BASE_PRD = null;
+
+/**
  * Endpoints de Neon con datos reales. Se busca como subcadena del host: el real
  * lleva un sufijo (`-acbz9jqu`) y a veces `-pooler`.
  */
-export const HOSTS_DE_BASE_REALES = new Set(["ep-proud-resonance"]);
+export const HOSTS_DE_BASE_REALES = new Set(["ep-proud-resonance", HOST_DE_BASE_PRD].filter(Boolean));
+
+// Dev (la base viva) y QA: ningún script de bases de prd ni del ensayo los toca.
+const HOSTS_DE_OTROS_AMBIENTES = ["ep-proud-resonance", "ep-wispy-flower"];
+
+// Si alguna está en el entorno, su endpoint también cuenta como de otro ambiente: staging no tiene host fijo en el repo.
+const VARIABLES_DE_OTROS_AMBIENTES = [
+  "STAGING_DATABASE_URL",
+  "STAGING_DATABASE_URL_APP",
+  "QA_DATABASE_URL",
+  "QA_DATABASE_URL_APP",
+];
 
 /**
  * Host en minúsculas y sin punto final. "" si la URL no se lee o no es una URL
@@ -105,6 +124,51 @@ export function vetadoBase(cadena) {
     // Se queda con el texto entero.
   }
   return [...HOSTS_DE_BASE_REALES].some((h) => hosts.includes(h));
+}
+
+// El host y el `?host=` de una cadena, en minúsculas. "" si no se lee.
+function hostsDe(cadena) {
+  try {
+    const u = new URL(String(cadena ?? "").trim().toLowerCase().replace(/^postgres(ql)?:/, "https:"));
+    return [u.host, u.searchParams.get("host") ?? ""].join(" ").trim();
+  } catch {
+    return "";
+  }
+}
+
+// El endpoint de Neon: la primera etiqueta del host, sin `-pooler`.
+function endpointDe(cadena) {
+  return hostsDe(cadena).split(" ")[0].split(".")[0].replace(/-pooler$/, "");
+}
+
+/**
+ * Por qué un script de bases NO puede correr contra esta cadena, o `null` si puede.
+ *
+ * - `ensayo`: el proyecto `claimmix-ensayo`. Rechaza todo lo que sea de datos reales,
+ *   QA o staging.
+ * - `prd`: la base de control de `claimmix-prd`. Exige su endpoint (`HOST_DE_BASE_PRD`)
+ *   y rechaza los de otros ambientes. No usa `vetadoBase`: ese veta justamente prd.
+ *
+ * Nunca devuelve la cadena ni su contraseña: el motivo se imprime tal cual.
+ *
+ * @param {"prd" | "ensayo" | string} ambiente
+ * @param {string | undefined} cadena
+ * @param {Record<string, string | undefined>} [entorno]
+ * @returns {string | null}
+ */
+export function motivoDeVetoDeBases(ambiente, cadena, entorno = process.env) {
+  const hosts = hostsDe(cadena);
+  if (hosts === "") return "la cadena de conexión no se lee";
+
+  const ajenos = VARIABLES_DE_OTROS_AMBIENTES.map((n) => endpointDe(entorno[n])).filter(Boolean);
+  if (HOSTS_DE_OTROS_AMBIENTES.some((h) => hosts.includes(h)) || ajenos.includes(endpointDe(cadena))) {
+    return "es la base de otro ambiente (dev, QA o staging)";
+  }
+
+  if (ambiente === "ensayo") return vetadoBase(cadena) ? "es una base con datos reales" : null;
+  if (ambiente !== "prd") return `ambiente desconocido: ${ambiente}`;
+  if (!HOST_DE_BASE_PRD) return "falta el endpoint de prd (HOST_DE_BASE_PRD en scripts/lib/hosts-vetados.mjs)";
+  return hosts.includes(HOST_DE_BASE_PRD) ? null : "no es el endpoint de claimmix-prd";
 }
 
 const [, archivo, modo, destino] = process.argv;

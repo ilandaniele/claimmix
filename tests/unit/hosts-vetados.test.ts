@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   HOSTS_DE_BASE_REALES,
   HOSTS_WEB,
+  HOST_DE_BASE_PRD,
   conocido,
   hostNormalizado,
+  motivoDeVetoDeBases,
   vetadoBase,
   vetadoWeb,
 } from "../../scripts/lib/hosts-vetados.mjs";
@@ -135,6 +137,70 @@ describe("vetadoBase: qué cadenas de Postgres son las de datos reales", () => {
     undefined,
   ])("%s no lo es", (cadena) => {
     expect(vetadoBase(cadena)).toBe(false);
+  });
+});
+
+describe("motivoDeVetoDeBases: dónde pueden correr los scripts de bases por cliente", () => {
+  const ENSAYO = "postgresql://u:fake-clave@ep-ensayo-bases-123.example.com/neondb";
+  const STAGING = "postgresql://u:fake-clave@ep-staging-uno-456.example.com/neondb";
+
+  it("la lista de datos reales no guarda un null cuando prd todavía no tiene endpoint", () => {
+    expect([...HOSTS_DE_BASE_REALES].every((h) => typeof h === "string" && h !== "")).toBe(true);
+    if (HOST_DE_BASE_PRD) expect(HOSTS_DE_BASE_REALES.has(HOST_DE_BASE_PRD)).toBe(true);
+  });
+
+  it.each([
+    ENSAYO,
+    "postgresql://u:fake-clave@ep-ensayo-bases-123-pooler.example.com/neondb?sslmode=require",
+  ])("ensayo acepta %s", (cadena) => {
+    expect(motivoDeVetoDeBases("ensayo", cadena, {})).toBeNull();
+  });
+
+  it.each([
+    ["dev", "postgresql://u:fake-clave@ep-proud-resonance-acbz9jqu.example.com/neondb"],
+    ["dev con -pooler", "postgresql://u:fake-clave@ep-proud-resonance-acbz9jqu-pooler.example.com/neondb"],
+    ["QA", "postgresql://u:fake-clave@ep-wispy-flower-abc123.example.com/neondb"],
+    ["QA con -pooler", "postgresql://u:fake-clave@ep-wispy-flower-abc123-pooler.example.com/neondb"],
+    ["dev por ?host=", "postgresql://u:fake-clave@ep-ensayo-bases-123.example.com/neondb?host=ep-proud-resonance-acbz9jqu.example.com"],
+  ])("ensayo y prd rechazan la base de %s", (_nombre, cadena) => {
+    for (const ambiente of ["ensayo", "prd"]) {
+      expect(motivoDeVetoDeBases(ambiente, cadena, {})).toContain("otro ambiente");
+    }
+  });
+
+  it("staging no tiene host fijo: se rechaza el endpoint de las variables de staging y QA del entorno, con o sin -pooler", () => {
+    const pooler = "postgresql://u:fake-clave@ep-staging-uno-456-pooler.example.com/neondb";
+    for (const variable of ["STAGING_DATABASE_URL", "STAGING_DATABASE_URL_APP", "QA_DATABASE_URL", "QA_DATABASE_URL_APP"]) {
+      for (const cadena of [STAGING, pooler]) {
+        expect(motivoDeVetoDeBases("ensayo", cadena, { [variable]: STAGING })).toContain("otro ambiente");
+      }
+    }
+    expect(motivoDeVetoDeBases("ensayo", STAGING, {})).toBeNull();
+    expect(motivoDeVetoDeBases("ensayo", ENSAYO, { STAGING_DATABASE_URL: STAGING })).toBeNull();
+  });
+
+  it.each(["", "no-es-una-url", undefined])("una cadena que no se lee (%s) se rechaza", (cadena) => {
+    expect(motivoDeVetoDeBases("ensayo", cadena, {})).toContain("no se lee");
+  });
+
+  it("el motivo no lleva la contraseña ni la cadena", () => {
+    for (const cadena of [ENSAYO, STAGING, "postgresql://u:fake-clave@ep-proud-resonance-acbz9jqu.example.com/neondb"]) {
+      const motivo = motivoDeVetoDeBases("prd", cadena, { STAGING_DATABASE_URL: STAGING }) ?? "";
+      expect(motivo).not.toContain("fake-clave");
+      expect(motivo).not.toContain("example.com");
+    }
+  });
+
+  it("prd sólo acepta el endpoint de claimmix-prd, y mientras no esté cargado no acepta ninguno", () => {
+    const propia = `postgresql://u:fake-clave@${HOST_DE_BASE_PRD ?? "ep-prd-ejemplo-789"}.example.com/neondb`;
+    const motivo = motivoDeVetoDeBases("prd", propia, {});
+    if (HOST_DE_BASE_PRD) expect(motivo).toBeNull();
+    else expect(motivo).toContain("HOST_DE_BASE_PRD");
+    expect(motivoDeVetoDeBases("prd", ENSAYO, {})).not.toBeNull();
+  });
+
+  it("un ambiente que no existe se rechaza", () => {
+    expect(motivoDeVetoDeBases("produccion", ENSAYO, {})).toContain("desconocido");
   });
 });
 

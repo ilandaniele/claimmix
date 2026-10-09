@@ -182,6 +182,7 @@ afterEach(() => {
   delete process.env.BETTER_AUTH_SECRET;
   delete process.env.NEXT_PUBLIC_SITE_URL;
   delete process.env.ALTA_AUTOMATICA;
+  delete process.env.ALTA_NUMERO_AUTOMATICO;
 });
 
 describe("signUp no crea nada", () => {
@@ -619,5 +620,61 @@ describe("empezarAltaConGoogle", () => {
     expect(h.enviar).not.toHaveBeenCalled();
     expect(h.escribir).not.toHaveBeenCalled();
     expect(h.signUpEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("un +54 sin el 9 de los celulares", () => {
+  const SIN_NUEVE = { whatsapp: "+54 11 1234-5678" };
+
+  describe("con el número automático prendido", () => {
+    beforeEach(() => {
+      process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    });
+
+    it("por correo va a /registro?e=celular, sin gastar cupo ni mandar nada", async () => {
+      expect(await pedir({ ...BUENOS, ...SIN_NUEVE })).toBe("/registro?e=celular");
+
+      expect(h.rateLimit).not.toHaveBeenCalled();
+      expect(h.topePorIp).not.toHaveBeenCalled();
+      expect(h.pendientes).toHaveLength(0);
+      expect(h.enviar).not.toHaveBeenCalled();
+    });
+
+    it("con Google va a /registro?e=celular, sin cookie ni Google", async () => {
+      expect(await conGoogle({ ...BUENOS, ...SIN_NUEVE })).toBe("/registro?e=celular");
+
+      expect(h.topePorIp).not.toHaveBeenCalled();
+      expect(h.ponerCookie).not.toHaveBeenCalled();
+      expect(h.signInSocial).not.toHaveBeenCalled();
+    });
+
+    it("con el 9 sigue como siempre, por correo y con Google", async () => {
+      expect(await pedir()).toBe(AVISO);
+      expect(await conGoogle()).toBe(URL_DE_GOOGLE);
+    });
+
+    it("otro país sigue como siempre", async () => {
+      expect(await pedir({ ...BUENOS, whatsapp: "+1 202-555-0123" })).toBe(AVISO);
+      expect(await conGoogle({ ...BUENOS, whatsapp: "+1 202-555-0123" })).toBe(URL_DE_GOOGLE);
+    });
+
+    it("un dato malo sigue siendo `datos`, aunque el número también falte del 9", async () => {
+      expect(await pedir({ ...BUENOS, ...SIN_NUEVE, terminos: undefined })).toBe("/registro?e=datos");
+      expect(await conGoogle({ ...BUENOS, ...SIN_NUEVE, empresa: "" })).toBe("/registro?e=datos");
+    });
+  });
+
+  describe("con el número automático apagado", () => {
+    it("por correo se acepta como hoy y el enlace lleva el número tal cual", async () => {
+      expect(await pedir({ ...BUENOS, ...SIN_NUEVE })).toBe(AVISO);
+
+      expect(abrirToken(elMail().token)?.numero).toBe("+541112345678");
+    });
+
+    it("con Google se acepta como hoy", async () => {
+      expect(await conGoogle({ ...BUENOS, ...SIN_NUEVE })).toBe(URL_DE_GOOGLE);
+
+      expect(h.ponerCookie).toHaveBeenCalledWith(expect.objectContaining({ numero: "+541112345678" }));
+    });
   });
 });

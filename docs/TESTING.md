@@ -1049,8 +1049,10 @@ Detrás de `pnpm smoke` hay un endpoint que corre **dentro** del deploy y report
 lo que puede alcanzar. Sirve solo, sin el script:
 
 ```bash
-curl -H "Authorization: Bearer $CRON_SECRET" https://claimmix.vercel.app/api/health
+curl -H "Authorization: Bearer $CRON_SECRET" https://claimmix-dev.vercel.app/api/health
 ```
+
+En prd (`claimmix.vercel.app`) va con `PRD_CRON_SECRET`.
 
 Responde 200 si no hay nada roto y 503 si hay algo caído, así cualquier cosa que
 mire una URL se entera sin parsear el cuerpo.

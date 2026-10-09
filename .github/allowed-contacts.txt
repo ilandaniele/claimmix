@@ -12,6 +12,7 @@
 541100000001
 541100000000
 54911000000
+54110000000
 
 # El bloque con el que este sistema inventa asegurados. No es un móvil argentino
 # válido: no le pertenece a nadie y nunca va a pertenecerle. El mensajero se

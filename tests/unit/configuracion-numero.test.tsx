@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
  * El panel para conectar el WhatsApp con un código, en /configuracion: qué
- * formularios pinta, qué dice cada resultado y que sigue siendo de servidor
- * (sin JavaScript de cliente: `pnpm peso` no tiene lugar).
+ * formularios pinta, qué dice cada resultado y que sigue siendo de servidor: el
+ * único JavaScript de cliente son los botones (`BotonDeEnvio`), porque `pnpm peso`
+ * no tiene lugar para más.
  */
 
 import { readFileSync } from "node:fs";
@@ -159,6 +160,14 @@ describe("NumeroPanel como código", () => {
 
     expect(fuente).not.toMatch(/["']use client["']/);
     expect(fuente).not.toMatch(/\buse(State|Effect|T|Transition|ActionState)\b/);
+  });
+
+  it("los tres botones son BotonDeEnvio, el único componente de cliente que usa", () => {
+    const fuente = readFileSync("src/app/(app)/configuracion/NumeroPanel.tsx", "utf8");
+
+    expect(fuente.match(/<BotonDeEnvio\b/g)).toHaveLength(3);
+    expect(fuente).not.toMatch(/<button\b/);
+    expect(readFileSync("src/app/(app)/configuracion/BotonDeEnvio.tsx", "utf8")).toMatch(/^"use client"/);
   });
 
   it("no muestra ningún número ni id: sólo recibe la clave del resultado", () => {

@@ -1,6 +1,7 @@
 import type { TranslationKey } from "@/lib/i18n";
 import { esExitoDelNumero, type ResultadoDelNumero } from "@/server/alta/numero-resultados";
 
+import { BotonDeEnvio } from "./BotonDeEnvio";
 import { pedirCodigoDelNumero, verificarCodigoDelNumero } from "./numero-actions";
 
 type Traducir = (clave: TranslationKey) => string;
@@ -21,10 +22,11 @@ const secundario =
   "rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50";
 
 /**
- * Conectar el WhatsApp con un código, en /configuracion (alta automática): pedir
- * el código por SMS o llamada y escribirlo. Es de servidor, igual que `SsoPanel`:
- * dos formularios que llaman a las acciones de `numero-actions.ts`, sin
- * JavaScript de cliente.
+ * Conectar el WhatsApp con un código, en /configuracion y en /preparando (alta
+ * automática): pedir el código por SMS o llamada y escribirlo. Es de servidor,
+ * igual que `SsoPanel`: dos formularios que llaman a las acciones de
+ * `numero-actions.ts`. El único JavaScript de cliente son los botones
+ * (`BotonDeEnvio`), que se apagan mientras el pedido va.
  *
  * La página decide cuándo mostrarlo (bandera prendida, número pedido, prueba
  * vigente). Acá no se muestra el número ni nada que salga de Meta: el aviso es
@@ -54,12 +56,12 @@ export function NumeroPanel({ t, resultado, formularios }: Props) {
           <form action={pedirCodigoDelNumero} className="space-y-2">
             <p className="text-xs text-slate-700">{t("configuracion.numero.paso1")}</p>
             <div className="flex gap-2">
-              <button type="submit" name="metodo" value="SMS" className={principal}>
+              <BotonDeEnvio name="metodo" value="SMS" className={principal}>
                 {t("configuracion.numero.porSms")}
-              </button>
-              <button type="submit" name="metodo" value="VOICE" className={secundario}>
+              </BotonDeEnvio>
+              <BotonDeEnvio name="metodo" value="VOICE" className={secundario}>
                 {t("configuracion.numero.porLlamada")}
-              </button>
+              </BotonDeEnvio>
             </div>
           </form>
 
@@ -80,9 +82,7 @@ export function NumeroPanel({ t, resultado, formularios }: Props) {
                 aria-label={t("configuracion.numero.codigo")}
                 className={campo}
               />
-              <button type="submit" className={principal}>
-                {t("configuracion.numero.conectar")}
-              </button>
+              <BotonDeEnvio className={principal}>{t("configuracion.numero.conectar")}</BotonDeEnvio>
             </div>
           </form>
         </>

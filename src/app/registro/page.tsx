@@ -25,6 +25,7 @@ export const metadata = {
 
 const ERRORES: Record<string, ClaveDelServidor> = {
   datos: "alta.error.datos",
+  celular: "alta.error.celular",
   intentos: "login.errores.demasiados_intentos",
 };
 

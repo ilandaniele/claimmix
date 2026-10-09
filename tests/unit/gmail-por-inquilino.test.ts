@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
  * Correo por inquilino: al conectar, la URL de Google lleva el correo de la
- * sesión como `login_hint`, y el poller no lee la casilla de un inquilino sin
- * servicio.
+ * sesión como `login_hint` y pide sólo `gmail.modify` y `gmail.send`; mientras la
+ * base del espacio se arma no se conecta nada, y el poller no lee la casilla de
+ * un inquilino sin servicio.
  *
  * La base de `listEnabledGmailAccounts` es un drizzle sobre un proxy que anota el
  * SQL y devuelve las filas armadas a mano: así se ve el join de verdad, en la
@@ -17,6 +18,7 @@ const h = vi.hoisted(() => ({
   filas: [] as unknown[][],
   falla: null as Error | null,
   requireRole: vi.fn(),
+  baseLista: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -33,6 +35,7 @@ vi.mock("@/lib/db", () => ({
   }),
 }));
 vi.mock("@/data/scope", () => ({ enControl: vi.fn() }));
+vi.mock("@/server/bases/base-lista", () => ({ baseLista: h.baseLista }));
 vi.mock("@/lib/security/cifrado", () => ({
   cifrar: (valor: string) => `cifrado:${valor}`,
   descifrar: (sobre: string) => sobre.replace(/^cifrado:/, ""),
@@ -50,6 +53,7 @@ beforeEach(() => {
   h.consultas.length = 0;
   h.filas = [];
   h.falla = null;
+  h.baseLista.mockResolvedValue(true);
   vi.stubEnv("GMAIL_CLIENT_ID", "fake-client-id");
   vi.stubEnv("GMAIL_CLIENT_SECRET", "fake-client-secret");
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
@@ -100,6 +104,82 @@ describe("conectar Gmail: login_hint", () => {
     const res = await GET();
 
     expect(new URL(res.headers.get("location") ?? "").pathname).toBe("/login");
+    expect(h.baseLista).not.toHaveBeenCalled();
+  });
+});
+
+describe("conectar Gmail: lo que se le pide a Google", () => {
+  beforeEach(() => {
+    h.requireRole.mockResolvedValue({
+      user: { id: "u-1", email: "ana@example.com" },
+      userRow: { id: "u-1", tenant_id: TENANT, role: "admin" },
+    });
+  });
+
+  it("sólo gmail.modify y gmail.send: sin el permiso de sólo lectura, que modify ya cubre", async () => {
+    const res = await GET();
+
+    const permisos = (new URL(res.headers.get("location") ?? "").searchParams.get("scope") ?? "").split(" ").sort();
+    expect(permisos).toEqual([
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/gmail.send",
+    ]);
+    expect(permisos.join(" ")).not.toContain("readonly");
+  });
+});
+
+describe("conectar Gmail: mientras la base del espacio se arma", () => {
+  function sesion() {
+    h.requireRole.mockResolvedValue({
+      user: { id: "u-1", email: "ana@example.com" },
+      userRow: { id: "u-1", tenant_id: TENANT, role: "admin" },
+    });
+  }
+
+  it("con la base lista sigue a Google como siempre", async () => {
+    sesion();
+
+    const res = await GET();
+
+    expect(h.baseLista).toHaveBeenCalledWith("u-1");
+    expect(new URL(res.headers.get("location") ?? "").origin).toBe("https://accounts.google.com");
+  });
+
+  it("con la base todavía en marcha vuelve a /preparando, sin URL de Google ni cookie de estado", async () => {
+    sesion();
+    h.baseLista.mockResolvedValue(false);
+
+    const res = await GET();
+
+    expect(res.headers.get("location")).toBe("https://app.example.com/preparando");
+    expect(res.cookies.get(COOKIE_ESTADO_OAUTH)).toBeUndefined();
+  });
+
+  it("lo mira con el usuario de la sesión, nunca con algo del pedido", async () => {
+    sesion();
+
+    await GET();
+
+    expect(h.baseLista).toHaveBeenCalledTimes(1);
+    expect(h.baseLista.mock.calls[0]).toEqual(["u-1"]);
+  });
+
+  it("antes de eso pide el rol: sin rol no se llega a mirar la base", async () => {
+    h.requireRole.mockRejectedValue(new Error("FORBIDDEN_ROLE"));
+
+    await GET();
+
+    expect(h.baseLista).not.toHaveBeenCalled();
+  });
+
+  it("si no se puede saber, no deja conectar: vuelve al login como cualquier otra falla", async () => {
+    sesion();
+    h.baseLista.mockRejectedValue(new Error("la base no contesta"));
+
+    const res = await GET();
+
+    expect(new URL(res.headers.get("location") ?? "").pathname).toBe("/login");
+    expect(res.cookies.get(COOKIE_ESTADO_OAUTH)).toBeUndefined();
   });
 });
 

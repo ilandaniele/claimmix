@@ -233,7 +233,7 @@ describe("/alta con el formulario", () => {
     expect(container.querySelector("script")).not.toBeNull();
   });
 
-  it.each(["datos", "cerrada", "intentos", "falla"])(
+  it.each(["datos", "cerrada", "intentos", "falla", "celular"])(
     "tras el error %s muestra su texto y NO se envía solo",
     async (motivo) => {
       h.cookie.mockResolvedValue(DATOS);

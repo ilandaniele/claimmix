@@ -1199,6 +1199,7 @@ console.log("\n▸ enControl sólo desde su lista");
     // El alta
     "src/server/alta/crear-inquilino.ts",
     "src/server/alta/invitacion.ts",
+    "src/server/alta/numero-automatico.ts",
     "src/server/alta/panel-operador.ts",
     // Casillas, formulario y SSO
     "src/server/email/gmail/accounts.ts",
@@ -1250,6 +1251,7 @@ console.log("\n▸ enControl sólo desde su lista");
 console.log("\n▸ Lo de control va por enControl");
 {
   const SOLO_DE_CONTROL = [
+    "src/server/alta/numero-automatico.ts",
     "src/server/email/gmail/accounts.ts",
     "src/app/api/admin/gmail-accounts/route.ts",
     "src/app/api/admin/gmail-accounts/callback/route.ts",

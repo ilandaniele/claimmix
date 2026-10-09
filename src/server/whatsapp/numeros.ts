@@ -49,6 +49,23 @@ export function credencialDelEntorno(): CredencialesMeta | null {
   };
 }
 
+export interface WebhookDelEntorno {
+  url: string;
+  verifyToken: string;
+}
+
+/**
+ * El webhook que Meta tiene que usar por cada número que se suma: el de este
+ * ambiente, con el token del apretón de manos. Null si falta alguno de los dos
+ * o si el sitio no es https: Meta no llama a otra cosa.
+ */
+export function webhookDelEntorno(): WebhookDelEntorno | null {
+  const sitio = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (!sitio || !verifyToken || !/^https:\/\/[^/\s]/i.test(sitio) || !URL.canParse(sitio)) return null;
+  return { url: `${sitio}/api/webhooks/whatsapp`, verifyToken };
+}
+
 /**
  * A qué inquilino va cada `phone_number_id` del lote: id -> tenant_id. Un id
  * que no está en el mapa se descarta.

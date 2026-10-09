@@ -11,6 +11,12 @@
  *   - `verificarCodigo`: se lo entrega a Meta, registra el número y lo deja
  *     'conectado'.
  *
+ * Con `BASE_POR_CLIENTE` el número vive en control: se lee y se escribe con
+ * `enControl`, y cada paso que se guarda se espeja a la base del cliente (la copia
+ * que lee /configuracion). El espejo nunca hace fallar el paso. Un número queda
+ * 'conectado' sólo con su webhook propio puesto y leído de Graph: sin él, lo que le
+ * escriban caería en el webhook de la WABA, que puede ser el de otro ambiente.
+ *
  * Ninguna de las dos tira: lo inesperado vuelve como 'meta' y se anota. Todo caso
  * raro termina en 'revision' más un aviso al operador, que lo conecta a mano desde
  * /admin/altas o borra el número que sobre: nunca queda uno conectado a medias.
@@ -32,7 +38,7 @@ import "server-only";
 import { eq, ne, sql } from "drizzle-orm";
 import { after } from "next/server";
 
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { pruebaVencida } from "@/lib/billing/plans";
 import { filasDe } from "@/lib/db/filas";
 import { tenants, whatsappNumeros } from "@/lib/db/schema";
@@ -45,21 +51,25 @@ import { avisarNumeroEnRevision, type MotivoDeRevision } from "@/server/alta/avi
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import type { ResultadoDelNumero } from "@/server/alta/numero-resultados";
 import { mismoNumero } from "@/server/alta/validar";
+import { esNumeroDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
+import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { codigoPg } from "@/server/core-sync/config";
 import {
   agregarNumero,
   codigoYaVerificado,
+  fijarWebhookDelNumero,
   ID_GUARDABLE,
   numeroYaRegistrado,
   partirNumero,
   pedirCodigoAMeta,
   registrarNumero,
   verificarCodigoEnMeta,
+  webhookPropioEs,
   type CredencialDeAlta,
   type FallaDeGraph,
   type MetodoDeCodigo,
 } from "@/server/whatsapp/alta-de-numero";
-import { credencialDelEntorno, idDeLaPlataforma } from "@/server/whatsapp/numeros";
+import { credencialDelEntorno, idDeLaPlataforma, webhookDelEntorno, type WebhookDelEntorno } from "@/server/whatsapp/numeros";
 import { recorrerLaWaba } from "@/server/whatsapp/verificar-en-meta";
 
 const HORA_MS = 60 * 60_000;
@@ -151,12 +161,12 @@ async function tomar(lista: Cupo[]): Promise<Toma> {
 
 /**
  * La fila del número del espacio y lo que decide si puede seguir, en una sola
- * consulta. `funcion` dice si la 0049 está aplicada. 42P01 y 42703 (la 0048 sin
- * aplicar) cuentan como «sin fila».
+ * consulta, contra control: la copia del cliente puede ir atrás. `funcion` dice si
+ * la 0049 está aplicada. 42P01 y 42703 (la 0048 sin aplicar) cuentan como «sin fila».
  */
 async function leerFila(tenantId: string) {
   try {
-    const filas = await enTenant({ tenantId }, (db) =>
+    const filas = await enControl({ tenantId }, (db) =>
       db
         .select({
           numero_e164: whatsappNumeros.numero_e164,
@@ -182,13 +192,14 @@ async function leerFila(tenantId: string) {
 
 type Fila = NonNullable<Awaited<ReturnType<typeof leerFila>>>;
 
-/** Por qué este espacio no puede pasar por acá, o null si puede. Lo mismo que vuelve a mirar la función de la 0049. */
+/** Por qué este espacio no puede pasar por acá, o null si puede. Casi todo lo vuelve a mirar la función de la 0049. */
 function porQueNo(fila: Fila): string | null {
   if (fila.funcion !== true) return "sin_migracion";
   if (fila.autoalta !== true) return "no_es_alta_automatica";
   if (fila.billing_status !== "trial" && fila.billing_status !== "active") return "sin_servicio";
   if (pruebaVencida(fila, new Date())) return "prueba_vencida";
   if (fila.estado !== "pedido") return "estado";
+  if (esNumeroDeOtroAmbiente(fila.phone_number_id ?? "", fila.numero_e164)) return "de_otro_ambiente";
   return null;
 }
 
@@ -202,6 +213,7 @@ async function filaHabilitada(tenantId: string): Promise<Fila | null> {
   if (!fila || motivo) {
     logger.info({ tenantId, motivo }, "alta.numero_automatico_no_aplica");
     if (!fila) after(() => avisarNumeroEnRevision("sin_fila", tenantId));
+    else if (motivo === "de_otro_ambiente") after(() => avisarNumeroEnRevision("de_otro_ambiente", tenantId));
     return null;
   }
   return fila;
@@ -223,7 +235,9 @@ const nombreDe = (e: unknown) => (e instanceof Error ? e.name : "UnknownError");
 
 /**
  * Escribe un paso con la función de la 0049: 'agregado' (el id que Graph dio) o
- * 'conectado'. Nunca tira: lo que no sea 'ok' lo decide quien llama.
+ * 'conectado'. Nunca tira: lo que no sea 'ok' lo decide quien llama. Un paso que
+ * quedó en control se espeja a la base del cliente antes de contestar, porque es la
+ * copia que lee la pantalla a la que vuelve la persona.
  */
 async function guardarPaso(
   quien: QuienPide,
@@ -233,7 +247,7 @@ async function guardarPaso(
   idPlataforma: string
 ): Promise<Guardado> {
   try {
-    const filas = await enTenant({ tenantId: quien.tenantId }, (db) =>
+    const filas = await enControl({ tenantId: quien.tenantId }, (db) =>
       db.execute(sql`
         select public.claimmix_numero_automatico(
           ${quien.tenantId}::uuid, ${quien.userId}::uuid, ${paso}::text, ${phoneNumberId}::text,
@@ -244,7 +258,9 @@ async function guardarPaso(
     const crudo = filasDe<{ r?: unknown }>(filas)[0]?.r;
     const r = (typeof crudo === "string" ? JSON.parse(crudo) : crudo) as { resultado?: unknown } | null | undefined;
     const resultado = r?.resultado;
-    return typeof resultado === "string" && GUARDADOS.has(resultado) ? (resultado as Guardado) : "error";
+    const guardado = typeof resultado === "string" && GUARDADOS.has(resultado) ? (resultado as Guardado) : "error";
+    if (guardado === "ok") await espejarSinFallar(quien.tenantId);
+    return guardado;
   } catch (e) {
     const codigo = codigoPg(e);
     if (codigo === "23505") return "id_ocupado";
@@ -276,17 +292,23 @@ function sinDueno(quien: QuienPide, paso: "agregado" | "conectado", guardado: Gu
 interface Entorno {
   cred: CredencialDeAlta;
   plataforma: string;
+  webhook: WebhookDelEntorno;
 }
 
-/** El token y la WABA de la plataforma, y su número (que nunca se toca). Null si falta algo; quien llama avisa. */
+/**
+ * El token y la WABA de la plataforma, su número (que nunca se toca) y el webhook de
+ * este ambiente. Null si falta algo; quien llama avisa. Sin webhook no se toca Graph:
+ * un número sumado así quedaría en el de la WABA.
+ */
 function entornoDeMeta(): Entorno | null {
   const entorno = credencialDelEntorno();
   const plataforma = idDeLaPlataforma();
-  if (!entorno?.wabaId || !plataforma) {
+  const webhook = webhookDelEntorno();
+  if (!entorno?.wabaId || !plataforma || !webhook) {
     logger.warn({}, "alta.numero_automatico_sin_credencial");
     return null;
   }
-  return { cred: { accessToken: entorno.accessToken, wabaId: entorno.wabaId }, plataforma };
+  return { cred: { accessToken: entorno.accessToken, wabaId: entorno.wabaId }, plataforma, webhook };
 }
 
 type Paso<T> = { ok: true; valor: T } | { ok: false; resultado: ResultadoDelNumero };
@@ -403,8 +425,22 @@ export async function pedirCodigo(quien: QuienPide, metodo: MetodoDeCodigo): Pro
 /* ── Verificar el código ──────────────────────────────────────────────────── */
 
 /**
+ * Le pone al número el webhook de este ambiente y lo lee de Graph. null si quedó; si
+ * no, qué contestar. Poner no alcanza: lo que Graph devuelve es lo único que vale.
+ */
+async function fijarElWebhook(tenantId: string, id: string, entorno: Entorno): Promise<ResultadoDelNumero | null> {
+  const puesto = await fijarWebhookDelNumero(entorno.cred, id, entorno.webhook);
+  if (!puesto.ok) return deFalla(puesto.falla, tenantId);
+  const leido = await webhookPropioEs(entorno.cred, id, entorno.webhook.url);
+  if (!leido.ok) return deFalla(leido.falla, tenantId);
+  return leido.valor ? null : aRevision("sin_webhook", tenantId);
+}
+
+/**
  * Registra el número en Cloud API (si Meta no lo tiene ya registrado: `register`
- * pone un PIN nuevo cada vez y no se repite) y lo deja 'conectado'.
+ * pone un PIN nuevo cada vez y no se repite), le pone su webhook propio y lo deja
+ * 'conectado'. Si el webhook no queda, el número queda registrado y 'pedido': otro
+ * intento de la persona repite el webhook sin volver a registrar.
  */
 async function registrarYConectar(quien: QuienPide, id: string, entorno: Entorno): Promise<ResultadoDelNumero> {
   const { tenantId } = quien;
@@ -419,6 +455,9 @@ async function registrarYConectar(quien: QuienPide, id: string, entorno: Entorno
     const registro = await registrarNumero(entorno.cred, id);
     if (!registro.ok) return deFalla(registro.falla, tenantId);
   }
+
+  const sinWebhook = await fijarElWebhook(tenantId, id, entorno);
+  if (sinWebhook) return sinWebhook;
 
   const guardado = await guardarPaso(quien, "conectado", id, entorno.cred.wabaId, entorno.plataforma);
   return guardado === "ok" ? "conectado" : sinDueno(quien, "conectado", guardado);

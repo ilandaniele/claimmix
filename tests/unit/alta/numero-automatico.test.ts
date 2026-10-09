@@ -95,7 +95,13 @@ vi.mock("@/server/whatsapp/alta-de-numero", async (importOriginal) => ({
 }));
 vi.mock("@/server/alta/aviso-operador", () => ({ avisarNumeroEnRevision: h.aviso }));
 
-import { pedirCodigo, topesDelNumero, verificarCodigo, type QuienPide } from "@/server/alta/numero-automatico";
+import {
+  numeroPorConectar,
+  pedirCodigo,
+  topesDelNumero,
+  verificarCodigo,
+  type QuienPide,
+} from "@/server/alta/numero-automatico";
 
 const HORA_MS = 60 * 60_000;
 const DIA_MS = 24 * HORA_MS;
@@ -1235,5 +1241,73 @@ describe("lo que no se anota ni se guarda", () => {
       for (const [, id] of f.mock.calls) expect(id).not.toBe(PLATAFORMA);
     }
     for (const consulta of h.ejecutadas) expect(valoresDe(consulta)[3]).not.toBe(PLATAFORMA);
+  });
+});
+
+describe("numeroPorConectar", () => {
+  const faltaTabla = (code: string) => Object.assign(new Error("no existe"), { code });
+
+  it("un espacio que puede seguir y tiene el número pedido: sí", async () => {
+    expect(await numeroPorConectar(TENANT)).toBe(true);
+    expect(h.enControl).toHaveBeenCalledWith({ tenantId: TENANT });
+  });
+
+  it("sin fila de número también dice que sí: no distingue «sin fila» de «pedido» (H3)", async () => {
+    h.leer.mockResolvedValue([]);
+
+    expect(await numeroPorConectar(TENANT)).toBe(true);
+  });
+
+  it.each([
+    ["la 0049 no está aplicada", { funcion: false }],
+    ["no es del alta automática", { autoalta: false }],
+    ["el espacio está suspendido", { billing_status: "suspended" }],
+    ["el espacio está dado de baja", { billing_status: "churned" }],
+    ["la prueba venció", { trial_ends_at: "2000-01-01T00:00:00.000Z" }],
+    ["el número ya está conectado", { estado: "conectado" }],
+    ["el número está suspendido", { estado: "suspendido" }],
+  ])("no si %s", async (_caso, cambios) => {
+    h.leer.mockResolvedValue([fila(cambios)]);
+
+    expect(await numeroPorConectar(TENANT)).toBe(false);
+  });
+
+  it("no gasta nada: ni cupo, ni Graph, ni aviso al operador, ni registro", async () => {
+    h.leer.mockResolvedValue([]);
+    await numeroPorConectar(TENANT);
+    h.leer.mockResolvedValue([fila({ estado: "conectado" })]);
+    await numeroPorConectar(TENANT);
+
+    expect(h.rateLimit).not.toHaveBeenCalled();
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+    sinGraph();
+    expect(h.aviso).not.toHaveBeenCalled();
+    expect(h.after).not.toHaveBeenCalled();
+    expect(h.info).not.toHaveBeenCalled();
+    expect(h.warn).not.toHaveBeenCalled();
+    expect(h.ejecutadas).toHaveLength(0);
+  });
+
+  it("las tablas de la 0048 que faltan cuentan como sin fila, sin tirar", async () => {
+    h.leer.mockRejectedValue(faltaTabla("42P01"));
+    expect(await numeroPorConectar(TENANT)).toBe(true);
+
+    h.leer.mockRejectedValue(faltaTabla("42703"));
+    expect(await numeroPorConectar(TENANT)).toBe(true);
+  });
+
+  it("si control no contesta, no tira: dice que no y no deja registro (se llama en cada refresco)", async () => {
+    h.leer.mockRejectedValue(Object.assign(new TypeError("fake-secreto en el mensaje"), { code: "57P01" }));
+
+    expect(await numeroPorConectar(TENANT)).toBe(false);
+    expect(h.warn).not.toHaveBeenCalled();
+    expect(h.info).not.toHaveBeenCalled();
+    expect(h.aviso).not.toHaveBeenCalled();
+  });
+
+  it("no mira la bandera: eso lo decide la pantalla antes de preguntar", async () => {
+    delete process.env.ALTA_NUMERO_AUTOMATICO;
+
+    expect(await numeroPorConectar(TENANT)).toBe(true);
   });
 });

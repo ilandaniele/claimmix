@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   ERRORES_DE_ALTA,
   EMPRESA_MAXIMA,
+  faltaElNueveArgentino,
   mismoNumero,
   normalizarE164,
   validarEmpresa,
@@ -123,8 +124,31 @@ describe("mismoNumero", () => {
   });
 });
 
+describe("faltaElNueveArgentino", () => {
+  it.each(["+541112345678", "+541123456789", "+541100000000"])("un +54 de diez dígitos sin el 9 falta: %s", (e164) => {
+    expect(faltaElNueveArgentino(e164)).toBe(true);
+  });
+
+  it.each(["+5492916426930", "+5491123456789"])("con el 9 no falta nada: %s", (e164) => {
+    expect(faltaElNueveArgentino(e164)).toBe(false);
+  });
+
+  it.each(["+12025550123", "+442025550123", "+54911000000", "+54110000000", "+5411000000001"])(
+    "otros países y otros largos quedan como siempre: %s",
+    (e164) => {
+      expect(faltaElNueveArgentino(e164)).toBe(false);
+    },
+  );
+
+  it("es lo que saca normalizarE164 de lo que escribe la gente, que no lo cambia", () => {
+    expect(normalizarE164("+54 11 1234 5678")).toBe("+541112345678");
+    expect(faltaElNueveArgentino(normalizarE164("+54 11 1234-5678")!)).toBe(true);
+    expect(faltaElNueveArgentino(normalizarE164("+54 9 11 1234-5678")!)).toBe(false);
+  });
+});
+
 describe("ERRORES_DE_ALTA", () => {
-  it("son los cuatro motivos que la pantalla sabe decir", () => {
-    expect([...ERRORES_DE_ALTA]).toEqual(["datos", "cerrada", "intentos", "falla"]);
+  it("son los cinco motivos que la pantalla sabe decir", () => {
+    expect([...ERRORES_DE_ALTA]).toEqual(["datos", "cerrada", "intentos", "falla", "celular"]);
   });
 });

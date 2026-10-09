@@ -7,6 +7,10 @@
  *   3. Umbrales de la IA: confidence threshold + monthly budget cap (read-only for non-admin)
  *   4. Info del sistema: app version, Node version (server env), region
  *
+ * Arriba de todo, sólo para admin: lo que dejó conectar Gmail (`?gmail=`) y, en un
+ * espacio del alta automática, los «Primeros pasos» que todavía faltan (correo y
+ * WhatsApp). Salen de lo que hay conectado, no de la dirección.
+ *
  * Server Component fetches user data; ConfiguracionClient handles the
  * password change form (requires interactivity).
  */
@@ -35,7 +39,9 @@ import { SsoPanel } from "./SsoPanel";
 import { esResultadoSso } from "./sso-resultados";
 import { MONTOS_POR_DEFECTO } from "@/core/case/monto-estimado";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
-import { esResultadoDelNumero } from "@/server/alta/numero-resultados";
+import { panelDelNumero } from "@/server/alta/numero-resultados";
+import { pasosHechos } from "@/server/alta/pasos-hechos";
+import { esExitoDeGmail, esResultadoGmail } from "./gmail-resultados";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -85,17 +91,32 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// Un paso de /configuracion?primeros=1: qué conectar y el botón que lleva ahí.
-function Paso({ texto, href, boton }: { texto: string; href: string; boton: string }) {
+// Un paso de los primeros pasos: qué conectar y el botón que lleva ahí, o el panel mismo en `children`.
+function Paso({
+  texto,
+  href,
+  boton,
+  children,
+}: {
+  texto: string;
+  href?: string;
+  boton?: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3">
-      <span className="text-sm text-slate-700">{texto}</span>
-      <a
-        href={href}
-        className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-      >
-        {boton}
-      </a>
+    <li>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-sm text-slate-700">{texto}</span>
+        {href && boton && (
+          <a
+            href={href}
+            className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          >
+            {boton}
+          </a>
+        )}
+      </div>
+      {children}
     </li>
   );
 }
@@ -105,9 +126,9 @@ function Paso({ texto, href, boton }: { texto: string; href: string; boton: stri
 export default async function ConfiguracionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ vinculo?: string; sso?: string; wa?: string; primeros?: string }>;
+  searchParams: Promise<{ vinculo?: string; sso?: string; wa?: string; gmail?: string }>;
 }) {
-  const { vinculo, sso, wa, primeros } = await searchParams;
+  const { vinculo, sso, wa, gmail } = await searchParams;
   const locale = await getAccountLocale();
   const t = getT(locale);
 
@@ -123,10 +144,14 @@ export default async function ConfiguracionPage({
   const esAdmin = (ADMIN_ROLES as string[]).includes(role);
   const email: string = session.user.email ?? "—";
 
-  const [userHasGeminiKey, admin, panelDelSso] = await Promise.all([
+  // Un espacio del alta automática: el único que tiene «Primeros pasos».
+  const esAutoalta = esAdmin && userRow?.autoalta === true;
+
+  const [userHasGeminiKey, admin, panelDelSso, pasos] = await Promise.all([
     getUserGeminiKey(session.user.id).then(Boolean, () => false),
     esAdmin && userRow ? paraAdmin(userRow.tenant_id) : null,
     esAdmin && userRow ? ssoParaAdmin(userRow.tenant_id) : null,
+    esAutoalta && userRow ? pasosHechos(userRow.tenant_id) : null,
   ]);
 
   // AI thresholds — read from env with documented defaults
@@ -137,8 +162,17 @@ export default async function ConfiguracionPage({
 
   // El número por código: la bandera y la 0049 (sin ella, lo de siempre), lo que dejó la última acción y si todavía hay un número por conectar.
   const automatico = numeroAutomatico() && admin?.prueba?.porCodigo === true;
-  const resultadoDelNumero = esResultadoDelNumero(wa) ? wa : null;
   const formulariosDelNumero = admin?.prueba?.numero === "pedido" && admin.prueba.dias !== 0;
+  const panelDelCodigo = panelDelNumero(automatico, formulariosDelNumero, wa);
+
+  // Los primeros pasos salen de lo que falta, no de la dirección. El WhatsApp sólo cuenta si hay dónde conectarlo.
+  const faltaGmail = pasos !== null && !pasos.gmail;
+  const faltaWhatsapp = pasos !== null && admin?.prueba !== undefined && !pasos.whatsapp;
+  const primerosPasos = faltaGmail || faltaWhatsapp;
+  // El panel del código vive en un solo lugar: en el paso del WhatsApp si está, y si no en la sección de la prueba.
+  const numeroEnPrimeros = faltaWhatsapp && panelDelCodigo?.formularios === true;
+
+  const resultadoGmail = esAdmin && esResultadoGmail(gmail) ? gmail : null;
 
   // System info
   const appVersion = packageJson.version;
@@ -153,22 +187,48 @@ export default async function ConfiguracionPage({
       </div>
 
       <div className="space-y-6">
-        {/* ── Primeros pasos (recién dado de alta, sólo admin): conectar el correo y el WhatsApp ── */}
-        {esAdmin && primeros === "1" && (
+        {/* ── Lo que pasó al conectar Gmail (sólo admin): una lista cerrada, nunca el texto de la dirección ── */}
+        {resultadoGmail && (
+          <p
+            role="status"
+            className={`rounded border px-3 py-2 text-xs ${
+              esExitoDeGmail(resultadoGmail)
+                ? "border-green-200 bg-green-50 text-green-800"
+                : "border-red-200 bg-red-50 text-red-800"
+            }`}
+          >
+            {t(`configuracion.gmail.r.${resultadoGmail}`)}
+            {esExitoDeGmail(resultadoGmail) && !primerosPasos && (
+              <a href="/bandeja" className="ml-2 font-medium underline">
+                {t("configuracion.gmail.irABandeja")}
+              </a>
+            )}
+          </p>
+        )}
+
+        {/* ── Primeros pasos (espacio recién dado de alta, sólo admin): lo que falta conectar, el correo y el WhatsApp ── */}
+        {primerosPasos && (
           <Section title={t("configuracion.primeros.titulo")}>
-            <ol className="space-y-3">
-              <Paso
-                texto={t("configuracion.primeros.gmail")}
-                href="/api/admin/gmail-accounts/connect"
-                boton={t("gmail.accounts.connect")}
-              />
-              {admin?.prueba && (
+            <ol className="list-decimal space-y-4 pl-5">
+              {faltaGmail && (
                 <Paso
-                  texto={t("configuracion.primeros.whatsapp")}
-                  href="#whatsapp"
-                  boton={t("configuracion.primeros.conectarWhatsapp")}
+                  texto={t("configuracion.primeros.gmail")}
+                  href="/api/admin/gmail-accounts/connect"
+                  boton={t("gmail.accounts.connect")}
                 />
               )}
+              {faltaWhatsapp &&
+                (numeroEnPrimeros && panelDelCodigo ? (
+                  <Paso texto={t("configuracion.primeros.whatsapp")}>
+                    <NumeroPanel t={t} resultado={panelDelCodigo.resultado} formularios={panelDelCodigo.formularios} />
+                  </Paso>
+                ) : (
+                  <Paso
+                    texto={t("configuracion.primeros.whatsapp")}
+                    href="#whatsapp"
+                    boton={t("configuracion.primeros.conectarWhatsapp")}
+                  />
+                ))}
             </ol>
           </Section>
         )}
@@ -192,8 +252,8 @@ export default async function ConfiguracionPage({
         {admin?.prueba && (
           <Section id="whatsapp" title={t("configuracion.prueba.titulo")}>
             <PruebaPanel prueba={admin.prueba} t={t} automatico={automatico} />
-            {automatico && (formulariosDelNumero || resultadoDelNumero) && (
-              <NumeroPanel t={t} resultado={resultadoDelNumero} formularios={formulariosDelNumero} />
+            {panelDelCodigo && !numeroEnPrimeros && (
+              <NumeroPanel t={t} resultado={panelDelCodigo.resultado} formularios={panelDelCodigo.formularios} />
             )}
           </Section>
         )}

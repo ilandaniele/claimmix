@@ -1201,6 +1201,7 @@ console.log("\n▸ enControl sólo desde su lista");
     "src/server/alta/invitacion.ts",
     "src/server/alta/numero-automatico.ts",
     "src/server/alta/panel-operador.ts",
+    "src/server/alta/pasos-hechos.ts",
     // Casillas, formulario y SSO
     "src/server/email/gmail/accounts.ts",
     "src/app/api/admin/gmail-accounts/route.ts",
@@ -1254,6 +1255,7 @@ console.log("\n▸ Lo de control va por enControl");
 {
   const SOLO_DE_CONTROL = [
     "src/server/alta/numero-automatico.ts",
+    "src/server/alta/pasos-hechos.ts",
     "src/server/email/gmail/accounts.ts",
     "src/app/api/admin/gmail-accounts/route.ts",
     "src/app/api/admin/gmail-accounts/callback/route.ts",

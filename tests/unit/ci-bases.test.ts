@@ -74,19 +74,19 @@ describe("ci.yml: el job de bases por cliente", () => {
     expect(script.indexOf("--comprobar")).toBeLessThan(script.indexOf("bases:probar"));
   });
 
-  it("usa las dos cadenas `ENSAYO_BASES_*` y ninguna otra base", () => {
-    expect(paso).toContain("ENSAYO_BASES_DATABASE_URL: ${{ secrets.ENSAYO_BASES_DATABASE_URL }}");
-    expect(paso).toContain("ENSAYO_BASES_DATABASE_URL_APP: ${{ secrets.ENSAYO_BASES_DATABASE_URL_APP }}");
+  it("usa las dos cadenas `PRD_ENSAYO_*` y ninguna otra base", () => {
+    expect(paso).toContain("PRD_ENSAYO_DATABASE_URL: ${{ secrets.PRD_ENSAYO_DATABASE_URL }}");
+    expect(paso).toContain("PRD_ENSAYO_DATABASE_URL_APP: ${{ secrets.PRD_ENSAYO_DATABASE_URL_APP }}");
     const secretos = [...job.matchAll(/secrets\.(\w+)/g)].map((m) => m[1]);
     expect(secretos.length).toBeGreaterThan(0);
-    for (const s of secretos) expect(s).toMatch(/^ENSAYO_BASES_DATABASE_URL(_APP)?$/);
+    for (const s of secretos) expect(s).toMatch(/^PRD_ENSAYO_DATABASE_URL(_APP)?$/);
     expect(job).not.toMatch(/^\s+DATABASE_URL(_APP)?:/m);
   });
 
   it("`HAY_BASES` exige los dos secretos, sin dejar uno pelado entre && y ||", () => {
     const linea = job.split("\n").find((l) => l.includes("HAY_BASES:"));
-    expect(linea).toContain("secrets.ENSAYO_BASES_DATABASE_URL != ''");
-    expect(linea).toContain("secrets.ENSAYO_BASES_DATABASE_URL_APP != ''");
+    expect(linea).toContain("secrets.PRD_ENSAYO_DATABASE_URL != ''");
+    expect(linea).toContain("secrets.PRD_ENSAYO_DATABASE_URL_APP != ''");
     expect(linea).not.toMatch(/&&\s*secrets\.\w+\s*\|\|/);
   });
 

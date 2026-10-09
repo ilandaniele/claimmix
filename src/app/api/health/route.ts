@@ -36,7 +36,7 @@ import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { basePorCliente } from "@/data/bases";
-import { enTenant } from "@/data/scope";
+import { enControl, enTenant } from "@/data/scope";
 
 const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
 import { medirBases } from "./bases";
@@ -458,7 +458,7 @@ async function checkGmail(): Promise<Check> {
     // columns are called, and reported "gmail no se pudo verificar" on a
     // perfectly healthy mailbox. A health check that cries wolf gets ignored,
     // which is worse than not having one.
-    const rows = await enTenant({ tenantId }, (db) =>
+    const rows = await enControl({ tenantId }, (db) =>
       db
         .select({
           email: gmailAccounts.email,

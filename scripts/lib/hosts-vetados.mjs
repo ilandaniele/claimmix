@@ -31,7 +31,7 @@ const HOST_QA = "claimmix-qa.vercel.app";
  * completa al crear el proyecto, con el prefijo del host sin el sufijo ni
  * `-pooler`.
  */
-export const HOST_DE_BASE_PRD = null;
+export const HOST_DE_BASE_PRD = "ep-sweet-salad";
 
 /**
  * Endpoints de Neon con datos reales. Se busca como subcadena del host: el real
@@ -144,7 +144,7 @@ function endpointDe(cadena) {
 /**
  * Por qué un script de bases NO puede correr contra esta cadena, o `null` si puede.
  *
- * - `ensayo`: el proyecto `claimmix-ensayo`. Rechaza todo lo que sea de datos reales,
+ * - `ensayo`: la rama `ensayo` del proyecto `claimmix-prd`. Rechaza todo lo que sea de datos reales,
  *   QA o staging.
  * - `prd`: la base de control de `claimmix-prd`. Exige su endpoint (`HOST_DE_BASE_PRD`)
  *   y rechaza los de otros ambientes. No usa `vetadoBase`: ese veta justamente prd.

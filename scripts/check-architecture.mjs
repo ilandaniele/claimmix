@@ -1212,6 +1212,8 @@ console.log("\n▸ enControl sólo desde su lista");
     "src/server/sso/usuarios.ts",
     "src/server/sso/panel.ts",
     "src/app/api/admin/sso/route.ts",
+    // La salud mira la casilla, que vive en control
+    "src/app/api/health/route.ts",
     // Identidad y membresía
     "src/app/api/admin/users/[id]/route.ts",
     "src/app/api/admin/users/[id]/sessions/route.ts",

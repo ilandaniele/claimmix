@@ -7,7 +7,7 @@
  *
  * - prd: `DATABASE_URL` y `DATABASE_URL_APP` de `.env.prd.local`, nunca del
  *   entorno del proceso.
- * - ensayo: `ENSAYO_BASES_DATABASE_URL` y `ENSAYO_BASES_DATABASE_URL_APP`, del
+ * - ensayo: `PRD_ENSAYO_DATABASE_URL` y `PRD_ENSAYO_DATABASE_URL_APP`, del
  *   entorno (CI) o de `.env.local`.
  *
  * Tira un Error con el motivo, sin la cadena: lleva la contraseña.
@@ -19,8 +19,8 @@ const AMBIENTES = {
   prd: { archivo: "./.env.prd.local", dueno: "DATABASE_URL", app: "DATABASE_URL_APP", delEntorno: false },
   ensayo: {
     archivo: "./.env.local",
-    dueno: "ENSAYO_BASES_DATABASE_URL",
-    app: "ENSAYO_BASES_DATABASE_URL_APP",
+    dueno: "PRD_ENSAYO_DATABASE_URL",
+    app: "PRD_ENSAYO_DATABASE_URL_APP",
     delEntorno: true,
   },
 };

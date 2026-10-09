@@ -56,7 +56,7 @@ algo de verdad, para comprobar que la salida funciona.
 `pnpm arquitectura` comprueba que ninguna consulta se salga de la capa de datos
 y `pnpm permisos` que el rol restringido pueda hacer lo que ella le pide.
 `pnpm bases:probar` da de alta dos inquilinos con una base cada uno y comprueba el
-aislamiento, el espejo y el barrido, contra el proyecto de Neon `claimmix-ensayo`.
+aislamiento, el espejo y el barrido, contra la rama `ensayo` del proyecto de Neon `claimmix-prd`.
 
 `pnpm load` mide cuánto aguanta y `pnpm pentest` pregunta qué se consigue sin
 credenciales. Las mitades gratis de las dos corren solas después de cada deploy.
@@ -4734,7 +4734,7 @@ base `ep-proud-resonance` con sus datos reales, alias `claimmix-dev.vercel.app`)
 no cambia, y la producción de los clientes es un proyecto nuevo, **`claimmix-prd`** (rama `prd`,
 Neon Free `claimmix-prd` con una base de control `neondb` y una `t_<hex>` por cliente, R2,
 pool WIF y topic de Pub/Sub propios). Recibe `claimmix.vercel.app` por un move atómico de
-Vercel. `claimmix-ensayo` es un proyecto de Neon aparte, sin Vercel, sólo para
+Vercel. La rama `ensayo` de ese proyecto, con endpoint propio y sin Vercel, es sólo para
 `pnpm bases:probar`. Los pasos en orden, el Ignored Build Step de los tres proyectos, el orden
 del move y la regla de a lo sumo una promoción a prd por día están en `docs/PROMOCION.md`
 (sección «Prd»); cómo se prueba, en `docs/TESTING.md` (capa 9, «Después de cada deploy» y
@@ -4762,7 +4762,7 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
     P13 (scripts de bases, `pnpm bases:probar` y el job `Bases por cliente`), P14 (el
     contrato con la 0049) y P17 (esta documentación y `.env.example`).
   - Con el flag apagado todo anda como siempre, salvo lo que cada commit marca como
-    «visible» (P12 en esta fase). Falta: la 0050 en QA, dev, staging y control de prd; mergear; `claimmix-ensayo` y sus dos secretos; `pnpm bases:probar` en
+    «visible» (P12 en esta fase). Falta: la 0050 en QA, dev, staging y control de prd; mergear; la rama `ensayo` y sus dos secretos; `pnpm bases:probar` en
     verde; migrar control de prd con el registro; la base del inquilino casa; prender el
     flag; el perfil control; abrir el alta y probarla; y la verificación del negocio en Meta.
 - **El flag es de ida.** Con clientes vivos no se apaga `BASE_POR_CLIENTE`: la base de

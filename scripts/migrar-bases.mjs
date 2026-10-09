@@ -5,7 +5,7 @@
  *   node scripts/migrar-bases.mjs --env prd --dry                 # sólo muestra qué haría
  *   node scripts/migrar-bases.mjs --env prd --base t_<32 hex>     # sólo esa base de cliente
  *   node scripts/migrar-bases.mjs --env prd --perfil control      # además, el perfil de permisos de control
- *   node scripts/migrar-bases.mjs --env ensayo                    # claimmix-ensayo (lo usa `pnpm bases:probar`)
+ *   node scripts/migrar-bases.mjs --env ensayo                    # rama ensayo de claimmix-prd (lo usa `pnpm bases:probar`)
  *
  * Por qué existe: `migrate.mjs` migra UNA base y la cadena de cada cliente sólo se
  * aplica sola a una base nueva (`migrarBase`). Cuando sale una migración hay que

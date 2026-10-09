@@ -11,8 +11,8 @@
  * recorre todas.
  *
  * Escribe y borra bases: sólo corre contra el proyecto de ensayo de bases
- * (claimmix-ensayo). Usa nada más `ENSAYO_BASES_DATABASE_URL` (el dueño) y
- * `ENSAYO_BASES_DATABASE_URL_APP` (`claimmix_app`); el veto rechaza dev, QA,
+ * (la rama `ensayo` de claimmix-prd). Usa nada más `PRD_ENSAYO_DATABASE_URL` (el dueño) y
+ * `PRD_ENSAYO_DATABASE_URL_APP` (`claimmix_app`); el veto rechaza dev, QA,
  * staging y producción. Pone `BASE_POR_CLIENTE=1` sólo para este proceso.
  *
  * Al final borra con `DROP DATABASE` las bases que creó y con el rol dueño los
@@ -47,14 +47,14 @@ let app: string;
 try {
   const cadenas = cadenasDelEntorno("ensayo", { app: true });
   dueno = cadenas.dueno;
-  app = cadenas.app ?? parar("falta ENSAYO_BASES_DATABASE_URL_APP");
+  app = cadenas.app ?? parar("falta PRD_ENSAYO_DATABASE_URL_APP");
 } catch (e) {
   parar((e as Error).message);
 }
 
 const usuarioApp = new URL(app);
 if (decodeURIComponent(usuarioApp.username) !== ROL_APP) {
-  parar(`ENSAYO_BASES_DATABASE_URL_APP tiene que entrar como ${ROL_APP}`);
+  parar(`PRD_ENSAYO_DATABASE_URL_APP tiene que entrar como ${ROL_APP}`);
 }
 
 // Antes de importar nada de la app: la capa de datos y el workflow leen estas variables al usarse.

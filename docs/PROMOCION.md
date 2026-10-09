@@ -538,9 +538,9 @@ sección usa los nombres nuevos. El estado de cada paso, y qué falta, está en
 | qa | `claimmix-qa` | `qa` | `ep-wispy-flower` | `claimmix-qa.vercel.app` |
 | prd | `claimmix-prd` | `prd` | proyecto de Neon `claimmix-prd` (plan Free, `aws-sa-east-1`): la base de control `neondb` y una `t_<hex>` por cliente | `claimmix-prd.vercel.app`, y `claimmix.vercel.app` después del move |
 
-Fuera de Vercel hay dos más, y ninguno recibe tráfico: `claimmix-ensayo`, un proyecto de
-Neon aparte que sólo usa `pnpm bases:probar` (secretos `ENSAYO_BASES_DATABASE_URL` y
-`ENSAYO_BASES_DATABASE_URL_APP`), y la rama `production` del proyecto de Neon de Veltra
+Fuera de Vercel hay dos más, y ninguno recibe tráfico: la rama `ensayo` del
+proyecto de Neon `claimmix-prd`, que sólo usa `pnpm bases:probar` (secretos `PRD_ENSAYO_DATABASE_URL` y
+`PRD_ENSAYO_DATABASE_URL_APP`), y la rama `production` del proyecto de Neon de Veltra
 (`STAGING_DATABASE_URL`), que sólo usa `ci.yml`.
 
 prd tiene todo propio: el bucket `claimmix-prd-attachments` de R2, el pool WIF `vercel-prd`
@@ -669,8 +669,8 @@ detrás de pruebas y de un orden fijo:
    QA, en dev, en staging y en la base de control de prd, y después `pnpm esquemas`.
 2. Asistente: mergear P1 a P14 y P17 con el flag apagado. Un cambio que toca autorización o
    secretos (P1, P4, P6, P7, P8, P13, P18) lo revisa Fable, y sin cuota, Opus 5.5.
-3. Asistente: crear el proyecto de Neon `claimmix-ensayo` y cargar sus dos secretos en
-   GitHub.
+3. Asistente: crear la rama `ensayo` del proyecto de Neon `claimmix-prd` y cargar sus dos
+   secretos en GitHub.
 4. **Bloqueante.** Asistente: `pnpm bases:probar` en verde, y el job `Bases por cliente` de
    `ci.yml` también (capa 9 de [TESTING.md](TESTING.md)).
 5. Asistente: la promoción a prd (la de ese día), con el job `PRD` en verde.

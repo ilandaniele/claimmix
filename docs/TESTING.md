@@ -833,9 +833,9 @@ migración a una base por cliente promete:
 - el barrido (`paraCadaBase`) recorre las dos bases sin fallas.
 
 Escribe y borra bases (`DROP DATABASE`), así que **no corre contra ningún ambiente**:
-corre contra `claimmix-ensayo`, un proyecto de Neon aparte, sin proyecto de Vercel, con
-sus propios secretos `ENSAYO_BASES_DATABASE_URL` (el dueño) y
-`ENSAYO_BASES_DATABASE_URL_APP` (`claimmix_app`). El script se niega a arrancar con los de
+corre contra la rama `ensayo` del proyecto de Neon `claimmix-prd`, con endpoint propio, con
+sus propios secretos `PRD_ENSAYO_DATABASE_URL` (el dueño) y
+`PRD_ENSAYO_DATABASE_URL_APP` (`claimmix_app`). El script se niega a arrancar con los de
 dev, QA, staging o prd: lo decide el veto de `scripts/lib/hosts-vetados.mjs`. Al final
 borra lo que creó, también si algo falló, y si una corrida se corta a la mitad la
 siguiente barre lo que tenga más de una hora.
@@ -848,7 +848,7 @@ migración. El grupo `concurrency: bases` hace que dos corridas no se pisen el c
 bases del proyecto. Sin los secretos, un fork avisa y sigue; en cualquier otro caso el job
 corta, porque un check que se saltea en silencio no prueba nada.
 
-Localmente: `ENSAYO_BASES_DATABASE_URL` y `ENSAYO_BASES_DATABASE_URL_APP` en `.env.local`
+Localmente: `PRD_ENSAYO_DATABASE_URL` y `PRD_ENSAYO_DATABASE_URL_APP` en `.env.local`
 y `pnpm bases:probar`. Sin ellas, no hay forma de probarlo.
 
 ---
@@ -905,7 +905,7 @@ bloquean el merge.
 - **Licencias** (obligatorio) — sin GPL/AGPL/LGPL/SSPL.
 - **Aislamiento de tenants** (obligatorio) — `pnpm tenancy` y `pnpm capa-datos`.
 - **Pen test local** (obligatorio) — `pnpm pentest --solo-superficie` contra un build local.
-- **Bases por cliente** — `pnpm bases:empaquetar --comprobar` y `pnpm bases:probar` contra el proyecto `claimmix-ensayo` (capa 9).
+- **Bases por cliente** — `pnpm bases:empaquetar --comprobar` y `pnpm bases:probar` contra la rama `ensayo` de `claimmix-prd` (capa 9).
 
 `codeql.yml`:
 

@@ -1178,8 +1178,8 @@ jobs:
   # `pnpm bases:probar` da de alta dos inquilinos con la función de verdad, les
   # prepara su base `t_<hex>` y comprueba el aislamiento, el espejo, el tope de
   # bases y el barrido (ver scripts/probar-bases.mts). Escribe y borra bases, así
-  # que sólo corre contra el proyecto claimmix-ensayo, con sus propios secretos
-  # `ENSAYO_BASES_*`: nunca con los de la base de ensayo de arriba ni con los de
+  # que sólo corre contra la rama `ensayo` del proyecto claimmix-prd, con sus propios secretos
+  # `PRD_ENSAYO_*`: nunca con los de la base de ensayo de arriba ni con los de
   # QA, dev o producción (el veto de scripts/lib/hosts-vetados.mjs los rechaza).
   #
   # Sin los secretos, un fork avisa y sigue (no los recibe por diseño); en
@@ -1200,7 +1200,7 @@ jobs:
       group: bases
       cancel-in-progress: false
     env:
-      HAY_BASES: ${{ secrets.ENSAYO_BASES_DATABASE_URL != '' && secrets.ENSAYO_BASES_DATABASE_URL_APP != '' && 'true' || '' }}
+      HAY_BASES: ${{ secrets.PRD_ENSAYO_DATABASE_URL != '' && secrets.PRD_ENSAYO_DATABASE_URL_APP != '' && 'true' || '' }}
       ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1233,9 +1233,9 @@ jobs:
           elif [ "$ES_FORK" = "true" ]; then
             echo "::warning title=Bases por cliente sin probar::Fork sin secretos, no se probó."
           else
-            echo "::error title=Bases por cliente sin probar::Faltan ENSAYO_BASES_DATABASE_URL y ENSAYO_BASES_DATABASE_URL_APP."
+            echo "::error title=Bases por cliente sin probar::Faltan PRD_ENSAYO_DATABASE_URL y PRD_ENSAYO_DATABASE_URL_APP."
             exit 1
           fi
         env:
-          ENSAYO_BASES_DATABASE_URL: ${{ secrets.ENSAYO_BASES_DATABASE_URL }}
-          ENSAYO_BASES_DATABASE_URL_APP: ${{ secrets.ENSAYO_BASES_DATABASE_URL_APP }}
+          PRD_ENSAYO_DATABASE_URL: ${{ secrets.PRD_ENSAYO_DATABASE_URL }}
+          PRD_ENSAYO_DATABASE_URL_APP: ${{ secrets.PRD_ENSAYO_DATABASE_URL_APP }}

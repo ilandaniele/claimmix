@@ -31,3 +31,18 @@ export function esResultadoDelNumero(valor: unknown): valor is ResultadoDelNumer
 export function esExitoDelNumero(resultado: ResultadoDelNumero): boolean {
   return resultado === "codigo_enviado" || resultado === "conectado";
 }
+
+/**
+ * Qué pinta el panel del número en /configuracion y en /preparando, o null si nada.
+ * Lo comparten las dos pantallas: la bandera y la prueba vigente (`automatico`) y si
+ * queda un número por conectar (`formularios`) salen de cada una, y `wa` es lo que
+ * trae la dirección; uno que no esté en la lista cerrada no pinta nada.
+ */
+export function panelDelNumero(
+  automatico: boolean,
+  formularios: boolean,
+  wa: unknown,
+): { resultado: ResultadoDelNumero | null; formularios: boolean } | null {
+  const resultado = esResultadoDelNumero(wa) ? wa : null;
+  return automatico && (formularios || resultado) ? { resultado, formularios } : null;
+}

@@ -8,9 +8,9 @@ import {
   codificarEstado,
   nuevoNonce,
 } from "@/lib/auth/oauth-state";
+import { baseLista } from "@/server/bases/base-lista";
 
 const GMAIL_SCOPES = [
-  "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.send",
 ];
@@ -23,6 +23,9 @@ export async function GET() {
 
   try {
     const { userRow, user } = await requireRole(...ADMIN_ROLES);
+
+    // Sin su base, el poller leería correos que no tienen dónde guardarse y los daría por perdidos.
+    if (!(await baseLista(user.id))) return NextResponse.redirect(new URL("/preparando", origin));
 
     const clientId = process.env.GMAIL_CLIENT_ID;
     const clientSecret = process.env.GMAIL_CLIENT_SECRET;

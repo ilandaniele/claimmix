@@ -4,7 +4,8 @@
  * lee `paraAdmin`, cuándo lo pinta la página y qué dice. Es sólo para leer.
  *
  * La base se reemplaza en `enTenantVarias`, así que `paraAdmin` y la página
- * corren de verdad, uno sobre el otro.
+ * corren de verdad, uno sobre el otro. Lo que está conectado (`pasosHechos`) se
+ * reemplaza aparte: de ahí salen los «Primeros pasos», no de la dirección.
  */
 
 import { readFileSync } from "node:fs";
@@ -19,6 +20,7 @@ const m = vi.hoisted(() => ({
   getSessionContext: vi.fn(),
   getUserRow: vi.fn(),
   locale: vi.fn(),
+  pasos: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -31,6 +33,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/data/scope", () => ({ enTenantVarias: m.enTenantVarias }));
 vi.mock("@/server/notify/specialist-alert", () => ({ listaDelTenant: m.listaDelTenant }));
 vi.mock("@/server/sso/panel", () => ({ panelSso: m.panelSso }));
+vi.mock("@/server/alta/pasos-hechos", () => ({ pasosHechos: m.pasos }));
 vi.mock("@/app/(app)/configuracion/numero-actions", () => ({
   pedirCodigoDelNumero: vi.fn(),
   verificarCodigoDelNumero: vi.fn(),
@@ -62,6 +65,7 @@ for (const modulo of [
 import { getT } from "@/lib/i18n";
 import { enUSServidor } from "@/lib/i18n/en-US.servidor";
 import { esARServidor } from "@/lib/i18n/es-AR.servidor";
+import { RESULTADOS_GMAIL } from "@/app/(app)/configuracion/gmail-resultados";
 import { PruebaPanel } from "@/app/(app)/configuracion/PruebaPanel";
 import { paraAdmin } from "@/app/(app)/configuracion/para-admin";
 
@@ -108,15 +112,18 @@ function armadas(llamada: number): Array<{ toSQL: () => { sql: string; params: u
 /** El SQL de la consulta `n` del lote que armó la llamada `llamada`. */
 const consulta = (llamada: number, n: number) => armadas(llamada)[n].toSQL();
 
-async function pintar(params: { wa?: string; primeros?: string } = {}) {
+async function pintar(params: { wa?: string; gmail?: string; primeros?: string } = {}) {
   const { default: Pagina } = await import("@/app/(app)/configuracion/page");
   return renderToStaticMarkup(await Pagina({ searchParams: Promise.resolve(params) }));
 }
 
-function conRol(role: string) {
+function conRol(role: string, extra: Record<string, unknown> = { autoalta: true }) {
   m.getSessionContext.mockResolvedValue({ user: { id: "u1", email: "ana@example.com" } });
-  m.getUserRow.mockResolvedValue({ id: "u1", tenant_id: TENANT, role, full_name: "Ana", plan: "piloto" });
+  m.getUserRow.mockResolvedValue({ id: "u1", tenant_id: TENANT, role, full_name: "Ana", plan: "piloto", ...extra });
 }
+
+/** Cuántas veces sale un trozo de HTML: el panel del código tiene que salir una sola vez. */
+const veces = (html: string, trozo: string) => html.split(trozo).length - 1;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -125,6 +132,7 @@ beforeEach(() => {
   m.listaDelTenant.mockResolvedValue([]);
   m.panelSso.mockRejectedValue(falta("42P01"));
   m.locale.mockResolvedValue("es-AR");
+  m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
   conRol("owner");
 });
 
@@ -336,13 +344,21 @@ describe("/configuracion con la prueba", () => {
   });
 });
 
-describe("/configuracion?primeros=1", () => {
-  it("un admin recién dado de alta ve arriba conectar Gmail y conectar WhatsApp", async () => {
+describe("/configuracion: los primeros pasos salen de lo que falta conectar", () => {
+  const NADA = { whatsapp: false, gmail: false };
+
+  beforeEach(() => {
+    m.pasos.mockResolvedValue(NADA);
+  });
+
+  it("un admin de un espacio del alta automática sin nada conectado ve conectar Gmail y conectar WhatsApp", async () => {
     m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
-    const html = await pintar({ primeros: "1" });
+    const html = await pintar();
 
+    expect(m.pasos).toHaveBeenCalledWith(TENANT);
     expect(html).toContain("Primeros pasos");
+    expect(html).toContain("Conectá la casilla de Gmail");
     expect(html).toContain("Conectar Gmail");
     expect(html).toContain('href="/api/admin/gmail-accounts/connect"');
     expect(html).toContain("Conectar WhatsApp");
@@ -351,51 +367,287 @@ describe("/configuracion?primeros=1", () => {
     expect(html.indexOf("Primeros pasos")).toBeLessThan(html.indexOf("Tu prueba y tu WhatsApp"));
   });
 
+  it("los pasos no llevan número escrito: sobra el que no se muestra", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).not.toMatch(/>\s*1\. Conect/);
+    expect(html).not.toMatch(/>\s*2\. Conect/);
+  });
+
+  it("la lista numera los pasos que faltan: sin los números escritos, los pone la lista", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).toMatch(/<ol class="list-decimal [^"]*pl-5"/);
+  });
+
+  it("no depende de la dirección: ?primeros=1 o no, sale igual", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+    const sin = await pintar();
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+    const con = await pintar({ primeros: "1" });
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+    const otro = await pintar({ primeros: "0" });
+
+    expect(sin).toContain("Primeros pasos");
+    expect(con).toBe(sin);
+    expect(otro).toBe(sin);
+  });
+
+  it("con Gmail ya conectado queda sólo el paso del WhatsApp", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: false, gmail: true });
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).toContain("Primeros pasos");
+    expect(html).toContain("Conectar WhatsApp");
+    expect(html).not.toContain("Conectar Gmail");
+    expect(html).not.toContain('href="/api/admin/gmail-accounts/connect"');
+  });
+
+  it("con el WhatsApp ya conectado queda sólo el paso de Gmail", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: false });
+    m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
+
+    const html = await pintar();
+
+    expect(html).toContain("Primeros pasos");
+    expect(html).toContain("Conectar Gmail");
+    expect(html).not.toContain("Conectar WhatsApp");
+  });
+
+  it("con las dos cosas conectadas no hay sección, ni con ?primeros=1", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).not.toContain("Primeros pasos");
+    expect(html).not.toContain("Conectar WhatsApp");
+    expect(html).not.toContain("Conectar Gmail");
+  });
+
   it("en inglés, con los mismos dos pasos", async () => {
     m.locale.mockResolvedValue("en-US");
     m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
-    const html = await pintar({ primeros: "1" });
+    const html = await pintar();
 
     expect(html).toContain("First steps");
     expect(html).toContain("Connect Gmail");
     expect(html).toContain("Connect WhatsApp");
   });
 
-  it.each([undefined, "0"])("sin ?primeros=1 (%s) no hay pasos", async (primeros) => {
-    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+  it.each([false, null, undefined])("un espacio de siempre (autoalta %s) no tiene pasos y no lee qué hay conectado", async (autoalta) => {
+    conRol("owner", autoalta === undefined ? {} : { autoalta });
+    m.enTenantVarias.mockResolvedValueOnce(lote({ autoalta: false }));
 
-    const html = await pintar({ primeros });
+    const html = await pintar({ primeros: "1" });
 
     expect(html).not.toContain("Primeros pasos");
     expect(html).not.toContain("Conectar WhatsApp");
+    expect(m.pasos).not.toHaveBeenCalled();
   });
 
-  it("quien no administra no los ve: no puede conectar nada", async () => {
+  it("quien no administra no los ve, y no se lee qué hay conectado", async () => {
     conRol("analyst");
 
     const html = await pintar({ primeros: "1" });
 
     expect(html).not.toContain("Primeros pasos");
     expect(html).not.toContain("Conectar Gmail");
+    expect(m.pasos).not.toHaveBeenCalled();
   });
 
   it("sin panel de prueba queda sólo el paso de Gmail: el WhatsApp no tiene dónde conectarse", async () => {
     m.enTenantVarias.mockResolvedValueOnce(lote({ autoalta: false }));
 
-    const html = await pintar({ primeros: "1" });
+    const html = await pintar();
 
     expect(html).toContain("Conectar Gmail");
     expect(html).not.toContain("Conectar WhatsApp");
   });
 
-  it("no suma consultas: el lote es el mismo", async () => {
+  it("no suma consultas al lote: lo conectado se lee aparte, en control", async () => {
     m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
-    await pintar({ primeros: "1" });
+    await pintar();
 
     expect(m.enTenantVarias).toHaveBeenCalledOnce();
     expect(armadas(0)).toHaveLength(3);
+    expect(m.pasos).toHaveBeenCalledOnce();
+  });
+
+  describe("con el número por código prendido", () => {
+    beforeEach(() => {
+      process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    });
+
+    it("el panel del código vive dentro del paso del WhatsApp, una sola vez y sin botón de bajar", async () => {
+      m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+      const html = await pintar();
+
+      expect(veces(html, 'name="codigo"')).toBe(1);
+      expect(veces(html, 'value="SMS"')).toBe(1);
+      expect(html).not.toContain('href="#whatsapp"');
+      expect(html).not.toContain("Conectar WhatsApp");
+      expect(html.indexOf("Conectá tu WhatsApp: cada mensaje")).toBeLessThan(html.indexOf('name="codigo"'));
+      expect(html.indexOf('name="codigo"')).toBeLessThan(html.indexOf('id="whatsapp"'));
+    });
+
+    it("con el WhatsApp ya conectado el panel queda en la sección de la prueba, una sola vez", async () => {
+      m.pasos.mockResolvedValue({ whatsapp: true, gmail: false });
+      m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+      const html = await pintar();
+
+      expect(veces(html, 'name="codigo"')).toBe(1);
+      expect(html.indexOf('id="whatsapp"')).toBeLessThan(html.indexOf('name="codigo"'));
+    });
+
+    it("con todo conectado el panel queda en la sección de la prueba, una sola vez", async () => {
+      m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+      m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+      const html = await pintar();
+
+      expect(html).not.toContain("Primeros pasos");
+      expect(veces(html, 'name="codigo"')).toBe(1);
+    });
+
+    it("sin formularios (número conectado) el aviso de ?wa= queda en la sección de la prueba, no en los pasos", async () => {
+      m.pasos.mockResolvedValue({ whatsapp: false, gmail: false });
+      m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
+
+      const html = await pintar({ wa: "conectado" });
+
+      expect(veces(html, "Listo: tu WhatsApp quedó conectado.")).toBe(1);
+      expect(html).not.toContain('name="codigo"');
+      expect(html).toContain('href="#whatsapp"');
+    });
+
+    it("el aviso de ?wa=revision sale una sola vez y con los formularios", async () => {
+      m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+      const html = await pintar({ wa: "revision" });
+
+      expect(veces(html, "No pudimos conectarlo desde acá.")).toBe(1);
+      expect(veces(html, 'name="codigo"')).toBe(1);
+    });
+
+    it("sin la prueba vigente no hay panel ni en los pasos: el botón lleva a «lo conectamos nosotros»", async () => {
+      m.enTenantVarias.mockResolvedValueOnce(lote({ trial_ends_at: enDias(-3) }));
+
+      const html = await pintar();
+
+      expect(html).not.toContain('name="codigo"');
+      expect(html).toContain('href="#whatsapp"');
+      expect(html).toContain("Lo conectamos nosotros y te avisamos.");
+    });
+  });
+
+  describe("con el número por código apagado", () => {
+    it("el paso del WhatsApp sólo lleva a la sección de la prueba, sin formularios", async () => {
+      m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+      const html = await pintar({ wa: "conectado" });
+
+      expect(html).toContain('href="#whatsapp"');
+      expect(html).not.toContain('name="codigo"');
+      expect(html).not.toContain("Listo: tu WhatsApp quedó conectado.");
+    });
+  });
+});
+
+describe("/configuracion: lo que dejó conectar Gmail", () => {
+  const textoEs = (r: string) => (esARServidor as Record<string, string>)[`configuracion.gmail.r.${r}`]!;
+  const textoEn = (r: string) => (enUSServidor as Record<string, string>)[`configuracion.gmail.r.${r}`]!;
+  const escapado = (texto: string) => texto.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+
+  beforeEach(() => {
+    m.enTenantVarias.mockResolvedValue(lote({}));
+  });
+
+  it.each(RESULTADOS_GMAIL)("?gmail=%s dice su texto, en una lista cerrada", async (resultado) => {
+    const html = await pintar({ gmail: resultado });
+
+    expect(html).toContain(escapado(textoEs(resultado)));
+    expect(html).toContain('role="status"');
+  });
+
+  it("el éxito es verde y los demás rojos", async () => {
+    const bien = await pintar({ gmail: "connected" });
+    const mal = await pintar({ gmail: "mailbox_taken" });
+
+    expect(bien).toContain("border-green-200");
+    expect(mal).toContain("border-red-200");
+    expect(mal).not.toContain(textoEs("connected"));
+  });
+
+  it("al conectar, con todo hecho, ofrece ir a la bandeja", async () => {
+    const html = await pintar({ gmail: "connected" });
+
+    expect(html).toContain('href="/bandeja"');
+    expect(html).toContain("Ir a la bandeja");
+  });
+
+  it("al conectar, si todavía faltan pasos, no manda a la bandeja", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: false, gmail: true });
+
+    const html = await pintar({ gmail: "connected" });
+
+    expect(html).toContain(escapado(textoEs("connected")));
+    expect(html).not.toContain('href="/bandeja"');
+    expect(html).toContain("Primeros pasos");
+  });
+
+  it("un error nunca ofrece la bandeja", async () => {
+    const html = await pintar({ gmail: "save_failed" });
+
+    expect(html).not.toContain('href="/bandeja"');
+  });
+
+  it("un admin de un espacio de siempre también ve el resultado y la bandeja", async () => {
+    conRol("admin", { autoalta: false });
+    m.enTenantVarias.mockResolvedValue(lote({ autoalta: false }));
+
+    const html = await pintar({ gmail: "connected" });
+
+    expect(html).toContain(escapado(textoEs("connected")));
+    expect(html).toContain('href="/bandeja"');
+    expect(m.pasos).not.toHaveBeenCalled();
+  });
+
+  it.each(["raro", "<script>alert(1)</script>", "", "CONNECTED", "constructor"])("?gmail=%s no muestra aviso ni se refleja", async (gmail) => {
+    const html = await pintar({ gmail });
+
+    expect(html).not.toContain("alert(1)");
+    expect(html).not.toContain("configuracion.gmail.r.");
+    for (const resultado of RESULTADOS_GMAIL) expect(html).not.toContain(escapado(textoEs(resultado)));
+  });
+
+  it("quien no administra no ve nada de Gmail, ni con ?gmail=", async () => {
+    conRol("analyst");
+
+    const html = await pintar({ gmail: "connected" });
+
+    expect(html).not.toContain(escapado(textoEs("connected")));
+    expect(html).not.toContain("Ir a la bandeja");
+  });
+
+  it("en inglés, en inglés", async () => {
+    m.locale.mockResolvedValue("en-US");
+
+    const html = await pintar({ gmail: "connected" });
+
+    expect(html).toContain(escapado(textoEn("connected")));
+    expect(html).toContain("Go to the inbox");
+    expect(html).not.toContain("Ir a la bandeja");
   });
 });
 

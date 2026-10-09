@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-08. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-09. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -35,8 +35,9 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 - **Stack:** Next.js 16 (App Router), React 19, TypeScript, Drizzle ORM, Neon
   Postgres, Better Auth, pnpm. Deployed on **Vercel (Hobby plan)**.
-- **Prod URL:** https://claimmix.vercel.app (el proyecto `claimmix`, que pasa a ser dev
-  cuando `claimmix-prd` reciba este dominio; ver «Ambiente prd» más abajo)
+- **URLs:** prd en https://claimmix.vercel.app (proyecto `claimmix-prd`, desde el move
+  del 2026-10-09) y dev en https://claimmix-dev.vercel.app (proyecto `claimmix`, con la
+  base `ep-proud-resonance` y sus datos reales); ver «Ambiente prd» más abajo
 - **AI:** Gemini `gemini-2.5-flash` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`),
   `MOCK_AI=true` para local. **No hay fallback de OpenAI**: el extractor se borró
   y `OPENAI_API_KEY` no se lee en ningún archivo. El selector real es
@@ -854,7 +855,8 @@ contra producción o con un test que falla si deja de ser cierto.
   credencial mientras dura. Techo de tres pedidos por hora y por dirección,
   aplicado en la Server Action Y en la ruta HTTP, que son dos puertas al mismo
   cuarto.
-- **Dominio propio**: corre en `claimmix.vercel.app`. Hace falta comprar y
+- **Dominio propio**: corre en `claimmix.vercel.app` (prd) y `claimmix-dev.vercel.app`
+  (dev). Hace falta comprar y
   configurar uno.
 - **VPS**: no aplica, y esta vez con la comprobación hecha. Volvió a preguntarse
   el 16/09/2026 —«desactivar el login por SSH con contraseña, poner otra forma de
@@ -4584,7 +4586,8 @@ sola migración (la 0047).
   `PREVIEW_CRON_SECRET`. Sólo lo usa `load-tests.yml`, que elige entre
   `CRON_SECRET`, `QA_CRON_SECRET` y `PREVIEW_CRON_SECRET` según el destino ya
   resuelto. `deploy-checks.yml`, `post-deploy.yml` y `barrer-trabados.yml` aceptan
-  sólo `claimmix.vercel.app` y `claimmix-qa.vercel.app`: el deploy de una rama no
+  sólo `claimmix-dev.vercel.app` y `claimmix-qa.vercel.app` (prd va por su propio job,
+  con `vars.PRD_URL`): el deploy de una rama no
   recibe ningún secreto de producción ni de QA. Sin `PREVIEW_CRON_SECRET` el paso
   de diagnóstico de la Carga contra un Preview no interroga y la medición sigue
   igual.
@@ -4740,66 +4743,70 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
 (sección «Prd»); cómo se prueba, en `docs/TESTING.md` (capa 9, «Después de cada deploy» y
 `/api/health`).
 
-- **Fase 1, sin base por cliente: prd con una sola base, `ALTA_AUTOMATICA=0`.**
-  - Código, en la rama y sin mergear: P15 (workflows de tres ambientes, el job `PRD` de
-    `post-deploy.yml`, el barrido de prd y `scripts/lib/hosts-vetados.mjs`), P18 (guardas
-    «de otro ambiente»: slugs, números, casillas, enlaces viejos de dev y webhook de Gmail
-    sin casillas) y P16 (el texto fijo del segundo usuario).
-  - Infraestructura, nada hecho que el repositorio pueda mostrar (`HOST_DE_BASE_PRD` sigue
-    en `null`): Ignored Build Step, alias `claimmix-dev`, Google OAuth y Turnstile con los
-    tres hosts, inventario de dev, overrides de Meta y Pub/Sub de dev, el proyecto de Neon,
-    la cadena de migraciones en control, el proyecto de Vercel, el pool `vercel-prd`, R2,
-    el topic de prd, las variables, la rama `prd`, el primer deploy, el move del dominio y
-    24 h de logs. Confirmar el estado real en Vercel, Neon y GitHub antes de seguir.
-- **Fase 2, una base por cliente (`BASE_POR_CLIENTE=1`, sólo en prd).**
-  - Código, en la rama y sin mergear: P1 (elección de base en la capa de datos), P2 (migración
-    0050: `tenant_bases` y `schema_migrations`), P3 (permisos por perfil y cadena
-    empaquetada), P4 (crear, migrar y dar permisos a una base), P5 (espejo de control),
-    P6 (workflow `preparar-base`, alta con topes, `/preparando`), P7 y P8 (lo que es de
-    control va a control: membresía, roles, provisión, números), P9 (libro de IA), P10
-    (barridos por base y reintentos), P11 (salud y desfase), P12 (el flujo de dos pasos
-    para conectar Gmail y WhatsApp en Configuración, que se ve aun con el flag apagado),
-    P13 (scripts de bases, `pnpm bases:probar` y el job `Bases por cliente`), P14 (el
-    contrato con la 0049) y P17 (esta documentación y `.env.example`).
-  - Con el flag apagado todo anda como siempre, salvo lo que cada commit marca como
-    «visible» (P12 en esta fase). Falta: la 0050 en QA, dev, staging y control de prd; mergear; la rama `ensayo` y sus dos secretos; `pnpm bases:probar` en
-    verde; migrar control de prd con el registro; la base del inquilino casa; prender el
-    flag; el perfil control; abrir el alta y probarla; y la verificación del negocio en Meta.
+- **Estado al 2026-10-09.** El código entró por #396 (a `qa`), #397 (a `main`) y #398 (a
+  `prd`); el primer deploy de `claimmix-prd` está READY. La 0050 está aplicada a mano en las
+  cinco bases (QA, dev, staging, control de prd y la rama `ensayo`), el inquilino casa tiene
+  su base lista y su perfil control, y en prd están prendidas `BASE_POR_CLIENTE`,
+  `ALTA_AUTOMATICA`, `ALTA_NUMERO_AUTOMATICO` y el remitente del alta (también en dev). El
+  move del dominio se hizo el 09/10 con el OK del dueño: `claimmix.vercel.app` es prd (sigue
+  respondiendo `claimmix-prd.vercel.app`), dev quedó en `claimmix-dev.vercel.app` y
+  `vars.PRD_URL` apunta al dominio nuevo. Vertex anda en prd por el pool WIF `vercel-prd`; el
+  webhook de WhatsApp y el push de Gmail de dev apuntan a `claimmix-dev`, y prd tiene su
+  propio tópico `gmail-push-prd`.
+- **Falta:** R2 de prd (lo configura el dueño; hasta entonces `/api/health` de prd da 503 y
+  el Post-deploy de PRD sale rojo sólo por eso), Turnstile con los hosts nuevos, la prueba
+  de punta a punta de un alta con el dueño, 24 h de logs y la verificación del negocio en
+  Meta.
 - **El flag es de ida.** Con clientes vivos no se apaga `BASE_POR_CLIENTE`: la base de
   control no tiene sus datos de negocio. Para frenar se usa `ALTA_AUTOMATICA=0` y se arregla
   hacia adelante.
 - **Bloqueantes abiertos:**
-  1. La cadena de migraciones 0001 a la última nunca corrió sobre una base vacía (en control
-     de prd, y en las `t_<hex>` con la cadena empaquetada).
+  1. ~~La cadena de migraciones 0001 a la última nunca corrió sobre una base vacía.~~
+     Resuelto el 2026-10-09: corrió en control de prd y en la base del inquilino casa, y
+     `pnpm bases:probar` salió verde contra la rama `ensayo`.
   2. Meta permite 2 números en la WABA hasta verificar el negocio.
   3. La pantalla de consentimiento de Google tiene que estar publicada; con los scopes de
      Gmail sin verificar hay un tope de 100 usuarios que comparten dev y prd.
-  4. Hay que confirmar que Vercel acepta mover un `*.vercel.app` entre proyectos. Si no, prd
-     queda en `claimmix-prd.vercel.app` y decide el dueño: no hay plan B que suelte el
-     dominio (nunca `DELETE` y `POST`).
+  4. ~~Confirmar que Vercel acepta mover un `*.vercel.app` entre proyectos.~~ Resuelto el
+     2026-10-09: el move anduvo.
   5. Los términos de Vercel Hobby son de uso no comercial y prd tendría clientes que pagan.
      El dueño decidió no usar planes pagos; queda señalado.
 - **Dónde se apartó la documentación del plan:** el plan decía que `claimmix` construye sólo
   `main`; los pasos 3 y 5 de `docs/PROMOCION.md` y `load-tests.yml` dependen de sus vistas
   previas, así que el Ignored Build Step de `claimmix` saltea `qa` y `prd` y construye el resto.
 
+### Alta corta: correo y WhatsApp con el mínimo de pasos (2026-10-09, rama `feat/alta-corta`)
+
+Para que un cliente nuevo de prd termine con su correo y su WhatsApp conectados sin pasar
+por el operador. Con `BASE_POR_CLIENTE` y `ALTA_NUMERO_AUTOMATICO` apagadas todo anda como
+antes.
+
+- **WhatsApp mientras se prepara la base.** `/preparando` muestra el formulario del número
+  (el mismo `NumeroPanel` de Configuración) a un admin de un alta automática, mientras la
+  base se crea. El destino de las acciones lo decide el servidor según la base esté lista o
+  no; el refresco de la página se frena mientras el usuario escribe o espera un código.
+- **Al terminar la base** va a la bandeja si el número ya está conectado y hay una casilla
+  de Gmail; si no, a Configuración con «Primeros pasos», que ahora sale de los datos y no
+  de la URL, y muestra el formulario del número en un solo lugar.
+- **Gmail** se conecta desde Configuración, que avisa el resultado con una lista cerrada de
+  diez casos y dice cómo seguir en cada falla. Conectar con la base sin terminar vuelve a
+  `/preparando` sin abrir Google. El permiso pedido baja a `gmail.modify` y `gmail.send`
+  (sin `gmail.readonly`).
+- **Celular sin el 9.** Con el número automático prendido, un `+54` de diez dígitos sin el 9
+  se rechaza en el alta con un aviso que muestra cómo escribirlo.
+- **Pasos del cliente:** correo, celular con el 9, entrar con Google, el código por SMS en
+  `/preparando` o Configuración y conectar Gmail en Configuración.
+
 ### 🙋 Waiting on you (not code)
 
-- **Ambiente prd: pasos del dueño.** Hay que autenticar `neonctl` (`npx neonctl auth`), y
-  después: orígenes, redirect URIs y pantalla de consentimiento publicada en Google Cloud;
+- **Ambiente prd: lo que queda del dueño.** El bucket `claimmix-prd-attachments` de R2 y su
+  token cargados en `claimmix-prd` (después Claude redeploya y mira `/api/health?deep=1`);
   los hostnames `claimmix-dev.vercel.app` y `claimmix-prd.vercel.app` en el widget de
-  Turnstile; el pool WIF `vercel-prd`; el bucket `claimmix-prd-attachments` y su token; el
-  topic y la suscripción de Gmail de prd y el cambio de la suscripción de dev; avisar a los
-  clientes de dev con SSO o API v1; completar `.env.prd.local` con los secretos; mirar los
-  minutos de Actions; y dar el OK al move del dominio. Lista completa, con quién hace cada
-  cosa, en `docs/PROMOCION.md`, sección «Prd».
-- **Ambiente prd: completar `HOST_DE_BASE_PRD`** en `scripts/lib/hosts-vetados.mjs` con el
-  endpoint de control del proyecto de Neon `claimmix-prd` apenas exista. Hasta entonces los
-  scripts de bases se niegan a correr contra prd.
-- **Ambiente prd, fase 2: aplicar la 0050 a mano** (`0050_tenant_bases.sql`, aditiva) con el
-  dueño de la base, en QA (`ep-wispy-flower`), dev (`ep-proud-resonance`), la rama
-  `production` de Veltra y la base de control de prd, antes de mergear; sin ella el CI
-  queda rojo por `--exigir-al-dia`. Después `pnpm esquemas`.
+  Turnstile; un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
+  propios; la verificación del negocio en Meta para pasar de 2 números en la WABA; y avisar
+  a los clientes de dev con SSO o API v1 del dominio nuevo. La política de privacidad
+  todavía nombra el permiso `gmail.readonly`, que el alta corta ya no pide: ese texto lo
+  cambia el dueño. Lista completa en `docs/PROMOCION.md`, sección «Prd».
 - **Número por código: aplicar la 0049 ANTES de mergear.** Es sólo la función
   `claimmix_numero_automatico` (`0049_numero_por_codigo.sql`), aditiva e
   idempotente. Se aplica a mano, con el dueño de la base (necesita `BYPASSRLS`), en

@@ -28,7 +28,8 @@ import { borrarCookieDeAlta } from "@/server/alta/cookie";
 import { crearInquilino, type AltaCreada } from "@/server/alta/crear-inquilino";
 import { soltarCupoDeAlta, tomarCupoDeAlta } from "@/server/alta/cupo-por-ip";
 import { avisarSiLlegoAlTope, conError, prepararEspacio, SIN_ESPACIO } from "@/server/alta/destinos";
-import { normalizarE164, validarEmpresa } from "@/server/alta/validar";
+import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
+import { faltaElNueveArgentino, normalizarE164, validarEmpresa } from "@/server/alta/validar";
 
 /** La ruta a la que sigue el pedido. Nunca redirige: de eso se ocupa quien la llama, fuera de todo try/catch. */
 async function destinoDelAlta(formData: FormData): Promise<string> {
@@ -52,6 +53,7 @@ async function destinoDelAlta(formData: FormData): Promise<string> {
   const empresa = validarEmpresa(formData.get("empresa"));
   const numero = normalizarE164(formData.get("whatsapp"));
   if (!empresa.ok || numero === null || formData.get("terminos") !== "on") return conError("datos");
+  if (numeroAutomatico() && faltaElNueveArgentino(numero)) return conError("celular");
 
   const ip = clientIpFromHeaders(await headers());
   const { clave, cupo } = await tomarCupoDeAlta(ip);

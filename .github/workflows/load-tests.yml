@@ -166,13 +166,20 @@ jobs:
           # El sufijo de la organización, no sólo el nombre del proyecto: con
           # `claimmix*` alcanzaba con crear un proyecto llamado `claimmix-x` en
           # cualquier cuenta de Vercel para quedar del lado bueno del filtro.
-          case "$HOST" in
-            claimmix.vercel.app|claimmix-qa.vercel.app|claimmix-*-ilandaniele-3471s-projects.vercel.app)
-              echo "url=$URL" >> "$GITHUB_OUTPUT" ;;
-            *)
-              echo "::error title=Destino no reconocido::La corrida iba a mandar las credenciales de la cuenta de pruebas a $URL, que no es un despliegue de este proyecto. Se corta."
-              exit 1 ;;
-          esac
+          #
+          # Los hosts de ClaimMix salen de scripts/lib/hosts-vetados.mjs; lo que
+          # queda acá es el patrón de las vistas previas.
+          if node scripts/lib/hosts-vetados.mjs --conocido "$URL"; then
+            echo "url=$URL" >> "$GITHUB_OUTPUT"
+          else
+            case "$HOST" in
+              claimmix-*-ilandaniele-3471s-projects.vercel.app)
+                echo "url=$URL" >> "$GITHUB_OUTPUT" ;;
+              *)
+                echo "::error title=Destino no reconocido::La corrida iba a mandar las credenciales de la cuenta de pruebas a $URL, que no es un despliegue de este proyecto. Se corta."
+                exit 1 ;;
+            esac
+          fi
 
       # ── La puerta de Vercel ────────────────────────────────────────────────
       #
@@ -370,8 +377,8 @@ jobs:
           # o contra una vista previa, el de producción no abre nada
           # (`/api/health` contesta 401 y el diagnóstico diría que no contesta
           # una dependencia que sí contesta) y además le entregaría a ese deploy
-          # una credencial que no es suya. El de producción sólo viaja al alias
-          # de producción; el que no es ninguno de los dos alias cae en
+          # una credencial que no es suya. El de CRON_SECRET sólo viaja al alias
+          # de dev; el que no es ninguno de los dos alias cae en
           # PREVIEW_CRON_SECRET y, si ése falta, el paso corta sin interrogar.
           # Se elige por el destino ya resuelto y no por el entorno del
           # deployment, así vale también para el disparo a mano.
@@ -380,7 +387,7 @@ jobs:
           # sin cargar viajaba el de producción, y con CRON_SECRET sin cargar el
           # de Preview. Con `'__falta__'` de respaldo nada queda vacío y el
           # primer comando corta.
-          CRON_SECRET: ${{ steps.destino.outputs.url == 'https://claimmix-qa.vercel.app' && (secrets.QA_CRON_SECRET || '__falta__') || (steps.destino.outputs.url == 'https://claimmix.vercel.app' && (secrets.CRON_SECRET || '__falta__') || (secrets.PREVIEW_CRON_SECRET || '__falta__')) }}
+          CRON_SECRET: ${{ steps.destino.outputs.url == 'https://claimmix-qa.vercel.app' && (secrets.QA_CRON_SECRET || '__falta__') || (steps.destino.outputs.url == 'https://claimmix-dev.vercel.app' && (secrets.CRON_SECRET || '__falta__') || (secrets.PREVIEW_CRON_SECRET || '__falta__')) }}
         run: |
           [ "${CRON_SECRET}" != '__falta__' ] || { echo '::error::Falta el CRON_SECRET de este host (QA_CRON_SECRET, CRON_SECRET o PREVIEW_CRON_SECRET según el destino): no se puede interrogar a /api/health.'; exit 1; }
           COD=$(curl -s -o salud.json -w '%{http_code}' \

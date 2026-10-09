@@ -184,6 +184,62 @@ describe("GET /api/admin/gmail-accounts/callback — casilla de otra aseguradora
   });
 });
 
+describe("GET /api/admin/gmail-accounts/callback — casilla del otro ambiente", () => {
+  beforeEach(() => {
+    process.env.GMAIL_CLIENT_ID = "client-id";
+    process.env.GMAIL_CLIENT_SECRET = "fake-client-secret";
+    process.env.PUBSUB_TOPIC = TOPIC;
+
+    mockRequireRole.mockResolvedValue({
+      db: (baseSimulada.actual = { insert: mockInsert }),
+      user: { id: USER },
+      userRow: { tenant_id: TENANT },
+    });
+    mockGetToken.mockResolvedValue({ tokens: { refresh_token: REFRESH } });
+    mockGetProfile.mockResolvedValue({ data: { emailAddress: EMAIL } });
+    mockInquilinoDeLaCasilla.mockResolvedValue(null);
+    mockInsert.mockReturnValue({
+      values: () => ({ onConflictDoUpdate: () => Promise.resolve() }),
+    });
+    mockSetupGmailWatch.mockResolvedValue({
+      historyId: "1",
+      expiration: new Date(1750000000000).toISOString(),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    delete process.env.GMAIL_CLIENT_ID;
+    delete process.env.GMAIL_CLIENT_SECRET;
+    delete process.env.PUBSUB_TOPIC;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it("una casilla de CASILLAS_DE_DEV redirige a otro_ambiente sin guardar ni pedir aviso, y quema el nonce", async () => {
+    vi.stubEnv("CASILLAS_DE_DEV", "otra@example.com, Casilla@Example.com");
+
+    const res = await GET(makeRequest());
+
+    expect(destino(res)).toBe("otro_ambiente");
+    expect(mockInquilinoDeLaCasilla).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockSetupGmailWatch).not.toHaveBeenCalled();
+    expect(res.headers.get("set-cookie")).toMatch(/gmail_oauth_state=;/);
+  });
+
+  it("con CASILLAS_DE_DEV una casilla que no está en la lista conecta igual", async () => {
+    vi.stubEnv("CASILLAS_DE_DEV", "otra@example.com");
+
+    const res = await GET(makeRequest());
+
+    expect(destino(res)).toBe("connected");
+    expect(mockInsert).toHaveBeenCalledOnce();
+  });
+});
+
 describe("GET /api/admin/gmail-accounts/callback — el índice único de la casilla", () => {
   beforeEach(() => {
     process.env.GMAIL_CLIENT_ID = "client-id";

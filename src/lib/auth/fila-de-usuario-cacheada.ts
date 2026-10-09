@@ -27,7 +27,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
-import { tenants, users } from "@/lib/db/schema";
+import { tenantBases, tenants, users } from "@/lib/db/schema";
 
 export interface FilaUsuario {
   id: string;
@@ -41,6 +41,10 @@ export interface FilaUsuario {
   billing_status: string;
   /** `tenants.autoalta`; null si la 0048 todavía no está aplicada. */
   autoalta: boolean | null;
+  /** `tenant_bases.estado` de su inquilino; null si todavía no tiene fila. */
+  base: "creando" | "lista" | "fallida" | "borrada" | null;
+  /** Desde cuándo: `tenant_bases.creada_at`, o `tenants.created_at` si no hay fila. */
+  baseDesde: Date | null;
 }
 
 /**
@@ -86,7 +90,7 @@ export async function filaDeUsuario(userId: string): Promise<FilaUsuario | null>
    * dato que ella misma busca.
    */
   // sin-inquilino: esta consulta AVERIGUA el inquilino de la sesión.
-  const fila = firstRow(
+  const leida = firstRow(
     await db
       .select({
         id: users.id,
@@ -98,17 +102,23 @@ export async function filaDeUsuario(userId: string): Promise<FilaUsuario | null>
         billing_status: tenants.billing_status,
         // `to_jsonb` y no la columna: antes de la 0048 `tenants.autoalta` tira 42703 y deja afuera a todos.
         autoalta: sql<boolean | null>`(to_jsonb(${tenants}.*) ->> 'autoalta')::boolean`,
+        base: tenantBases.estado,
+        baseDesde: sql<string | Date | null>`coalesce(${tenantBases.creada_at}, ${tenants.created_at})`,
       })
       .from(users)
       // El plan viaja en la misma consulta: sin un segundo viaje por pedido.
       // Inner y no left: `users.tenant_id` es NOT NULL con FK a `tenants`, así
       // que no se pierde ninguna fila y `plan` nunca llega nulo.
       .innerJoin(tenants, eq(tenants.id, users.tenant_id))
+      // Left: un inquilino sin base propia no tiene fila. `tenants.id` va primero:
+      // `pnpm arquitectura` cuenta los `eq(x.tenant_id, …)` y esto no es un filtro.
+      .leftJoin(tenantBases, eq(tenants.id, tenantBases.tenant_id))
       .where(eq(users.id, userId))
       .limit(1)
   );
 
-  if (!fila) return null;
+  if (!leida) return null;
+  const fila: FilaUsuario = { ...leida, baseDesde: leida.baseDesde == null ? null : new Date(leida.baseDesde) };
 
   guardar(userId, fila);
   return fila;

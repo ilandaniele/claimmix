@@ -14,10 +14,20 @@
  *
  * Auth: Authorization: Bearer <CRON_SECRET> (constant-time compared), same as
  * the gmail-poll cron. Vercel cron invocations include this header automatically.
+ *
+ * Con `BASE_POR_CLIENTE=1` cada barrido de casos corre una vez por base de cliente
+ * (`paraCadaBase`), y al final la ruta vuelve a lanzar las bases que quedaron a
+ * medias y espeja control en las que están listas. Apagada, todo corre una vez
+ * contra la base de siempre y la respuesta es la de siempre.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { basePorCliente } from "@/data/bases";
 import { isInternalRequest } from "@/lib/security/internal-auth";
+import type { DbDueno } from "@/lib/db";
+import { paraCadaBase } from "@/server/bases/cada-base";
+import { espejarTodas } from "@/server/bases/espejo";
+import { reintentarBases } from "@/server/bases/reintentar";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
@@ -34,6 +44,14 @@ import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+const suma = (numeros: number[]) => numeros.reduce((total, n) => total + n, 0);
+
+/** Junta lo que devolvió cada base: con una sola (bandera apagada) es ella misma, sin tocar. */
+function juntar<T extends object>(resultados: T[], sumar: (a: T, b: T) => T): T | null {
+  const [primero, ...resto] = resultados;
+  return primero === undefined ? null : resto.reduce(sumar, primero);
+}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const hasta = Date.now() + maxDuration * 1000;
@@ -61,7 +79,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const result = await reapStuckProcessingCases();
+  // Lo que no entró o falló en las pasadas por las bases; con la bandera apagada queda en cero y no sale.
+  const bases = { pendientes: 0, fallas: 0 };
+  const porBase = async <T>(trabajo: (db: DbDueno, tenantId: string | null) => Promise<T>, hastaDelBarrido: number) => {
+    const corrida = await paraCadaBase(trabajo, { hasta: hastaDelBarrido });
+    bases.pendientes = Math.max(bases.pendientes, corrida.pendientes);
+    bases.fallas += corrida.fallas;
+    return corrida.resultados;
+  };
+
+  const trabados = await porBase((db) => reapStuckProcessingCases(undefined, db), hasta);
+  const result = { reaped: suma(trabados.map((r) => r.reaped)), caseIds: trabados.flatMap((r) => r.caseIds) };
 
   /*
    * Y después, retomar lo que quedó marcado y sin hacer.
@@ -79,14 +107,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
    * invocación: veinte corridas enteras no entran en ninguna función, así que
    * se corta cuando no queda para una más.
    */
-  const retomados = await retomarExtraccionesPendientes({ hasta });
+  const retomados = suma(
+    (await porBase((db) => retomarExtraccionesPendientes({ hasta }, db), hasta)).map((r) => r.retomados)
+  );
 
   // Los recordatorios (B4) van antes del cierre, con a lo sumo un minuto: un
   // caso que hoy cumple las 48 h no tiene que esperar a que se cierren los
   // viejos. Si fallan, el cierre corre igual.
   let recordatorios = { enviados: 0, salteados: 0 };
   try {
-    recordatorios = await recordarPendientes({ hasta: Math.min(hasta - 60_000, Date.now() + 60_000) });
+    const hastaRecordatorios = Math.min(hasta - 60_000, Date.now() + 60_000);
+    const enviados = await porBase((db) => recordarPendientes({ hasta: hastaRecordatorios }, db), hastaRecordatorios);
+    recordatorios = {
+      enviados: suma(enviados.map((r) => r.enviados)),
+      salteados: suma(enviados.map((r) => r.salteados)),
+    };
   } catch (err) {
     logger.error({ code: errorCode(err) }, "cron_reap_stuck.recordatorios_fallaron");
   }
@@ -94,13 +129,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Same nightly pass, second sweep: conversations the claimant abandoned.
   // Piggybacking rather than adding a cron because the Hobby plan allows one
   // run a day and both jobs want exactly that cadence.
-  const abandoned = await closeAbandonedConversations();
+  const abandoned = {
+    closed: suma((await porBase((db) => closeAbandonedConversations(db), hasta)).map((r) => r.closed)),
+  };
 
   // El aviso de cierre (B4) busca los cierres recientes sin avisar, así que el
   // que hoy no entra sale mañana. Deja un minuto para la purga y la respuesta.
   let avisosDeCierre = 0;
   try {
-    avisosDeCierre = await avisarCierres({ hasta: hasta - 60_000 });
+    avisosDeCierre = suma(await porBase((db) => avisarCierres({ hasta: hasta - 60_000 }, db), hasta - 60_000));
   } catch (err) {
     logger.error({ code: errorCode(err) }, "cron_reap_stuck.avisos_de_cierre_fallaron");
   }
@@ -124,10 +161,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     try {
       const cupo = await rateLimit(claveDeCupo("revision-de-desvios"), RATE_LIMIT_CONFIGS.REVISION_DE_DESVIOS);
       if (cupo.allowed) {
-        const revision = await revisarDesvios();
-        desviosNuevos = revision.nuevos;
-        desviosFallidas = revision.fallidas;
-        for (const [tenantId, porRegla] of Object.entries(revision.porInquilino)) {
+        const revisiones = await porBase((db) => revisarDesvios(db), hasta - 60_000);
+        desviosNuevos = suma(revisiones.map((r) => r.nuevos));
+        desviosFallidas = [...new Set(revisiones.flatMap((r) => r.fallidas))];
+        const porInquilino = Object.assign({}, ...revisiones.map((r) => r.porInquilino)) as ResultadoDeLaRevision["porInquilino"];
+        for (const [tenantId, porRegla] of Object.entries(porInquilino)) {
           if (Date.now() >= hasta - 60_000) break;
           if (await avisarDesvios({ tenantId, porRegla })) avisosDeDesvios += 1;
         }
@@ -159,12 +197,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
     if (cupoDelDia) {
       try {
-        purga = await purgarAdjuntos({ hasta: hasta - 60_000 });
+        const purgas = (await porBase((db) => purgarAdjuntos({ hasta: hasta - 60_000 }, db), hasta - 60_000)).filter(
+          (r): r is ResultadoPurga => r !== null
+        );
+        purga = juntar(purgas, (a, b) => ({
+          ...a,
+          candidatos: a.candidatos + b.candidatos,
+          purgados: a.purgados + b.purgados,
+          fallidos: a.fallidos + b.fallidos,
+        }));
       } catch (err) {
         logger.error({ code: errorCode(err) }, "cron_reap_stuck.purga_de_adjuntos_fallo");
       }
       try {
-        retencion = await aplicarRetencion({ hasta: hasta - 60_000 });
+        const retenciones = (
+          await porBase((db) => aplicarRetencion({ hasta: hasta - 60_000 }, new Date(), db), hasta - 60_000)
+        ).filter((r): r is ResultadoRetencion => r !== null);
+        retencion = juntar(retenciones, (a, b) => ({
+          ...a,
+          inquilinos: a.inquilinos + b.inquilinos,
+          candidatos: a.candidatos + b.candidatos,
+          borrados: a.borrados + b.borrados,
+        }));
       } catch (err) {
         logger.error({ code: errorCode(err) }, "cron_reap_stuck.retencion_fallo");
       }
@@ -176,10 +230,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { purgeExpiredRateLimits } = await import("@/lib/rate-limit/postgres");
   const purged = await purgeExpiredRateLimits();
 
+  // Lo último, con lo que quede de la función: las dos nunca tiran y con la bandera apagada no hacen nada.
+  let barridoDeBases: Record<string, number> | null = null;
+  if (basePorCliente()) {
+    const relanzadas = await reintentarBases(hasta - 15_000);
+    const espejadas = await espejarTodas(hasta - 15_000);
+    barridoDeBases = {
+      ...bases,
+      relanzadas: relanzadas.lanzadas,
+      espejadas: espejadas.ok,
+      espejo_fallas: espejadas.fallas,
+    };
+  }
+
   return NextResponse.json({
     ok: true,
     ...result,
-    retomados: retomados.retomados,
+    retomados,
     abandoned_closed: abandoned.closed,
     recordatorios_enviados: recordatorios.enviados,
     recordatorios_salteados: recordatorios.salteados,
@@ -190,5 +257,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     purga,
     retencion,
     rate_limit_rows_purged: purged,
+    ...(barridoDeBases ? { bases: barridoDeBases } : {}),
   });
 }

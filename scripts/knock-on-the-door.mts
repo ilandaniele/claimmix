@@ -60,7 +60,7 @@ function flag(name: string): string | null {
   return i !== -1 && value && !value.startsWith("--") ? value : null;
 }
 
-const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app").replace(/\/+$/, "");
+const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix-dev.vercel.app").replace(/\/+$/, "");
 const SECRET = process.env.CRON_SECRET;
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();

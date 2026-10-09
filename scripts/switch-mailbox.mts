@@ -43,7 +43,7 @@ function flag(name: string): string | null {
 const keep = flag("keep")?.toLowerCase() ?? null;
 const testTo = flag("test");
 const doDelete = args.includes("--delete");
-const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app").replace(
+const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix-dev.vercel.app").replace(
   /\/+$/,
   ""
 );

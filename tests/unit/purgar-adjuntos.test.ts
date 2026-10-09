@@ -327,3 +327,22 @@ describe("purgarAdjuntos: el rastro", () => {
     expect(porCaso).toEqual({ "caso-a": T, "caso-b": otro });
   });
 });
+
+describe("purgarAdjuntos: la base que le pasan (P10)", () => {
+  it("elige y marca en esa base, y no toca la de siempre", async () => {
+    const { drizzle } = await import("drizzle-orm/pg-proxy");
+    const propias: string[] = [];
+    const propia = drizzle(async (texto) => {
+      const sql = texto.replace(/\s+/g, " ").trim();
+      propias.push(sql);
+      return { rows: sql.startsWith("select") ? [[fila(1).id, T, fila(1).case_id, fila(1).storage_path]] : [] };
+    });
+
+    const r = await purgarAdjuntos({ hasta: enUnaHora() }, propia as never);
+
+    expect(r).toMatchObject({ purgados: 1, fallidos: 0 });
+    expect(propias.filter((s) => s.startsWith("select"))).toHaveLength(1);
+    expect(propias.filter((s) => s.startsWith("update"))).toHaveLength(1);
+    expect(m.consultas).toEqual([]);
+  });
+});

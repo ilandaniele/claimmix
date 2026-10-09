@@ -68,6 +68,7 @@ function conFilaDeUsuario() {
   mockDb.select.mockReturnValue({
     from: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
+    leftJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     limit: vi.fn().mockResolvedValue([
       { id: USER_ID, tenant_id: TENANT_ID, role: "admin", full_name: "Ana", locale: "es-AR", plan: "piloto" },

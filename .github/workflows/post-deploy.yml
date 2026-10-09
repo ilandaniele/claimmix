@@ -13,7 +13,7 @@ on:
     inputs:
       url:
         description: "URL a chequear"
-        default: "https://claimmix.vercel.app"
+        default: "https://claimmix-dev.vercel.app"
         required: false
 
 # Una corrida por vez, y sin cancelar la que está andando.
@@ -93,6 +93,10 @@ on:
 # Sigue siendo `startsWith(…, 'Production')` y no `== 'Production'`: la
 # igualdad exacta dejó de ser cierta el día que nació el segundo proyecto.
 #
+# Con el tercero, producción de verdad (`claimmix-prd`), son tres nombres y
+# cada job mira el suyo: QA termina en `-qa`, prd termina en `-prd` y dev es
+# el que no termina en ninguno de los dos.
+#
 # Y sigue fallando CERRADA: si el nombre llegara vacío, `startsWith` es falso
 # y no entra. Lo que se cae con un cambio de nombre del proyecto de QA es la
 # exclusión, así que renombrarlo obliga a tocar estas dos copias de la
@@ -113,12 +117,17 @@ concurrency:
     ${{ (github.event_name == 'workflow_dispatch' ||
     (github.event.deployment_status.state == 'success' &&
     startsWith(github.event.deployment.environment, 'Production') &&
-    !endsWith(github.event.deployment.environment, '-qa')))
+    !endsWith(github.event.deployment.environment, '-qa') &&
+    !endsWith(github.event.deployment.environment, '-prd')))
     && 'post-deploy-contra-produccion'
     || (github.event.deployment_status.state == 'success' &&
     startsWith(github.event.deployment.environment, 'Production') &&
     endsWith(github.event.deployment.environment, '-qa'))
     && 'post-deploy-contra-qa'
+    || (github.event.deployment_status.state == 'success' &&
+    startsWith(github.event.deployment.environment, 'Production') &&
+    endsWith(github.event.deployment.environment, '-prd'))
+    && 'post-deploy-contra-prd'
     || format('post-deploy-sin-cola-{0}', github.run_id) }}
   cancel-in-progress: false
 
@@ -131,10 +140,10 @@ jobs:
   # `produccion` llama a deploy-checks.yml con `secrets: inherit`, y la URL del
   # disparo a mano llega hasta ahí. El reusable la vuelve a comprobar en su
   # primer paso, pero este job corta antes de que nada reciba un secreto: sólo
-  # el alias de producción. El de QA tampoco entra: ese ensayo correría con la
-  # base y el CRON_SECRET de producción contra un deploy que no es el suyo (QA
-  # tiene su propio job, con sus secretos). Una vista previa no entra, ni un
-  # host ajeno. Por deployment_status la URL es fija y el job no corre.
+  # el alias de dev. El de QA ni el de prd tampoco entran: ese ensayo correría
+  # con la base y el CRON_SECRET de dev contra un deploy que no es el suyo (QA
+  # tiene su propio job, con sus secretos, y prd el suyo). Una vista previa no
+  # entra, ni un host ajeno. Por deployment_status la URL es fija y el job no corre.
   validar_url:
     name: ¿A dónde apunta esto?
     if: github.event_name == 'workflow_dispatch'
@@ -142,7 +151,7 @@ jobs:
     steps:
       - name: ¿A dónde apunta esto?
         env:
-          URL: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+          URL: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
         run: |
           set -u
           case "$URL" in
@@ -154,8 +163,8 @@ jobs:
             *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
           esac
           case "$HOST" in
-            claimmix.vercel.app) ;;
-            *) echo "::error::Este disparo sólo admite claimmix.vercel.app, no ${HOST}"; exit 1 ;;
+            claimmix-dev.vercel.app) ;;
+            *) echo "::error::Este disparo sólo admite claimmix-dev.vercel.app, no ${HOST}"; exit 1 ;;
           esac
 
   produccion:
@@ -190,7 +199,8 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
        (github.event.deployment_status.state == 'success' &&
         startsWith(github.event.deployment.environment, 'Production') &&
-        !endsWith(github.event.deployment.environment, '-qa')))
+        !endsWith(github.event.deployment.environment, '-qa') &&
+        !endsWith(github.event.deployment.environment, '-prd')))
     permissions:
       contents: read
       # Techo para el job `rehearse` de deploy-checks.yml: un workflow
@@ -201,7 +211,7 @@ jobs:
     with:
       # El `url` del disparo a mano llega hasta acá: si no, sería un campo
       # que se puede llenar y no hace nada.
-      url: ${{ github.event.inputs.url || 'https://claimmix.vercel.app' }}
+      url: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
       entorno: Production
       medir_carga: true
     secrets: inherit
@@ -450,3 +460,62 @@ jobs:
             -f description="$descripcion" \
             -f target_url="$RUN_URL"
           [ "$estado" = "success" ] || exit 1
+
+  # ── PRD: que esté sano y que las bases no se hayan desfasado ────────────────
+  #
+  # Producción de verdad (`claimmix-prd`) tiene clientes, así que acá no corre
+  # nada que escriba: ni el ensayo, ni el pen test, ni el timbre, ni la carga.
+  # Son el smoke —sin `--deep`— y una pregunta a `/api/health?deep=1`: que las
+  # dependencias contesten y que `bases.desfase` no sea verdadero, o sea, que
+  # las migraciones de las bases estén aplicadas todas igual.
+  #
+  # Mismo cinturón que los otros dos: la guarda mira el sufijo del nombre del
+  # entorno, y los secretos son los suyos (`PRD_CRON_SECRET`), nunca los de dev.
+  # Sin `vars.PRD_URL` el job corta en voz alta: un deploy de prd que nadie
+  # comprueba no puede quedar en verde.
+  prd:
+    name: PRD
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      endsWith(github.event.deployment.environment, '-prd')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Smoke de prd
+        # Contra el alias y esperando este commit, igual que el de dev.
+        env:
+          CRON_SECRET: ${{ secrets.PRD_CRON_SECRET }}
+          PRD_URL: ${{ vars.PRD_URL }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          if [ -z "$PRD_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Faltan vars.PRD_URL o secrets.PRD_CRON_SECRET: prd no se puede comprobar."
+            exit 1
+          fi
+          node scripts/lib/hosts-vetados.mjs --conocido "$PRD_URL" ||
+            { echo "::error::PRD_URL no es un https de ClaimMix."; exit 1; }
+          pnpm smoke -- --url "$PRD_URL" --expect-commit "$SHA"
+
+      - name: Las bases no están desfasadas
+        env:
+          CRON_SECRET: ${{ secrets.PRD_CRON_SECRET }}
+          PRD_URL: ${{ vars.PRD_URL }}
+        run: |
+          salud="$(curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" "${PRD_URL%/}/api/health?deep=1")"
+          if [ "$(echo "$salud" | jq -r '.bases.desfase')" = "true" ]; then
+            echo "::error::Las bases de prd no tienen las mismas migraciones (bases.desfase)."
+            exit 1
+          fi

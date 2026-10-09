@@ -29,12 +29,13 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { AuditEvent } from "@/lib/audit/log";
 import { ALL_ROLES, type UserRole } from "@/lib/auth/roles";
 import { filasDe } from "@/lib/db/filas";
 import { SignUpSchema } from "@/lib/schemas/auth";
 import { abrir, sellar } from "@/server/alta/sellado";
+import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { correoExigeSso } from "@/server/sso/usuarios";
 
 export const COOKIE_DE_INVITACION = "cm_invitacion";
@@ -129,7 +130,7 @@ export interface ResumenDeInvitacion {
  * espacio exige el SSO para el dominio invitado.
  */
 export async function resumenDeInvitacion(d: DatosDeInvitacion): Promise<ResumenDeInvitacion | null> {
-  const filas = await enTenant({ tenantId: d.t }, (db) =>
+  const filas = await enControl({ tenantId: d.t }, (db) =>
     db.execute(sql`
       select x.name as espacio, x.billing_status as estado, i.full_name as quien, i.role as rol_de_quien
       from public.tenants x
@@ -155,14 +156,15 @@ export async function resumenDeInvitacion(d: DatosDeInvitacion): Promise<Resumen
  * viajan dentro del INSERT, así que no hay un hueco entre mirar y escribir. Con
  * el contexto de otro espacio nada de esto se ve —ni quien invita ni el espacio—
  * y no se inserta nada. El asiento de auditoría sale de la fila insertada: sin
- * perfil nuevo no hay asiento.
+ * perfil nuevo no hay asiento. Con el perfil creado en control se lo espeja a la
+ * base del cliente: si la copia falla queda pendiente y la invitación igual vale.
  */
 export async function aceptarInvitacion(
   d: DatosDeInvitacion,
   quien: { userId: string; ip: string | null; ua: string | null }
 ): Promise<boolean> {
   const payload = JSON.stringify({ rol: d.r });
-  const filas = await enTenant({ tenantId: d.t }, (db) =>
+  const filas = await enControl({ tenantId: d.t }, (db) =>
     db.execute(sql`
       with nuevo as (
         insert into public.users (id, tenant_id, full_name, role)
@@ -187,5 +189,7 @@ export async function aceptarInvitacion(
       select id from nuevo
     `)
   );
-  return filasDe(filas).length > 0;
+  const creado = filasDe(filas).length > 0;
+  if (creado) await espejarSinFallar(d.t);
+  return creado;
 }

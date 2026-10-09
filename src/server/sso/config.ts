@@ -5,7 +5,7 @@ import type { JSONWebKeySet } from "jose";
 import { z } from "zod";
 
 import { proveedorDeSso } from "@/core/sso";
-import { enTenant, type ClienteDatos } from "@/data/scope";
+import { enControl, type ClienteDatos } from "@/data/scope";
 import { db } from "@/lib/db";
 import { accounts, ssoSettings } from "@/lib/db/schema";
 import { revisarForma } from "@/server/core-sync/destino";
@@ -157,7 +157,7 @@ export function cambiarEstadoSso(db: ClienteDatos, tenantId: string, userId: str
 /** La config vigente de un inquilino ya identificado (por el `state` firmado de la vuelta del IdP). */
 export async function configVigenteDelInquilino(tenantId: string): Promise<ConfigSso | null> {
   try {
-    const [fila] = await enTenant({ tenantId }, (db) => consultaDeLaConfigVigente(db));
+    const [fila] = await enControl({ tenantId }, (db) => consultaDeLaConfigVigente(db));
     return completa(fila);
   } catch (e) {
     if (esFaltaDe0045(e)) return null;

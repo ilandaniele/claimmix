@@ -21,7 +21,7 @@ const { mockSelectDb, mockSelectInquilino } = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: { select: (...args: unknown[]) => mockSelectDb(...args) } }));
 vi.mock("@/data/scope", () => ({
-  enTenant: async (_ctx: unknown, fn: (c: unknown) => unknown) =>
+  enControl: async (_ctx: unknown, fn: (c: unknown) => unknown) =>
     fn({ select: (...args: unknown[]) => mockSelectInquilino(...args) }),
 }));
 vi.mock("@/lib/security/cifrado", () => ({
@@ -33,6 +33,7 @@ import {
   credencialesWhatsApp,
   inquilinoDeLaPlataforma,
   resolverNumeros,
+  webhookDelEntorno,
 } from "@/server/whatsapp/numeros";
 
 const PLATAFORMA = "10000000-0000-0000-0000-000000000001";
@@ -63,6 +64,8 @@ const ENTORNO = [
   "WHATSAPP_PHONE_NUMBER_ID",
   "WHATSAPP_ACCESS_TOKEN",
   "WHATSAPP_BUSINESS_ACCOUNT_ID",
+  "WHATSAPP_VERIFY_TOKEN",
+  "NEXT_PUBLIC_SITE_URL",
 ] as const;
 const guardado: Record<string, string | undefined> = {};
 
@@ -99,6 +102,37 @@ describe("inquilinoDeLaPlataforma", () => {
   it("sin ninguno de los dos, es null y no un inquilino por omisión", () => {
     delete process.env.WHATSAPP_TENANT_ID;
     expect(inquilinoDeLaPlataforma()).toBeNull();
+  });
+});
+
+describe("webhookDelEntorno", () => {
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://claimmix.example.com";
+    process.env.WHATSAPP_VERIFY_TOKEN = "fake-verify-token";
+  });
+
+  it("es la ruta del webhook de este sitio, con el token del apretón de manos", () => {
+    expect(webhookDelEntorno()).toEqual({
+      url: "https://claimmix.example.com/api/webhooks/whatsapp",
+      verifyToken: "fake-verify-token",
+    });
+  });
+
+  it("sin blancos ni barras al final del sitio", () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "  https://claimmix.example.com//  ";
+    expect(webhookDelEntorno()?.url).toBe("https://claimmix.example.com/api/webhooks/whatsapp");
+  });
+
+  it.each([
+    ["sin sitio", () => delete process.env.NEXT_PUBLIC_SITE_URL],
+    ["sin token", () => delete process.env.WHATSAPP_VERIFY_TOKEN],
+    ["con el token vacío", () => (process.env.WHATSAPP_VERIFY_TOKEN = "")],
+    ["con un sitio http", () => (process.env.NEXT_PUBLIC_SITE_URL = "http://claimmix.example.com")],
+    ["con un sitio que no es una URL", () => (process.env.NEXT_PUBLIC_SITE_URL = "https://")],
+    ["con un sitio con blancos adentro", () => (process.env.NEXT_PUBLIC_SITE_URL = "https://claim mix.example.com")],
+  ])("%s: null, Meta no se llama", (_cual, preparar) => {
+    preparar();
+    expect(webhookDelEntorno()).toBeNull();
   });
 });
 

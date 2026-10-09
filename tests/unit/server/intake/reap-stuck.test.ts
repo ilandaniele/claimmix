@@ -8,10 +8,11 @@
 
 import { readFileSync } from "node:fs";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockWriteAuditLog, state } = vi.hoisted(() => ({
+const { mockWriteAuditLog, mockDbDeBase, state } = vi.hoisted(() => ({
   mockWriteAuditLog: vi.fn(),
+  mockDbDeBase: vi.fn(),
   state: {
     // `status` porque el barredor ahora lo lee, para poder decir en el registro
     // de auditoria de cual de los dos estados venia el caso.
@@ -39,6 +40,7 @@ vi.mock("@/lib/db", () => ({
       }),
     }),
   },
+  dbDeBase: mockDbDeBase,
   tables: {},
 }));
 
@@ -59,6 +61,7 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: { CASE_STATUS_CHANGED: "case.status_changed" },
 }));
 
+import type { DbDueno } from "@/lib/db";
 import { reapStuckProcessingCases, getStuckReapAfterMs } from "@/server/intake/reap-stuck";
 
 describe("reapStuckProcessingCases", () => {
@@ -229,5 +232,79 @@ describe("el barredor ve los casos que entran de verdad", () => {
     expect(mockWriteAuditLog.mock.calls[0][0].payload).toMatchObject({
       previous_status: "procesando",
     });
+  });
+});
+
+describe("reapStuckProcessingCases: la base de cada cliente (P10)", () => {
+  const TENANT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const SAVED = process.env.BASE_POR_CLIENTE;
+
+  /** Una base propia: devuelve un solo caso trabado y lo escala. */
+  const baseDelCliente = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => Promise.resolve([{ id: "caso-del-cliente", tenant_id: TENANT, status: "recibido" }]),
+        }),
+      }),
+    }),
+    update: () => ({
+      set: () => ({
+        where: () => ({ returning: () => Promise.resolve([{ id: "caso-del-cliente", tenant_id: TENANT }]) }),
+      }),
+    }),
+  } as unknown as DbDueno;
+
+  beforeEach(() => {
+    state.stuckRows = [];
+    state.updatedRows = [];
+    mockWriteAuditLog.mockReset();
+    mockWriteAuditLog.mockResolvedValue(undefined);
+    mockDbDeBase.mockReset();
+    mockDbDeBase.mockReturnValue(baseDelCliente);
+  });
+
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.BASE_POR_CLIENTE;
+    else process.env.BASE_POR_CLIENTE = SAVED;
+  });
+
+  it("con el flag apagado y un inquilino barre la base de siempre", async () => {
+    delete process.env.BASE_POR_CLIENTE;
+
+    const res = await reapStuckProcessingCases({ tenantId: TENANT });
+
+    expect(mockDbDeBase).not.toHaveBeenCalled();
+    expect(res).toEqual({ reaped: 0, caseIds: [] });
+  });
+
+  it("con el flag prendido y un inquilino barre la base de ese inquilino", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+
+    const res = await reapStuckProcessingCases({ tenantId: TENANT });
+
+    expect(mockDbDeBase).toHaveBeenCalledWith("t_aaaaaaaabbbbccccddddeeeeeeeeeeee");
+    expect(res).toEqual({ reaped: 1, caseIds: ["caso-del-cliente"] });
+  });
+
+  it("con el flag prendido y sin inquilino barre la base de siempre", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+
+    await reapStuckProcessingCases();
+
+    expect(mockDbDeBase).not.toHaveBeenCalled();
+  });
+
+  it("la base que le pasan manda sobre la del inquilino", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+    const otra = {
+      ...baseDelCliente,
+      select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }),
+    } as unknown as DbDueno;
+
+    const res = await reapStuckProcessingCases({ tenantId: TENANT }, otra);
+
+    expect(mockDbDeBase).not.toHaveBeenCalled();
+    expect(res).toEqual({ reaped: 0, caseIds: [] });
   });
 });

@@ -47,7 +47,7 @@ function flag(name: string): string | null {
 const toWhatsApp = flag("whatsapp");
 const toEmail = flag("email");
 const BASE = (
-  flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app"
+  flag("url") || process.env.SMOKE_URL || "https://claimmix-dev.vercel.app"
 ).replace(/\/+$/, "");
 
 if (!toWhatsApp && !toEmail) {

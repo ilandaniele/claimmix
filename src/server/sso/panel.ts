@@ -1,6 +1,6 @@
 import "server-only";
 
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { urlDeVueltaDelSso } from "@/lib/auth/base-url";
 
 import { esFaltaDe0045, vistaDeLaConfigSso, type VistaDeLaConfigSso } from "./config";
@@ -48,7 +48,7 @@ export function armarPanel(
 /** Una consulta. Sin fila (nunca configuró nada) el panel viene vacío. */
 export async function panelSso(tenantId: string): Promise<PanelSso> {
   try {
-    const [fila] = await enTenant({ tenantId }, (db) => vistaDeLaConfigSso(db));
+    const [fila] = await enControl({ tenantId }, (db) => vistaDeLaConfigSso(db));
     return armarPanel(tenantId, fila);
   } catch (e) {
     if (esFaltaDe0045(e)) return armarPanel(tenantId, undefined, true);

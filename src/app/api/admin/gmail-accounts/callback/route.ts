@@ -4,7 +4,8 @@ import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
 import { encryptRefreshToken, inquilinoDeLaCasilla } from "@/server/email/gmail/accounts";
 import { setupGmailWatch } from "@/server/email/gmail/watch";
-import { enTenant } from "@/data/scope";
+import { esCasillaDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
+import { enControl } from "@/data/scope";
 import { codigoPg } from "@/server/core-sync/config";
 import { logger } from "@/lib/observability/logger";
 import {
@@ -69,6 +70,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL("/configuracion?gmail=missing_email", origin));
     }
 
+    // La casilla de dev conectada acá le sacaría el aviso a dev: el último watch gana y el otro deja de recibir sin error.
+    if (esCasillaDeOtroAmbiente(email)) {
+      logger.warn({ motivo: "casilla_de_otro_ambiente" }, "gmail_accounts_callback.rechazado");
+      const rechazo = NextResponse.redirect(new URL("/configuracion?gmail=otro_ambiente", origin));
+      rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+      return rechazo;
+    }
+
     // La unicidad en la base es por inquilino: la misma casilla en dos
     // aseguradoras haría que el timbre y las respuestas cayeran en una sola.
     const duena = await inquilinoDeLaCasilla(email);
@@ -84,7 +93,7 @@ export async function GET(request: NextRequest) {
     const refreshTokenEncrypted = encryptRefreshToken(tokens.refresh_token);
 
     try {
-      await enTenant({ tenantId: userRow.tenant_id }, (db) =>
+      await enControl({ tenantId: userRow.tenant_id }, (db) =>
         db
           .insert(t)
           .values({

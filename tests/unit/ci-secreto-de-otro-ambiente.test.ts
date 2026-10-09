@@ -30,7 +30,8 @@ describe("un secreto elegido por condición no cae al de otro ambiente", () => {
 
   it("barrer-trabados.yml: los dos pasos con CRON_SECRET llevan respaldo y cortan", () => {
     const yml = sinComentarios("barrer-trabados.yml");
-    const lineas = yml.split("\n").filter((l) => l.includes("CRON_SECRET: ${{"));
+    // El job de prd lleva el suyo, solo, y se mira aparte (ci-prd.test.ts).
+    const lineas = yml.split("\n").filter((l) => l.includes("CRON_SECRET: ${{") && !l.includes("PRD_CRON_SECRET"));
     expect(lineas).toHaveLength(2);
     for (const l of lineas) {
       expect(l).toContain("(secrets.QA_CRON_SECRET || '__falta__')");

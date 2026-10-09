@@ -121,7 +121,7 @@ const corren = (pedida === "todas" ? FORMAS.filter((f) => f !== "todas") : [pedi
 const doWrite = args.includes("--write");
 const claimants = numero("claimants", 10, 1, 100);
 const reporte = flag("reporte");
-const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix.vercel.app").replace(
+const BASE = (flag("url") || process.env.SMOKE_URL || "https://claimmix-dev.vercel.app").replace(
   /\/+$/,
   ""
 );

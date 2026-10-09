@@ -13,8 +13,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: {} }));
 
-const enTenant = vi.fn();
-vi.mock("@/data/scope", () => ({ enTenant: (...a: unknown[]) => enTenant(...a), enTenantVarias: vi.fn() }));
+const enControl = vi.fn();
+vi.mock("@/data/scope", () => ({ enControl: (...a: unknown[]) => enControl(...a), enTenantVarias: vi.fn() }));
 
 const pedirFijado = vi.fn();
 vi.mock("@/server/red/https-fijado", () => ({ pedirFijado: (...a: unknown[]) => pedirFijado(...a) }));
@@ -131,7 +131,7 @@ beforeEach(() => {
   vi.stubEnv("GMAIL_TOKEN_ENCRYPTION_KEY", "test-sso-encryption-key-0123456789");
   olvidarLosIdps();
   pedidos.length = 0;
-  enTenant.mockReset();
+  enControl.mockReset();
   documento = {
     issuer: ISSUER,
     authorization_endpoint: `${ISSUER}/authorize`,
@@ -454,26 +454,26 @@ describe("descubrimiento del IdP", () => {
 describe("la config vigente", () => {
   it("sin la 0045 aplicada no hay SSO, y no es un error", async () => {
     for (const code of ["42P01", "42703"]) {
-      enTenant.mockRejectedValueOnce(Object.assign(new Error("x"), { code }));
+      enControl.mockRejectedValueOnce(Object.assign(new Error("x"), { code }));
       expect(await configVigenteDelInquilino(TENANT)).toBeNull();
     }
   });
 
   it("cualquier otra falla de la base se propaga", async () => {
-    enTenant.mockRejectedValueOnce(Object.assign(new Error("caída"), { code: "08006" }));
+    enControl.mockRejectedValueOnce(Object.assign(new Error("caída"), { code: "08006" }));
     await expect(configVigenteDelInquilino(TENANT)).rejects.toThrow("caída");
   });
 
   it("una fila con un campo vacío no es una config", async () => {
-    enTenant.mockResolvedValueOnce([{ ...config(), issuer: null }]);
+    enControl.mockResolvedValueOnce([{ ...config(), issuer: null }]);
     expect(await configVigenteDelInquilino(TENANT)).toBeNull();
-    enTenant.mockResolvedValueOnce([]);
+    enControl.mockResolvedValueOnce([]);
     expect(await configVigenteDelInquilino(TENANT)).toBeNull();
   });
 
   it("una fila completa se devuelve tal cual", async () => {
     const fila = config();
-    enTenant.mockResolvedValueOnce([fila]);
+    enControl.mockResolvedValueOnce([fila]);
     expect(await configVigenteDelInquilino(TENANT)).toEqual(fila);
   });
 });

@@ -64,6 +64,9 @@ function tramosDeArmadores(s) {
  * dos consultas de una página y las manda por `enTenantVarias`. Sin nombrarlo
  * acá, cada listado paginado salía reportado como consulta cruda, que es
  * exactamente al revés de lo que es.
+ *
+ * `enControl` y `enControlVarias` cuentan igual: son la misma puerta, apuntada a la
+ * base de control.
  */
 function tramosDeLaCapa(s) {
   const tramos = [];
@@ -71,7 +74,7 @@ function tramosDeLaCapa(s) {
   // lleva un argumento de tipo, el paréntesis no viene pegado al nombre, y sin
   // esto el tramo entero quedaba sin reconocer y sus consultas salían como
   // crudas cuando no lo son.
-  const re = /\b(?:paginarEnTenant|enTenant(?:DeUsuario)?(?:Varias)?)\s*(?:<[^(]*>)?\s*\(/g;
+  const re = /\b(?:paginarEnTenant|en(?:Tenant(?:DeUsuario)?|Control)(?:Varias)?)\s*(?:<[^(]*>)?\s*\(/g;
   let m;
   while ((m = re.exec(s))) {
     let i = s.indexOf("(", m.index);

@@ -12,7 +12,7 @@ import { AppError } from "@/lib/errors";
 
 const m = vi.hoisted(() => ({
   requireAdmin: vi.fn(),
-  enTenant: vi.fn(),
+  enControl: vi.fn(),
   cerrarSesiones: vi.fn(),
   writeAuditLog: vi.fn(),
 }));
@@ -20,7 +20,7 @@ const m = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/require-admin", () => ({ requireAdmin: m.requireAdmin }));
 vi.mock("@/lib/auth/sesiones", () => ({ cerrarSesiones: m.cerrarSesiones }));
-vi.mock("@/data/scope", () => ({ enTenant: m.enTenant }));
+vi.mock("@/data/scope", () => ({ enControl: m.enControl }));
 vi.mock("@/lib/db", async () => {
   const { users } = await import("@/lib/db/schema");
   return { db: {}, tables: { users } };
@@ -56,7 +56,7 @@ beforeEach(() => {
 });
 
 function elObjetivoEs(filas: Array<{ id: string; role: string }>) {
-  m.enTenant.mockImplementation(async (ctx: { tenantId: string }, armar: (db: unknown) => unknown) => {
+  m.enControl.mockImplementation(async (ctx: { tenantId: string }, armar: (db: unknown) => unknown) => {
     expect(ctx).toEqual({ tenantId: TENANT_ID });
     const cadena = {
       select: () => cadena,
@@ -77,7 +77,7 @@ describe("quién entra", () => {
     m.requireAdmin.mockRejectedValue(new AppError(codigo as "FORBIDDEN_ROLE"));
 
     expect((await cerrar(OBJETIVO_ID)).status).toBe(estado);
-    expect(m.enTenant).not.toHaveBeenCalled();
+    expect(m.enControl).not.toHaveBeenCalled();
     expect(m.cerrarSesiones).not.toHaveBeenCalled();
     expect(m.writeAuditLog).not.toHaveBeenCalled();
   });
@@ -86,7 +86,7 @@ describe("quién entra", () => {
 describe("a quién se le cierran", () => {
   it("un id que no es uuid es un 404 sin consultar", async () => {
     expect((await cerrar("no-es-un-uuid")).status).toBe(404);
-    expect(m.enTenant).not.toHaveBeenCalled();
+    expect(m.enControl).not.toHaveBeenCalled();
     expect(m.cerrarSesiones).not.toHaveBeenCalled();
   });
 

@@ -8,8 +8,8 @@
  * que nunca vea el `error_description` que la librería agrega en inglés.
  */
 
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ locale: "es-AR" as "es-AR" | "en-US" }));
 
@@ -35,6 +35,10 @@ async function pintar(
 
 beforeEach(() => {
   h.locale = "es-AR";
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("cada código de error muestra su texto", () => {
@@ -140,6 +144,31 @@ describe("lo que cada texto cuenta", () => {
     expect(esARServidor["login.errores.account_not_linked"]).toMatch(/recuperala/);
     expect(enUSServidor["login.errores.account_not_linked"]).toMatch(/password/);
     expect(enUSServidor["login.errores.account_not_linked"]).toMatch(/reset/);
+  });
+});
+
+describe("la pista del otro ambiente", () => {
+  for (const idioma of IDIOMAS) {
+    it(`con URL_DEL_OTRO_AMBIENTE manda allá en ${idioma}; sin ella no hay enlace`, async () => {
+      await pintar({}, idioma);
+      expect(screen.queryByRole("link", { name: "dev.example.com" })).toBeNull();
+      cleanup();
+
+      vi.stubEnv("URL_DEL_OTRO_AMBIENTE", "https://dev.example.com");
+      await pintar({}, idioma);
+
+      expect(screen.getByRole("link", { name: "dev.example.com" })).toHaveAttribute("href", "https://dev.example.com/login");
+      expect(screen.getByRole("link", { name: "dev.example.com" }).parentElement).toHaveTextContent(
+        DICCIONARIO[idioma]["login.otroAmbiente"].replace("{url}", "dev.example.com")
+      );
+    });
+  }
+
+  it("una URL que no es http no se pinta", async () => {
+    vi.stubEnv("URL_DEL_OTRO_AMBIENTE", "javascript:alert(1)");
+    await pintar({}, "es-AR");
+
+    expect(screen.queryByText(/antes del cambio/)).toBeNull();
   });
 });
 

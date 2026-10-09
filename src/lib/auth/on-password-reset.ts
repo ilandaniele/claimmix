@@ -32,6 +32,7 @@ import { cerrarSesiones } from "@/lib/auth/sesiones";
 import { db } from "@/lib/db";
 import { authUsers, users } from "@/lib/db/schema";
 import { logger } from "@/lib/observability/logger";
+import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { remitenteDelSistema } from "@/server/notify/remitente-sistema";
 
 /**
@@ -110,6 +111,9 @@ export async function onPasswordReset(user: { id: string; email?: string; name?:
     // Sin perfil no hay inquilino donde anotar. Restablecer nunca da perfil: eso
     // lo hace /alta, y sólo a quien eligió él mismo el espacio.
     if (!perfil) return;
+
+    // La marca del correo se escribió en control; la copia del cliente se pone al día acá, que es donde ya hay inquilino.
+    await espejarSinFallar(perfil.tenant_id);
 
     await writeAuditLog({
       tenant_id: perfil.tenant_id,

@@ -24,25 +24,43 @@
  *   pnpm rol-app                      contra DATABASE_URL
  *   pnpm rol-app --env STAGING_DATABASE_URL
  *   pnpm rol-app --rotar              genera contraseña nueva para un rol que ya existe
+ *   pnpm rol-app --perfil cliente     además, los permisos de la base de un cliente
+ *   pnpm rol-app --perfil control     además, los de la base de control
+ *
+ * Sin `--perfil` (unico) los permisos son los de siempre. Los perfiles son de
+ * BASE_POR_CLIENTE: `scripts/lib/permisos-por-perfil.mjs` dice qué quitan.
  */
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { randomBytes } from "node:crypto";
 import { escribirEnEnvLocal } from "./lib/env-local.mjs";
-import { PERMISOS_QUITADOS, sentenciasPorColumna, sentenciasQuitar } from "./lib/permisos-quitados.mjs";
+import {
+  ROL_APP,
+  sentenciasDelRol,
+  sentenciasPerfilCliente,
+  sentenciasPerfilControl,
+} from "./lib/permisos-por-perfil.mjs";
+import { PERMISOS_QUITADOS, sentenciasPorColumna } from "./lib/permisos-quitados.mjs";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 
 neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 
-const ROL = "claimmix_app";
+const ROL = ROL_APP;
 const envIdx = process.argv.indexOf("--env");
 const VAR = envIdx !== -1 ? process.argv[envIdx + 1] : "DATABASE_URL";
+const perfilIdx = process.argv.indexOf("--perfil");
+const PERFIL = perfilIdx !== -1 ? process.argv[perfilIdx + 1] : "unico";
 const rotar = process.argv.includes("--rotar");
 const url = process.env[VAR]?.trim();
 
 if (!url) {
   console.error(`Falta ${VAR} en .env.local`);
+  process.exit(2);
+}
+
+if (!["unico", "cliente", "control"].includes(PERFIL)) {
+  console.error(`--perfil espera unico, cliente o control (recibí "${PERFIL}")`);
   process.exit(2);
 }
 
@@ -86,30 +104,24 @@ try {
   // Idempotentes: se pueden volver a conceder las veces que haga falta. Los
   // "default privileges" son los que evitan que una tabla creada mañana nazca
   // sin permisos y rompa producción sin que nadie relacione una cosa con la otra.
+  //
+  // `sentenciasDelRol` los trae en orden: primero lo que se concede, después lo
+  // que el rol NO puede (`permisos-quitados.mjs`: reescribir la auditoría (0032),
+  // borrar la configuración de la entrega al Core (0036)…), y al final los
+  // permisos por columna, porque un REVOKE de tabla también borra los de columna.
   paso("Permisos sobre el esquema public");
-  for (const sql of [
-    `GRANT USAGE ON SCHEMA public TO ${ROL}`,
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${ROL}`,
-    `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${ROL}`,
-    `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${ROL}`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${ROL}`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${ROL}`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO ${ROL}`,
-  ]) {
-    await cx.query(sql);
-  }
-
-  // Lo que el rol NO puede (`permisos-quitados.mjs`): reescribir la auditoría
-  // (0032) o borrar la configuración de la entrega al Core (0036).
-  // Va después del GRANT ON ALL TABLES, que lo volvería a conceder.
-  for (const sql of sentenciasQuitar(ROL)) await cx.query(sql);
+  for (const sql of sentenciasDelRol()) await cx.query(sql);
   ok(`lectura, escritura, secuencias y funciones — más los permisos por omisión; sin ${Object.entries(PERMISOS_QUITADOS).map(([t, p]) => `${p.join("/")} en ${t}`).join(", ")}`);
+  for (const { resumen } of sentenciasPorColumna(ROL)) ok(resumen);
 
-  // Un REVOKE de tabla también borra los permisos por columna: se vuelven a dar
-  // acá, después de los REVOKE y no antes.
-  for (const { sql, resumen } of sentenciasPorColumna(ROL)) {
-    await cx.query(sql);
-    ok(resumen);
+  if (PERFIL === "cliente") {
+    paso("Perfil cliente");
+    for (const sql of sentenciasPerfilCliente()) await cx.query(sql);
+    ok("sin las tablas de control, sin escribir lo espejado, y en tenants sólo las columnas de configuración");
+  } else if (PERFIL === "control") {
+    paso("Perfil control");
+    await cx.query(sentenciasPerfilControl());
+    ok("sin INSERT, UPDATE, DELETE ni TRUNCATE en lo que no es de control; SELECT queda");
   }
 
   // ── Comprobación de atributos ─────────────────────────────────────────────

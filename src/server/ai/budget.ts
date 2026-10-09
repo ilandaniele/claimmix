@@ -17,6 +17,9 @@
  * AC10 (budget guard): Returns { exceeded: true, reason } when any cap is hit.
  *
  * Queries ai_usage through enTenant/enTenantVarias (no service-role client).
+ * Con BASE_POR_CLIENTE=1 cada gasto se anota además en control (`recordUsage`),
+ * que es de donde sale el tope del proyecto; los topes por inquilino siguen
+ * leyendo su propia base.
  *
  * Token cost model: Gemini/Vertex pricing (see MODEL_COSTS below). The
  * gpt-4o(-mini) entries are legacy — kept only to price ai_usage rows
@@ -26,6 +29,7 @@
 import "server-only";
 import { and, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { QueryBuilder } from "drizzle-orm/pg-core";
+import { after } from "next/server.js";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import {
@@ -40,7 +44,9 @@ import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit, resolveProvider } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { inquilinoDeLaPlataforma } from "@/server/whatsapp/numeros";
+import { CENTINELA, basePorCliente } from "@/data/bases";
 import {
+  enControl,
   enTenant,
   enTenantVarias,
   type ClienteDatos,
@@ -772,6 +778,68 @@ export async function recordUsage(
     cost_usd: costUsd.toFixed(4),
   };
 
+  await anotarEnElInquilino(tenantId, userId, fila);
+  // El centinela ya vive en control: copiarlo ahí sería anotarlo dos veces.
+  if (basePorCliente() && tenantId !== CENTINELA) await copiarEnControl(tenantId, userId, fila);
+}
+
+type FilaDeGasto = {
+  tenant_id: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: string;
+};
+
+/**
+ * La copia del gasto en control, para el tope del proyecto.
+ *
+ * `sumaMensualDelProyecto` lee con el dueño, que sólo ve control: con una base
+ * por inquilino, un gasto anotado únicamente en la del inquilino no entra en el
+ * tope global. El trigger de la 0046 mantiene `ai_usage_mensual` en control.
+ *
+ * Va en `after()`, así que no suma latencia a la llamada. Fuera de un pedido —un
+ * script, una prueba— `after()` tira, y ahí se espera como antes. No tira nunca:
+ * si falla, el gasto sigue anotado en la base del inquilino y queda dicho.
+ */
+async function copiarEnControl(
+  tenantId: string,
+  userId: string | null,
+  fila: FilaDeGasto
+): Promise<void> {
+  const escribir = (user_id: string | null) =>
+    enControl({ tenantId }, (db) => db.insert(tables.aiUsage).values({ ...fila, user_id }));
+
+  const copiar = async () => {
+    try {
+      try {
+        await escribir(userId);
+      } catch (e) {
+        // Mismo caso que en la base del inquilino: un usuario que no sirve no
+        // puede costar el gasto.
+        const code = (e as { code?: string })?.code;
+        if (!userId || (code !== "23503" && code !== "22P02")) throw e;
+        await escribir(null);
+      }
+    } catch (e) {
+      const name = e instanceof Error ? e.name : "UnknownError";
+      logger.error({ error_name: name }, "ai.usage_control_error");
+    }
+  };
+
+  try {
+    after(copiar);
+  } catch {
+    await copiar();
+  }
+}
+
+/** El gasto en la base del inquilino, de donde leen sus topes. No tira. */
+async function anotarEnElInquilino(
+  tenantId: string,
+  userId: string | null,
+  fila: FilaDeGasto
+): Promise<void> {
   try {
     await enTenant({ tenantId }, (db) =>
       db.insert(tables.aiUsage).values({ ...fila, user_id: userId })

@@ -14,6 +14,8 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
 import { esPlanPro } from "@/core/billing/plan-pro";
+import { basePorCliente } from "@/data/bases";
+import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 import { getSessionContext } from "@/lib/auth/session";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { getUserRowOrThrow, type UserRow } from "@/lib/auth/user-row";
@@ -50,6 +52,12 @@ export default async function AppLayout({
   }
   // Sesión sin fila de `users`: cuenta creada sin acceso. Fuera del try.
   if (filaLeida && !userRow) redirect("/pendiente");
+  // Con una base por cliente el espacio no sirve hasta que su base está lista. Se olvida la fila de
+  // esta instancia: si ya estaba lista y la copia era vieja, /preparando la devuelve y no rebota.
+  if (userRow && basePorCliente() && userRow.base !== "lista") {
+    olvidarFilaDeUsuario(userRow.id);
+    redirect("/preparando");
+  }
 
   // El nombre en el idioma del usuario, así que se resuelve DESPUÉS del
   // locale — ver más abajo, donde la preferencia de la cuenta le gana a la

@@ -11,6 +11,10 @@
  * El tope se cuenta en la base, sobre filas reales y con un candado, y no acá:
  * dos altas a la vez no se lo saltean y no hace falta un contador aparte.
  *
+ * Con una base por cliente, antes de llamar a la función la misma sentencia mira
+ * los topes del plan (cuántas bases, cuántos MB): pasados, el alta se cierra sin
+ * crear nada.
+ *
  * Nunca recibe el inquilino de un pedido: el id lo inventa esta función.
  */
 
@@ -20,7 +24,7 @@ import { randomUUID } from "node:crypto";
 
 import { sql } from "drizzle-orm";
 
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { entero } from "@/lib/entero";
 import { diasDePrueba } from "@/lib/billing/plans";
 import { filasDe } from "@/lib/db/filas";
@@ -36,6 +40,8 @@ export type ResultadoDeAlta =
 
 export interface AltaCreada {
   resultado: ResultadoDeAlta;
+  /** El espacio que se creó (o se intentó crear): de ahí sale la base que hay que preparar. */
+  tenantId: string;
   /** Las altas automáticas de las últimas 24 h, contada ésta si salió bien. Null si la base no lo dijo. */
   creadas24h: number | null;
   tope: number | null;
@@ -44,6 +50,16 @@ export interface AltaCreada {
 /** Cuántos espacios por día. 0 cierra el alta; la base lo acota a 500. */
 export function topeGlobalDelDia(): number {
   return entero("ALTA_TOPE_GLOBAL_DIA", 20, 0, 500);
+}
+
+/** Cuántas bases de cliente puede haber. 0 no pone tope. */
+export function topeDeBases(): number {
+  return entero("ALTA_TOPE_BASES", 0, 0, 500);
+}
+
+/** Cuántos MB puede pesar el proyecto entero. 0 no pone tope. */
+export function topeDeMb(): number {
+  return entero("ALTA_TOPE_MB", 0, 0, 500);
 }
 
 /**
@@ -69,7 +85,7 @@ function numeroOnull(valor: unknown): number | null {
 }
 
 /** El jsonb que devuelve la función. Un resultado que no conocemos lanza: cerrar en silencio escondería un cambio de la función. */
-function leerResultado(filas: unknown): AltaCreada {
+function leerResultado(filas: unknown): Omit<AltaCreada, "tenantId"> {
   const crudo = filasDe<{ r?: unknown }>(filas)[0]?.r;
   const r = (typeof crudo === "string" ? JSON.parse(crudo) : crudo) as Record<string, unknown> | null | undefined;
   const resultado = r?.resultado;
@@ -93,19 +109,31 @@ export async function crearInquilino(datos: {
   const nuevoId = randomUUID();
   try {
     // alta: el inquilino todavía no existe. El contexto es el id nuevo, y la función se niega a crear otro.
-    const filas = await enTenant({ tenantId: nuevoId }, (db) =>
+    // Los topes de bases y de MB van en la misma sentencia: con 0 no cuentan y el catálogo ni se mira.
+    const topeBases = topeDeBases();
+    const topeMb = topeDeMb();
+    const filas = await enControl({ tenantId: nuevoId }, (db) =>
       db.execute(sql`
-        select public.claimmix_crear_inquilino(
-          ${nuevoId}::uuid, ${datos.userId}::uuid, ${datos.empresa}::text, ${datos.numero}::text,
-          ${diasDePrueba()}::int, ${topeGlobalDelDia()}::int, ${datos.ip}::inet
-        ) as r
+        select case
+          when ${topeBases}::int > 0
+            and (select count(*) from pg_database where datname ~ '^t_[0-9a-f]{32}$') >= ${topeBases}::int
+            then jsonb_build_object('resultado', 'alta_cerrada')
+          when ${topeMb}::int > 0
+            and (select sum(pg_database_size(oid)) from pg_database
+                 where not datistemplate and has_database_privilege(oid, 'CONNECT')) / 1048576 >= ${topeMb}::int
+            then jsonb_build_object('resultado', 'alta_cerrada')
+          else public.claimmix_crear_inquilino(
+            ${nuevoId}::uuid, ${datos.userId}::uuid, ${datos.empresa}::text, ${datos.numero}::text,
+            ${diasDePrueba()}::int, ${topeGlobalDelDia()}::int, ${datos.ip}::inet
+          )
+        end as r
       `)
     );
-    return leerResultado(filas);
+    return { ...leerResultado(filas), tenantId: nuevoId };
   } catch (e) {
     const codigo = codigoPg(e);
     if (codigo !== undefined && CODIGOS_DE_ALTA_CERRADA.has(codigo)) {
-      return { resultado: "alta_cerrada", creadas24h: null, tope: null };
+      return { resultado: "alta_cerrada", tenantId: nuevoId, creadas24h: null, tope: null };
     }
     throw e;
   }

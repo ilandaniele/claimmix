@@ -26,7 +26,7 @@ import { asc } from "drizzle-orm";
 
 import { leerRetencion, type ModoDeBorrado } from "@/core/retencion";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { db } from "@/lib/db";
+import { db as dbDueno, type DbDueno } from "@/lib/db";
 import { cases, tenants } from "@/lib/db/schema";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 import { errorCode } from "@/lib/observability/error-code";
@@ -67,7 +67,8 @@ async function vencidos(ctx: TenantContext, corte: Date): Promise<string[]> {
  */
 export async function aplicarRetencion(
   { hasta }: { hasta: number },
-  ahora: Date = new Date()
+  ahora: Date = new Date(),
+  db: DbDueno = dbDueno
 ): Promise<ResultadoRetencion | null> {
   const { modo, anios, corte } = leerRetencion(process.env, ahora);
   if (modo === "apagado") return null;

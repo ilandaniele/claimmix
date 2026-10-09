@@ -2,7 +2,8 @@ import "server-only";
 
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { baseDelInquilino } from "@/data/bases";
+import { db as dbDueno, dbDeBase, type DbDueno } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
@@ -89,12 +90,19 @@ export interface ReapResult {
  * @param opts.tenantId    Limit to one tenant (opportunistic calls); omit for the global cron sweep.
  * @param opts.olderThanMs Override the staleness threshold (defaults to SIMULATE_STUCK_REAP_AFTER_MS).
  * @param opts.limit       Max cases to reap in one pass (default 200).
+ * @param conBase          La base a barrer: la pasa el recorrido por bases. Sin ella, con
+ *                         `BASE_POR_CLIENTE=1` y `opts.tenantId` es la del inquilino; si no, la de siempre.
  */
-export async function reapStuckProcessingCases(opts?: {
-  tenantId?: string;
-  olderThanMs?: number;
-  limit?: number;
-}): Promise<ReapResult> {
+export async function reapStuckProcessingCases(
+  opts?: {
+    tenantId?: string;
+    olderThanMs?: number;
+    limit?: number;
+  },
+  conBase?: DbDueno
+): Promise<ReapResult> {
+  const baseDelCaso = baseDelInquilino(opts?.tenantId);
+  const db = conBase ?? (baseDelCaso ? dbDeBase(baseDelCaso) : dbDueno);
   const olderThanMs = opts?.olderThanMs ?? getStuckReapAfterMs();
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
   const limit = opts?.limit ?? DEFAULT_REAP_LIMIT;

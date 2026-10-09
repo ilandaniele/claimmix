@@ -82,6 +82,12 @@ describe("claveDeCupo con IP", () => {
     expect(claveDeCupo("alta:correo-ip", "2001:db8:abcd:1200::1")).toBe("alta:correo-ip:2001:db8:abcd:1200::/56");
   });
 
+  it("wa:codigo-ip también corta a /56, y el cupo del inquilino no se toca", () => {
+    expect(claveDeCupo("wa:codigo-ip", "2001:db8:abcd:1200::1")).toBe(claveDeCupo("wa:codigo-ip", "2001:db8:abcd:12ff::1"));
+    expect(claveDeCupo("wa:codigo-ip", "2001:db8:abcd:1200::1")).toBe("wa:codigo-ip:2001:db8:abcd:1200::/56");
+    expect(claveDeCupo("wa:codigo", "T-1")).toBe("wa:codigo:t-1");
+  });
+
   it("dos /56 distintos no comparten alta:ip", () => {
     expect(claveDeCupo("alta:ip", "2001:db8:abcd:1200::1")).not.toBe(
       claveDeCupo("alta:ip", "2001:db8:abcd:1300::1")

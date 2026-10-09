@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, asc, eq } from "drizzle-orm";
 import { requireRole, ADMIN_ROLES, ALL_ROLES } from "@/lib/auth/require-role";
 import { tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enControl, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -61,7 +61,7 @@ export async function GET() {
 
     let data;
     try {
-      data = await enTenant(tenantCtx, (db) =>
+      data = await enControl(tenantCtx, (db) =>
         db
           .select(ACCOUNT_COLUMNS)
           .from(t)
@@ -99,7 +99,7 @@ export async function PATCH(request: NextRequest) {
     let data;
     try {
       data = firstRow(
-        await enTenant(tenantCtx, (db) =>
+        await enControl(tenantCtx, (db) =>
           db
             .update(t)
             .set({
@@ -142,7 +142,7 @@ export async function DELETE(request: NextRequest) {
     let deleted;
     try {
       deleted = firstRow(
-        await enTenant(tenantCtx, (db) =>
+        await enControl(tenantCtx, (db) =>
           db.delete(t).where(eq(t.id, id)).returning({ id: t.id })
         )
       );

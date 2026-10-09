@@ -17,7 +17,7 @@
 import "server-only";
 
 import { and, eq, notExists, notInArray, sql, type AnyColumn } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db as dbDueno, type DbDueno } from "@/lib/db";
 import { enTenant, enTenantVarias } from "@/data/scope";
 import { caseRecordatorios, cases, tenants } from "@/lib/db/schema";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
@@ -152,7 +152,10 @@ export async function recordarCaso(
  * vencida y sin reservar en su ciclo, y sin un pedido de las últimas 24 h: los
  * que hoy no tienen nada que mandar no les tapan el lugar a los que sí.
  */
-export async function recordarPendientes(o: { hasta: number }): Promise<{ enviados: number; salteados: number }> {
+export async function recordarPendientes(
+  o: { hasta: number },
+  db: DbDueno = dbDueno
+): Promise<{ enviados: number; salteados: number }> {
   const resultado = { enviados: 0, salteados: 0 };
 
   // sin-inquilino: barrido de sistema sobre los casos de todos los inquilinos
@@ -207,7 +210,7 @@ export async function recordarPendientes(o: { hasta: number }): Promise<{ enviad
  * sale nada: a los catorce días de silencio la ventana de 24 h está cerrada y
  * no hay plantilla para esto.
  */
-export async function avisarCierres(o: { hasta: number }): Promise<number> {
+export async function avisarCierres(o: { hasta: number }, db: DbDueno = dbDueno): Promise<number> {
   // sin-inquilino: barrido de sistema sobre los cierres de todos los
   // inquilinos; cada caso se atiende después en el suyo.
   const cerrados = await db

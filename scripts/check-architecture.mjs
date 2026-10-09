@@ -49,7 +49,7 @@ import { join } from "node:path";
  * configuración en una sola consulta; `cerrarSesionesDelDominio` borra sesiones,
  * que no son de un inquilino, de las cuentas de ese inquilino. Sin ese filtro
  * «exigir» de una aseguradora tocaba a las cuentas de otra con un mail del mismo
- * dominio. `correoExigeSso`, que sí conoce el inquilino, va por `enTenant`.
+ * dominio. `correoExigeSso`, que sí conoce el inquilino, va por `enControl`.
  */
 const TOPE_FILTROS = 13;
 
@@ -231,18 +231,20 @@ const scope = "src/data/scope.ts";
 if (!existsSync(scope)) {
   mal("no encuentro src/data/scope.ts");
 } else {
-  const s = readFileSync(scope, "utf8");
   // Se permite nombrarlo en comentarios —el archivo explica por qué NO se usa—
-  // pero no leerlo.
-  const lee = s
-    .split(/\r?\n/)
-    .some((l) => {
-      const t = l.trim();
-      if (t.startsWith("//") || t.startsWith("*")) return false;
-      return /process\.env\.DATABASE_URL\b/.test(l);
-    });
-  if (lee) {
-    mal("lee DATABASE_URL: con el rol viejo, sus consultas devuelven datos de todos");
+  // pero no leerlo. Vale para todo `src/data/`: `bases.ts` arma la cadena de cada
+  // inquilino a partir de la que le da `scope.ts` y tampoco toca la del dueño.
+  const leen = archivos("src/data").filter((f) =>
+    readFileSync(f, "utf8")
+      .split(/\r?\n/)
+      .some((l) => {
+        const t = l.trim();
+        if (t.startsWith("//") || t.startsWith("*")) return false;
+        return /process\.env\.DATABASE_URL\b/.test(l);
+      })
+  );
+  if (leen.length > 0) {
+    mal(`${leen.join(", ")} lee DATABASE_URL: con el rol viejo, sus consultas devuelven datos de todos`);
   } else {
     bien("no hay forma de que caiga al rol que saltea RLS");
   }
@@ -410,7 +412,7 @@ console.log("\n▸ nadie usa db.$count (la capa no lo puede armar)");
  * hace `find-raw-db.mjs` para delimitar los tramos de la capa.
  */
 function anidaEnTenant(txt) {
-  const re = /\benTenant(?:DeUsuario)?(?:Varias)?\s*(?:<[^(]*>)?\s*\(/g;
+  const re = /\ben(?:Tenant(?:DeUsuario)?|Control)(?:Varias)?\s*(?:<[^(]*>)?\s*\(/g;
   let m;
   while ((m = re.exec(txt))) {
     const abre = txt.indexOf("(", m.index);
@@ -425,7 +427,7 @@ function anidaEnTenant(txt) {
     }
     // El cuerpo de la llamada, sin contar su propio nombre.
     const adentro = txt.slice(abre + 1, i);
-    if (/\benTenant(?:DeUsuario)?(?:Varias)?\s*(?:<[^(]*>)?\s*\(/.test(adentro)) return true;
+    if (/\ben(?:Tenant(?:DeUsuario)?|Control)(?:Varias)?\s*(?:<[^(]*>)?\s*\(/.test(adentro)) return true;
   }
   return false;
 }
@@ -1180,6 +1182,106 @@ console.log("\n▸ Ningún secreto elegido por condición cae al de otro ambient
     for (const c of culpables) console.log(`     .github/workflows/${c}`);
     console.log("     Escribilo `cond && (secrets.A || '__falta__') || (secrets.B || '__falta__')`");
     console.log("     y cortá el paso si el valor quedó '__falta__'.");
+  }
+}
+
+// ── 22. enControl sólo lo usan los archivos de su lista ───────────────────
+//
+// Con `BASE_POR_CLIENTE=1` cada inquilino tiene su base y `enControl` es la
+// puerta a la otra: la de control, donde viven la identidad, la membresía, los
+// números, las casillas, el SSO, el formulario y el alta. Un archivo que la use
+// sin que le toque manda a control lo que es del inquilino, o al revés, y con la
+// bandera apagada no se nota: hay una sola base y las dos puertas llevan al mismo
+// lugar. Sumar un archivo a la lista es un acto deliberado, no un descuido.
+console.log("\n▸ enControl sólo desde su lista");
+{
+  const ARCHIVOS_CON_ENCONTROL = new Set([
+    // El alta
+    "src/server/alta/crear-inquilino.ts",
+    "src/server/alta/invitacion.ts",
+    "src/server/alta/numero-automatico.ts",
+    "src/server/alta/panel-operador.ts",
+    // Casillas, formulario y SSO
+    "src/server/email/gmail/accounts.ts",
+    "src/app/api/admin/gmail-accounts/route.ts",
+    "src/app/api/admin/gmail-accounts/callback/route.ts",
+    "src/app/api/admin/formulario-web/route.ts",
+    "src/server/web/formulario-del-inquilino.ts",
+    "src/app/(app)/agente/page.tsx",
+    "src/server/sso/config.ts",
+    "src/server/sso/usuarios.ts",
+    "src/server/sso/panel.ts",
+    "src/app/api/admin/sso/route.ts",
+    // La salud mira la casilla, que vive en control
+    "src/app/api/health/route.ts",
+    // Identidad y membresía
+    "src/app/api/admin/users/[id]/route.ts",
+    "src/app/api/admin/users/[id]/sessions/route.ts",
+    "src/app/api/auth/me/route.ts",
+    "src/lib/auth/provision.ts",
+    "src/lib/auth/on-password-reset.ts",
+    // Números, auditoría de control y el libro de IA
+    "src/server/whatsapp/numeros.ts",
+    "src/lib/audit/log.ts",
+    "src/server/ai/budget.ts",
+  ]);
+  const USA = /\benControl(?:Varias)?\b/;
+  const sueltos = archivos("src").filter(
+    (f) =>
+      !f.startsWith("src/data/") &&
+      !ARCHIVOS_CON_ENCONTROL.has(f) &&
+      USA.test(sinComentarios(readFileSync(f, "utf8")))
+  );
+  if (sueltos.length === 0) {
+    bien("ningún archivo fuera de la lista usa enControl");
+  } else {
+    mal(`${sueltos.length} archivo(s) usan enControl sin estar en la lista`);
+    for (const x of sueltos) console.log(`     ${x}`);
+    console.log("     Si lo que tocan vive en control, sumalos a ARCHIVOS_CON_ENCONTROL;");
+    console.log("     si es del inquilino, va enTenant.");
+  }
+}
+
+// ── 23. Lo que es de control no vuelve a enTenant ─────────────────────────
+//
+// Casillas de Gmail, formulario, SSO y la membresía que mira el panel de
+// sesiones viven en control (`TABLAS_DE_CONTROL`, scripts/lib/permisos-por-perfil.mjs).
+// Estos archivos sólo tocan esas tablas: si alguno vuelve a `enTenant`, con la
+// bandera apagada anda igual —hay una sola base— y con ella prendida la
+// consulta cae en la base del cliente, donde esas tablas están vacías o no
+// existen. Es una lista a mano, y sumar un archivo es deliberado.
+console.log("\n▸ Lo de control va por enControl");
+{
+  const SOLO_DE_CONTROL = [
+    "src/server/alta/numero-automatico.ts",
+    "src/server/email/gmail/accounts.ts",
+    "src/app/api/admin/gmail-accounts/route.ts",
+    "src/app/api/admin/gmail-accounts/callback/route.ts",
+    "src/app/api/admin/formulario-web/route.ts",
+    "src/server/web/formulario-del-inquilino.ts",
+    "src/server/sso/config.ts",
+    "src/server/sso/usuarios.ts",
+    "src/server/sso/panel.ts",
+    "src/app/api/admin/sso/route.ts",
+    "src/app/api/admin/users/[id]/sessions/route.ts",
+  ];
+  const VUELVEN = /\benTenant(?:Varias|DeUsuarioVarias)?\b/;
+  const faltan = SOLO_DE_CONTROL.filter((f) => !existsSync(f));
+  const vuelven = SOLO_DE_CONTROL.filter(
+    (f) => existsSync(f) && VUELVEN.test(sinComentarios(readFileSync(f, "utf8")))
+  );
+  if (faltan.length > 0) {
+    mal(`${faltan.length} archivo(s) de la lista de control ya no existen`);
+    for (const x of faltan) console.log(`     ${x}`);
+    console.log("     Si se movieron, actualizá SOLO_DE_CONTROL en este chequeo.");
+  }
+  if (vuelven.length > 0) {
+    mal(`${vuelven.length} archivo(s) de control usan enTenant`);
+    for (const x of vuelven) console.log(`     ${x}`);
+    console.log("     Sus tablas viven en control: va enControl.");
+  }
+  if (faltan.length === 0 && vuelven.length === 0) {
+    bien(`${SOLO_DE_CONTROL.length} archivo(s) de control, ninguno usa enTenant`);
   }
 }
 

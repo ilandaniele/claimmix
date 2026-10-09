@@ -30,7 +30,7 @@ vi.mock("@/data/scope", async () => {
     return { rows: m.filas.actuales as unknown[][] };
   });
   return {
-    enTenant: (ctx: { tenantId: string }, armar: (d: unknown) => unknown) => {
+    enControl: (ctx: { tenantId: string }, armar: (d: unknown) => unknown) => {
       m.contextos.push(ctx.tenantId);
       return Promise.resolve(armar(db));
     },
@@ -52,6 +52,7 @@ const put = (body: unknown) =>
   );
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
   m.consultas.length = 0;
   m.contextos.length = 0;
@@ -117,6 +118,24 @@ describe("PUT /api/admin/formulario-web", () => {
     const res = await put({ activo: true, slug: "tomado-por-otro" });
     expect(res.status).toBe(400);
     expect(m.audit).not.toHaveBeenCalled();
+  });
+
+  it("un enlace de SLUGS_DE_DEV da 400 como uno tomado, sin tocar la base", async () => {
+    vi.stubEnv("SLUGS_DE_DEV", "otra-aseguradora, Denuncia-Dev");
+    for (const slug of ["otra-aseguradora", "denuncia-dev"]) {
+      const res = await put({ activo: true, slug });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.message).toBe("Ese enlace ya está en uso.");
+    }
+    expect(m.consultas).toHaveLength(0);
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+
+  it("con SLUGS_DE_DEV un enlace que no está en la lista se crea igual", async () => {
+    vi.stubEnv("SLUGS_DE_DEV", "otra-aseguradora");
+    m.filas.actuales = [["mi-aseguradora", true]];
+    expect((await put({ activo: true, slug: "mi-aseguradora" })).status).toBe(200);
+    expect(m.consultas).toHaveLength(1);
   });
 
   it("sin la 0044 responde 503 MIGRACION_PENDIENTE", async () => {

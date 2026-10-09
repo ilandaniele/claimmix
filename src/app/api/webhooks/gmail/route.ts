@@ -30,6 +30,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { OAuth2Client } from "google-auth-library";
 import { pollGmail } from "@/server/email/gmail/gmail-poller";
 import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
+import { hayCasillaDelEntorno } from "@/server/email/gmail/gmail-client";
 import { logger } from "@/lib/observability/logger";
 
 /** Required: prevent Vercel from statically optimising this dynamic route. */
@@ -257,6 +258,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const casillas = await listEnabledGmailAccounts();
+    // Ni casillas conectadas ni la del .env (así arranca prd): no hay a quién leerle nada, y pollGmail() tiraría.
+    if (casillas.length === 0 && !hayCasillaDelEntorno()) {
+      logger.info({ message_id: messageId }, "webhooks_gmail.sin_casillas");
+      return NextResponse.json({ ok: true, ignored: true });
+    }
     const direccion = pushPayload.emailAddress?.toLowerCase();
     const connectedAccount = direccion
       ? (casillas.find((c) => c.email === direccion) ?? null)

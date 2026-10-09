@@ -156,3 +156,214 @@ status on its own, and caches it briefly. Without `WHATSAPP_BUSINESS_ACCOUNT_ID`
 or while the template is not yet approved, behaviour stays exactly as it is
 today — a reopened-by-abandonment case outside the window simply can't be
 reopened by resending.
+
+---
+
+## Parte F — Número propio por código (alta automática)
+
+Un espacio del alta automática (`/alta`) nace con su número en estado `pedido`, y
+hasta ahora lo conectaba el operador a mano desde `/admin/altas`. Con
+`ALTA_NUMERO_AUTOMATICO=1` lo conecta el owner o el admin del espacio desde
+**Configuración**: pide el código por SMS o por llamada, lo escribe, y Meta suma su
+número a la WABA de la plataforma. Está **apagado por omisión**: sin la variable, o
+sin la migración 0049 en la base, nada llama a Graph. `/admin/altas` sigue de
+respaldo para cualquier caso que no cierre solo.
+
+> Graph no se probó en vivo. Los endpoints, los cuerpos, el formato del móvil
+> argentino, el idioma del SMS y los códigos de error de esta parte salen de la
+> documentación de Cloud API y se miden en la prueba real de QA (abajo). Todo lo que
+> Meta conteste y no se entienda termina en «revisión» con aviso al operador, nunca
+> en un número a medias.
+
+### Antes de prenderlo
+
+1. Aplicar la **0049** a mano, con el rol dueño, en las tres bases y en este orden:
+   QA (`ep-wispy-flower`), la viva (`ep-proud-resonance`) y la rama `production` de
+   Veltra (`STAGING_DATABASE_URL`). Identificar cada base por el canal de sus casos,
+   no por el nombre. `node scripts/migrate.mjs --apply`, y después en cada una, con su
+   `DATABASE_URL_APP`: `pnpm permisos && pnpm tenancy`. El CI corre
+   `--exigir-al-dia`: mergear antes de migrar lo deja rojo.
+2. Sólo después, `ALTA_NUMERO_AUTOMATICO=1`. Con la bandera y sin la 0049 la
+   pantalla de Configuración no muestra los formularios (comprueba en la misma
+   consulta que la función exista) y sigue con «lo conectamos nosotros»; si alguien
+   llega con una pantalla vieja, la acción termina en «revisión» sin llamar a Graph
+   (el motivo queda en el log `alta.numero_automatico_no_aplica`, `sin_migracion`).
+   La bienvenida de la bandeja sólo mira la bandera: por eso la 0049 va primero.
+3. El token del sistema (`WHATSAPP_ACCESS_TOKEN`) necesita
+   `whatsapp_business_management` y `whatsapp_business_messaging`, y hacen falta
+   `WHATSAPP_BUSINESS_ACCOUNT_ID` y `WHATSAPP_PHONE_NUMBER_ID` (el de la plataforma).
+   Sin alguno de los dos ids no se agrega nada.
+4. Confirmar que la app de ClaimMix está en `subscribed_apps` de la WABA. Cada
+   número nuevo recibe además su **webhook propio**
+   (`NEXT_PUBLIC_SITE_URL` + `/api/webhooks/whatsapp`, con `WHATSAPP_VERIFY_TOKEN`):
+   dev y prd comparten app y WABA, y sin él los mensajes del número caerían en el
+   webhook del otro ambiente. Con `NEXT_PUBLIC_SITE_URL` sin https o sin
+   `WHATSAPP_VERIFY_TOKEN` no se llama a Meta (aviso `sin_credencial`). En el
+   ambiente que no es dev, `NUMEROS_DE_DEV` lista los números de dev: uno de ellos
+   termina en «revisión» con el aviso `de_otro_ambiente`, sin tocar Meta.
+5. Mantener `ADMIN_EMAILS` y el remitente del sistema (Gmail): sin ellos los avisos
+   al operador sólo quedan en el log `alta.numero_en_revision`.
+
+### Lo que hace la persona
+
+1. Se da de alta en `/alta` con un **móvil argentino** (`+549` y diez dígitos más)
+   que reciba SMS o llamada y que **no esté en la app de WhatsApp ni en WhatsApp
+   Business**. Si lo está, tiene que borrar esa cuenta y esperar unos minutos; los
+   chats se pierden.
+2. En **Configuración** aprieta «Por SMS» o «Por llamada». El panel sólo se ve si es
+   owner o admin, el espacio es del alta automática, la prueba sigue vigente (o está
+   activo; suspendido o dado de baja no), la 0049 está en la base y el número está en
+   `pedido`. En `/registro` el aviso de que el móvil no puede estar en la app de
+   WhatsApp aparece con la bandera prendida.
+3. Escribe el código de seis números y aprieta «Conectar».
+4. Listo: lo que le escriban a ese número entra como caso en la bandeja de su espacio.
+
+Los clientes de esa aseguradora ven como nombre del número **el de la plataforma**
+(el `verified_name` del número de Veltra, leído de Graph). Lo que tipeó la persona
+nunca va como nombre. Si después quiere que figure el de su empresa, se pide a Meta
+a mano.
+
+### Lo que hace el sistema
+
+Cada acción es un formulario de servidor (sin JavaScript de cliente) que termina en
+`/configuracion?wa=<resultado>`, con un resultado de una lista cerrada: nunca un
+texto de Graph.
+
+**Pedir el código** (`pedirCodigo`):
+
+1. Toma los cupos de código (por espacio, por red y global). Sin lugar, «esperar».
+2. Lee, en una consulta, la fila del número y el estado del espacio y comprueba que
+   la 0049 exista. Si algo no cierra, «revisión» y no llama a Graph; si el espacio
+   no tiene fila de número, además sale el aviso `sin_fila`. Si el número es de la
+   lista del otro ambiente, aviso `de_otro_ambiente`. Si falta el token, la WABA, el
+   número de la plataforma, el sitio https o `WHATSAPP_VERIFY_TOKEN` en el entorno,
+   aviso `sin_credencial`. La fila se lee y se escribe en control; cada paso que se
+   guarda se espeja a la base del cliente (con `BASE_POR_CLIENTE` apagado no hace
+   nada) y, si la copia no entra, el paso sale igual y la levanta el barrido.
+3. Si la fila todavía no tiene `phone_number_id`:
+   - parte el número (sólo `+549…`; otro formato, aviso `pais`);
+   - recorre la WABA (`GET /{waba}/phone_numbers?fields=id,display_phone_number,verified_name`);
+   - si el número ya está ahí, no lo adopta (aviso `ya_en_la_waba`); si la WABA ya
+     tiene el máximo de números, aviso `sin_lugar`; si no aparece el nombre de la
+     plataforma, aviso `sin_nombre`;
+   - toma los cupos de alta y agrega el número
+     (`POST /{waba}/phone_numbers` con `cc`, `phone_number` y `verified_name`). Si
+     Meta pide aflojar, «esperar» y los cupos de alta vuelven; si rechaza, aviso
+     `rechazo`; si no contesta, da 5xx o contesta sin id, el número pudo haber
+     entrado: aviso `incierto` y los cupos se quedan gastados;
+   - guarda el id que Graph devolvió con la función de la 0049 (paso `agregado`) y
+     avisa al operador (aviso `agregado`).
+4. Pide el código: `POST /{id}/request_code` con `code_method` (`SMS` o `VOICE`) y
+   `language` (`es` o `en`, según la cuenta).
+
+**Verificar el código** (`verificarCodigo`):
+
+1. Toma el cupo de verificaciones. El código tiene que ser `^\d{6}$`.
+2. `POST /{id}/verify_code` con `code`. Si Meta lo rechaza, mira
+   `GET /{id}?fields=code_verification_status`: si ya figura `VERIFIED` (un intento
+   anterior que se cortó después de aceptarlo) sigue; si no, «código incorrecto».
+3. Si Meta ya lo tiene registrado en Cloud API
+   (`GET /{id}?fields=status,platform_type`) no vuelve a registrarlo. Si no,
+   `POST /{id}/register` con `messaging_product` y un PIN de seis dígitos al azar.
+4. Le pone al número su webhook propio (`POST /{id}` con
+   `webhook_configuration.override_callback_uri` y `verify_token`) y lo lee de Graph
+   (`GET /{id}?fields=webhook_configuration`). Si lo que vuelve no es la URL de este
+   ambiente, el número queda registrado y en `pedido`, con el aviso `sin_webhook`; un
+   nuevo intento repite el webhook sin volver a registrarlo.
+5. Con la función de la 0049 (paso `conectado`) pasa la fila a `conectado`, sólo con
+   el webhook leído de Graph. Desde ahí el webhook del número lo rutea al espacio y
+   las respuestas salen con el token de la plataforma.
+
+Lo que nunca pasa: el número de la plataforma no se toca (ni `register`, ni
+`request_code`, ni se guarda en la fila de un espacio); nada borra números de la
+WABA ni llama a `deregister`; el token, el PIN y el código no se anotan, no se
+guardan y no vuelven a la pantalla; el `phone_number_id` sale siempre de la
+respuesta de Graph, nunca de lo tipeado.
+
+### El tope de Meta
+
+Mientras la empresa (Veltra) **no esté verificada en Meta**, un portfolio admite **2
+números** (esto sale de la documentación, no se midió). El de la plataforma ya ocupa
+uno: **hoy entra un solo número automático**. Del segundo espacio en adelante, todo
+va a revisión con el aviso `sin_lugar`, hasta que se verifique la empresa y se suba
+`ALTA_NUMEROS_MAXIMOS_WABA`. Ese tope se compara contra **todas** las filas que
+devuelve `/phone_numbers`, en cualquier estado, antes de agregar. Si no se las puede
+contar enteras, el pedido falla cerrado («meta»).
+
+### Los topes
+
+| Variable | Por defecto | Rango | Qué limita |
+|---|---|---|---|
+| `ALTA_NUMERO_AUTOMATICO` | apagado | `1` prende | la función entera |
+| `ALTA_NUMEROS_MAXIMOS_WABA` | 2 | 1-1000 | números en total de la WABA, el de la plataforma incluido |
+| `ALTA_TOPE_NUMEROS_DIA` | 2 | 0-50 | números nuevos por día, de todos los espacios juntos (0 cierra) |
+| `ALTA_TOPE_CODIGOS_INQUILINO_DIA` | 3 | 0-20 | pedidos de código por espacio cada 24 h |
+| `ALTA_TOPE_CODIGOS_IP_DIA` | 5 | 0-50 | pedidos de código por red cada 24 h (/56 en IPv6) |
+| `ALTA_TOPE_CODIGOS_DIA` | 10 | 0-500 | pedidos de código de todos los espacios, cada 24 h (0 cierra) |
+| `ALTA_TOPE_VERIFICACIONES_HORA` | 5 | 0-20 | intentos de entregar un código por espacio por hora |
+
+Además hay dos cupos fijos, sin variable: **un número nuevo por hora por espacio** y
+**tres `register` por día por espacio** (Meta admite unos diez por número cada 72 h).
+Todos fallan cerrados: si el contador no contesta, no sale nada. Los cupos de código
+sólo se devuelven si ningún pedido a Graph salió: una compuerta cortó antes (la fila,
+el espacio, la migración, las credenciales o un móvil que no es argentino). Desde el
+recorrido de la WABA se quedan gastados, aunque el recorrido falle, porque cada
+vuelta cuesta contra los topes de Meta; un timeout o una respuesta rara en
+`request_code` también cuentan como código pedido, porque Meta pudo haber mandado el
+SMS. Los cupos de alta (un número por hora por espacio y el tope diario) vuelven sólo
+cuando Meta pide aflojar.
+Las ventanas de 24 h son fijas (cortan a las 00:00 UTC): en el borde del día el tope
+puede duplicarse.
+
+### Qué hace el operador ante cada aviso
+
+El mail dice sólo el motivo; qué espacio fue queda en el log `alta.numero_en_revision`
+(`vercel logs`). Sale un aviso por día y motivo, salvo `agregado`, `incierto` y
+`sin_webhook`, que salen por cada espacio.
+
+| Motivo | Qué pasó | Qué hacer |
+|---|---|---|
+| `sin_lugar` | La WABA llegó a `ALTA_NUMEROS_MAXIMOS_WABA`, o se agotó `ALTA_TOPE_NUMEROS_DIA`. | Mirar WhatsApp Manager y borrar a mano los números sobrantes, o verificar la empresa en Meta y subir el tope. Mientras, conectar el espacio desde `/admin/altas`. |
+| `ya_en_la_waba` | El número ya estaba en la WABA; no se adopta solo. | Ver de quién es. Si es del cliente, conectarlo desde `/admin/altas` (se comprueba contra Meta); si no, aclararlo con quien lo agregó. |
+| `rechazo` | Meta dijo que no (el número está en la app de WhatsApp, nombre rechazado, PIN de otro proveedor…). | Leer el `code` en el log `whatsapp.alta_numero.graph` (trae el paso). Si es la app de WhatsApp, el cliente borra esa cuenta; si no, `/admin/altas`. |
+| `sin_dueno` | Meta tiene el número, pero la base no pudo asignárselo al espacio. | Ver `alta.numero_automatico_no_guardado` (dice el resultado de la función) y conectarlo desde `/admin/altas`. Mientras la fila siga en `pedido`, el webhook descarta lo que entre. |
+| `pais` | No es un móvil argentino; no se mandó nada a Meta. | Corregir el número del espacio o conectarlo a mano. |
+| `sin_nombre` | Graph no devolvió el nombre visible del número de la plataforma; no se agregó nada. | Revisar `WHATSAPP_PHONE_NUMBER_ID` y el permiso `whatsapp_business_management` del token. |
+| `agregado` | No es una falla: un número entró a la WABA. | Si el espacio no llega a conectarlo, borrarlo a mano en WhatsApp Manager, porque ocupa lugar del tope. |
+| `incierto` | Se pidió agregar el número y Meta no contestó o contestó algo que no se entiende: pudo haber entrado. | Buscarlo en WhatsApp Manager. Si está, conectar el espacio desde `/admin/altas` o borrarlo; si no, repetir. Los cupos del espacio quedan gastados. |
+| `sin_fila` | Un espacio pidió el código y no tiene un número en trámite (`pedido`); no se llamó a Meta. | Ver el espacio en `/admin/altas`: puede ser un número ya tomado por otro al darse de alta. |
+| `sin_credencial` | Falta el token, la WABA o el número de la plataforma en el entorno, o el sitio no es https o no hay token del apretón de manos; no se llamó a Meta. | Revisar `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_PHONE_NUMBER_ID`, `NEXT_PUBLIC_SITE_URL` y `WHATSAPP_VERIFY_TOKEN`. |
+| `de_otro_ambiente` | Un espacio pidió un número de la lista `NUMEROS_DE_DEV`; no se llamó a Meta. | Ver cómo llegó ese número a este ambiente y conectarlo en el que corresponde. |
+| `sin_webhook` | El número quedó registrado pero Graph no devolvió el webhook propio de este ambiente: lo que le escriban puede caer en el otro. | Mirar el número en WhatsApp Manager. El espacio puede reintentar (repite el webhook sin registrar de nuevo); si no alcanza, ponerlo a mano y conectar desde `/admin/altas`. |
+
+Los números sobrantes se borran **a mano en WhatsApp Manager**: ClaimMix no borra nada
+de la WABA. Lo mismo vale para un flujo abandonado (se agregó el número y nadie
+escribió el código).
+
+### El PIN de dos pasos
+
+`register` pone la verificación en dos pasos con un PIN al azar que **no se guarda**:
+guardar un secreto que no se usa sólo agrega superficie. Para re-registrar o migrar
+el número hay que cambiarlo antes, con el mismo token:
+`POST /{id}` con `{ "pin": "<seis dígitos>" }`. Si el número ya tenía un PIN de otro
+proveedor, `register` falla y el caso va a revisión.
+
+### Prueba real en QA
+
+Hace falta una SIM libre que no esté en la app de WhatsApp. Prender
+`ALTA_NUMERO_AUTOMATICO=1` **sólo en QA** (y la 0049 ya aplicada en esa base).
+
+1. Crear un espacio por `/alta` con el número de esa SIM.
+2. En Configuración, «Por SMS»; si no llega, «Por llamada».
+3. Escribir el código y ver «Listo».
+4. Mandar un WhatsApp a ese número y ver el caso en la bandeja de ese espacio.
+5. En los logs (`vercel logs`, evento `whatsapp.alta_numero.graph`) anotar los códigos
+   de error que aparezcan y si el número argentino entró con el 9 adelante.
+6. En WhatsApp Manager, mirar el estado del nombre visible.
+7. Si queda un número sobrante, borrarlo ahí.
+
+Lo que sólo esta prueba aclara: que llegue el SMS o la llamada, el `verify_code` y el
+`register` reales, el formato del número, el idioma, los códigos de error, cómo cuenta
+Meta el tope, la revisión del nombre y que el webhook del número nuevo llegue al
+espacio. Las constantes están juntas en `src/server/whatsapp/alta-de-numero.ts` para
+ajustarlas después. En producción se prende recién cuando QA salga bien.

@@ -812,6 +812,45 @@ PATCH del SSO, la cola de purga con dos borrados del mismo objeto (R2 simulado),
 retención en `simular` y la revisión nocturna dos veces. Por eso sólo corren en CI
 o con `--escribe`, y nunca contra `ep-proud-resonance`: ahí el chequeo falla.
 
+### 9. `pnpm bases:probar` — una base por cliente, de punta a punta
+
+Sólo importa con `BASE_POR_CLIENTE=1`, que hoy no está prendida en ningún ambiente. Da de
+alta dos inquilinos con la función de verdad (`crearInquilino`), les prepara su base
+`t_<hex>` con el mismo `prepararBase` que corre el workflow y comprueba lo que la
+migración a una base por cliente promete:
+
+- cada base queda en la última migración, con su asiento en `schema_migrations` y su fila
+  `lista` en `tenant_bases`;
+- el rol de la app no toca lo que es de control en la base de un cliente, y los dos
+  perfiles de `pnpm permisos` (`--perfil cliente --base t_<hex>` y `--perfil control`) dan
+  verde contra las bases recién creadas;
+- el espejo de control (inquilino, usuarios, cuentas de acceso y números) es una copia fiel, y la
+  base de un cliente no guarda inquilinos ajenos;
+- `enTenant(A)` no ve lo de B, una clave de un inquilino sin base da 401 y la auditoría
+  cae a control si la base no existe;
+- `ALTA_TOPE_BASES` cierra el alta sin dejar un inquilino a medias, y crear, migrar y tomar
+  la base se pueden repetir sin romper nada;
+- el barrido (`paraCadaBase`) recorre las dos bases sin fallas.
+
+Escribe y borra bases (`DROP DATABASE`), así que **no corre contra ningún ambiente**:
+corre contra la rama `ensayo` del proyecto de Neon `claimmix-prd`, con endpoint propio, con
+sus propios secretos `PRD_ENSAYO_DATABASE_URL` (el dueño) y
+`PRD_ENSAYO_DATABASE_URL_APP` (`claimmix_app`). El script se niega a arrancar con los de
+dev, QA, staging o prd: lo decide el veto de `scripts/lib/hosts-vetados.mjs`. Al final
+borra lo que creó, también si algo falló, y si una corrida se corta a la mitad la
+siguiente barre lo que tenga más de una hora.
+
+En CI es el job **Bases por cliente** de `ci.yml`: corre `pnpm bases:empaquetar --comprobar`
+(que la cadena de migraciones empaquetada para las bases nuevas no haya quedado atrás de
+`neon/migrations`; no usa ninguna base y corre siempre) y después `pnpm bases:probar`. La
+cadena empaquetada se regenera con `pnpm bases:empaquetar` cada vez que se suma una
+migración. El grupo `concurrency: bases` hace que dos corridas no se pisen el catálogo de
+bases del proyecto. Sin los secretos, un fork avisa y sigue; en cualquier otro caso el job
+corta, porque un check que se saltea en silencio no prueba nada.
+
+Localmente: `PRD_ENSAYO_DATABASE_URL` y `PRD_ENSAYO_DATABASE_URL_APP` en `.env.local`
+y `pnpm bases:probar`. Sin ellas, no hay forma de probarlo.
+
 ---
 
 ## Cuándo correr qué
@@ -831,6 +870,8 @@ o con `--escribe`, y nunca contra `ep-proud-resonance`: ahí el chequeo falla.
 | **Antes de desplegar la capa de datos** | `pnpm listo` |
 | Después de agregar una tabla con `tenant_id` | `pnpm permisos` |
 | Dudás de si una consulta filtra por inquilino | `pnpm arquitectura` |
+| Después de tocar el alta, la capa de bases o las migraciones de una base por cliente | `pnpm bases:probar` (y `pnpm bases:empaquetar` si sumaste una migración) |
+| Después de migrar la base de control o la de un cliente de prd | `pnpm permisos --perfil control` y `pnpm permisos --perfil cliente --base t_<hex>` |
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.
@@ -864,6 +905,7 @@ bloquean el merge.
 - **Licencias** (obligatorio) — sin GPL/AGPL/LGPL/SSPL.
 - **Aislamiento de tenants** (obligatorio) — `pnpm tenancy` y `pnpm capa-datos`.
 - **Pen test local** (obligatorio) — `pnpm pentest --solo-superficie` contra un build local.
+- **Bases por cliente** — `pnpm bases:empaquetar --comprobar` y `pnpm bases:probar` contra la rama `ensayo` de `claimmix-prd` (capa 9).
 
 `codeql.yml`:
 
@@ -940,6 +982,29 @@ existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el
 post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo
 incluido.
 
+**Contra prd corre todavía menos, a propósito.** `claimmix-prd` es el proyecto de Vercel
+con los clientes de verdad, y el job `PRD` de `post-deploy.yml` (se dispara con el
+entorno `Production` de ese proyecto, igual que el de QA) no escribe nada: corre
+`pnpm smoke` sin `--deep` contra `vars.PRD_URL`, esperando el commit del deploy, y después
+pide `/api/health?deep=1` y falla si `bases.desfase` es verdadero. Con
+`BASE_POR_CLIENTE=0` (la fase 1) `bases` no aparece en la respuesta y esa segunda
+comprobación no tiene qué mirar. Usa el secreto `PRD_CRON_SECRET`, nunca `CRON_SECRET`, y sin
+`vars.PRD_URL` o con una URL que no sea de ClaimMix corta en voz alta: un deploy de prd que
+nadie comprueba no puede quedar en verde.
+
+**Por qué no hay ensayo del agente en prd.** El ensayo crea casos y los borra, el pen test
+ataca, el timbre deposita un mail y manda un payload firmado, y la carga llena la mesa. En
+dev eso se tolera, con casos que aparecen y desaparecen en el tablero; en prd hay clientes
+que miran el suyo, y con una base por cliente el ensayo necesitaría además un inquilino y
+una base propios. Lo que llega a prd es un commit que ya pasó por QA y por `main`, donde el
+ensayo de las veintiséis conversaciones sí corrió; lo único que prd puede romper solo es su
+entorno (variables, base, dominio, bases desfasadas), y eso lo miran el smoke y la salud. El
+resto lo frenan los vetos de `scripts/lib/hosts-vetados.mjs` (también por CLI, `--veto
+<url>`): `vetadoWeb` cubre los alias de dev y de prd y el host de `PRD_URL`;
+`deploy-checks.yml` rechaza `atacar_agente` y `pared_propia` contra ellos, y `pnpm pentest
+--pared-propia` se niega por su cuenta. `pnpm pentest --agent` a mano no mira la URL: no lo
+apuntes a prd. Si tocaste el agente, el ensayo es el de dev, el de QA o el local.
+
 También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
 *Run workflow*, con una URL distinta si querés apuntar a un preview.
 
@@ -993,6 +1058,14 @@ mire una URL se entera sin parsear el cuerpo.
 Pide autenticación porque enumera las dependencias y cómo están cableadas: no
 son secretos uno por uno, juntos son un mapa. `?deep=1` gasta plata: sube un
 archivo de verdad y llama al modelo de verdad.
+
+Con `?deep=1` y `BASE_POR_CLIENTE=1` suma además `bases`: cuántas bases de cliente hay
+en cada estado (`lista`, `creando`, `fallida`, `borrada`), la versión de migración mínima y
+máxima entre las `lista`, la de control y `desfase`, que es verdadero si control o alguna
+base quedó atrás de lo que el código espera. Lo mide con una sola consulta a control, sin
+conectarse a cada base. Un desfase o una base en `creando` hace rato dejan el estado en
+`degraded` (el HTTP sigue en 200); el job `PRD` del post-deploy falla si `desfase` es
+verdadero. Sin la bandera, o sin `deep`, `bases` no existe. Ver `src/app/api/health/bases.ts`.
 
 ---
 

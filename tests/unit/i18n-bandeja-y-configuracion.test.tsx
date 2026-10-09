@@ -84,6 +84,57 @@ describe("i18n de la bandeja y el shell", () => {
     }
   });
 
+  it("el aviso al operador del número de WhatsApp existe en los dos idiomas, distinto en cada uno", () => {
+    for (const key of [
+      "alta.avisoNumero.asunto",
+      "alta.avisoNumero.texto",
+      "alta.avisoNumero.motivo.sin_lugar",
+      "alta.avisoNumero.motivo.ya_en_la_waba",
+      "alta.avisoNumero.motivo.rechazo",
+      "alta.avisoNumero.motivo.sin_dueno",
+      "alta.avisoNumero.motivo.pais",
+      "alta.avisoNumero.motivo.sin_nombre",
+      "alta.avisoNumero.motivo.agregado",
+    ] as const) {
+      expect(esAR[key], `es-AR le falta '${key}'`).toBeTruthy();
+      expect(enUS[key], `en-US le falta '${key}'`).toBeTruthy();
+      expect(enUS[key]).not.toBe(esAR[key]);
+    }
+    expect(esAR["alta.avisoNumero.texto"]).toContain("{motivo}");
+    expect(enUS["alta.avisoNumero.texto"]).toContain("{motivo}");
+  });
+
+  it("el número de WhatsApp por código existe en los dos idiomas, distinto en cada uno", () => {
+    for (const key of [
+      "configuracion.prueba.ayuda.pedidoAutomatico",
+      "configuracion.numero.titulo",
+      "configuracion.numero.antes",
+      "configuracion.numero.nombre",
+      "configuracion.numero.paso1",
+      "configuracion.numero.porSms",
+      "configuracion.numero.porLlamada",
+      "configuracion.numero.paso2",
+      "configuracion.numero.codigo",
+      "configuracion.numero.conectar",
+      "configuracion.numero.r.codigo_enviado",
+      "configuracion.numero.r.conectado",
+      "configuracion.numero.r.codigo_invalido",
+      "configuracion.numero.r.codigo_incorrecto",
+      "configuracion.numero.r.pedi_primero",
+      "configuracion.numero.r.esperar",
+      "configuracion.numero.r.meta",
+      "configuracion.numero.r.revision",
+      "bandeja.bienvenidaAutomatica",
+      "alta.whatsapp.aviso",
+    ] as const) {
+      expect(esAR[key], `es-AR le falta '${key}'`).toBeTruthy();
+      expect(enUS[key], `en-US le falta '${key}'`).toBeTruthy();
+      expect(enUS[key]).not.toBe(esAR[key]);
+    }
+    expect(esAR["bandeja.bienvenidaAutomatica"]).toContain("{n}");
+    expect(enUS["bandeja.bienvenidaAutomatica"]).toContain("{n}");
+  });
+
   it("ETIQUETA_DE_ROL resuelve en los dos idiomas", () => {
     const tEs = getT("es-AR");
     expect(tEs(ETIQUETA_DE_ROL.owner)).toBe("Owner");

@@ -83,7 +83,7 @@ function baseFalsa() {
 }
 
 vi.mock("@/data/scope", () => ({
-  enTenant: vi.fn(async (ctx: unknown, armar: (db: unknown) => unknown) => {
+  enControl: vi.fn(async (ctx: unknown, armar: (db: unknown) => unknown) => {
     h.contextos.push(ctx);
     return armar(baseFalsa());
   }),

@@ -20,7 +20,7 @@
 
 import { createHash } from "node:crypto";
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { sinControlNiAngulares } from "@/core/text/sin-control";
@@ -36,6 +36,7 @@ import {
   RATE_LIMIT_CONFIGS,
 } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { esSlugDeOtroAmbiente, urlDelOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 import { marcarParaResponderAunqueSigaElAgente } from "@/server/cases/para-responder";
 import { faltaLa0044 } from "@/server/core-sync/config";
 import { dispatchExtractionWorker } from "@/server/worker/despachar-extraccion";
@@ -245,6 +246,11 @@ export async function POST(
   const { slug } = await params;
   // Un enlace con otro formato no existe: ni cupo, ni lectura del cuerpo, ni redirección con él.
   if (!slugValido(slug)) return err(new AppError("NOT_FOUND"));
+  // El formulario es de dev: 308 conserva el método y el cuerpo, así que un envío embebido con el enlace viejo llega igual.
+  if (esSlugDeOtroAmbiente(slug)) {
+    const destino = urlDelOtroAmbiente(`/api/denuncia/${slug}`);
+    if (destino) return NextResponse.redirect(destino, 308);
+  }
   const comoJson = esJson(request);
   const respuesta = await recibir(request, slug, comoJson);
   return comoJson ? respuesta : volverALaPagina(slug, respuesta.status);

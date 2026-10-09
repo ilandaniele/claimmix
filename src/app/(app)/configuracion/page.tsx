@@ -28,11 +28,14 @@ import packageJson from "../../../../package.json";
 import { ADMIN_ROLES } from "@/lib/auth/require-role";
 import { CoreSyncPanel } from "./CoreSyncPanel";
 import { MontosPanel } from "./MontosPanel";
+import { NumeroPanel } from "./NumeroPanel";
 import { paraAdmin, ssoParaAdmin } from "./para-admin";
 import { PruebaPanel } from "./PruebaPanel";
 import { SsoPanel } from "./SsoPanel";
 import { esResultadoSso } from "./sso-resultados";
 import { MONTOS_POR_DEFECTO } from "@/core/case/monto-estimado";
+import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
+import { esResultadoDelNumero } from "@/server/alta/numero-resultados";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -56,13 +59,15 @@ function RoleBadge({ role, label }: { role: string; label: string }) {
 
 function Section({
   title,
+  id,
   children,
 }: {
   title: string;
+  id?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white">
+    <div id={id} className="rounded-lg border border-slate-200 bg-white">
       <div className="border-b border-slate-100 px-5 py-3">
         <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
       </div>
@@ -80,14 +85,29 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// Un paso de /configuracion?primeros=1: qué conectar y el botón que lleva ahí.
+function Paso({ texto, href, boton }: { texto: string; href: string; boton: string }) {
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3">
+      <span className="text-sm text-slate-700">{texto}</span>
+      <a
+        href={href}
+        className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+      >
+        {boton}
+      </a>
+    </li>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function ConfiguracionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ vinculo?: string; sso?: string }>;
+  searchParams: Promise<{ vinculo?: string; sso?: string; wa?: string; primeros?: string }>;
 }) {
-  const { vinculo, sso } = await searchParams;
+  const { vinculo, sso, wa, primeros } = await searchParams;
   const locale = await getAccountLocale();
   const t = getT(locale);
 
@@ -115,6 +135,11 @@ export default async function ConfiguracionPage({
   );
   const monthlyBudgetCap = 200; // $200/month — hardcoded default per spec
 
+  // El número por código: la bandera y la 0049 (sin ella, lo de siempre), lo que dejó la última acción y si todavía hay un número por conectar.
+  const automatico = numeroAutomatico() && admin?.prueba?.porCodigo === true;
+  const resultadoDelNumero = esResultadoDelNumero(wa) ? wa : null;
+  const formulariosDelNumero = admin?.prueba?.numero === "pedido" && admin.prueba.dias !== 0;
+
   // System info
   const appVersion = packageJson.version;
   const nodeVersion = process.version; // e.g. "v22.0.0"
@@ -128,6 +153,26 @@ export default async function ConfiguracionPage({
       </div>
 
       <div className="space-y-6">
+        {/* ── Primeros pasos (recién dado de alta, sólo admin): conectar el correo y el WhatsApp ── */}
+        {esAdmin && primeros === "1" && (
+          <Section title={t("configuracion.primeros.titulo")}>
+            <ol className="space-y-3">
+              <Paso
+                texto={t("configuracion.primeros.gmail")}
+                href="/api/admin/gmail-accounts/connect"
+                boton={t("gmail.accounts.connect")}
+              />
+              {admin?.prueba && (
+                <Paso
+                  texto={t("configuracion.primeros.whatsapp")}
+                  href="#whatsapp"
+                  boton={t("configuracion.primeros.conectarWhatsapp")}
+                />
+              )}
+            </ol>
+          </Section>
+        )}
+
         {/* ── Cuenta ────────────────────────────────────────────────────────── */}
         <Section title={t("configuracion.cuenta")}>
           <div className="divide-y divide-slate-50">
@@ -143,10 +188,13 @@ export default async function ConfiguracionPage({
           </div>
         </Section>
 
-        {/* ── Prueba y número de WhatsApp (alta automática, sólo admin, sólo lectura) ── */}
+        {/* ── Prueba y número de WhatsApp (alta automática, sólo admin; el número se conecta con un código si la bandera está prendida) ── */}
         {admin?.prueba && (
-          <Section title={t("configuracion.prueba.titulo")}>
-            <PruebaPanel prueba={admin.prueba} t={t} />
+          <Section id="whatsapp" title={t("configuracion.prueba.titulo")}>
+            <PruebaPanel prueba={admin.prueba} t={t} automatico={automatico} />
+            {automatico && (formulariosDelNumero || resultadoDelNumero) && (
+              <NumeroPanel t={t} resultado={resultadoDelNumero} formularios={formulariosDelNumero} />
+            )}
           </Section>
         )}
 

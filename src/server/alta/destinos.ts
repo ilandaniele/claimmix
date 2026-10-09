@@ -8,9 +8,12 @@ import "server-only";
 
 import { after } from "next/server";
 
+import { basePorCliente } from "@/data/bases";
+import { logger } from "@/lib/observability/logger";
 import { avisarAlOperador, llegoAlAviso } from "@/server/alta/aviso-operador";
 import type { AltaCreada, ResultadoDeAlta } from "@/server/alta/crear-inquilino";
 import type { ErrorDeAlta } from "@/server/alta/validar";
+import { iniciarBase } from "@/server/bases/iniciar";
 
 export const conError = (e: ErrorDeAlta) => `/alta?e=${e}`;
 
@@ -31,4 +34,23 @@ export function avisarSiLlegoAlTope({ creadas24h, tope }: AltaCreada): void {
   if (creadas24h !== null && tope !== null && llegoAlAviso(creadas24h, tope)) {
     after(() => avisarAlOperador(creadas24h, tope));
   }
+}
+
+/**
+ * Adónde va quien tiene su espacio recién creado. Con una base por cliente el
+ * espacio todavía no tiene dónde guardar nada: se lanza la preparación y la
+ * persona espera en /preparando. Apagada la bandera, `destino`.
+ *
+ * Si la preparación no arranca, el espacio ya existe y la persona no puede hacer
+ * nada con el error: se anota y se la manda igual a /preparando, que sabe
+ * reintentar (el barrido de bases pendientes también).
+ */
+export async function prepararEspacio({ tenantId }: AltaCreada, destino: string): Promise<string> {
+  if (!basePorCliente()) return destino;
+  try {
+    await iniciarBase(tenantId);
+  } catch (e) {
+    logger.error({ error: e instanceof Error ? e.name : "UnknownError", tenantId }, "alta.base_no_arranco");
+  }
+  return "/preparando";
 }

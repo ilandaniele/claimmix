@@ -53,6 +53,7 @@ async function pintar(e?: string | string[], v?: string | string[]) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.ALTA_AUTOMATICA = "1";
+  delete process.env.ALTA_NUMERO_AUTOMATICO;
   delete process.env.SIGNUP_ALLOWED_EMAILS;
   sesion();
   h.fila.mockResolvedValue(null);
@@ -121,6 +122,63 @@ describe("/alta con el formulario", () => {
     expect(screen.getByRole("checkbox")).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Crear mi espacio" })).toBeInTheDocument();
     expect(container.querySelector("script")).toBeNull();
+  });
+
+  it("con el número por código prendido, la ayuda del WhatsApp suma que tiene que recibir SMS o llamada", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    const { container } = await pintar();
+
+    const ayuda = container.querySelector("#alta-whatsapp-ayuda");
+    expect(ayuda).toHaveTextContent("Con código de país, por ejemplo +54 9 11 5555 0000.");
+    expect(ayuda).toHaveTextContent("Tiene que poder recibir un SMS o una llamada y no puede estar en uso en la app de WhatsApp ni en WhatsApp Business.");
+    expect(screen.getByLabelText("WhatsApp de tu empresa")).toHaveAccessibleDescription(/Tiene que poder recibir un SMS/);
+  });
+
+  it("con el número por código prendido, en inglés", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    h.locale.mockResolvedValue("en-US");
+    const { container } = await pintar();
+
+    expect(container.querySelector("#alta-whatsapp-ayuda")).toHaveTextContent(
+      "It must be able to receive an SMS or a phone call, and it can't be in use in the WhatsApp or WhatsApp Business app."
+    );
+  });
+
+  it("sin la bandera, la ayuda del WhatsApp es la de hoy", async () => {
+    const { container } = await pintar();
+
+    expect(container.querySelector("#alta-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
+  });
+
+  it("debajo del formulario, el texto fijo para quien ya tiene una empresa en ClaimMix", async () => {
+    const { container } = await pintar();
+
+    const texto = screen.getByText("¿Tu empresa ya usa ClaimMix? Pedile a un admin que te invite.");
+    const formulario = container.querySelector("#alta-form")!;
+    expect(formulario.contains(texto)).toBe(false);
+    expect(formulario.compareDocumentPosition(texto) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(texto.querySelector("a, button, input")).toBeNull();
+  });
+
+  it("el texto fijo no consulta nada: la única lectura de la base es la del perfil", async () => {
+    await pintar();
+
+    expect(h.fila).toHaveBeenCalledTimes(1);
+    expect(h.fila).toHaveBeenCalledWith("u-1");
+  });
+
+  it("el texto fijo, en inglés", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintar();
+
+    expect(screen.getByText("Does your company already use ClaimMix? Ask an admin to invite you.")).toBeInTheDocument();
+  });
+
+  it("el texto fijo es del formulario: no aparece en las pantallas sin formulario", async () => {
+    sesion({ emailVerified: false });
+    await pintar();
+
+    expect(screen.queryByText(/ya usa ClaimMix/)).toBeNull();
   });
 
   it("pide los términos con los enlaces a /terms y /privacy", async () => {

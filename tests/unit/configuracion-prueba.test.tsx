@@ -31,6 +31,10 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/data/scope", () => ({ enTenantVarias: m.enTenantVarias }));
 vi.mock("@/server/notify/specialist-alert", () => ({ listaDelTenant: m.listaDelTenant }));
 vi.mock("@/server/sso/panel", () => ({ panelSso: m.panelSso }));
+vi.mock("@/app/(app)/configuracion/numero-actions", () => ({
+  pedirCodigoDelNumero: vi.fn(),
+  verificarCodigoDelNumero: vi.fn(),
+}));
 vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 vi.mock("@/lib/auth/session", () => ({ getSessionContext: m.getSessionContext }));
 vi.mock("@/lib/auth/user-row", () => ({ getUserRow: m.getUserRow }));
@@ -69,10 +73,30 @@ const enDias = (dias: number) => new Date(AHORA.getTime() + dias * 24 * 60 * 60 
 
 /** Lo que devuelve el lote con la 0048 aplicada. */
 function lote(
-  tenant: { billing_status?: string; trial_ends_at?: string | null; autoalta?: boolean | null },
+  tenant: {
+    billing_status?: string;
+    trial_ends_at?: string | null;
+    autoalta?: boolean | null;
+    funcion_del_numero?: boolean;
+  },
   numeros: Array<{ estado: string }> = []
 ) {
-  return [[{ emails: [], horas: [], montos: null, billing_status: "trial", trial_ends_at: enDias(12), autoalta: true, ...tenant }], [VISTA], numeros];
+  return [
+    [
+      {
+        emails: [],
+        horas: [],
+        montos: null,
+        billing_status: "trial",
+        trial_ends_at: enDias(12),
+        autoalta: true,
+        funcion_del_numero: true,
+        ...tenant,
+      },
+    ],
+    [VISTA],
+    numeros,
+  ];
 }
 
 /** Las consultas que armó la llamada `llamada` al lote. */
@@ -84,9 +108,9 @@ function armadas(llamada: number): Array<{ toSQL: () => { sql: string; params: u
 /** El SQL de la consulta `n` del lote que armó la llamada `llamada`. */
 const consulta = (llamada: number, n: number) => armadas(llamada)[n].toSQL();
 
-async function pintar() {
+async function pintar(params: { wa?: string; primeros?: string } = {}) {
   const { default: Pagina } = await import("@/app/(app)/configuracion/page");
-  return renderToStaticMarkup(await Pagina({ searchParams: Promise.resolve({}) }));
+  return renderToStaticMarkup(await Pagina({ searchParams: Promise.resolve(params) }));
 }
 
 function conRol(role: string) {
@@ -96,6 +120,7 @@ function conRol(role: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.ALTA_NUMERO_AUTOMATICO;
   vi.useFakeTimers({ now: AHORA, toFake: ["Date"] });
   m.listaDelTenant.mockResolvedValue([]);
   m.panelSso.mockRejectedValue(falta("42P01"));
@@ -105,6 +130,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.ALTA_NUMERO_AUTOMATICO;
 });
 
 describe("paraAdmin: la prueba y el número", () => {
@@ -116,6 +142,29 @@ describe("paraAdmin: la prueba y el número", () => {
     expect(m.enTenantVarias).toHaveBeenCalledOnce();
     expect(armadas(0)).toHaveLength(3);
     expect(consulta(0, 0).sql).toContain('(to_jsonb("tenants".*) ->> \'autoalta\')::boolean');
+  });
+
+  it("si la 0049 está aplicada lo pregunta en la misma consulta del espacio, sin tirar si falta", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    await paraAdmin(TENANT);
+
+    expect(consulta(0, 0).sql).toContain(
+      "to_regprocedure('public.claimmix_numero_automatico(uuid, uuid, text, text, text, text, inet)') is not null"
+    );
+  });
+
+  it.each([
+    ["en prueba, con la 0049", { billing_status: "trial" }, true],
+    ["pagando, con la 0049", { billing_status: "active" }, true],
+    ["suspendido", { billing_status: "suspended" }, false],
+    ["dado de baja", { billing_status: "churned" }, false],
+    ["sin la 0049", { funcion_del_numero: false }, false],
+    ["la consulta no trajo si está la 0049", { funcion_del_numero: undefined }, false],
+  ])("porCodigo, espacio %s: %s", async (_caso, tenant, esperado) => {
+    m.enTenantVarias.mockResolvedValueOnce(lote(tenant));
+
+    expect((await paraAdmin(TENANT)).prueba?.porCodigo).toBe(esperado);
   });
 
   it("del número sólo lee el estado, y deja afuera lo dado de baja", async () => {
@@ -287,18 +336,238 @@ describe("/configuracion con la prueba", () => {
   });
 });
 
+describe("/configuracion?primeros=1", () => {
+  it("un admin recién dado de alta ve arriba conectar Gmail y conectar WhatsApp", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).toContain("Primeros pasos");
+    expect(html).toContain("Conectar Gmail");
+    expect(html).toContain('href="/api/admin/gmail-accounts/connect"');
+    expect(html).toContain("Conectar WhatsApp");
+    expect(html).toContain('href="#whatsapp"');
+    expect(html).toContain('id="whatsapp"');
+    expect(html.indexOf("Primeros pasos")).toBeLessThan(html.indexOf("Tu prueba y tu WhatsApp"));
+  });
+
+  it("en inglés, con los mismos dos pasos", async () => {
+    m.locale.mockResolvedValue("en-US");
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).toContain("First steps");
+    expect(html).toContain("Connect Gmail");
+    expect(html).toContain("Connect WhatsApp");
+  });
+
+  it.each([undefined, "0"])("sin ?primeros=1 (%s) no hay pasos", async (primeros) => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ primeros });
+
+    expect(html).not.toContain("Primeros pasos");
+    expect(html).not.toContain("Conectar WhatsApp");
+  });
+
+  it("quien no administra no los ve: no puede conectar nada", async () => {
+    conRol("analyst");
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).not.toContain("Primeros pasos");
+    expect(html).not.toContain("Conectar Gmail");
+  });
+
+  it("sin panel de prueba queda sólo el paso de Gmail: el WhatsApp no tiene dónde conectarse", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({ autoalta: false }));
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).toContain("Conectar Gmail");
+    expect(html).not.toContain("Conectar WhatsApp");
+  });
+
+  it("no suma consultas: el lote es el mismo", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    await pintar({ primeros: "1" });
+
+    expect(m.enTenantVarias).toHaveBeenCalledOnce();
+    expect(armadas(0)).toHaveLength(3);
+  });
+});
+
+describe("/configuracion con el número por código", () => {
+  beforeEach(() => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+  });
+
+  it("pedido y con prueba: pinta los formularios del código y cambia la ayuda", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).toContain("Conectá tu WhatsApp");
+    expect(html).toContain('name="codigo"');
+    expect(html).toContain('value="SMS"');
+    expect(html).toContain('value="VOICE"');
+    expect(html).toContain("Conectalo vos abajo con un código de WhatsApp. Si no podés, lo conectamos nosotros y te avisamos.");
+    expect(html).not.toContain("Lo conectamos nosotros y te avisamos.");
+  });
+
+  it("no suma consultas: el lote es el mismo, de tres, en un viaje", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    await pintar({ wa: "codigo_enviado" });
+
+    expect(m.enTenantVarias).toHaveBeenCalledOnce();
+    expect(armadas(0)).toHaveLength(3);
+  });
+
+  it("con la bandera apagada queda lo de hoy: sin formularios y 'lo conectamos nosotros'", async () => {
+    delete process.env.ALTA_NUMERO_AUTOMATICO;
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ wa: "conectado" });
+
+    expect(html).not.toContain('name="codigo"');
+    expect(html).not.toContain("Conectá tu WhatsApp");
+    expect(html).not.toContain("Listo: tu WhatsApp quedó conectado.");
+    expect(html).toContain("Lo conectamos nosotros y te avisamos.");
+  });
+
+  it.each([
+    ["ya está conectado", lote({}, [{ estado: "conectado" }])],
+    ["está suspendido", lote({}, [{ estado: "suspendido" }])],
+    ["la prueba venció", lote({ trial_ends_at: enDias(-3) })],
+    ["no es del alta automática", lote({ autoalta: false })],
+    ["el espacio está suspendido (billing)", lote({ billing_status: "suspended", trial_ends_at: null })],
+    ["el espacio está dado de baja (billing)", lote({ billing_status: "churned", trial_ends_at: null })],
+    ["la 0049 no está aplicada", lote({ funcion_del_numero: false })],
+  ])("no pinta los formularios si %s", async (_caso, filas) => {
+    m.enTenantVarias.mockResolvedValueOnce(filas);
+
+    const html = await pintar();
+
+    expect(html).not.toContain('name="codigo"');
+    expect(html).not.toContain('value="SMS"');
+    expect(html).not.toContain("Conectalo vos abajo");
+  });
+
+  it("bandera prendida pero sin la 0049: lo de hoy, 'lo conectamos nosotros', ni siquiera con ?wa=", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({ funcion_del_numero: false }));
+
+    const html = await pintar({ wa: "revision" });
+
+    expect(html).toContain("Lo conectamos nosotros y te avisamos.");
+    expect(html).not.toContain("Conectá tu WhatsApp");
+    expect(html).not.toContain("No pudimos conectarlo desde acá.");
+    expect(html).not.toContain('name="codigo"');
+  });
+
+  it("un espacio suspendido o dado de baja no ve «te avisamos» con formularios: sigue con lo de hoy", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({ billing_status: "suspended", trial_ends_at: null }));
+
+    const html = await pintar();
+
+    expect(html).toContain("Lo conectamos nosotros y te avisamos.");
+    expect(html).not.toContain("Conectalo vos abajo");
+  });
+
+  it("con la prueba vencida la ayuda sigue siendo la de hoy", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({ trial_ends_at: enDias(-3) }));
+
+    expect(await pintar()).toContain("Lo conectamos nosotros y te avisamos.");
+  });
+
+  it("un espacio que ya paga un plan y sigue con el número pedido también los ve", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({ billing_status: "active" }));
+
+    expect(await pintar()).toContain('name="codigo"');
+  });
+
+  it("?wa=conectado muestra el aviso, aunque ya no haya formularios", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
+
+    const html = await pintar({ wa: "conectado" });
+
+    expect(html).toContain("Listo: tu WhatsApp quedó conectado.");
+    expect(html).not.toContain('name="codigo"');
+  });
+
+  it("?wa=revision muestra el aviso y deja los formularios para reintentar", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ wa: "revision" });
+
+    expect(html).toContain("No pudimos conectarlo desde acá.");
+    expect(html).toContain('name="codigo"');
+  });
+
+  it.each(["raro", "<script>alert(1)</script>", "", "CONECTADO", "constructor"])("?wa=%s no muestra aviso ni se refleja", async (wa) => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ wa });
+
+    expect(html).not.toContain('role="status"');
+    expect(html).not.toContain("alert(1)");
+    expect(html).not.toContain("configuracion.numero.r.");
+    expect(html).toContain('name="codigo"');
+  });
+
+  it("quien no administra no ve nada del número, ni con ?wa=", async () => {
+    conRol("analyst");
+
+    const html = await pintar({ wa: "conectado" });
+
+    expect(html).not.toContain("Listo: tu WhatsApp quedó conectado.");
+    expect(html).not.toContain('name="codigo"');
+  });
+
+  it("en inglés, en inglés", async () => {
+    m.locale.mockResolvedValue("en-US");
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ wa: "codigo_enviado" });
+
+    expect(html).toContain("Connect your WhatsApp");
+    expect(html).toContain("We sent the code.");
+    expect(html).toContain("Connect it yourself below with a WhatsApp code.");
+    expect(html).not.toContain("Pedí el código");
+  });
+});
+
 describe("PruebaPanel", () => {
   it("no tiene nada que se pueda editar", () => {
     const t = getT("es-AR");
     for (const numero of ["pedido", "conectado", "suspendido"] as const) {
-      const html = renderToStaticMarkup(<PruebaPanel prueba={{ dias: 5, numero }} t={t} />);
+      const html = renderToStaticMarkup(<PruebaPanel prueba={{ dias: 5, numero, porCodigo: true }} t={t} />);
       for (const control of ["<input", "<button", "<form", "<select", "<textarea", "<a "]) expect(html).not.toContain(control);
     }
   });
 
   it("dice 'queda 1 día' en singular", () => {
-    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido" }} t={getT("es-AR")} />)).toContain("Queda 1 día");
-    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido" }} t={getT("en-US")} />)).toContain("1 day left");
+    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido", porCodigo: false }} t={getT("es-AR")} />)).toContain(
+      "Queda 1 día"
+    );
+    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido", porCodigo: false }} t={getT("en-US")} />)).toContain(
+      "1 day left"
+    );
+  });
+
+  it("con el número por código prendido, sólo el pedido con prueba vigente manda a conectarlo abajo", () => {
+    const t = getT("es-AR");
+    const pintarPrueba = (prueba: Parameters<typeof PruebaPanel>[0]["prueba"], automatico: boolean) =>
+      renderToStaticMarkup(<PruebaPanel prueba={prueba} t={t} automatico={automatico} />);
+
+    expect(pintarPrueba({ dias: 5, numero: "pedido", porCodigo: true }, true)).toContain("Conectalo vos abajo");
+    expect(pintarPrueba({ dias: null, numero: "pedido", porCodigo: true }, true)).toContain("Conectalo vos abajo");
+    expect(pintarPrueba({ dias: 5, numero: "pedido", porCodigo: true }, false)).toContain("Lo conectamos nosotros y te avisamos.");
+    expect(pintarPrueba({ dias: 0, numero: "pedido", porCodigo: true }, true)).toContain("Lo conectamos nosotros y te avisamos.");
+    expect(pintarPrueba({ dias: 5, numero: "suspendido", porCodigo: true }, true)).toContain("Escribinos y lo vemos.");
+    expect(pintarPrueba({ dias: 5, numero: "conectado", porCodigo: true }, true)).not.toContain("Conectalo vos abajo");
   });
 
   it("es de servidor: no baja JavaScript al navegador", () => {

@@ -22,7 +22,7 @@ import { eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enControl, type TenantContext } from "@/data/scope";
 import { entrar } from "@/lib/api/entrada";
 import { ok, err } from "@/lib/api/respond";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
@@ -146,7 +146,7 @@ export async function PUT(request: NextRequest) {
     // Todo en una sentencia: qué conserva y qué apaga cada cambio está en guardarIdp.
     let fila;
     try {
-      [fila] = await enTenant(ctx, (db) =>
+      [fila] = await enControl(ctx, (db) =>
         guardarIdp(db, ctx.tenantId, { issuer, client_id, dominio, client_secret_cifrado: cifrado })
       );
     } catch (e) {
@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
     let fila;
     try {
       // `dominio = …`: si lo cambiaron mientras se consultaba el DNS, no se marca nada.
-      [fila] = await enTenant(ctx, (db) =>
+      [fila] = await enControl(ctx, (db) =>
         db
           .update(ssoSettings)
           .set({ dominio_verificado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() })
@@ -220,7 +220,7 @@ export async function PATCH(request: NextRequest) {
     // Las condiciones viajan en el mismo UPDATE (ver cambiarEstadoSso): sin fila afectada, no se cumplían.
     let fila;
     try {
-      [fila] = await enTenant(ctx, (db) => cambiarEstadoSso(db, ctx.tenantId, user.id, { activo, exigir }));
+      [fila] = await enControl(ctx, (db) => cambiarEstadoSso(db, ctx.tenantId, user.id, { activo, exigir }));
     } catch (e) {
       traducirError(e);
     }

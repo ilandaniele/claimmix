@@ -14,7 +14,7 @@
  * Admin-only. Rate limited to 2 batch jobs / 10 min per user.
  */
 
-import { type NextRequest, after } from "next/server";
+import { type NextRequest, after } from "next/server.js";
 import { z } from "zod";
 import { firstRow } from "@/lib/db/helpers";
 import { cases, rawMessages } from "@/lib/db/schema";

@@ -21,7 +21,7 @@ import "server-only";
 
 import { and, inArray, lt, sql, type AnyColumn } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { db as dbDueno, type DbDueno } from "@/lib/db";
 import { caseRecordatorios, cases, outboundMessages } from "@/lib/db/schema";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { errorCode } from "@/lib/observability/error-code";
@@ -114,7 +114,7 @@ export const leLlegoLaPregunta = sql`coalesce((
  * and swallowed, since a sweep that throws would take the whole nightly run
  * with it.
  */
-export async function closeAbandonedConversations(): Promise<CloseAbandonedResult> {
+export async function closeAbandonedConversations(db: DbDueno = dbDueno): Promise<CloseAbandonedResult> {
   const days = getAbandonAfterDays();
 
   try {
@@ -218,7 +218,7 @@ export async function closeAbandonedConversations(): Promise<CloseAbandonedResul
      * barrido. Si esto sale con un número grande, no es que la gente no
      * conteste: es que no estamos preguntando.
      */
-    await avisarDeLosQueNoRecibieron(days);
+    await avisarDeLosQueNoRecibieron(days, db);
 
     return { closed: closed.length, caseIds: closed.map((r) => r.id) };
   } catch (err) {
@@ -238,7 +238,7 @@ export const ABANDONABLE_STATUSES = AWAITING_CLAIMANT;
  * falla no puede llevarse puesto un barrido que ya cerró lo que tenía que
  * cerrar.
  */
-async function avisarDeLosQueNoRecibieron(days: number): Promise<void> {
+async function avisarDeLosQueNoRecibieron(days: number, db: DbDueno): Promise<void> {
   try {
     // sin-inquilino: el mismo barrido de sistema de arriba, mirando lo que dejó abierto.
     const retenidos = await db

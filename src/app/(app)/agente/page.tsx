@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 
 import type { RamoDelInquilino } from "@/core/case/ramos";
-import { enTenantVarias } from "@/data/scope";
+import { basePorCliente } from "@/data/bases";
+import { enControl, enTenant, enTenantVarias } from "@/data/scope";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { AppError } from "@/lib/errors";
 import { getT } from "@/lib/i18n";
@@ -33,9 +34,17 @@ export default async function AgentConsolePage() {
   let formulario: FormularioDelInquilino | null = null;
   let pendiente0044 = false;
   try {
-    const [ramosDelInquilino, formularioDelInquilino] = await enTenantVarias<
-      [RamoDelInquilino[], FormularioDelInquilino[]]
-    >({ tenantId }, (db) => [consultaRamosDelInquilino(db), consultaFormularioWeb(db)]);
+    // Con base por cliente los ramos son de la base del inquilino y el formulario vive en control: dos viajes en paralelo. Apagada, uno solo.
+    const ctx = { tenantId };
+    const [ramosDelInquilino, formularioDelInquilino] = basePorCliente()
+      ? await Promise.all([
+          enTenant(ctx, (db) => consultaRamosDelInquilino(db)),
+          enControl(ctx, (db) => consultaFormularioWeb(db)),
+        ])
+      : await enTenantVarias<[RamoDelInquilino[], FormularioDelInquilino[]]>(ctx, (db) => [
+          consultaRamosDelInquilino(db),
+          consultaFormularioWeb(db),
+        ]);
     ramos = ramosDelInquilino;
     formulario = formularioDelInquilino[0] ?? null;
   } catch (e) {

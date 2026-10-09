@@ -23,8 +23,9 @@ import "server-only";
 
 import { sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import type { DbDueno } from "@/lib/db";
 import { errorCode } from "@/lib/observability/error-code";
+import { paraCadaBase } from "@/server/bases/cada-base";
 
 export type EstadoDeTrabajo = "ok" | "degraded" | "down";
 
@@ -33,6 +34,14 @@ export interface ChequeoDeTrabajo {
   status: EstadoDeTrabajo;
   detail: string;
 }
+
+/**
+ * Cuánto se tarda como máximo en pasar por las bases de los clientes.
+ *
+ * La ruta dura 60 s y los cuatro chequeos recorren a la vez: con 30 s alcanza para
+ * decenas de bases, a unos 50 ms cada una, y deja el resto para los otros nueve.
+ */
+const MS_PARA_RECORRER = 30_000;
 
 /** Cuántos minutos puede estar un caso sin que nadie lo tome. Ver `reap-stuck`. */
 const MINUTOS_TRABADO = 20;
@@ -70,6 +79,26 @@ function noSePudo(name: string, err: unknown): ChequeoDeTrabajo {
 }
 
 /**
+ * La consulta en cada base de cliente, o una sola vez si no hay base por cliente.
+ *
+ * Con `BASE_POR_CLIENTE=1` los casos, los envíos y los adjuntos viven en la base de
+ * cada inquilino: mirar sólo control daría cero y verde, que es el error de arriba.
+ * `sinMedir` cuenta las bases que no se pudieron leer o que no entraron en el tiempo.
+ */
+async function enCadaBase<T>(consulta: (db: DbDueno) => Promise<T>): Promise<{ filas: T[]; sinMedir: number }> {
+  const corrida = await paraCadaBase((db) => consulta(db), { hasta: Date.now() + MS_PARA_RECORRER });
+  return { filas: corrida.resultados, sinMedir: corrida.pendientes + corrida.fallas };
+}
+
+/** Un «ok» con bases sin leer no es un «ok»: baja a `degraded` y dice cuántas faltaron. */
+function conLoQueFalto(chequeo: ChequeoDeTrabajo, sinMedir: number): ChequeoDeTrabajo {
+  if (sinMedir === 0 || chequeo.status !== "ok") return chequeo;
+  return flojo(chequeo.name, `${chequeo.detail}; sin medir en ${sinMedir} base(s)`);
+}
+
+const sumar = (numeros: number[]) => numeros.reduce((total, n) => total + n, 0);
+
+/**
  * Casos que entraron y que nadie levantó. Cada uno es una denuncia sin leer.
  *
  * Los `recibido` marcados «Para responder» no cuentan: pasado el tope por
@@ -80,16 +109,19 @@ function noSePudo(name: string, err: unknown): ChequeoDeTrabajo {
 export async function chequearCasosTrabados(): Promise<ChequeoDeTrabajo> {
   const name = "casos trabados";
   try {
-    // sin-inquilino: chequeo de salud del sistema entero; no corre en nombre de nadie.
-    const filas = await db.execute<{ n: number }>(sql`
-      select count(*)::int as n from cases
-       where status in ('recibido', 'procesando')
-         and created_at < now() - interval '${sql.raw(String(MINUTOS_TRABADO))} minutes'
-         and (status = 'procesando' or para_responder_desde is null)
-    `);
-    const n = Number(filas.rows?.[0]?.n ?? 0);
+    const { filas, sinMedir } = await enCadaBase(async (db) => {
+      // sin-inquilino: chequeo de salud del sistema entero; no corre en nombre de nadie.
+      const hallados = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from cases
+         where status in ('recibido', 'procesando')
+           and created_at < now() - interval '${sql.raw(String(MINUTOS_TRABADO))} minutes'
+           and (status = 'procesando' or para_responder_desde is null)
+      `);
+      return Number(hallados.rows?.[0]?.n ?? 0);
+    });
+    const n = sumar(filas);
     return n === 0
-      ? bien(name, "ninguno")
+      ? conLoQueFalto(bien(name, "ninguno"), sinMedir)
       : caido(name, `${n} caso(s) sin tomar hace más de ${MINUTOS_TRABADO} min`);
   } catch (err) {
     return noSePudo(name, err);
@@ -100,24 +132,30 @@ export async function chequearCasosTrabados(): Promise<ChequeoDeTrabajo> {
 export async function chequearExtraccion(): Promise<ChequeoDeTrabajo> {
   const name = "extracción";
   try {
-    // sin-inquilino: idem, salud del sistema.
-    const filas = await db.execute<{ malas: number; total: number }>(sql`
-      select count(*) filter (where status <> 'success')::int as malas,
-             count(*)::int as total
-        from provider_usage_events
-       where created_at > now() - interval '1 hour'
-    `);
-    const malas = Number(filas.rows?.[0]?.malas ?? 0);
-    const total = Number(filas.rows?.[0]?.total ?? 0);
+    const { filas, sinMedir } = await enCadaBase(async (db) => {
+      // sin-inquilino: idem, salud del sistema.
+      const hallados = await db.execute<{ malas: number; total: number }>(sql`
+        select count(*) filter (where status <> 'success')::int as malas,
+               count(*)::int as total
+          from provider_usage_events
+         where created_at > now() - interval '1 hour'
+      `);
+      return {
+        malas: Number(hallados.rows?.[0]?.malas ?? 0),
+        total: Number(hallados.rows?.[0]?.total ?? 0),
+      };
+    });
+    const malas = sumar(filas.map((f) => f.malas));
+    const total = sumar(filas.map((f) => f.total));
     // Sin llamadas no hay proporción que calcular, y eso no es una falla: de
     // madrugada no entra nada.
-    if (total === 0) return bien(name, "sin llamadas en la última hora");
+    if (total === 0) return conLoQueFalto(bien(name, "sin llamadas en la última hora"), sinMedir);
 
     const proporcion = malas / total;
     const pct = Math.round(proporcion * 100);
     return proporcion > TOPE_FALLOS_DEL_MODELO
       ? flojo(name, `${pct}% de ${total} llamadas falló`)
-      : bien(name, `${pct}% de ${total} llamadas falló`);
+      : conLoQueFalto(bien(name, `${pct}% de ${total} llamadas falló`), sinMedir);
   } catch (err) {
     return noSePudo(name, err);
   }
@@ -127,13 +165,18 @@ export async function chequearExtraccion(): Promise<ChequeoDeTrabajo> {
 export async function chequearEnvios(): Promise<ChequeoDeTrabajo> {
   const name = "envíos al denunciante";
   try {
-    // sin-inquilino: idem, salud del sistema.
-    const filas = await db.execute<{ n: number }>(sql`
-      select count(*)::int as n from outbound_messages
-       where status = 'failed' and created_at > now() - interval '24 hours'
-    `);
-    const n = Number(filas.rows?.[0]?.n ?? 0);
-    return n === 0 ? bien(name, "ninguno falló") : flojo(name, `${n} sin salir en 24 h`);
+    const { filas, sinMedir } = await enCadaBase(async (db) => {
+      // sin-inquilino: idem, salud del sistema.
+      const hallados = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from outbound_messages
+         where status = 'failed' and created_at > now() - interval '24 hours'
+      `);
+      return Number(hallados.rows?.[0]?.n ?? 0);
+    });
+    const n = sumar(filas);
+    return n === 0
+      ? conLoQueFalto(bien(name, "ninguno falló"), sinMedir)
+      : flojo(name, `${n} sin salir en 24 h`);
   } catch (err) {
     return noSePudo(name, err);
   }
@@ -148,14 +191,19 @@ export async function chequearEnvios(): Promise<ChequeoDeTrabajo> {
 export async function chequearAdjuntos(): Promise<ChequeoDeTrabajo> {
   const name = "adjuntos";
   try {
-    // sin-inquilino: idem, salud del sistema.
-    const filas = await db.execute<{ n: number }>(sql`
-      select count(*)::int as n from claim_attachments
-       where rejected_reason = 'storage_upload_failed'
-         and created_at > now() - interval '24 hours'
-    `);
-    const n = Number(filas.rows?.[0]?.n ?? 0);
-    return n === 0 ? bien(name, "ninguno perdido") : flojo(name, `${n} no llegaron al bucket en 24 h`);
+    const { filas, sinMedir } = await enCadaBase(async (db) => {
+      // sin-inquilino: idem, salud del sistema.
+      const hallados = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from claim_attachments
+         where rejected_reason = 'storage_upload_failed'
+           and created_at > now() - interval '24 hours'
+      `);
+      return Number(hallados.rows?.[0]?.n ?? 0);
+    });
+    const n = sumar(filas);
+    return n === 0
+      ? conLoQueFalto(bien(name, "ninguno perdido"), sinMedir)
+      : flojo(name, `${n} no llegaron al bucket en 24 h`);
   } catch (err) {
     return noSePudo(name, err);
   }

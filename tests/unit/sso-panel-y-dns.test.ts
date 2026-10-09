@@ -49,7 +49,7 @@ vi.mock("@/lib/db", async () => {
 });
 
 vi.mock("@/data/scope", () => ({
-  enTenant: vi.fn(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+  enControl: vi.fn(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
     armar({
       select: () => ({
         from: () => (h.fallaDelPanel ? Promise.reject(h.fallaDelPanel) : Promise.resolve(h.filaDelPanel ? [h.filaDelPanel] : [])),

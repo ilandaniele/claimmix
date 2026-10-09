@@ -29,12 +29,18 @@
  * `SET LOCAL` no sirve acá: no acepta parámetros en ninguna versión de Postgres.
  * `set_config(clave, $1, true)` es una función, sí los toma, y muere con la
  * transacción exactamente igual.
+ *
+ * Con `BASE_POR_CLIENTE=1` hay una base por inquilino (`t_<hex>`) además de la de
+ * control, y las tres funciones de abajo eligen la del inquilino del contexto.
+ * Lo que no vive en la base del inquilino va por `enControl`. Apagada, hay una
+ * sola base y todo anda como siempre. Cómo se arma el nombre: `bases.ts`.
  */
 import "server-only";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { sql } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
+import { baseDelInquilino, cadenaConBase, esBaseInexistente } from "@/data/bases";
 
 /**
  * De qué inquilino se trata.
@@ -86,11 +92,25 @@ function crearCliente(connectionString: string) {
   return drizzle(neon(connectionString), { schema });
 }
 
-let cacheCliente: ClienteDatos | null = null;
-let cacheCadena: string | null = null;
+/**
+ * Los clientes que ya nacieron, por cadena de conexión.
+ *
+ * Con la bandera apagada hay una sola cadena y una sola entrada, igual que antes.
+ * Con `BASE_POR_CLIENTE=1` hay una por base, y en una instancia que vive días el
+ * mapa no puede crecer sin techo: al llegar a `TOPE_CLIENTES` se va el más viejo.
+ * Crear un cliente no abre ninguna conexión —el driver es HTTP—, así que perder
+ * uno sale gratis.
+ */
+const TOPE_CLIENTES = 500;
+const clientes = new Map<string, ClienteDatos>();
 
 /**
- * El cliente con el que habla esta capa. Sólo DATABASE_URL_APP, y sin respaldo.
+ * El cliente con el que habla esta capa para ese inquilino, y la cadena con la
+ * que nació. Sólo DATABASE_URL_APP, y sin respaldo.
+ *
+ * Con la bandera apagada, o con `null` o el centinela, es DATABASE_URL_APP tal
+ * cual: la base de control. Con `BASE_POR_CLIENTE=1` y un inquilino real, la misma
+ * cadena apuntando a su base `t_<hex>`. Sin consulta extra: el nombre sale del id.
  *
  * La primera versión caía a DATABASE_URL avisando por consola, con el argumento
  * de que "la capa funciona igual y lo único que se pierde es la defensa". Eso
@@ -105,10 +125,10 @@ let cacheCadena: string | null = null;
  * Por eso rompe. Un 500 en una pantalla es un mal rato; una aseguradora viendo
  * los siniestros de otra es otra clase de problema.
  */
-function cliente(): ClienteDatos {
-  const cadena = process.env.DATABASE_URL_APP?.trim();
+function cliente(tenantId: string | null): { cadena: string; db: ClienteDatos } {
+  const base = process.env.DATABASE_URL_APP?.trim();
 
-  if (!cadena) {
+  if (!base) {
     throw new Error(
       "[data] falta DATABASE_URL_APP. Esta capa NO usa DATABASE_URL: sus consultas " +
         "no llevan filtro por inquilino y el rol viejo saltea RLS, así que caer a él " +
@@ -116,8 +136,15 @@ function cliente(): ClienteDatos {
     );
   }
 
-  if (!cacheCliente || cacheCadena !== cadena) {
-    cacheCadena = cadena;
+  const nombre = baseDelInquilino(tenantId);
+  const cadena = nombre ? cadenaConBase(base, nombre) : base;
+
+  let db = clientes.get(cadena);
+  if (!db) {
+    if (clientes.size >= TOPE_CLIENTES) {
+      const [masViejo] = clientes.keys();
+      clientes.delete(masViejo);
+    }
     /*
      * El ÚNICO lugar donde nace un `ClienteDatos`.
      *
@@ -128,9 +155,10 @@ function cliente(): ClienteDatos {
      *
      * Es el único cast del archivo, y no debería haber otro.
      */
-    cacheCliente = crearCliente(cadena) as ClienteDatos;
+    db = crearCliente(cadena) as ClienteDatos;
+    clientes.set(cadena, db);
   }
-  return cacheCliente;
+  return { cadena, db };
 }
 
 /**
@@ -147,12 +175,26 @@ function cliente(): ClienteDatos {
  * agarró un test que comparaba los `tenant_id` de la respuesta; sin ese test,
  * la pantalla se veía perfecta.
  *
- * Cuesta una consulta la primera vez que se usa el cliente, y nada después. Al
- * lado de lo que evita, es gratis.
+ * Cuesta una consulta la primera vez que se usa cada host con cada usuario, y
+ * nada después. El rol es del clúster y no de una base, así que las bases
+ * `t_<hex>` del mismo host no lo repiten. Al lado de lo que evita, es gratis.
  */
-let rolComprobado: Promise<void> | null = null;
+const rolComprobado = new Set<string>();
+const rolEnCurso = new Map<string, Promise<void>>();
 
-function exigirRolSinBypass(db: ClienteDatos): Promise<void> {
+/** `host|usuario` de la cadena. Si no se deja leer, la cadena entera. */
+function claveDeRol(cadena: string): string {
+  try {
+    const url = new URL(cadena);
+    return `${url.host}|${decodeURIComponent(url.username)}`;
+  } catch {
+    return cadena;
+  }
+}
+
+function exigirRolSinBypass(db: ClienteDatos, cadena: string): Promise<void> {
+  const clave = claveDeRol(cadena);
+  if (rolComprobado.has(clave)) return Promise.resolve();
   /*
    * Sólo se cachea el resultado BUENO. Un fallo se olvida.
    *
@@ -163,39 +205,63 @@ function exigirRolSinBypass(db: ClienteDatos): Promise<void> {
    * rota hasta que se reciclara la instancia, con un mensaje de red que no
    * insinuaba en ningún momento que la respuesta estaba guardada.
    *
-   * Ahora el `catch` limpia el caché y vuelve a tirar. El próximo pedido
-   * pregunta de nuevo: si el problema era pasajero, sigue; si es el rol
-   * equivocado, vuelve a fallar igual y con el mismo mensaje.
+   * Ahora `rolComprobado` sólo guarda lo que salió bien, y `rolEnCurso` sólo
+   * junta a los que llegan mientras la consulta vuela: el `finally` la suelta
+   * pase lo que pase. El próximo pedido pregunta de nuevo: si el problema era
+   * pasajero, sigue; si es el rol equivocado, vuelve a fallar igual y con el
+   * mismo mensaje.
    */
-  rolComprobado ??= (async () => {
-    const r = (await db.execute(
-      sql`SELECT current_user::text AS usuario,
-                 rolbypassrls AS saltea,
-                 rolsuper AS es_super
-            FROM pg_roles WHERE rolname = current_user`
-    )) as unknown as { rows?: Array<{ usuario: string; saltea: boolean; es_super: boolean }> };
-    const fila = (Array.isArray(r) ? r[0] : r?.rows?.[0]) as
-      | { usuario: string; saltea: boolean; es_super: boolean }
-      | undefined;
-    if (!fila) return; // No se pudo averiguar: no se bloquea por las dudas.
-    if (fila.saltea || fila.es_super) {
-      // El cliente también se tira: si alguien arregla la variable, que no haga
-      // falta reiniciar para que se tome la nueva.
-      cacheCliente = null;
-      cacheCadena = null;
-      throw new Error(
-        `[data] DATABASE_URL_APP entra como "${fila.usuario}", que ` +
-          `${fila.es_super ? "es superusuario" : "tiene BYPASSRLS"}. Ese rol ignora las ` +
-          "políticas de RLS, y como estas consultas ya no llevan filtro por inquilino, " +
-          "devolverían los datos de TODOS. Apuntá DATABASE_URL_APP al rol restringido " +
-          "(claimmix_app); se crea y se rota con `pnpm rol-app --rotar`."
-      );
-    }
-  })().catch((e) => {
-    rolComprobado = null;
+  let enCurso = rolEnCurso.get(clave);
+  if (!enCurso) {
+    enCurso = (async () => {
+      const r = (await db.execute(
+        sql`SELECT current_user::text AS usuario,
+                   rolbypassrls AS saltea,
+                   rolsuper AS es_super
+              FROM pg_roles WHERE rolname = current_user`
+      )) as unknown as { rows?: Array<{ usuario: string; saltea: boolean; es_super: boolean }> };
+      const fila = (Array.isArray(r) ? r[0] : r?.rows?.[0]) as
+        | { usuario: string; saltea: boolean; es_super: boolean }
+        | undefined;
+      // Sin fila no se pudo averiguar: no se bloquea por las dudas.
+      if (fila && (fila.saltea || fila.es_super)) {
+        // El cliente también se tira: si alguien arregla la variable, que no haga
+        // falta reiniciar para que se tome la nueva.
+        clientes.delete(cadena);
+        throw new Error(
+          `[data] DATABASE_URL_APP entra como "${fila.usuario}", que ` +
+            `${fila.es_super ? "es superusuario" : "tiene BYPASSRLS"}. Ese rol ignora las ` +
+            "políticas de RLS, y como estas consultas ya no llevan filtro por inquilino, " +
+            "devolverían los datos de TODOS. Apuntá DATABASE_URL_APP al rol restringido " +
+            "(claimmix_app); se crea y se rota con `pnpm rol-app --rotar`."
+        );
+      }
+      rolComprobado.add(clave);
+    })().finally(() => rolEnCurso.delete(clave));
+    rolEnCurso.set(clave, enCurso);
+  }
+  return enCurso;
+}
+
+/**
+ * Corre `usar` con el cliente del inquilino, ya comprobado el rol.
+ *
+ * Si Postgres contesta que la base no existe (3D000), el cliente se saca del
+ * mapa y el error sigue de largo: quien llama decide qué hacer con un inquilino
+ * sin base, y el mapa no se queda con un cliente que apunta a la nada.
+ */
+async function usando<R>(
+  tenantId: string | null,
+  usar: (db: ClienteDatos) => Promise<R>
+): Promise<R> {
+  const { cadena, db } = cliente(tenantId);
+  try {
+    await exigirRolSinBypass(db, cadena);
+    return await usar(db);
+  } catch (e) {
+    if (esBaseInexistente(e)) clientes.delete(cadena);
     throw e;
-  });
-  return rolComprobado;
+  }
 }
 
 /** La sentencia que pone el contexto. Va primera en cada lote. */
@@ -283,18 +349,47 @@ export async function enTenant<T>(
   ctx: TenantContext,
   armar: (db: ClienteDatos) => Promise<T>
 ): Promise<T> {
-  const db = cliente();
-  await exigirRolSinBypass(db);
-  // `batch` acepta las consultas ya armadas, no una promesa a la que esperar:
-  // por eso la función de arriba se invoca sin await. Drizzle tipa `batch` con
-  // tuplas, y expresar eso acá pelearía con la firma simple que hace que esto
-  // valga la pena, así que el cast queda contenido en este único lugar.
-  const consulta = armar(db) as unknown;
-  exigirConsulta(consulta);
-  const [, resultado] = (await (
-    db as unknown as { batch: (q: unknown[]) => Promise<unknown[]> }
-  ).batch([ponerContexto(db, ctx.tenantId), consulta])) as [unknown, T];
-  return resultado;
+  return correrUna(ctx.tenantId, ctx, armar);
+}
+
+/**
+ * Lo mismo que `enTenant`, pero siempre contra la base de control.
+ *
+ * Con `BASE_POR_CLIENTE=1` hay datos que no viven en la base del inquilino sino
+ * en `neondb`: identidad, membresía, números, casillas, SSO, formulario y el
+ * alta. El contexto es el mismo —el `set_config` lleva el `tenantId` y la RLS
+ * hace lo suyo— y cambia sólo adónde va el lote. Con la bandera apagada es
+ * `enTenant`, porque hay una sola base. Quién puede importarla lo vigila
+ * `pnpm arquitectura`.
+ */
+export async function enControl<T>(
+  ctx: TenantContext,
+  armar: (db: ClienteDatos) => Promise<T>
+): Promise<T> {
+  return correrUna(null, ctx, armar);
+}
+
+/**
+ * El cuerpo de `enTenant` y `enControl`. `deTenant` es el inquilino cuya base se
+ * usa; `null` es la de control. El contexto que viaja en el lote es siempre el de `ctx`.
+ */
+function correrUna<T>(
+  deTenant: string | null,
+  ctx: TenantContext,
+  armar: (db: ClienteDatos) => Promise<T>
+): Promise<T> {
+  return usando(deTenant, async (db) => {
+    // `batch` acepta las consultas ya armadas, no una promesa a la que esperar:
+    // por eso la función de arriba se invoca sin await. Drizzle tipa `batch` con
+    // tuplas, y expresar eso acá pelearía con la firma simple que hace que esto
+    // valga la pena, así que el cast queda contenido en este único lugar.
+    const consulta = armar(db) as unknown;
+    exigirConsulta(consulta);
+    const [, resultado] = (await (
+      db as unknown as { batch: (q: unknown[]) => Promise<unknown[]> }
+    ).batch([ponerContexto(db, ctx.tenantId), consulta])) as [unknown, T];
+    return resultado;
+  });
 }
 
 /**
@@ -318,7 +413,15 @@ export function enTenantVarias<T extends readonly unknown[]>(
   ctx: TenantContext,
   armar: ArmarVarias<T>
 ): Promise<T> {
-  return correrLote((db) => [ponerContexto(db, ctx.tenantId)], armar);
+  return correrLote(ctx.tenantId, (db) => [ponerContexto(db, ctx.tenantId)], armar);
+}
+
+/** `enTenantVarias` contra la base de control. Ver `enControl`. */
+export function enControlVarias<T extends readonly unknown[]>(
+  ctx: TenantContext,
+  armar: ArmarVarias<T>
+): Promise<T> {
+  return correrLote(null, (db) => [ponerContexto(db, ctx.tenantId)], armar);
 }
 
 type ArmarVarias<T extends readonly unknown[]> = (
@@ -326,23 +429,25 @@ type ArmarVarias<T extends readonly unknown[]> = (
 ) => { [K in keyof T]: Promise<T[K]> } | readonly unknown[];
 
 /**
- * El cuerpo de `enTenantVarias` y de `enTenantDeUsuarioVarias`: las sentencias
- * de contexto van primero y su resultado no vuelve. Los guardias viven acá
- * para que las dos capas los tengan siempre iguales.
+ * El cuerpo de `enTenantVarias`, `enControlVarias` y `enTenantDeUsuarioVarias`:
+ * las sentencias de contexto van primero y su resultado no vuelve. Los guardias
+ * viven acá para que las capas los tengan siempre iguales. `deTenant` es el
+ * inquilino cuya base se usa; `null` es la de control.
  */
-async function correrLote<T extends readonly unknown[]>(
+function correrLote<T extends readonly unknown[]>(
+  deTenant: string | null,
   armarContexto: (db: ClienteDatos) => readonly unknown[],
   armar: ArmarVarias<T>
 ): Promise<T> {
-  const db = cliente();
-  await exigirRolSinBypass(db);
-  const consultas = armar(db) as readonly unknown[];
-  for (const c of consultas) exigirConsulta(c);
-  const contexto = armarContexto(db);
-  const res = (await (
-    db as unknown as { batch: (q: unknown[]) => Promise<unknown[]> }
-  ).batch([...contexto, ...consultas])) as unknown[];
-  return res.slice(contexto.length) as unknown as T;
+  return usando(deTenant, async (db) => {
+    const consultas = armar(db) as readonly unknown[];
+    for (const c of consultas) exigirConsulta(c);
+    const contexto = armarContexto(db);
+    const res = (await (
+      db as unknown as { batch: (q: unknown[]) => Promise<unknown[]> }
+    ).batch([...contexto, ...consultas])) as unknown[];
+    return res.slice(contexto.length) as unknown as T;
+  });
 }
 
 /**
@@ -369,5 +474,9 @@ export function enTenantDeUsuarioVarias<T extends readonly unknown[]>(
   ctx: UsuarioContext,
   armar: ArmarVarias<T>
 ): Promise<T> {
-  return correrLote((db) => [ponerContexto(db, ctx.tenantId), ponerUsuario(db, ctx.userId)], armar);
+  return correrLote(
+    ctx.tenantId,
+    (db) => [ponerContexto(db, ctx.tenantId), ponerUsuario(db, ctx.userId)],
+    armar
+  );
 }

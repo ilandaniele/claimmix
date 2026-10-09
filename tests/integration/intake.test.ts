@@ -132,8 +132,10 @@ function setupDbMocksConRol(role: string) {
   mockDbSelect.mockReturnValue({
     from: vi.fn().mockReturnValue({
       innerJoin: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ ...MOCK_USER_ROW, role }]),
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ ...MOCK_USER_ROW, role }]),
+          }),
         }),
       }),
     }),
@@ -152,8 +154,10 @@ function setupDbMocks() {
   mockDbSelect.mockReturnValue({
     from: vi.fn().mockReturnValue({
       innerJoin: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([MOCK_USER_ROW]),
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([MOCK_USER_ROW]),
+          }),
         }),
       }),
     }),

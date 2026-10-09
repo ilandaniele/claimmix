@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { verificarEnMeta } from "@/server/whatsapp/verificar-en-meta";
+import { recorrerLaWaba, verificarEnMeta } from "@/server/whatsapp/verificar-en-meta";
 
 const SAVED = { ...process.env };
 
@@ -146,5 +146,109 @@ describe("verificarEnMeta", () => {
 
     expect(await verificarEnMeta(PEDIDO)).toEqual({ ok: false, motivo: "numero_distinto" });
     expect(fetchFalso).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("recorrerLaWaba", () => {
+  const SIGUE = { cursors: { after: "SIGUE" }, next: "https://graph.example.com/x" };
+
+  it("pide los campos que se le piden, con el token de la plataforma, y devuelve las filas", async () => {
+    const fetchFalso = vi.fn(async () =>
+      respuesta({ data: [{ id: ID, display_phone_number: " +54 9 11 0000-0000 " }, { id: "100000000000001" }] })
+    );
+    vi.stubGlobal("fetch", fetchFalso);
+
+    expect(await recorrerLaWaba(WABA, "id,display_phone_number", "fake-access-token")).toEqual({
+      filas: [
+        { id: ID, display: "+54 9 11 0000-0000", nombre: null },
+        { id: "100000000000001", display: null, nombre: null },
+      ],
+      completa: true,
+    });
+
+    const [[url, init]] = fetchFalso.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(url).toBe(`https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id,display_phone_number&limit=100`);
+    expect(init.headers).toEqual({ Authorization: "Bearer fake-access-token" });
+  });
+
+  it("con verified_name trae el nombre de cada número, y lo que no es un texto queda en null", async () => {
+    const fetchFalso = vi.fn(async () =>
+      respuesta({ data: [{ id: "100000000000001", display_phone_number: "+54 9 291 000-0000", verified_name: " Veltra " }, { id: 7, verified_name: "" }] })
+    );
+    vi.stubGlobal("fetch", fetchFalso);
+
+    expect(await recorrerLaWaba(WABA, "id,display_phone_number,verified_name", "fake-access-token")).toEqual({
+      filas: [
+        { id: "100000000000001", display: "+54 9 291 000-0000", nombre: "Veltra" },
+        { id: null, display: null, nombre: null },
+      ],
+      completa: true,
+    });
+    expect((fetchFalso.mock.calls as unknown as Array<[string]>)[0][0]).toBe(
+      `https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id,display_phone_number,verified_name&limit=100`
+    );
+  });
+
+  it("sigue el cursor de cada página y junta las filas en orden", async () => {
+    const pedidos: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        pedidos.push(url);
+        if (url.includes("after=PAG2")) return respuesta({ data: [{ id: "2" }] });
+        return respuesta({ data: [{ id: "1" }], paging: { cursors: { after: "PAG2" }, next: "https://graph.example.com/x" } });
+      })
+    );
+
+    const r = await recorrerLaWaba(WABA, "id", "fake-access-token");
+    expect(r).toEqual({ filas: [{ id: "1", display: null, nombre: null }, { id: "2", display: null, nombre: null }], completa: true });
+    expect(pedidos).toEqual([
+      `https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id&limit=100`,
+      `https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id&limit=100&after=PAG2`,
+    ]);
+  });
+
+  it("un paging que nunca termina se corta en diez páginas, y no está completa", async () => {
+    const fetchFalso = vi.fn(async () => respuesta({ data: [{ id: "100000000000001" }], paging: SIGUE }));
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const r = await recorrerLaWaba(WABA, "id", "fake-access-token");
+    expect(r?.completa).toBe(false);
+    expect(r?.filas).toHaveLength(10);
+    expect(fetchFalso).toHaveBeenCalledTimes(10);
+  });
+
+  it("un next sin cursor para pedir la que sigue tampoco está completa", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta({ data: [{ id: "1" }], paging: { next: "https://graph.example.com/x" } })));
+
+    expect(await recorrerLaWaba(WABA, "id", "fake-access-token")).toEqual({
+      filas: [{ id: "1", display: null, nombre: null }],
+      completa: false,
+    });
+  });
+
+  it("si parar da true corta en esa fila, sin pedir más páginas, y queda completa", async () => {
+    const fetchFalso = vi.fn(async () => respuesta({ data: [{ id: "1" }, { id: ID }, { id: "3" }], paging: SIGUE }));
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const r = await recorrerLaWaba(WABA, "id", "fake-access-token", (f) => f.id === ID);
+    expect(r?.completa).toBe(true);
+    expect(r?.filas.map((f) => f.id)).toEqual(["1", ID]);
+    expect(fetchFalso).toHaveBeenCalledTimes(1);
+  });
+
+  it("una página que no es 2xx, la red caída o un data que no es lista dan null", async () => {
+    let paginas = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => (++paginas === 1 ? respuesta({ data: [{ id: "1" }], paging: SIGUE }) : respuesta({}, 502)))
+    );
+    expect(await recorrerLaWaba(WABA, "id", "fake-access-token")).toBeNull();
+
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNRESET"); }));
+    expect(await recorrerLaWaba(WABA, "id", "fake-access-token")).toBeNull();
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta({ data: "raro" })));
+    expect(await recorrerLaWaba(WABA, "id", "fake-access-token")).toBeNull();
   });
 });

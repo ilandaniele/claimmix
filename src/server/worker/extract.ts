@@ -649,6 +649,7 @@ export async function runEmailExtractionWorker(
             severity: cases.severity,
             injury_severity: cases.injury_severity,
             monto_estimado: cases.monto_estimado,
+            intentos_de_extraccion: cases.intentos_de_extraccion,
           })
           .from(cases)
           // Buscar por id sin contexto sería peor que antes: el id de un
@@ -950,6 +951,9 @@ export async function runEmailExtractionWorker(
       learning,
       channel: caseRow.channel,
       ...(vistos.media.length > 0 ? { media: vistos.media } : {}),
+      // Una extracción anterior de este caso falló por algo pasajero (plazo, 429 o red): esta sale concisa y a 0,3.
+      // El contador no se reinicia, así que también vale para los turnos que lleguen después.
+      ...(caseRow.intentos_de_extraccion > 0 ? { trasCorte: true } : {}),
     };
     extractedClaim = await runEmailClaimAgent({
       payload: emailPayload,

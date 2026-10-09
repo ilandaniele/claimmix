@@ -35,7 +35,7 @@ import {
   REGLAS,
   type Regla,
 } from "@/core/desvios/reglas";
-import { db } from "@/lib/db";
+import { db as dbDueno, type DbDueno } from "@/lib/db";
 import { filasDe } from "@/lib/db/filas";
 import { auditLog, caseDesvios, casePlanPasos, cases, extractedFields, missingDocs, outboundMessages } from "@/lib/db/schema";
 import { AuditEvent } from "@/lib/audit/log";
@@ -228,7 +228,7 @@ export interface ResultadoDeLaRevision {
   fallidas: Regla[];
 }
 
-export async function revisarDesvios(): Promise<ResultadoDeLaRevision> {
+export async function revisarDesvios(db: DbDueno = dbDueno): Promise<ResultadoDeLaRevision> {
   const porRegla = Object.fromEntries(REGLAS.map((r) => [r, 0])) as Record<Regla, number>;
   const porInquilino: ResultadoDeLaRevision["porInquilino"] = {};
   const fallidas: Regla[] = [];

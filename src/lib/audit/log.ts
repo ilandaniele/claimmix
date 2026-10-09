@@ -18,7 +18,8 @@ import { isIP } from "node:net";
 import { auditLog } from "@/lib/db/schema";
 import type { AuditLogInsert } from "@/lib/db/types";
 import type { AuditPayload } from "./redact";
-import { enTenant } from "@/data/scope";
+import { esBaseInexistente } from "@/data/bases";
+import { enControl, enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
 
 /**
@@ -68,14 +69,24 @@ export function filaDeAuditoria(entry: AuditLogEntry): AuditLogInsert {
  *
  * Failures are logged to stderr but never thrown — audit log writes
  * must never break the primary request flow.
+ *
+ * Con `BASE_POR_CLIENTE=1` la fila va a la base del inquilino. Si esa base no
+ * existe (3D000: todavía no se creó, o ya se borró) se reintenta la misma fila
+ * en control, para que la auditoría no se pierda. En control viven, además, las
+ * que no tienen base: login (login/actions.ts) y recuperar (recuperar/actions.ts)
+ * con el inquilino centinela, el poller de Gmail (gmail-poller.ts) y las altas.
  */
 export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
     const insertRow = filaDeAuditoria(entry);
+    const ctx = { tenantId: insertRow.tenant_id };
 
-    await enTenant({ tenantId: insertRow.tenant_id }, (db) =>
-      db.insert(auditLog).values(insertRow)
-    );
+    try {
+      await enTenant(ctx, (db) => db.insert(auditLog).values(insertRow));
+    } catch (e) {
+      if (!esBaseInexistente(e)) throw e;
+      await enControl(ctx, (db) => db.insert(auditLog).values(insertRow));
+    }
   } catch (err) {
     // Log the error code/name only — never the full error (may contain PII).
     const code = (err as { code?: string })?.code;
@@ -631,6 +642,8 @@ export const AuditEvent = {
   TENANT_SUSPENDED: "tenant.suspended",
   /** El número de WhatsApp de un inquilino quedó conectado, suspendido o dado de baja. */
   WHATSAPP_NUMERO_CONECTADO: "whatsapp.numero_conectado",
+  /** Graph agregó el número de un inquilino a la WABA, todavía sin verificar. Payload: { via, phone_number_id }. */
+  WHATSAPP_NUMERO_AGREGADO: "whatsapp.numero_agregado",
   WHATSAPP_NUMERO_SUSPENDIDO: "whatsapp.numero_suspendido",
   WHATSAPP_NUMERO_BAJA: "whatsapp.numero_baja",
   /** USER_INVITED: un admin invitó a una persona al espacio. Payload: { rol } — sin el mail. */

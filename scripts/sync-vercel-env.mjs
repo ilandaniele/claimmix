@@ -1,15 +1,45 @@
 /**
- * Reads Gmail + cron env vars from .env.local and pushes them to Vercel production.
- * Run once: node scripts/sync-vercel-env.mjs
+ * Reads Gmail + cron env vars from an env file and pushes them to Vercel production.
+ * Run once: node scripts/sync-vercel-env.mjs [--project <nombre>] [--archivo <ruta>]
+ *   --project  proyecto de Vercel (default claimmix, el vinculado en .vercel)
+ *   --archivo  archivo de donde leer (default .env.local)
+ * claimmix-prd nunca lee .env.local: es el de dev, con las credenciales de dev.
  * Requires: vercel CLI logged in (npx vercel whoami should work)
  */
-import { readFileSync } from "fs";
+import { readFileSync, mkdtempSync, rmSync } from "fs";
 import { execSync } from "child_process";
-import { resolve, dirname } from "path";
+import { tmpdir } from "os";
+import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const ENV_PATH = resolve(ROOT, ".env.local");
+
+const args = process.argv.slice(2);
+const flag = (nombre, porDefecto) => {
+  const i = args.indexOf(`--${nombre}`);
+  const valor = args[i + 1];
+  return i >= 0 && valor && !valor.startsWith("--") ? valor : porDefecto;
+};
+const PROYECTO = flag("project", "claimmix");
+const ENV_PATH = resolve(ROOT, flag("archivo", ".env.local"));
+
+if (!/^[a-z0-9-]+$/.test(PROYECTO)) {
+  console.error(`❌ --project ${PROYECTO}: el nombre no es válido.`);
+  process.exit(1);
+}
+if (PROYECTO === "claimmix-prd" && ENV_PATH === resolve(ROOT, ".env.local")) {
+  console.error("❌ claimmix-prd no se carga desde .env.local: pasá --archivo con el archivo de prd.");
+  process.exit(1);
+}
+
+// El proyecto vinculado en .vercel es claimmix. Para otro se vincula una carpeta
+// temporal, así no se toca el vínculo del repositorio.
+let CWD = ROOT;
+if (PROYECTO !== "claimmix") {
+  CWD = mkdtempSync(join(tmpdir(), "vercel-env-"));
+  process.on("exit", () => rmSync(CWD, { recursive: true, force: true }));
+  execSync(`vercel link --yes --project ${PROYECTO}`, { stdio: "inherit", cwd: CWD });
+}
 
 const VARS_TO_SYNC = [
   "GMAIL_CLIENT_ID",
@@ -49,7 +79,7 @@ for (const varName of VARS_TO_SYNC) {
       {
         input: value + "\n",
         stdio: ["pipe", "inherit", "inherit"],
-        cwd: ROOT,
+        cwd: CWD,
       }
     );
     console.log(`✅ ${varName} — set`);
@@ -59,14 +89,14 @@ for (const varName of VARS_TO_SYNC) {
     try {
       execSync(`vercel env rm ${varName} production --yes`, {
         stdio: "inherit",
-        cwd: ROOT,
+        cwd: CWD,
       });
       execSync(
         `vercel env add ${varName} production`,
         {
           input: value + "\n",
           stdio: ["pipe", "inherit", "inherit"],
-          cwd: ROOT,
+          cwd: CWD,
         }
       );
       console.log(`✅ ${varName} — overwritten`);
@@ -78,4 +108,4 @@ for (const varName of VARS_TO_SYNC) {
 }
 
 console.log(`\nDone: ${synced} set, ${skipped} skipped.`);
-console.log("Run `vercel env ls production` to verify.");
+console.log(`Run \`vercel env ls production\` in ${PROYECTO} to verify.`);

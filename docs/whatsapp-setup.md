@@ -193,8 +193,14 @@ respaldo para cualquier caso que no cierre solo.
    `whatsapp_business_management` y `whatsapp_business_messaging`, y hacen falta
    `WHATSAPP_BUSINESS_ACCOUNT_ID` y `WHATSAPP_PHONE_NUMBER_ID` (el de la plataforma).
    Sin alguno de los dos ids no se agrega nada.
-4. Confirmar que la app de ClaimMix está en `subscribed_apps` de la WABA: así los
-   mensajes del número nuevo llegan al mismo webhook, sin configurar nada más.
+4. Confirmar que la app de ClaimMix está en `subscribed_apps` de la WABA. Cada
+   número nuevo recibe además su **webhook propio**
+   (`NEXT_PUBLIC_SITE_URL` + `/api/webhooks/whatsapp`, con `WHATSAPP_VERIFY_TOKEN`):
+   dev y prd comparten app y WABA, y sin él los mensajes del número caerían en el
+   webhook del otro ambiente. Con `NEXT_PUBLIC_SITE_URL` sin https o sin
+   `WHATSAPP_VERIFY_TOKEN` no se llama a Meta (aviso `sin_credencial`). En el
+   ambiente que no es dev, `NUMEROS_DE_DEV` lista los números de dev: uno de ellos
+   termina en «revisión» con el aviso `de_otro_ambiente`, sin tocar Meta.
 5. Mantener `ADMIN_EMAILS` y el remitente del sistema (Gmail): sin ellos los avisos
    al operador sólo quedan en el log `alta.numero_en_revision`.
 
@@ -228,8 +234,12 @@ texto de Graph.
 1. Toma los cupos de código (por espacio, por red y global). Sin lugar, «esperar».
 2. Lee, en una consulta, la fila del número y el estado del espacio y comprueba que
    la 0049 exista. Si algo no cierra, «revisión» y no llama a Graph; si el espacio
-   no tiene fila de número, además sale el aviso `sin_fila`. Si falta el token, la
-   WABA o el número de la plataforma en el entorno, aviso `sin_credencial`.
+   no tiene fila de número, además sale el aviso `sin_fila`. Si el número es de la
+   lista del otro ambiente, aviso `de_otro_ambiente`. Si falta el token, la WABA, el
+   número de la plataforma, el sitio https o `WHATSAPP_VERIFY_TOKEN` en el entorno,
+   aviso `sin_credencial`. La fila se lee y se escribe en control; cada paso que se
+   guarda se espeja a la base del cliente (con `BASE_POR_CLIENTE` apagado no hace
+   nada) y, si la copia no entra, el paso sale igual y la levanta el barrido.
 3. Si la fila todavía no tiene `phone_number_id`:
    - parte el número (sólo `+549…`; otro formato, aviso `pais`);
    - recorre la WABA (`GET /{waba}/phone_numbers?fields=id,display_phone_number,verified_name`);
@@ -255,9 +265,14 @@ texto de Graph.
 3. Si Meta ya lo tiene registrado en Cloud API
    (`GET /{id}?fields=status,platform_type`) no vuelve a registrarlo. Si no,
    `POST /{id}/register` con `messaging_product` y un PIN de seis dígitos al azar.
-4. Con la función de la 0049 (paso `conectado`) pasa la fila a `conectado`. Desde
-   ahí el webhook de la WABA lo rutea al espacio y las respuestas salen con el token
-   de la plataforma.
+4. Le pone al número su webhook propio (`POST /{id}` con
+   `webhook_configuration.override_callback_uri` y `verify_token`) y lo lee de Graph
+   (`GET /{id}?fields=webhook_configuration`). Si lo que vuelve no es la URL de este
+   ambiente, el número queda registrado y en `pedido`, con el aviso `sin_webhook`; un
+   nuevo intento repite el webhook sin volver a registrarlo.
+5. Con la función de la 0049 (paso `conectado`) pasa la fila a `conectado`, sólo con
+   el webhook leído de Graph. Desde ahí el webhook del número lo rutea al espacio y
+   las respuestas salen con el token de la plataforma.
 
 Lo que nunca pasa: el número de la plataforma no se toca (ni `register`, ni
 `request_code`, ni se guarda en la fila de un espacio); nada borra números de la
@@ -303,8 +318,8 @@ puede duplicarse.
 ### Qué hace el operador ante cada aviso
 
 El mail dice sólo el motivo; qué espacio fue queda en el log `alta.numero_en_revision`
-(`vercel logs`). Sale un aviso por día y motivo, salvo `agregado` e `incierto`, que
-salen por cada espacio.
+(`vercel logs`). Sale un aviso por día y motivo, salvo `agregado`, `incierto` y
+`sin_webhook`, que salen por cada espacio.
 
 | Motivo | Qué pasó | Qué hacer |
 |---|---|---|
@@ -317,7 +332,9 @@ salen por cada espacio.
 | `agregado` | No es una falla: un número entró a la WABA. | Si el espacio no llega a conectarlo, borrarlo a mano en WhatsApp Manager, porque ocupa lugar del tope. |
 | `incierto` | Se pidió agregar el número y Meta no contestó o contestó algo que no se entiende: pudo haber entrado. | Buscarlo en WhatsApp Manager. Si está, conectar el espacio desde `/admin/altas` o borrarlo; si no, repetir. Los cupos del espacio quedan gastados. |
 | `sin_fila` | Un espacio pidió el código y no tiene un número en trámite (`pedido`); no se llamó a Meta. | Ver el espacio en `/admin/altas`: puede ser un número ya tomado por otro al darse de alta. |
-| `sin_credencial` | Falta el token, la WABA o el número de la plataforma en el entorno; no se llamó a Meta. | Revisar `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID` y `WHATSAPP_PHONE_NUMBER_ID`. |
+| `sin_credencial` | Falta el token, la WABA o el número de la plataforma en el entorno, o el sitio no es https o no hay token del apretón de manos; no se llamó a Meta. | Revisar `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_PHONE_NUMBER_ID`, `NEXT_PUBLIC_SITE_URL` y `WHATSAPP_VERIFY_TOKEN`. |
+| `de_otro_ambiente` | Un espacio pidió un número de la lista `NUMEROS_DE_DEV`; no se llamó a Meta. | Ver cómo llegó ese número a este ambiente y conectarlo en el que corresponde. |
+| `sin_webhook` | El número quedó registrado pero Graph no devolvió el webhook propio de este ambiente: lo que le escriban puede caer en el otro. | Mirar el número en WhatsApp Manager. El espacio puede reintentar (repite el webhook sin registrar de nuevo); si no alcanza, ponerlo a mano y conectar desde `/admin/altas`. |
 
 Los números sobrantes se borran **a mano en WhatsApp Manager**: ClaimMix no borra nada
 de la WABA. Lo mismo vale para un flujo abandonado (se agregó el número y nadie

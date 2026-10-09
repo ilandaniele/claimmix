@@ -8,6 +8,9 @@
  * AC14: no unclassified cases → 200 { triggered: 0, case_ids: [], failed: [] }.
  * AC15: one fetch fails → that case in failed[], others still triggered.
  *
+ * Con BASE_POR_CLIENTE=1 (P10) busca y marca en la base de cada cliente, y el tope de
+ * 50 es de toda la llamada.
+ *
  * Mocks: @/lib/db, @/server/email/dispatch-url, and global.fetch.
  */
 
@@ -48,6 +51,7 @@ function buildMockDb(
 
   return {
     select: selectFn,
+    limit: limitFn,
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue({ rowCount: 1 }) }),
     update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 1 }) }) }),
     delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({ rowCount: 0 }) }),
@@ -58,8 +62,12 @@ function buildMockDb(
 // The mock db is a module-level var so tests can swap it out.
 let mockDbInstance = buildMockDb([]);
 
+// Las bases de cliente, por nombre, para `dbDeBase` (sólo con BASE_POR_CLIENTE=1).
+const basesDeCliente: Record<string, ReturnType<typeof buildMockDb>> = {};
+
 vi.mock("@/lib/db", () => ({
   get db() { return mockDbInstance; },
+  dbDeBase: (nombre: string) => basesDeCliente[nombre],
   tables: {
     cases: {
       id: "id",
@@ -347,5 +355,86 @@ describe("POST /api/admin/reprocess-unclassified", () => {
 
     expect(response.status).toBe(500);
     expect(body.error.code).toBe("INTERNAL_ERROR");
+  });
+});
+
+describe("POST /api/admin/reprocess-unclassified: una base por cliente (P10)", () => {
+  const originalFetch = global.fetch;
+  const originalCronSecret = process.env.CRON_SECRET;
+  const originalBase = process.env.BASE_POR_CLIENTE;
+  const A = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const B = "11111111-2222-3333-4444-555555555555";
+  const nombre = (id: string) => `t_${id.replaceAll("-", "")}`;
+  const casos = (tenant: string, n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `caso-${tenant.slice(0, 2)}-${i}`, tenant_id: tenant }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetWorkerBaseUrl.mockReturnValue("http://localhost:3000");
+    process.env.CRON_SECRET = "super-secret-cron";
+    process.env.BASE_POR_CLIENTE = "1";
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env.CRON_SECRET = originalCronSecret;
+    if (originalBase === undefined) delete process.env.BASE_POR_CLIENTE;
+    else process.env.BASE_POR_CLIENTE = originalBase;
+    vi.restoreAllMocks();
+  });
+
+  /** Control lista las dos bases; la hora 0 deja el recorrido en el orden A, B. */
+  function conDosBases(deA: number, deB: number) {
+    vi.spyOn(Date, "now").mockReturnValue(0);
+    mockDbInstance = {
+      ...buildMockDb([]),
+      execute: vi.fn().mockResolvedValue({ rows: [{ tenant_id: A }, { tenant_id: B }] }),
+    } as ReturnType<typeof buildMockDb>;
+    basesDeCliente[nombre(A)] = buildMockDb(casos(A, deA));
+    basesDeCliente[nombre(B)] = buildMockDb(casos(B, deB));
+  }
+
+  it("junta los casos de cada base y marca cada grupo en la base de donde salió", async () => {
+    conDosBases(2, 1);
+
+    const response = await POST(buildRequest({ bearerToken: "super-secret-cron" }));
+    const body = await response.json();
+
+    expect(body.data.triggered).toBe(3);
+    expect(basesDeCliente[nombre(A)].update).toHaveBeenCalledOnce();
+    expect(basesDeCliente[nombre(B)].update).toHaveBeenCalledOnce();
+    expect(mockDbInstance.update).not.toHaveBeenCalled();
+    expect(mockDbInstance.select).not.toHaveBeenCalled();
+  });
+
+  it("el tope de 50 es de toda la llamada: la segunda base pide sólo lo que queda", async () => {
+    conDosBases(30, 5);
+
+    await POST(buildRequest({ bearerToken: "super-secret-cron" }));
+
+    expect(basesDeCliente[nombre(A)].limit).toHaveBeenCalledWith(50);
+    expect(basesDeCliente[nombre(B)].limit).toHaveBeenCalledWith(20);
+  });
+
+  it("con el tope ya cumplido no consulta las demás bases", async () => {
+    conDosBases(50, 5);
+
+    const response = await POST(buildRequest({ bearerToken: "super-secret-cron" }));
+    const body = await response.json();
+
+    expect(body.data.triggered).toBe(50);
+    expect(basesDeCliente[nombre(B)].select).not.toHaveBeenCalled();
+  });
+
+  it("una base que falla no tira la llamada: se despachan los casos de las otras", async () => {
+    conDosBases(0, 2);
+    basesDeCliente[nombre(A)] = buildMockDb(null, new Error("la base no existe"));
+
+    const response = await POST(buildRequest({ bearerToken: "super-secret-cron" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data.triggered).toBe(2);
   });
 });

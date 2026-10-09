@@ -9,7 +9,8 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { ALL_ROLES } from "@/lib/auth/roles";
 import { tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enControl, type TenantContext } from "@/data/scope";
+import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -56,7 +57,7 @@ export async function PATCH(
     }
 
     const existing = firstRow(
-      await enTenant(tenantCtx, (db) =>
+      await enControl(tenantCtx, (db) =>
         db
           .select({ id: tables.users.id, role: tables.users.role })
           .from(tables.users)
@@ -78,7 +79,7 @@ export async function PATCH(
     }
 
     const updated = firstRow(
-      await enTenant(tenantCtx, (db) =>
+      await enControl(tenantCtx, (db) =>
         db
           .update(tables.users)
           .set({ role: parsed.data.role })
@@ -90,6 +91,9 @@ export async function PATCH(
     );
 
     if (!updated) throw new AppError("NOT_FOUND");
+
+    // El rol vive en control; la copia en la base del cliente puede quedar pendiente sin romper el cambio.
+    await espejarSinFallar(userRow.tenant_id);
 
     /*
      * El rol acaba de cambiar, así que la fila cacheada miente.

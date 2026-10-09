@@ -81,6 +81,7 @@ function conRol(role: string | null) {
   mockDb.select.mockReturnValue({
     from: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
+    leftJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     limit: vi
       .fn()

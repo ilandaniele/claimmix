@@ -21,11 +21,13 @@
 import Link from "next/link";
 
 import { signInSso, signOut } from "@/app/login/actions";
+import { PistaDelOtroAmbiente } from "@/app/login/PistaDelOtroAmbiente";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRowOrThrow } from "@/lib/auth/user-row";
 import { getT, type ClaveDelServidor, type Locale } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { abrirInvitacion, leerCookieDeInvitacion, resumenDeInvitacion } from "@/server/alta/invitacion";
+import { urlDelOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 
 import { aceptarConClave, aceptarConGoogle, aceptarConSesion, rechazarInvitacion } from "./actions";
 
@@ -99,9 +101,13 @@ export default async function InvitacionPage({
   const resumen = datos && enlace ? await resumenDeInvitacion(datos) : null;
 
   if (!datos || !enlace || !resumen) {
+    const otroAmbiente = urlDelOtroAmbiente("/login");
     return (
       <Tarjeta titulo={t("invitacion.vencida.titulo")} locale={locale}>
         <p className="text-sm text-slate-600">{t("invitacion.vencida.texto")}</p>
+        {otroAmbiente && (
+          <PistaDelOtroAmbiente texto={t("login.otroAmbiente")} url={otroAmbiente} className="mt-3 text-sm text-slate-600" />
+        )}
       </Tarjeta>
     );
   }

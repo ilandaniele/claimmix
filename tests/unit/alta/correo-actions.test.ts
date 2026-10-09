@@ -20,6 +20,7 @@ const h = vi.hoisted(() => ({
   findUserById: vi.fn(),
   marcarVerificado: vi.fn(),
   crearInquilino: vi.fn(),
+  iniciarBase: vi.fn(),
   llegoAlAviso: vi.fn(),
   avisarAlOperador: vi.fn(),
   topePorIp: vi.fn(),
@@ -79,6 +80,7 @@ vi.mock("@/server/alta/aviso-operador", () => ({
   avisarAlOperador: h.avisarAlOperador,
 }));
 vi.mock("@/server/alta/crear-inquilino", () => ({ crearInquilino: h.crearInquilino }));
+vi.mock("@/server/bases/iniciar", () => ({ iniciarBase: h.iniciarBase }));
 
 import { altaEnCursoPorServidor } from "@/lib/auth/registro-permitido";
 import { DURACION_DEL_TOKEN_MS, sellarToken } from "@/server/alta/token-de-registro";
@@ -106,6 +108,7 @@ let token: string;
 
 const alta = (resultado: string, extra: Record<string, unknown> = {}) => ({
   resultado,
+  tenantId: "22222222-2222-4222-8222-222222222222",
   creadas24h: 1,
   tope: 20,
   ...extra,
@@ -145,6 +148,7 @@ beforeEach(() => {
   h.caminoAlCrear.length = 0;
   process.env.BETTER_AUTH_SECRET = SECRETO;
   process.env.ALTA_AUTOMATICA = "1";
+  delete process.env.BASE_POR_CLIENTE;
   delete process.env.SIGNUP_ALLOWED_EMAILS;
   delete process.env.ADMIN_EMAILS;
   token = sellarToken(DATOS);
@@ -160,6 +164,7 @@ beforeEach(() => {
   h.crearInquilino.mockResolvedValue(alta("ok"));
   h.signInEmail.mockResolvedValue({ token: "fake-sesion" });
   h.llegoAlAviso.mockReturnValue(false);
+  h.iniciarBase.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -271,6 +276,29 @@ describe("el camino feliz", () => {
     await enviar();
 
     expect(JSON.stringify([h.error.mock.calls, h.warn.mock.calls])).not.toContain(CLAVE);
+  });
+});
+
+describe("con una base por cliente", () => {
+  it("lanza la base del espacio nuevo y va a /preparando", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+
+    expect(await enviar()).toBe("/preparando");
+    expect(h.iniciarBase).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
+    expect(h.signInEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin espacio (alta cerrada) no lanza nada y la persona vuelve a /alta", async () => {
+    process.env.BASE_POR_CLIENTE = "1";
+    h.crearInquilino.mockResolvedValue(alta("alta_cerrada", { creadas24h: 20, tope: 20 }));
+
+    expect(await enviar()).toBe("/alta?e=cerrada");
+    expect(h.iniciarBase).not.toHaveBeenCalled();
+  });
+
+  it("apagada la bandera no lanza nada", async () => {
+    expect(await enviar()).toBe("/bandeja?bienvenida=1");
+    expect(h.iniciarBase).not.toHaveBeenCalled();
   });
 });
 

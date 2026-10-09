@@ -18,7 +18,7 @@
 import "server-only";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { tenants, whatsappNumeros } from "@/lib/db/schema";
 import { enPrueba, pruebaVencida, SIN_SERVICIO } from "@/lib/billing/plans";
 import { descifrar } from "@/lib/security/cifrado";
@@ -47,6 +47,23 @@ export function credencialDelEntorno(): CredencialesMeta | null {
     phoneNumberId,
     wabaId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID?.trim() || null,
   };
+}
+
+export interface WebhookDelEntorno {
+  url: string;
+  verifyToken: string;
+}
+
+/**
+ * El webhook que Meta tiene que usar por cada número que se suma: el de este
+ * ambiente, con el token del apretón de manos. Null si falta alguno de los dos
+ * o si el sitio no es https: Meta no llama a otra cosa.
+ */
+export function webhookDelEntorno(): WebhookDelEntorno | null {
+  const sitio = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (!sitio || !verifyToken || !/^https:\/\/[^/\s]/i.test(sitio) || !URL.canParse(sitio)) return null;
+  return { url: `${sitio}/api/webhooks/whatsapp`, verifyToken };
 }
 
 /**
@@ -131,7 +148,7 @@ export interface CredencialesDelNumero extends CredencialesMeta {
  */
 export async function credencialesWhatsApp(tenantId: string): Promise<CredencialesDelNumero | null> {
   try {
-    const filas = await enTenant({ tenantId }, (c) =>
+    const filas = await enControl({ tenantId }, (c) =>
       c
         .select({
           estado: whatsappNumeros.estado,

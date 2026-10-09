@@ -39,7 +39,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/data/scope", () => ({
-  enTenant: async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+  enControl: async (_ctx: unknown, armar: (db: unknown) => unknown) =>
     armar({ insert: () => ({ values: async (v: unknown) => void h.perfiles.push(v) }) }),
   enTenantVarias: vi.fn(),
 }));

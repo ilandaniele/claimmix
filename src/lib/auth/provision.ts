@@ -6,8 +6,9 @@ import { eq } from "drizzle-orm";
 import { dominioDelMail } from "@/core/sso";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
+import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 
 interface NewAuthUser {
   id: string;
@@ -96,7 +97,7 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
       logger.warn({ email_domain: user.email.slice(user.email.indexOf("@")) }, "auth.signup.operador_en_sso");
       return;
     }
-    await enTenant({ tenantId: sso.tenantId }, (db) =>
+    await enControl({ tenantId: sso.tenantId }, (db) =>
       db.insert(users).values({
         id: user.id,
         tenant_id: sso.tenantId,
@@ -104,6 +105,7 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
         role: "viewer",
       })
     );
+    await espejarSinFallar(sso.tenantId);
     return;
   }
 
@@ -117,7 +119,7 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
     );
   }
 
-  await enTenant({ tenantId }, (db) =>
+  await enControl({ tenantId }, (db) =>
     db.insert(users).values({
       id: user.id,
       tenant_id: tenantId,
@@ -125,6 +127,7 @@ export async function provisionUserProfile(user: NewAuthUser): Promise<void> {
       role: "admin",
     })
   );
+  await espejarSinFallar(tenantId);
 
   /*
    * Acá se escribía además `authUsers.role = "admin"`, para que el plugin admin

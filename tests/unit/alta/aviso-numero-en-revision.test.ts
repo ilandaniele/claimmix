@@ -2,7 +2,7 @@
  * El aviso de que un número del alta automática se mira a mano.
  *
  * Una vez por día y motivo (cada número agregado a la WABA, o que pudo haber
- * entrado, el suyo), a cada
+ * entrado, o que quedó sin su webhook, el suyo), a cada
  * dirección de operación, sin datos de nadie, y sin romper nunca el pedido que
  * lo dispara.
  */
@@ -49,6 +49,8 @@ const MOTIVOS: MotivoDeRevision[] = [
   "sin_credencial",
   "agregado",
   "incierto",
+  "de_otro_ambiente",
+  "sin_webhook",
 ];
 
 beforeEach(() => {
@@ -155,7 +157,18 @@ describe("avisarNumeroEnRevision", () => {
     for (const [mail] of h.enviar.mock.calls) expect(JSON.stringify(mail)).not.toMatch(/1111|2222/);
   });
 
-  it.each(["sin_fila", "sin_credencial"] as const)("%s: un solo aviso por día para todos los espacios", async (motivo) => {
+  it("un número que quedó sin su webhook (sin_webhook) tiene su aviso: el cupo es del espacio", async () => {
+    await avisarNumeroEnRevision("sin_webhook", TENANT);
+    await avisarNumeroEnRevision("sin_webhook", OTRO_TENANT);
+
+    expect(h.rateLimit.mock.calls.map(([clave]) => clave)).toEqual([
+      `alta:aviso-numero:sin_webhook:${TENANT}`,
+      `alta:aviso-numero:sin_webhook:${OTRO_TENANT}`,
+    ]);
+    for (const [mail] of h.enviar.mock.calls) expect(JSON.stringify(mail)).not.toMatch(/1111|2222/);
+  });
+
+  it.each(["sin_fila", "sin_credencial", "de_otro_ambiente"] as const)("%s: un solo aviso por día para todos los espacios", async (motivo) => {
     await avisarNumeroEnRevision(motivo, TENANT);
     await avisarNumeroEnRevision(motivo, OTRO_TENANT);
 

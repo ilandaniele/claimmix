@@ -25,6 +25,7 @@ vi.mock("@/lib/db", () => ({ db: { select: mockSelect } }));
 vi.mock("@/lib/db/schema", () => ({
   users: { id: "id", tenant_id: "tenant_id", role: "role" },
   tenants: { id: "id", plan: "plan" },
+  tenantBases: { tenant_id: "tenant_id", estado: "estado", creada_at: "creada_at" },
 }));
 
 import { requireRole, ADMIN_ROLES, CASE_EDITOR_ROLES } from "@/lib/auth/require-role";
@@ -40,7 +41,9 @@ function conFila(fila: unknown | null) {
   mockSelect.mockReturnValue({
     from: () => ({
       innerJoin: () => ({
-        where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }),
+        leftJoin: () => ({
+          where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }),
+        }),
       }),
     }),
   });

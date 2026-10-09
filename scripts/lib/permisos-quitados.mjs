@@ -33,6 +33,9 @@
  *   columna las dos que no guardan secretos (PERMISOS_POR_COLUMNA).
  * - user (0048): la app lee el mail y el nombre para los cruces, pero no los
  *   escribe: eso lo hace Better Auth.
+ * - tenant_bases y schema_migrations (0050): el estado de la base de cada
+ *   inquilino y el registro de migraciones son de control. Los leen y escriben el
+ *   rol dueño y los scripts; la app no tiene nada que hacer ahí.
  */
 export const PERMISOS_QUITADOS = {
   audit_log: ["UPDATE", "DELETE"],
@@ -50,6 +53,8 @@ export const PERMISOS_QUITADOS = {
   session: ["SELECT", "INSERT", "UPDATE", "DELETE"],
   verification: ["SELECT", "INSERT", "UPDATE", "DELETE"],
   user: ["INSERT", "UPDATE", "DELETE"],
+  tenant_bases: ["SELECT", "INSERT", "UPDATE", "DELETE"],
+  schema_migrations: ["SELECT", "INSERT", "UPDATE", "DELETE"],
 };
 
 /**

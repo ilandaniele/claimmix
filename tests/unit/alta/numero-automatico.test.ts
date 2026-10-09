@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   rateLimit: vi.fn(),
   liberarCupo: vi.fn(),
-  enTenant: vi.fn(),
+  enControl: vi.fn(),
   /** Lo que devuelve la consulta de la fila del número. */
   leer: vi.fn(),
   /** Lo que devuelve `db.execute` (la función de la 0049). */
@@ -22,6 +22,8 @@ const h = vi.hoisted(() => ({
   ejecutadas: [] as Array<{ queryChunks: unknown[] }>,
   credencial: vi.fn(),
   plataforma: vi.fn(),
+  webhook: vi.fn(),
+  espejar: vi.fn(),
   recorrer: vi.fn(),
   agregar: vi.fn(),
   pedirAMeta: vi.fn(),
@@ -29,6 +31,8 @@ const h = vi.hoisted(() => ({
   yaVerificado: vi.fn(),
   yaRegistrado: vi.fn(),
   registrar: vi.fn(),
+  fijarWebhook: vi.fn(),
+  leerWebhook: vi.fn(),
   aviso: vi.fn(),
   after: vi.fn(),
   debug: vi.fn(),
@@ -58,12 +62,13 @@ vi.mock("@/data/scope", () => {
     },
   };
   return {
-    enTenant: async (ctx: unknown, armar: (db: unknown) => unknown) => {
-      h.enTenant(ctx);
+    enControl: async (ctx: unknown, armar: (db: unknown) => unknown) => {
+      h.enControl(ctx);
       return armar(db);
     },
   };
 });
+vi.mock("@/server/bases/espejar-sin-fallar", () => ({ espejarSinFallar: h.espejar }));
 vi.mock("@/lib/observability/logger", () => ({
   logger: { debug: h.debug, info: h.info, warn: h.warn, error: h.error },
 }));
@@ -71,6 +76,7 @@ vi.mock("@/lib/rate-limit", () => ({ rateLimit: h.rateLimit, liberarCupo: h.libe
 vi.mock("@/server/whatsapp/numeros", () => ({
   credencialDelEntorno: h.credencial,
   idDeLaPlataforma: h.plataforma,
+  webhookDelEntorno: h.webhook,
 }));
 vi.mock("@/server/whatsapp/verificar-en-meta", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/whatsapp/verificar-en-meta")>()),
@@ -84,6 +90,8 @@ vi.mock("@/server/whatsapp/alta-de-numero", async (importOriginal) => ({
   codigoYaVerificado: h.yaVerificado,
   numeroYaRegistrado: h.yaRegistrado,
   registrarNumero: h.registrar,
+  fijarWebhookDelNumero: h.fijarWebhook,
+  webhookPropioEs: h.leerWebhook,
 }));
 vi.mock("@/server/alta/aviso-operador", () => ({ avisarNumeroEnRevision: h.aviso }));
 
@@ -102,6 +110,7 @@ const TOKEN = "fake-access-token";
 const CODIGO = "123456";
 const NUMERO = "+5491100000000";
 const CRED = { accessToken: TOKEN, wabaId: WABA };
+const WEBHOOK = { url: "https://claimmix.example.com/api/webhooks/whatsapp", verifyToken: "fake-verify-token" };
 
 const QUIEN: QuienPide = { tenantId: TENANT, userId: USUARIO, ip: IP, idioma: "es-AR" };
 
@@ -113,6 +122,7 @@ const ENTORNO = [
   "ALTA_TOPE_CODIGOS_IP_DIA",
   "ALTA_TOPE_CODIGOS_DIA",
   "ALTA_TOPE_VERIFICACIONES_HORA",
+  "NUMEROS_DE_DEV",
 ] as const;
 const guardado: Record<string, string | undefined> = {};
 
@@ -152,6 +162,8 @@ function caminoFeliz() {
   h.yaVerificado.mockResolvedValue(ok(true));
   h.yaRegistrado.mockResolvedValue(ok(false));
   h.registrar.mockResolvedValue(ok(true));
+  h.fijarWebhook.mockResolvedValue(ok(true));
+  h.leerWebhook.mockResolvedValue(ok(true));
 }
 
 /** El contador rechaza las claves que empiezan con alguna de éstas. */
@@ -174,7 +186,7 @@ const valoresDe = (consulta: { queryChunks: unknown[] }) =>
   consulta.queryChunks.filter((c) => typeof c !== "object" || c === null);
 
 const sinGraph = () => {
-  for (const f of [h.recorrer, h.agregar, h.pedirAMeta, h.verificarEnMeta, h.yaVerificado, h.yaRegistrado, h.registrar]) {
+  for (const f of [h.recorrer, h.agregar, h.pedirAMeta, h.verificarEnMeta, h.yaVerificado, h.yaRegistrado, h.registrar, h.fijarWebhook, h.leerWebhook]) {
     expect(f).not.toHaveBeenCalled();
   }
 };
@@ -192,6 +204,8 @@ beforeEach(() => {
   h.aviso.mockResolvedValue(undefined);
   h.credencial.mockReturnValue({ accessToken: TOKEN, phoneNumberId: PLATAFORMA, wabaId: WABA });
   h.plataforma.mockReturnValue(PLATAFORMA);
+  h.webhook.mockReturnValue(WEBHOOK);
+  h.espejar.mockResolvedValue(true);
   caminoFeliz();
 });
 
@@ -246,7 +260,7 @@ describe("pedirCodigo: antes de tocar nada", () => {
     expect(await verificarCodigo(QUIEN, CODIGO)).toBe("revision");
 
     expect(h.rateLimit).not.toHaveBeenCalled();
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
     sinGraph();
   });
 
@@ -280,7 +294,7 @@ describe("pedirCodigo: antes de tocar nada", () => {
 
     expect(clavesTomadas()).toEqual([`wa:codigo:${TENANT}`, `wa:codigo-ip:${IP}`]);
     expect(clavesLiberadas()).toEqual([`wa:codigo:${TENANT}`, `wa:codigo-ip:${IP}`]);
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
     sinGraph();
   });
 
@@ -309,7 +323,7 @@ describe("pedirCodigo: antes de tocar nada", () => {
       expect(ventana).toBe(VENTANA);
       expect(windowMs).toBe(DIA_MS);
     }
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
     sinGraph();
   });
 });
@@ -363,16 +377,17 @@ describe("pedirCodigo: las compuertas del espacio", () => {
     expect(clavesLiberadas()).toHaveLength(3);
   });
 
-  it("la consulta de la fila va dentro de enTenant, con el espacio de la sesión", async () => {
+  it("la consulta de la fila va dentro de enControl, con el espacio de la sesión", async () => {
     await pedirCodigo(QUIEN, "SMS");
 
-    expect(h.enTenant).toHaveBeenCalledWith({ tenantId: TENANT });
+    expect(h.enControl).toHaveBeenCalledWith({ tenantId: TENANT });
   });
 
   it.each([
     ["sin credencial", () => h.credencial.mockReturnValue(null)],
     ["sin WABA", () => h.credencial.mockReturnValue({ accessToken: TOKEN, phoneNumberId: PLATAFORMA, wabaId: null })],
     ["sin número de la plataforma", () => h.plataforma.mockReturnValue(null)],
+    ["sin el webhook del ambiente (URL https o token del apretón de manos)", () => h.webhook.mockReturnValue(null)],
   ])("%s: revision sin Graph, aviso sin_credencial y vuelven los cupos", async (_cual, preparar) => {
     preparar();
 
@@ -657,7 +672,7 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
 
 /** Sin las llamadas de alta de Graph (el recorrido se afirma aparte). */
 function sinGraphMenosRecorrer() {
-  for (const f of [h.agregar, h.pedirAMeta, h.verificarEnMeta, h.yaVerificado, h.yaRegistrado, h.registrar]) {
+  for (const f of [h.agregar, h.pedirAMeta, h.verificarEnMeta, h.yaVerificado, h.yaRegistrado, h.registrar, h.fijarWebhook, h.leerWebhook]) {
     expect(f).not.toHaveBeenCalled();
   }
 }
@@ -750,7 +765,7 @@ describe("verificarCodigo", () => {
       expect(await verificarCodigo(QUIEN, codigo)).toBe("codigo_invalido");
 
       expect(h.rateLimit).not.toHaveBeenCalled();
-      expect(h.enTenant).not.toHaveBeenCalled();
+      expect(h.enControl).not.toHaveBeenCalled();
       sinGraph();
     }
   );
@@ -763,6 +778,8 @@ describe("verificarCodigo", () => {
     expect(h.yaRegistrado).toHaveBeenCalledWith(CRED, ID);
     expect(h.registrar).toHaveBeenCalledTimes(1);
     expect(h.registrar).toHaveBeenCalledWith(CRED, ID);
+    expect(h.fijarWebhook).toHaveBeenCalledWith(CRED, ID, WEBHOOK);
+    expect(h.leerWebhook).toHaveBeenCalledWith(CRED, ID, WEBHOOK.url);
     expect(h.ejecutadas).toHaveLength(1);
     expect(valoresDe(h.ejecutadas[0])).toEqual([TENANT, USUARIO, "conectado", ID, WABA, PLATAFORMA, IP]);
     expect(h.aviso).not.toHaveBeenCalled();
@@ -784,7 +801,7 @@ describe("verificarCodigo", () => {
 
     expect(await verificarCodigo(QUIEN, CODIGO)).toBe("esperar");
 
-    expect(h.enTenant).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
     sinGraph();
     expect(clavesLiberadas()).toEqual([`wa:verificar:${TENANT}`]);
   });
@@ -917,6 +934,7 @@ describe("verificarCodigo", () => {
     expect(await verificarCodigo(QUIEN, CODIGO)).toBe("conectado");
 
     expect(h.registrar).not.toHaveBeenCalled();
+    expect(h.fijarWebhook).toHaveBeenCalledTimes(1);
     expect(clavesTomadas()).toEqual([`wa:verificar:${TENANT}`]);
     expect(valoresDe(h.ejecutadas[0])[2]).toBe("conectado");
   });
@@ -987,16 +1005,191 @@ describe("verificarCodigo", () => {
   });
 });
 
-describe("lo que no se anota ni se guarda", () => {
-  it("enTenant se llama como mucho dos veces por llamada: leer la fila y guardar el paso", async () => {
-    await pedirCodigo(QUIEN, "SMS");
-    expect(h.enTenant.mock.calls.length).toBeLessThanOrEqual(2);
+describe("verificarCodigo: el webhook propio del número", () => {
+  beforeEach(() => {
+    h.leer.mockResolvedValue([fila({ phone_number_id: ID })]);
+  });
 
-    h.enTenant.mockClear();
+  it("se pone después de registrar y antes de guardar 'conectado'", async () => {
+    const orden: string[] = [];
+    const anota = <T>(paso: string, devuelve: T) => async () => {
+      orden.push(paso);
+      return devuelve;
+    };
+    h.registrar.mockImplementation(anota("registrar", ok(true)));
+    h.fijarWebhook.mockImplementation(anota("fijar", ok(true)));
+    h.leerWebhook.mockImplementation(anota("leer", ok(true)));
+    h.guardar.mockImplementation(anota("guardar", guardo("ok")));
+
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe("conectado");
+
+    expect(orden).toEqual(["registrar", "fijar", "leer", "guardar"]);
+  });
+
+  it("Graph no lo devuelve como puesto: revision y aviso sin_webhook, sin guardar 'conectado' ni espejar", async () => {
+    h.leerWebhook.mockResolvedValue(ok(false));
+
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe("revision");
+
+    expect(h.aviso).toHaveBeenCalledWith("sin_webhook", TENANT);
+    expect(h.ejecutadas).toHaveLength(0);
+    expect(h.espejar).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["esperar", "esperar"],
+    ["meta", "meta"],
+  ] as const)("ponerlo da %s: se devuelve %s, sin leerlo ni guardar", async (motivo, esperado) => {
+    h.fijarWebhook.mockResolvedValue(falla(motivo));
+
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe(esperado);
+
+    expect(h.leerWebhook).not.toHaveBeenCalled();
+    expect(h.ejecutadas).toHaveLength(0);
+    expect(h.aviso).not.toHaveBeenCalled();
+  });
+
+  it("ponerlo rechazado: revision y aviso rechazo, sin guardar", async () => {
+    h.fijarWebhook.mockResolvedValue(falla("rechazo", 100));
+
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe("revision");
+
+    expect(h.aviso).toHaveBeenCalledWith("rechazo", TENANT);
+    expect(h.leerWebhook).not.toHaveBeenCalled();
+    expect(h.ejecutadas).toHaveLength(0);
+  });
+
+  it.each([
+    ["esperar", "esperar"],
+    ["meta", "meta"],
+  ] as const)("leerlo da %s: se devuelve %s, sin guardar 'conectado'", async (motivo, esperado) => {
+    h.leerWebhook.mockResolvedValue(falla(motivo));
+
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe(esperado);
+
+    expect(h.ejecutadas).toHaveLength(0);
+    expect(h.aviso).not.toHaveBeenCalled();
+  });
+
+  it("otro intento con el webhook mal vuelve a ponerlo sin registrar de nuevo: el número ya figura registrado", async () => {
+    h.leerWebhook.mockResolvedValueOnce(ok(false));
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe("revision");
+
+    h.yaRegistrado.mockResolvedValue(ok(true));
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe("conectado");
+
+    expect(h.registrar).toHaveBeenCalledTimes(1);
+    expect(h.fijarWebhook).toHaveBeenCalledTimes(2);
+  });
+
+  it("el token del apretón de manos no llega al registro, al aviso ni a la base", async () => {
+    h.leerWebhook.mockResolvedValueOnce(ok(false));
+    await verificarCodigo(QUIEN, CODIGO);
+    h.leerWebhook.mockRejectedValueOnce(new Error(`boom ${WEBHOOK.verifyToken}`));
+    await verificarCodigo(QUIEN, CODIGO);
+
+    const visto = JSON.stringify([
+      h.info.mock.calls,
+      h.warn.mock.calls,
+      h.error.mock.calls,
+      h.aviso.mock.calls,
+      h.ejecutadas.map(valoresDe),
+    ]);
+    expect(visto).not.toContain(WEBHOOK.verifyToken);
+  });
+});
+
+describe("el espejo a la base del cliente", () => {
+  it("después de guardar 'agregado' y después de guardar 'conectado', con el espacio de la sesión", async () => {
+    await pedirCodigo(QUIEN, "SMS");
+    expect(h.espejar).toHaveBeenCalledTimes(1);
+    expect(h.espejar).toHaveBeenLastCalledWith(TENANT);
+
     h.leer.mockResolvedValue([fila({ phone_number_id: ID })]);
     await verificarCodigo(QUIEN, CODIGO);
-    expect(h.enTenant.mock.calls.length).toBeLessThanOrEqual(2);
-    for (const [ctx] of h.enTenant.mock.calls) expect(ctx).toEqual({ tenantId: TENANT });
+    expect(h.espejar).toHaveBeenCalledTimes(2);
+    expect(h.espejar).toHaveBeenLastCalledWith(TENANT);
+  });
+
+  it("sólo después de que la escritura en control salió: ni antes, ni cuando la función dice que no", async () => {
+    h.guardar.mockImplementation(async () => {
+      expect(h.espejar).not.toHaveBeenCalled();
+      return guardo("ok");
+    });
+    await pedirCodigo(QUIEN, "SMS");
+    expect(h.espejar).toHaveBeenCalledTimes(1);
+
+    h.espejar.mockClear();
+    h.guardar.mockResolvedValue(guardo("no_aplica"));
+    await pedirCodigo(QUIEN, "SMS");
+    h.guardar.mockRejectedValue(new Error("se cayó"));
+    await pedirCodigo(QUIEN, "SMS");
+    expect(h.espejar).not.toHaveBeenCalled();
+  });
+
+  it("si la copia no entra, la persona igual avanza: el espejo no hace fallar el paso", async () => {
+    h.espejar.mockResolvedValue(false);
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
+
+    h.leer.mockResolvedValue([fila({ phone_number_id: ID })]);
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe("conectado");
+  });
+});
+
+describe("un número del otro ambiente", () => {
+  it.each([
+    ["por su número", NUMERO],
+    ["por su número con otro formato (+54 sin el 9)", "+54 11 0000-0000"],
+  ])("%s: revision, aviso de_otro_ambiente, sin Graph ni base, y vuelven los cupos de código", async (_cual, enLaLista) => {
+    process.env.NUMEROS_DE_DEV = `100000000000999, ${enLaLista}`;
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
+
+    sinGraph();
+    expect(h.aviso).toHaveBeenCalledTimes(1);
+    expect(h.aviso).toHaveBeenCalledWith("de_otro_ambiente", TENANT);
+    expect(h.ejecutadas).toHaveLength(0);
+    expect(h.espejar).not.toHaveBeenCalled();
+    expect(clavesLiberadas()).toEqual(clavesTomadas());
+    expect(clavesLiberadas()).toHaveLength(3);
+  });
+
+  it("por el id que Graph ya le dio: no se verifica ni se registra ni se le pone webhook", async () => {
+    process.env.NUMEROS_DE_DEV = ID;
+    h.leer.mockResolvedValue([fila({ phone_number_id: ID })]);
+
+    expect(await verificarCodigo(QUIEN, CODIGO)).toBe("revision");
+
+    sinGraph();
+    expect(h.aviso).toHaveBeenCalledWith("de_otro_ambiente", TENANT);
+    expect(h.ejecutadas).toHaveLength(0);
+    expect(clavesLiberadas()).toEqual([`wa:verificar:${TENANT}`]);
+  });
+
+  it("sin NUMEROS_DE_DEV (dev, QA, local) no cambia nada", async () => {
+    delete process.env.NUMEROS_DE_DEV;
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
+    expect(h.aviso).not.toHaveBeenCalledWith("de_otro_ambiente", TENANT);
+  });
+
+  it("un número que no está en la lista sigue", async () => {
+    process.env.NUMEROS_DE_DEV = "5490000000001, 5490000000021";
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
+  });
+});
+
+describe("lo que no se anota ni se guarda", () => {
+  it("enControl se llama como mucho dos veces por llamada: leer la fila y guardar el paso", async () => {
+    await pedirCodigo(QUIEN, "SMS");
+    expect(h.enControl.mock.calls.length).toBeLessThanOrEqual(2);
+
+    h.enControl.mockClear();
+    h.leer.mockResolvedValue([fila({ phone_number_id: ID })]);
+    await verificarCodigo(QUIEN, CODIGO);
+    expect(h.enControl.mock.calls.length).toBeLessThanOrEqual(2);
+    for (const [ctx] of h.enControl.mock.calls) expect(ctx).toEqual({ tenantId: TENANT });
   });
 
   it("ni el token ni el código llegan al registro, al aviso, a la base o al resultado, ni siquiera cuando algo falla", async () => {

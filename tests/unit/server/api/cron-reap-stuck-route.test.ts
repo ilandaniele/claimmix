@@ -4,10 +4,14 @@
  * final de los barridos de casos y seguida del aviso a cada aseguradora con
  * desvíos nuevos, la purga de adjuntos y la retención sólo en la ventana de las
  * 04 UTC y una vez por día, y si uno falla lo demás corre igual.
+ *
+ * Con `BASE_POR_CLIENTE=1` (P10) cada barrido de casos corre por cada base de
+ * cliente, y al final se vuelven a lanzar las bases a medias y se espeja control.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type { DbDueno } from "@/lib/db";
 
 const m = vi.hoisted(() => ({
   orden: [] as string[],
@@ -22,7 +26,13 @@ const m = vi.hoisted(() => ({
   purgaAdjuntos: vi.fn(),
   retencion: vi.fn(),
   rateLimit: vi.fn(),
+  paraCadaBase: vi.fn(),
+  reintentar: vi.fn(),
+  espejar: vi.fn(),
 }));
+
+// La base que el recorrido le da a cada barrido cuando la bandera está apagada.
+const BASE_DE_CONTROL = { base: "control" } as unknown as DbDueno;
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/server/intake/reap-stuck", () => ({ reapStuckProcessingCases: m.reap }));
@@ -34,6 +44,9 @@ vi.mock("@/server/notify/specialist-alert", () => ({ avisarDesvios: m.avisarDesv
 vi.mock("@/server/storage/purgar-adjuntos", () => ({ purgarAdjuntos: m.purgaAdjuntos }));
 vi.mock("@/server/cases/retencion", () => ({ aplicarRetencion: m.retencion }));
 vi.mock("@/lib/rate-limit/postgres", () => ({ purgeExpiredRateLimits: m.purgar }));
+vi.mock("@/server/bases/cada-base", () => ({ paraCadaBase: m.paraCadaBase }));
+vi.mock("@/server/bases/reintentar", () => ({ reintentarBases: m.reintentar }));
+vi.mock("@/server/bases/espejo", () => ({ espejarTodas: m.espejar }));
 vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: m.rateLimit,
   RATE_LIMIT_CONFIGS: {
@@ -46,6 +59,8 @@ vi.mock("@/lib/observability/logger", () => ({
 }));
 
 import { GET } from "@/app/api/cron/reap-stuck/route";
+
+type Trabajo = (db: DbDueno, tenantId: string | null) => Promise<unknown>;
 
 const SECRETO = "secreto-de-prueba";
 const FUERA_DE_VENTANA = new Date("2026-09-30T12:00:00Z");
@@ -68,7 +83,15 @@ beforeEach(() => {
   vi.setSystemTime(FUERA_DE_VENTANA);
   m.orden.length = 0;
   vi.stubEnv("CRON_SECRET", SECRETO);
-  m.reap.mockImplementation(anota("reap", { reaped: 2 }));
+  vi.stubEnv("BASE_POR_CLIENTE", "");
+  m.paraCadaBase.mockImplementation(async (trabajo: Trabajo) => ({
+    resultados: [await trabajo(BASE_DE_CONTROL, null)],
+    pendientes: 0,
+    fallas: 0,
+  }));
+  m.reintentar.mockResolvedValue({ lanzadas: 0 });
+  m.espejar.mockResolvedValue({ ok: 0, fallas: 0 });
+  m.reap.mockImplementation(anota("reap", { reaped: 2, caseIds: [] }));
   m.retomar.mockImplementation(anota("retomar", { retomados: 1 }));
   m.recordar.mockImplementation(anota("recordar", { enviados: 3, salteados: 1 }));
   m.cerrar.mockImplementation(anota("cerrar", { closed: 4, caseIds: [] }));
@@ -85,6 +108,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe("GET /api/cron/reap-stuck", () => {
@@ -295,6 +319,7 @@ describe("GET /api/cron/reap-stuck", () => {
     expect(await res.json()).toEqual({
       ok: true,
       reaped: 2,
+      caseIds: [],
       retomados: 1,
       abandoned_closed: 4,
       recordatorios_enviados: 3,
@@ -418,8 +443,8 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
     await GET(pedido());
 
     const hasta = m.retomar.mock.calls[0][0].hasta;
-    expect(m.purgaAdjuntos).toHaveBeenCalledWith({ hasta: hasta - 60_000 });
-    expect(m.retencion).toHaveBeenCalledWith({ hasta: hasta - 60_000 });
+    expect(m.purgaAdjuntos).toHaveBeenCalledWith({ hasta: hasta - 60_000 }, BASE_DE_CONTROL);
+    expect(m.retencion).toHaveBeenCalledWith({ hasta: hasta - 60_000 }, expect.any(Date), BASE_DE_CONTROL);
   });
 
   it("el JSON trae lo que devolvió cada una", async () => {
@@ -477,5 +502,115 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
     await GET(pedido());
 
     expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("clave-secreta-de-r2");
+  });
+});
+
+describe("GET /api/cron/reap-stuck: una pasada por base (P10)", () => {
+  const BASE_A = { base: "a" } as unknown as DbDueno;
+  const BASE_B = { base: "b" } as unknown as DbDueno;
+
+  // El recorrido de dos bases: cada barrido corre una vez en cada una.
+  function conDosBases(extra: { pendientes?: number; fallas?: number } = {}) {
+    m.paraCadaBase.mockImplementation(async (trabajo: Trabajo) => ({
+      resultados: [await trabajo(BASE_A, "tenant-a"), await trabajo(BASE_B, "tenant-b")],
+      pendientes: extra.pendientes ?? 0,
+      fallas: extra.fallas ?? 0,
+    }));
+  }
+
+  it("con la bandera apagada no relanza ni espeja, y la respuesta no trae `bases`", async () => {
+    const res = await GET(pedido());
+
+    expect(m.reintentar).not.toHaveBeenCalled();
+    expect(m.espejar).not.toHaveBeenCalled();
+    expect(await res.json()).not.toHaveProperty("bases");
+  });
+
+  it("cada barrido corre una vez por base, con la base que le toca", async () => {
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    conDosBases();
+
+    await GET(pedido());
+
+    for (const barrido of [m.reap, m.retomar, m.recordar, m.cerrar, m.avisar, m.revisar]) {
+      expect(barrido).toHaveBeenCalledTimes(2);
+    }
+    expect(m.reap).toHaveBeenNthCalledWith(1, undefined, BASE_A);
+    expect(m.reap).toHaveBeenNthCalledWith(2, undefined, BASE_B);
+    expect(m.retomar).toHaveBeenNthCalledWith(2, { hasta: expect.any(Number) }, BASE_B);
+    expect(m.recordar).toHaveBeenNthCalledWith(1, { hasta: expect.any(Number) }, BASE_A);
+    expect(m.cerrar).toHaveBeenNthCalledWith(2, BASE_B);
+    expect(m.avisar).toHaveBeenNthCalledWith(1, { hasta: expect.any(Number) }, BASE_A);
+    expect(m.revisar).toHaveBeenNthCalledWith(2, BASE_B);
+  });
+
+  it("junta lo de todas las bases en la respuesta", async () => {
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    conDosBases();
+    m.reap.mockImplementation(async (_o: unknown, db: DbDueno) =>
+      db === BASE_A ? { reaped: 2, caseIds: ["a1", "a2"] } : { reaped: 1, caseIds: ["b1"] }
+    );
+    m.cerrar.mockImplementation(async (db: DbDueno) => ({ closed: db === BASE_A ? 4 : 5, caseIds: [] }));
+    m.revisar.mockImplementation(async (db: DbDueno) =>
+      db === BASE_A
+        ? { nuevos: 2, porRegla: {}, porInquilino: { "tenant-a": { plazo_vencido: 2 } }, fallidas: ["plazo_vencido"] }
+        : { nuevos: 1, porRegla: {}, porInquilino: { "tenant-b": { doc_sin_recibir: 1 } }, fallidas: ["plazo_vencido"] }
+    );
+
+    const res = await GET(pedido());
+
+    expect(await res.json()).toMatchObject({
+      reaped: 3,
+      caseIds: ["a1", "a2", "b1"],
+      abandoned_closed: 9,
+      retomados: 2,
+      recordatorios_enviados: 6,
+      avisos_de_cierre: 4,
+      desvios_nuevos: 3,
+      desvios_fallidas: ["plazo_vencido"],
+    });
+    expect(m.avisarDesvios).toHaveBeenCalledWith({ tenantId: "tenant-a", porRegla: { plazo_vencido: 2 } });
+    expect(m.avisarDesvios).toHaveBeenCalledWith({ tenantId: "tenant-b", porRegla: { doc_sin_recibir: 1 } });
+  });
+
+  it("la purga y la retención de la ventana también corren por base y se suman", async () => {
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    vi.setSystemTime(EN_VENTANA);
+    conDosBases();
+
+    const res = await GET(pedido());
+
+    const hasta = m.retomar.mock.calls[0][0].hasta;
+    expect(m.purgaAdjuntos).toHaveBeenNthCalledWith(2, { hasta: hasta - 60_000 }, BASE_B);
+    expect(m.retencion).toHaveBeenNthCalledWith(1, { hasta: hasta - 60_000 }, expect.any(Date), BASE_A);
+    expect(await res.json()).toMatchObject({
+      purga: { modo: "borrar", candidatos: 6, purgados: 4, fallidos: 2 },
+      retencion: { modo: "borrar", anios: 5, inquilinos: 2, candidatos: 4, borrados: 4 },
+    });
+  });
+
+  it("al final relanza las bases a medias y espeja, con lo que queda de la función, y lo informa", async () => {
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    conDosBases({ pendientes: 3, fallas: 1 });
+    m.reintentar.mockImplementation(anota("reintentar", { lanzadas: 2 }));
+    m.espejar.mockImplementation(anota("espejar", { ok: 5, fallas: 1 }));
+
+    const res = await GET(pedido());
+
+    expect(m.orden.slice(-3)).toEqual(["purgar", "reintentar", "espejar"]);
+    const hasta = m.retomar.mock.calls[0][0].hasta;
+    expect(m.reintentar).toHaveBeenCalledWith(hasta - 15_000);
+    expect(m.espejar).toHaveBeenCalledWith(hasta - 15_000);
+    expect((await res.json()).bases).toMatchObject({ relanzadas: 2, espejadas: 5, espejo_fallas: 1, pendientes: 3 });
+  });
+
+  it("si una base falla el recorrido lo cuenta y la ruta sigue en 200", async () => {
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    m.paraCadaBase.mockResolvedValue({ resultados: [], pendientes: 0, fallas: 1 });
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ reaped: 0, retomados: 0, abandoned_closed: 0, bases: { fallas: 6 } });
   });
 });

@@ -18,6 +18,11 @@
  *
  * Todo tolera que la 0048 todavía no esté aplicada (42P01 / 42703 / 42883): la
  * lectura avisa que falta y las acciones devuelven `migracion_pendiente`.
+ *
+ * Con `BASE_POR_CLIENTE` el rol dueño apunta a control, que es donde se escribe. Cada
+ * cambio que sale bien se espeja a la base del cliente (el espejo lleva el número y
+ * `billing_status`): si la copia no entra la acción devuelve `espejo_pendiente`, que
+ * no es un fallo —el cambio ya está— y el barrido la levanta.
  */
 
 import "server-only";
@@ -29,6 +34,8 @@ import { PLAN_CATALOG, isPlan, type Plan } from "@/lib/billing/plans";
 import { db } from "@/lib/db";
 import { conteoDe, filasDe } from "@/lib/db/filas";
 import { topeGlobalDelDia } from "@/server/alta/crear-inquilino";
+import { esNumeroDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
+import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { codigoPg } from "@/server/core-sync/config";
 import { idDeLaPlataforma, inquilinoDeLaPlataforma } from "@/server/whatsapp/numeros";
 import { verificarEnMeta, type MotivoDeMeta } from "@/server/whatsapp/verificar-en-meta";
@@ -39,13 +46,14 @@ export interface Operador {
   ip: string | null;
 }
 
-export type ResultadoDeAccion = "ok" | "no_aplica" | "migracion_pendiente";
+export type ResultadoDeAccion = "ok" | "no_aplica" | "migracion_pendiente" | "espejo_pendiente";
 
 export type ResultadoDeConexion =
   | ResultadoDeAccion
   | MotivoDeMeta
   | "datos_invalidos"
   | "id_de_la_plataforma"
+  | "de_otro_ambiente"
   | "en_cuarentena"
   | "numero_duplicado"
   | "id_ocupado";
@@ -55,10 +63,12 @@ export const RESULTADOS_DEL_PANEL = [
   "ok",
   "no_aplica",
   "migracion_pendiente",
+  "espejo_pendiente",
   "datos_invalidos",
   "no_confirmado",
   "falla",
   "id_de_la_plataforma",
+  "de_otro_ambiente",
   "en_cuarentena",
   "numero_duplicado",
   "id_ocupado",
@@ -108,10 +118,20 @@ function asiento(op: Operador, evento: string, objetivo: "tenant" | "whatsapp_nu
     from u`;
 }
 
+/** El final de una acción: cuántas filas cambió `u` y de qué inquilino, para espejarlo. */
+const CUENTA_DE_U = sql`select count(*)::int as n, min(u.tenant_id::text) as tenant_id from u`;
+
+/** El cambio ya está en control: «ok» si la copia del cliente también entró, y «espejo_pendiente» si queda para el barrido. */
+async function espejado(tenantId: unknown): Promise<ResultadoDeAccion> {
+  if (typeof tenantId !== "string") return "ok";
+  return (await espejarSinFallar(tenantId)) ? "ok" : "espejo_pendiente";
+}
+
 /** Corre una acción que devuelve cuántas filas cambió: ninguna es `no_aplica`, no un error. */
 async function aplicar(consulta: SQL): Promise<ResultadoDeAccion> {
   try {
-    return conteoDe(await ejecutar(consulta)) > 0 ? "ok" : "no_aplica";
+    const resultado = await ejecutar(consulta);
+    return conteoDe(resultado) > 0 ? await espejado(filasDe<Cruda>(resultado)[0]?.tenant_id) : "no_aplica";
   } catch (e) {
     if (FALTA_LA_0048.has(codigoPg(e) ?? "")) return "migracion_pendiente";
     throw e;
@@ -306,6 +326,8 @@ function esLaPlataforma(tenantId: string): boolean {
  * número (`verificarEnMeta`). Se rechaza si:
  *   - el id es el de la plataforma y el inquilino no lo es: sería mandar la
  *     bandeja de la casa a otro espacio;
+ *   - el id o el número están en `NUMEROS_DE_DEV`: son del otro ambiente, que
+ *     comparte la app de Meta, y conectarlos acá le sacaría el webhook;
  *   - el id tuvo una fila dada de baja en OTRO inquilino hace menos de 30 días
  *     (cuarentena: se dio de baja por algo);
  *   - otro inquilino ya tiene ese número vivo;
@@ -332,6 +354,7 @@ export async function conectarNumero(
   if (!fila) return "no_aplica";
 
   if (phoneNumberId === idDeLaPlataforma() && !esLaPlataforma(fila.tenantId)) return "id_de_la_plataforma";
+  if (esNumeroDeOtroAmbiente(phoneNumberId, fila.numeroE164)) return "de_otro_ambiente";
 
   const enMeta = await verificarEnMeta({ phoneNumberId, wabaId, numeroE164: fila.numeroE164 });
   if (!enMeta.ok) return enMeta.motivo;
@@ -374,9 +397,8 @@ export async function conectarNumero(
         end as resultado
       `)
     )[0]?.resultado;
-    return resultado === "ok" || resultado === "en_cuarentena" || resultado === "numero_duplicado"
-      ? resultado
-      : "no_aplica";
+    if (resultado === "ok") return await espejado(fila.tenantId);
+    return resultado === "en_cuarentena" || resultado === "numero_duplicado" ? resultado : "no_aplica";
   } catch (e) {
     const codigo = codigoPg(e) ?? "";
     if (codigo === "23505") return "id_ocupado";
@@ -395,7 +417,7 @@ export function suspenderNumero(numeroId: string, op: Operador): Promise<Resulta
     ), a as (
       ${asiento(op, AuditEvent.WHATSAPP_NUMERO_SUSPENDIDO, "whatsapp_numero", json({ estado: "suspendido" }))}
     )
-    select count(*)::int as n from u
+    ${CUENTA_DE_U}
   `);
 }
 
@@ -410,7 +432,7 @@ export function reactivarNumero(numeroId: string, op: Operador): Promise<Resulta
     ), a as (
       ${asiento(op, AuditEvent.WHATSAPP_NUMERO_CONECTADO, "whatsapp_numero", json({ via: "reactivar" }))}
     )
-    select count(*)::int as n from u
+    ${CUENTA_DE_U}
   `);
 }
 
@@ -424,7 +446,7 @@ export function darDeBajaNumero(numeroId: string, op: Operador): Promise<Resulta
     ), a as (
       ${asiento(op, AuditEvent.WHATSAPP_NUMERO_BAJA, "whatsapp_numero", json({ estado: "baja" }))}
     )
-    select count(*)::int as n from u
+    ${CUENTA_DE_U}
   `);
 }
 
@@ -440,7 +462,7 @@ export function suspenderInquilino(tenantId: string, op: Operador): Promise<Resu
     ), a as (
       ${asiento(op, AuditEvent.TENANT_SUSPENDED, "tenant", json({ estado: "suspended" }))}
     )
-    select count(*)::int as n from u
+    ${CUENTA_DE_U}
   `);
 }
 
@@ -455,7 +477,7 @@ export function reactivarInquilino(tenantId: string, op: Operador): Promise<Resu
     ), a as (
       ${asiento(op, AuditEvent.TENANT_SUSPENDED, "tenant", sql`jsonb_build_object('estado', u.billing_status)`)}
     )
-    select count(*)::int as n from u
+    ${CUENTA_DE_U}
   `);
 }
 
@@ -474,7 +496,7 @@ export function extenderPrueba(tenantId: string, dias: number, op: Operador): Pr
     ), a as (
       ${asiento(op, AuditEvent.TENANT_PLAN_CHANGED, "tenant", sql`jsonb_build_object('prueba_hasta', u.trial_ends_at)`)}
     )
-    select count(*)::int as n from u
+    ${CUENTA_DE_U}
   `);
 }
 
@@ -537,6 +559,6 @@ export function activarInquilino(
         sql`jsonb_build_object('de', (select plan_anterior from antes), 'a', ${terminos.plan}::text, 'estado', 'active')`
       )}
     )
-    select count(*)::int as n from u
+    ${CUENTA_DE_U}
   `);
 }

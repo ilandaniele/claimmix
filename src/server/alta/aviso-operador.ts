@@ -78,6 +78,10 @@ export async function avisarAlOperador(creadas24h: number, tope: number): Promis
  * operador tiene que poder borrar si el espacio no lo termina de conectar.
  * `incierto`: el pedido de agregarlo dio timeout o una respuesta rara; puede haber
  * entrado, y el operador lo busca en la WABA.
+ * `de_otro_ambiente`: el número es de la lista del otro ambiente (NUMEROS_DE_DEV);
+ * no se toca en Meta y alguien tiene que mirar cómo llegó acá.
+ * `sin_webhook`: el número ya está registrado pero Meta no confirmó el webhook
+ * propio de este ambiente; sin él lo que le escriben puede caer en el otro.
  */
 export type MotivoDeRevision =
   | "sin_lugar"
@@ -89,13 +93,16 @@ export type MotivoDeRevision =
   | "sin_fila"
   | "sin_credencial"
   | "agregado"
-  | "incierto";
+  | "incierto"
+  | "de_otro_ambiente"
+  | "sin_webhook";
 
 /**
  * Avisa al operador de un número del alta automática. El mail dice el motivo y
  * nada más: qué espacio fue queda sólo en el registro. Un aviso por día y motivo,
- * salvo `agregado` e `incierto`: cada número que entra (o puede haber entrado) a la
- * WABA tiene el suyo (el tope diario de números nuevos ya acota cuántos hay).
+ * salvo `agregado`, `incierto` y `sin_webhook`: cada número que entra (o puede haber
+ * entrado) a la WABA, o que quedó sin su webhook, tiene el suyo (el tope diario de
+ * números nuevos ya acota cuántos hay).
  */
 export async function avisarNumeroEnRevision(motivo: MotivoDeRevision, tenantId: string): Promise<void> {
   try {
@@ -104,7 +111,7 @@ export async function avisarNumeroEnRevision(motivo: MotivoDeRevision, tenantId:
     const destinatarios = operatorEmails();
     if (destinatarios.length === 0) return;
 
-    const porEspacio = motivo === "agregado" || motivo === "incierto";
+    const porEspacio = motivo === "agregado" || motivo === "incierto" || motivo === "sin_webhook";
     const clave = porEspacio ? claveDeCupo("alta:aviso-numero", motivo, tenantId) : claveDeCupo("alta:aviso-numero", motivo);
     const cupo = await rateLimit(clave, { limit: 1, windowMs: DIA_MS, fallaCerrada: true });
     if (!cupo.allowed) {

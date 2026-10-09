@@ -7,8 +7,8 @@
  * ningún formulario.
  */
 
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   locale: vi.fn(),
@@ -65,6 +65,10 @@ beforeEach(() => {
   h.filaDeUsuario.mockResolvedValue(null);
   h.cookie.mockResolvedValue(undefined);
   h.resumen.mockResolvedValue({ espacio: "Seguros Ejemplo", quien: "Jefa Ejemplo", exigeSso: false });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("/invitacion sin sesión y con un enlace bueno", () => {
@@ -175,6 +179,17 @@ describe("/invitacion con un enlace que no vale", () => {
     h.resumen.mockResolvedValue(null);
 
     vencida((await pintar(enlace())).container);
+  });
+
+  it("con URL_DEL_OTRO_AMBIENTE manda a quien tenía su cuenta allá; sin ella no dice nada", async () => {
+    expect((await pintar("basura")).container.querySelector("a")).toBeNull();
+    cleanup();
+
+    vi.stubEnv("URL_DEL_OTRO_AMBIENTE", "https://dev.example.com/");
+    const { container } = await pintar("basura");
+
+    expect(container.querySelector("a")).toHaveAttribute("href", "https://dev.example.com/login");
+    expect(container).toHaveTextContent("¿Tu cuenta es de antes del cambio? Entrá en dev.example.com");
   });
 
   it("repetido en la dirección: vale el último", async () => {

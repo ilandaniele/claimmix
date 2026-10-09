@@ -23,7 +23,7 @@ import { NextRequest } from "next/server";
 
 // ── Hoist mock factories ───────────────────────────────────────────────────────
 
-const { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts } =
+const { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts, mockHayCasillaDelEntorno } =
   vi.hoisted(() => {
     const mockVerifyIdToken = vi.fn();
     const MockOAuth2Client = vi.fn(function (this: unknown) {
@@ -31,7 +31,8 @@ const { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockListEnabledGmail
     });
     const mockPollGmail = vi.fn();
     const mockListEnabledGmailAccounts = vi.fn().mockResolvedValue([]);
-    return { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts };
+    const mockHayCasillaDelEntorno = vi.fn().mockReturnValue(true);
+    return { mockVerifyIdToken, MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts, mockHayCasillaDelEntorno };
   });
 
 // ── Module mocks (declared before any import that triggers them) ──────────────
@@ -50,6 +51,11 @@ vi.mock("@/server/email/gmail/gmail-poller", () => ({
 // is not actually loaded — prevents DATABASE_URL error at module init.
 vi.mock("@/server/email/gmail/accounts", () => ({
   listEnabledGmailAccounts: mockListEnabledGmailAccounts,
+}));
+
+// Estos tests son de una instalación con la casilla del .env: sin ella el webhook ni lee (ver webhooks-gmail-casilla-desconocida).
+vi.mock("@/server/email/gmail/gmail-client", () => ({
+  hayCasillaDelEntorno: mockHayCasillaDelEntorno,
 }));
 
 vi.mock("@/lib/db", () => ({

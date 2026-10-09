@@ -1,6 +1,6 @@
 /**
  * Sumar un número a la WABA de la plataforma, paso por paso, hablando con Graph:
- * agregarlo, pedir el código, verificarlo y registrarlo.
+ * agregarlo, pedir el código, verificarlo, registrarlo y ponerle su webhook propio.
  *
  * Es sólo el cliente de Graph. No decide nada (qué espacio puede, cuánto cupo le
  * queda y qué se guarda lo resuelve `numero-automatico.ts`), no toca la base y no
@@ -25,7 +25,7 @@ import { randomInt } from "node:crypto";
 import type { Locale } from "@/lib/i18n";
 import { logger } from "@/lib/observability/logger";
 import { urlDeGraph } from "@/server/whatsapp/cloud-api";
-import { idDeLaPlataforma } from "@/server/whatsapp/numeros";
+import { idDeLaPlataforma, type WebhookDelEntorno } from "@/server/whatsapp/numeros";
 import { ID_DE_GRAPH, PLAZO_GRAPH_MS } from "@/server/whatsapp/verificar-en-meta";
 
 export type FallaDeGraph = "esperar" | "meta" | "rechazo";
@@ -73,7 +73,15 @@ export function clasificar(status: number | null, codigo: number | null): FallaD
   return status >= 400 ? "rechazo" : "meta";
 }
 
-type Paso = "agregar" | "pedir_codigo" | "verificar" | "estado_codigo" | "estado_registro" | "registrar";
+type Paso =
+  | "agregar"
+  | "pedir_codigo"
+  | "verificar"
+  | "estado_codigo"
+  | "estado_registro"
+  | "registrar"
+  | "fijar_webhook"
+  | "leer_webhook";
 
 /** El pedido que ni salió: un id con forma rara, o el de la plataforma. No es culpa de Meta. */
 const SIN_PEDIDO: RespuestaDeAlta<never> = { ok: false, falla: "rechazo", codigo: null };
@@ -196,4 +204,35 @@ export async function registrarNumero(cred: CredencialDeAlta, phoneNumberId: str
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
   const pin = String(randomInt(0, 1_000_000)).padStart(6, "0");
   return confirmada("registrar", `${phoneNumberId}/register`, cred.accessToken, { messaging_product: "whatsapp", pin });
+}
+
+/**
+ * Le pone al número su propio webhook. Sin él lo que le escriben cae en el de la WABA,
+ * que con dos ambientes en la misma app de Meta puede ser el del otro. El token del
+ * apretón de manos viaja en el cuerpo y no se anota.
+ */
+export async function fijarWebhookDelNumero(
+  cred: CredencialDeAlta,
+  phoneNumberId: string,
+  webhook: WebhookDelEntorno
+): Promise<RespuestaDeAlta<true>> {
+  if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
+  return confirmada("fijar_webhook", phoneNumberId, cred.accessToken, {
+    webhook_configuration: { override_callback_uri: webhook.url, verify_token: webhook.verifyToken },
+  });
+}
+
+/**
+ * ¿El webhook propio del número es `url`? Cuenta lo que Graph devuelve, no lo que se
+ * mandó: la `application` y la de la WABA no valen, porque son las que se quiere evitar.
+ */
+export async function webhookPropioEs(cred: CredencialDeAlta, phoneNumberId: string, url: string): Promise<RespuestaDeAlta<boolean>> {
+  if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
+  const r = await llamar("leer_webhook", `${phoneNumberId}?fields=webhook_configuration`, cred.accessToken);
+  if (!r.ok) return r;
+  const conf = r.valor.webhook_configuration;
+  if (typeof conf !== "object" || conf === null || Array.isArray(conf)) return { ok: true, valor: false };
+  const { phone_number: propio, override_callback_uri: puesto } = conf as Record<string, unknown>;
+  const esUrl = (visto: unknown) => visto === url || visto === `${url}/`;
+  return { ok: true, valor: esUrl(propio) || esUrl(puesto) };
 }

@@ -17,7 +17,7 @@ import { leerDeEnvLocal as get } from "./lib/env-local.mjs";
 
 const KEY = get("GEMINI_API_KEY");
 const CRON = get("CRON_SECRET");
-const PROD = "https://claimmix.vercel.app";
+const PROD = "https://claimmix-dev.vercel.app";
 
 async function main() {
   // 1) Verify the key works now

@@ -3,7 +3,7 @@ import "server-only";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 
 import { dominioDelMail, proveedorDeSso } from "@/core/sso";
-import { enTenant } from "@/data/scope";
+import { enControl } from "@/data/scope";
 import { db } from "@/lib/db";
 import { accounts, authUsers, sessions, ssoSettings, users } from "@/lib/db/schema";
 
@@ -124,7 +124,7 @@ export function correoExigeSso(email: string, tenantId: string): Promise<boolean
   if (!dominio) return Promise.resolve(false);
   return sinSsoQueExigir(async () => {
     // Sin WHERE tenant_id: la fila del inquilino la elige RLS.
-    const filas = await enTenant({ tenantId }, (db) =>
+    const filas = await enControl({ tenantId }, (db) =>
       db
         .select({ uno: sql<number>`1` })
         .from(ssoSettings)

@@ -12,9 +12,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockRequireRole, mockEnTenant, mockStop, mockSetup, mockDecrypt } = vi.hoisted(() => ({
+const { mockRequireRole, mockEnControl, mockStop, mockSetup, mockDecrypt } = vi.hoisted(() => ({
   mockRequireRole: vi.fn(),
-  mockEnTenant: vi.fn(),
+  mockEnControl: vi.fn(),
   mockStop: vi.fn(),
   mockSetup: vi.fn(),
   mockDecrypt: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock("@/lib/auth/require-role", () => ({
 }));
 
 vi.mock("@/data/scope", () => ({
-  enTenant: mockEnTenant,
+  enControl: mockEnControl,
 }));
 
 vi.mock("@/lib/db", () => {
@@ -105,7 +105,7 @@ afterEach(() => {
 
 describe("PATCH /api/admin/gmail-accounts", () => {
   it("da 404 con un id inexistente", async () => {
-    mockEnTenant.mockResolvedValue([]);
+    mockEnControl.mockResolvedValue([]);
 
     const res = await PATCH(patchRequest(JSON.stringify({ id: ID, enabled: true })));
 
@@ -116,11 +116,11 @@ describe("PATCH /api/admin/gmail-accounts", () => {
     const res = await PATCH(patchRequest("{ esto no es json"));
 
     expect(res.status).toBe(400);
-    expect(mockEnTenant).not.toHaveBeenCalled();
+    expect(mockEnControl).not.toHaveBeenCalled();
   });
 
   it("da 200 con un id existente", async () => {
-    mockEnTenant.mockResolvedValue([FILA]);
+    mockEnControl.mockResolvedValue([FILA]);
 
     const res = await PATCH(patchRequest(JSON.stringify({ id: ID, enabled: true })));
 
@@ -132,7 +132,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
   const patch = (enabled: boolean) => PATCH(patchRequest(JSON.stringify({ id: ID, enabled })));
 
   it("apagar la casilla detiene el watch con su token descifrado", async () => {
-    mockEnTenant.mockResolvedValue([{ ...FILA, enabled: false }]);
+    mockEnControl.mockResolvedValue([{ ...FILA, enabled: false }]);
 
     const res = await patch(false);
 
@@ -144,7 +144,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
 
   it("apagar la casilla detiene el watch aunque no haya PUBSUB_TOPIC", async () => {
     delete process.env.PUBSUB_TOPIC;
-    mockEnTenant.mockResolvedValue([{ ...FILA, enabled: false }]);
+    mockEnControl.mockResolvedValue([{ ...FILA, enabled: false }]);
 
     await patch(false);
 
@@ -152,7 +152,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
   });
 
   it("prenderla con PUBSUB_TOPIC vuelve a registrar el watch", async () => {
-    mockEnTenant.mockResolvedValue([FILA]);
+    mockEnControl.mockResolvedValue([FILA]);
 
     const res = await patch(true);
 
@@ -163,7 +163,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
 
   it("prenderla sin PUBSUB_TOPIC no toca el watch", async () => {
     delete process.env.PUBSUB_TOPIC;
-    mockEnTenant.mockResolvedValue([FILA]);
+    mockEnControl.mockResolvedValue([FILA]);
 
     const res = await patch(true);
 
@@ -177,7 +177,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
     ["detener", false, () => mockStop],
     ["registrar", true, () => mockSetup],
   ])("si falla al %s el watch, igual da 200 y la casilla queda como se pidió", async (_nombre, enabled, queFalla) => {
-    mockEnTenant.mockResolvedValue([{ ...FILA, enabled }]);
+    mockEnControl.mockResolvedValue([{ ...FILA, enabled }]);
     queFalla().mockRejectedValue(Object.assign(new Error("se cayó Google"), { code: 503 }));
 
     const res = await patch(enabled);
@@ -189,7 +189,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
   });
 
   it("si el token no se puede descifrar, da 200 sin llamar a Google", async () => {
-    mockEnTenant.mockResolvedValue([FILA]);
+    mockEnControl.mockResolvedValue([FILA]);
     mockDecrypt.mockImplementation(() => {
       throw new Error("Invalid Gmail token payload");
     });
@@ -201,7 +201,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
   });
 
   it("la respuesta trae sólo la casilla: sin token cifrado ni descifrado, ni el estado del watch", async () => {
-    mockEnTenant.mockResolvedValue([FILA]);
+    mockEnControl.mockResolvedValue([FILA]);
 
     const res = await patch(true);
 
@@ -216,7 +216,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
   it("el log del fallo lleva el código y no el token ni la casilla", async () => {
     const { logger } = await import("@/lib/observability/logger");
     const error = vi.spyOn(logger, "error").mockImplementation(() => {});
-    mockEnTenant.mockResolvedValue([FILA]);
+    mockEnControl.mockResolvedValue([FILA]);
     mockSetup.mockRejectedValue(Object.assign(new Error("fake-refresh casilla@example.com"), { code: 503 }));
 
     await patch(true);
@@ -225,7 +225,7 @@ describe("PATCH /api/admin/gmail-accounts — el aviso de Gmail", () => {
   });
 
   it("sin fila (404) no toca el watch", async () => {
-    mockEnTenant.mockResolvedValue([]);
+    mockEnControl.mockResolvedValue([]);
 
     const res = await patch(false);
 
@@ -240,18 +240,18 @@ describe("DELETE /api/admin/gmail-accounts", () => {
     const res = await DELETE(deleteRequest("no-es-un-uuid"));
 
     expect(res.status).toBe(404);
-    expect(mockEnTenant).not.toHaveBeenCalled();
+    expect(mockEnControl).not.toHaveBeenCalled();
   });
 
   it("da 404 si no viene el id", async () => {
     const res = await DELETE(deleteRequest());
 
     expect(res.status).toBe(404);
-    expect(mockEnTenant).not.toHaveBeenCalled();
+    expect(mockEnControl).not.toHaveBeenCalled();
   });
 
   it("da 404 si el uuid no matchea ninguna fila", async () => {
-    mockEnTenant.mockResolvedValue([]);
+    mockEnControl.mockResolvedValue([]);
 
     const res = await DELETE(deleteRequest(ID));
 
@@ -259,7 +259,7 @@ describe("DELETE /api/admin/gmail-accounts", () => {
   });
 
   it("borra con un uuid existente", async () => {
-    mockEnTenant.mockResolvedValue([{ id: ID }]);
+    mockEnControl.mockResolvedValue([{ id: ID }]);
 
     const res = await DELETE(deleteRequest(ID));
 

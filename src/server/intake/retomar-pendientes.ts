@@ -32,7 +32,8 @@ import "server-only";
 
 import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { baseDelInquilino } from "@/data/bases";
+import { db as dbDueno, dbDeBase, type DbDueno } from "@/lib/db";
 import { cases } from "@/lib/db/schema";
 import { enTenant } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
@@ -86,13 +87,19 @@ export interface RetomadosResult {
  * `after()` del webhook, y arrastrar el grafo del worker a los dos encarecería
  * el arranque en frío de rutas que muchas veces no retoman nada.
  */
-export async function retomarExtraccionesPendientes(opts?: {
-  tenantId?: string;
-  limit?: number;
-  leaseMs?: number;
-  /** Cuándo se corta la invocación (epoch ms). Sin esto no se mira el reloj. */
-  hasta?: number;
-}): Promise<RetomadosResult> {
+export async function retomarExtraccionesPendientes(
+  opts?: {
+    tenantId?: string;
+    limit?: number;
+    leaseMs?: number;
+    /** Cuándo se corta la invocación (epoch ms). Sin esto no se mira el reloj. */
+    hasta?: number;
+  },
+  /** La base a barrer: la pasa el recorrido por bases. Sin ella, la del inquilino con la bandera, o la de siempre. */
+  conBase?: DbDueno
+): Promise<RetomadosResult> {
+  const baseDelCaso = baseDelInquilino(opts?.tenantId);
+  const db = conBase ?? (baseDelCaso ? dbDeBase(baseDelCaso) : dbDueno);
   const limit = opts?.limit ?? TOPE_POR_CORRIDA;
   const corte = new Date(Date.now() - ESPERA_MS).toISOString();
   const leaseVencido = new Date(

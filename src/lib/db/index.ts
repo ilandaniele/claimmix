@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { createTableRelationsHelpers, extractTablesRelationalConfig } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
+import { cadenaConBase } from "@/data/bases";
 import { logger } from "@/lib/observability/logger";
 
 function createDb(connectionString: string) {
@@ -98,3 +99,40 @@ export const db = new Proxy({} as Db, {
   },
 }) as Db;
 export * as tables from "./schema";
+
+export type DbDueno = typeof db;
+
+const NOMBRE_DE_BASE = /^t_[0-9a-f]{32}$/;
+const MAX_BASES = 50;
+
+// Por cadena de conexión y no por nombre: si DATABASE_URL cambia, no sirve la vieja.
+const basesPorCadena = new Map<string, DbDueno>();
+
+/**
+ * El rol dueño contra la base de un inquilino (`t_<32 hex>`), para quien no tiene
+ * un pedido de usuario: el workflow que la prepara, los barridos y los scripts.
+ * Lo del usuario va por `cliente(tenantId)`, con el rol restringido.
+ *
+ * Valida el nombre antes de armar la cadena, y guarda hasta 50 clientes: pasado
+ * el tope se tira el más viejo. Un nombre que no existe en el clúster falla al
+ * consultar (3D000), no acá.
+ */
+export function dbDeBase(base: string): DbDueno {
+  if (typeof base !== "string" || !NOMBRE_DE_BASE.test(base)) {
+    throw new Error("[db] el nombre de la base no es t_ y 32 hex: no se arma la cadena.");
+  }
+  const connectionString = process.env.DATABASE_URL?.trim();
+  if (!connectionString) throw new Error("DATABASE_URL is not set");
+
+  const cadena = cadenaConBase(connectionString, base);
+  let cliente = basesPorCadena.get(cadena);
+  if (!cliente) {
+    if (basesPorCadena.size >= MAX_BASES) {
+      const masVieja = basesPorCadena.keys().next().value;
+      if (masVieja !== undefined) basesPorCadena.delete(masVieja);
+    }
+    cliente = createDb(cadena);
+    basesPorCadena.set(cadena, cliente);
+  }
+  return cliente;
+}

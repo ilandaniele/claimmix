@@ -365,3 +365,16 @@ describe("plan_sin_terminar", () => {
     expect(sql).toContain("left(string_agg(p.clave, ',' order by p.orden), 200)");
   });
 });
+
+describe("revisarDesvios: la base que le pasan (P10)", () => {
+  it("corre cada regla contra esa base, y no contra la de siempre", async () => {
+    const propia = vi.fn().mockResolvedValue({ rowCount: 1, rows: [{ tenant_id: "inquilino-1" }] });
+
+    const r = await revisarDesvios({ execute: propia } as never);
+
+    expect(propia).toHaveBeenCalledTimes(REGLAS.length);
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(r.nuevos).toBe(REGLAS.length);
+    expect(r.fallidas).toEqual([]);
+  });
+});

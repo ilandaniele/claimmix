@@ -48,13 +48,8 @@ import {
   vencidos as vencidosDeLaPurga,
   type Pendiente,
 } from "@/server/storage/purgar-adjuntos";
-import {
-  HOST_DE_PRODUCCION,
-  codigoDe,
-  hostDe,
-  resumenDe,
-  taparEnElLog,
-} from "../tests/e2e/base-de-ensayo";
+import { codigoDe, hostDe, resumenDe, taparEnElLog } from "../tests/e2e/base-de-ensayo";
+import { vetadoBase } from "./lib/hosts-vetados.mjs";
 
 // Lo que se escapa sin atrapar (una consulta fuera de `explicar`, un TypeError del
 // driver) sale con el mensaje crudo, que puede traer parámetros o la cadena con la
@@ -116,7 +111,7 @@ const vetoDeEscritura = !escribe
   ? null
   : !hosts[0]
     ? "DATABASE_URL no es una URL válida"
-    : hosts.some((h) => h.includes(HOST_DE_PRODUCCION))
+    : [process.env.DATABASE_URL, url].some((c) => vetadoBase(c))
       ? "la base es la de PRODUCCIÓN"
       : endpointDe(hosts[0]) !== endpointDe(hosts[1])
         ? "DATABASE_URL y DATABASE_URL_APP apuntan a bases distintas"

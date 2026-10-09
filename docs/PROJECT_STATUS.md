@@ -35,7 +35,8 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 - **Stack:** Next.js 16 (App Router), React 19, TypeScript, Drizzle ORM, Neon
   Postgres, Better Auth, pnpm. Deployed on **Vercel (Hobby plan)**.
-- **Prod URL:** https://claimmix.vercel.app
+- **Prod URL:** https://claimmix.vercel.app (el proyecto `claimmix`, que pasa a ser dev
+  cuando `claimmix-prd` reciba este dominio; ver «Ambiente prd» más abajo)
 - **AI:** Gemini `gemini-2.5-flash` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`),
   `MOCK_AI=true` para local. **No hay fallback de OpenAI**: el extractor se borró
   y `OPENAI_API_KEY` no se lee en ningún archivo. El selector real es
@@ -54,6 +55,8 @@ algo de verdad, para comprobar que la salida funciona.
 
 `pnpm arquitectura` comprueba que ninguna consulta se salga de la capa de datos
 y `pnpm permisos` que el rol restringido pueda hacer lo que ella le pide.
+`pnpm bases:probar` da de alta dos inquilinos con una base cada uno y comprueba el
+aislamiento, el espejo y el barrido, contra la rama `ensayo` del proyecto de Neon `claimmix-prd`.
 
 `pnpm load` mide cuánto aguanta y `pnpm pentest` pregunta qué se consigue sin
 credenciales. Las mitades gratis de las dos corren solas después de cada deploy.
@@ -4724,8 +4727,79 @@ Un PR con dos partes que no se tocan.
   operador (aviso `incierto`). La bienvenida de la bandeja depende sólo de la
   bandera, no de que la 0049 exista: por eso la 0049 se aplica antes de prenderla.
 
+### Ambiente prd: tres proyectos y una base por cliente (2026-10-08, rama `feat/prd-bases`)
+
+El plan: `claimmix` pasa a ser **dev** (mismo `project_id`, mismo pool WIF `vercel`, misma
+base `ep-proud-resonance` con sus datos reales, alias `claimmix-dev.vercel.app`), `claimmix-qa`
+no cambia, y la producción de los clientes es un proyecto nuevo, **`claimmix-prd`** (rama `prd`,
+Neon Free `claimmix-prd` con una base de control `neondb` y una `t_<hex>` por cliente, R2,
+pool WIF y topic de Pub/Sub propios). Recibe `claimmix.vercel.app` por un move atómico de
+Vercel. La rama `ensayo` de ese proyecto, con endpoint propio y sin Vercel, es sólo para
+`pnpm bases:probar`. Los pasos en orden, el Ignored Build Step de los tres proyectos, el orden
+del move y la regla de a lo sumo una promoción a prd por día están en `docs/PROMOCION.md`
+(sección «Prd»); cómo se prueba, en `docs/TESTING.md` (capa 9, «Después de cada deploy» y
+`/api/health`).
+
+- **Fase 1, sin base por cliente: prd con una sola base, `ALTA_AUTOMATICA=0`.**
+  - Código, en la rama y sin mergear: P15 (workflows de tres ambientes, el job `PRD` de
+    `post-deploy.yml`, el barrido de prd y `scripts/lib/hosts-vetados.mjs`), P18 (guardas
+    «de otro ambiente»: slugs, números, casillas, enlaces viejos de dev y webhook de Gmail
+    sin casillas) y P16 (el texto fijo del segundo usuario).
+  - Infraestructura, nada hecho que el repositorio pueda mostrar (`HOST_DE_BASE_PRD` sigue
+    en `null`): Ignored Build Step, alias `claimmix-dev`, Google OAuth y Turnstile con los
+    tres hosts, inventario de dev, overrides de Meta y Pub/Sub de dev, el proyecto de Neon,
+    la cadena de migraciones en control, el proyecto de Vercel, el pool `vercel-prd`, R2,
+    el topic de prd, las variables, la rama `prd`, el primer deploy, el move del dominio y
+    24 h de logs. Confirmar el estado real en Vercel, Neon y GitHub antes de seguir.
+- **Fase 2, una base por cliente (`BASE_POR_CLIENTE=1`, sólo en prd).**
+  - Código, en la rama y sin mergear: P1 (elección de base en la capa de datos), P2 (migración
+    0050: `tenant_bases` y `schema_migrations`), P3 (permisos por perfil y cadena
+    empaquetada), P4 (crear, migrar y dar permisos a una base), P5 (espejo de control),
+    P6 (workflow `preparar-base`, alta con topes, `/preparando`), P7 y P8 (lo que es de
+    control va a control: membresía, roles, provisión, números), P9 (libro de IA), P10
+    (barridos por base y reintentos), P11 (salud y desfase), P12 (el flujo de dos pasos
+    para conectar Gmail y WhatsApp en Configuración, que se ve aun con el flag apagado),
+    P13 (scripts de bases, `pnpm bases:probar` y el job `Bases por cliente`), P14 (el
+    contrato con la 0049) y P17 (esta documentación y `.env.example`).
+  - Con el flag apagado todo anda como siempre, salvo lo que cada commit marca como
+    «visible» (P12 en esta fase). Falta: la 0050 en QA, dev, staging y control de prd; mergear; la rama `ensayo` y sus dos secretos; `pnpm bases:probar` en
+    verde; migrar control de prd con el registro; la base del inquilino casa; prender el
+    flag; el perfil control; abrir el alta y probarla; y la verificación del negocio en Meta.
+- **El flag es de ida.** Con clientes vivos no se apaga `BASE_POR_CLIENTE`: la base de
+  control no tiene sus datos de negocio. Para frenar se usa `ALTA_AUTOMATICA=0` y se arregla
+  hacia adelante.
+- **Bloqueantes abiertos:**
+  1. La cadena de migraciones 0001 a la última nunca corrió sobre una base vacía (en control
+     de prd, y en las `t_<hex>` con la cadena empaquetada).
+  2. Meta permite 2 números en la WABA hasta verificar el negocio.
+  3. La pantalla de consentimiento de Google tiene que estar publicada; con los scopes de
+     Gmail sin verificar hay un tope de 100 usuarios que comparten dev y prd.
+  4. Hay que confirmar que Vercel acepta mover un `*.vercel.app` entre proyectos. Si no, prd
+     queda en `claimmix-prd.vercel.app` y decide el dueño: no hay plan B que suelte el
+     dominio (nunca `DELETE` y `POST`).
+  5. Los términos de Vercel Hobby son de uso no comercial y prd tendría clientes que pagan.
+     El dueño decidió no usar planes pagos; queda señalado.
+- **Dónde se apartó la documentación del plan:** el plan decía que `claimmix` construye sólo
+  `main`; los pasos 3 y 5 de `docs/PROMOCION.md` y `load-tests.yml` dependen de sus vistas
+  previas, así que el Ignored Build Step de `claimmix` saltea `qa` y `prd` y construye el resto.
+
 ### 🙋 Waiting on you (not code)
 
+- **Ambiente prd: pasos del dueño.** Hay que autenticar `neonctl` (`npx neonctl auth`), y
+  después: orígenes, redirect URIs y pantalla de consentimiento publicada en Google Cloud;
+  los hostnames `claimmix-dev.vercel.app` y `claimmix-prd.vercel.app` en el widget de
+  Turnstile; el pool WIF `vercel-prd`; el bucket `claimmix-prd-attachments` y su token; el
+  topic y la suscripción de Gmail de prd y el cambio de la suscripción de dev; avisar a los
+  clientes de dev con SSO o API v1; completar `.env.prd.local` con los secretos; mirar los
+  minutos de Actions; y dar el OK al move del dominio. Lista completa, con quién hace cada
+  cosa, en `docs/PROMOCION.md`, sección «Prd».
+- **Ambiente prd: completar `HOST_DE_BASE_PRD`** en `scripts/lib/hosts-vetados.mjs` con el
+  endpoint de control del proyecto de Neon `claimmix-prd` apenas exista. Hasta entonces los
+  scripts de bases se niegan a correr contra prd.
+- **Ambiente prd, fase 2: aplicar la 0050 a mano** (`0050_tenant_bases.sql`, aditiva) con el
+  dueño de la base, en QA (`ep-wispy-flower`), dev (`ep-proud-resonance`), la rama
+  `production` de Veltra y la base de control de prd, antes de mergear; sin ella el CI
+  queda rojo por `--exigir-al-dia`. Después `pnpm esquemas`.
 - **Número por código: aplicar la 0049 ANTES de mergear.** Es sólo la función
   `claimmix_numero_automatico` (`0049_numero_por_codigo.sql`), aditiva e
   idempotente. Se aplica a mano, con el dueño de la base (necesita `BYPASSRLS`), en

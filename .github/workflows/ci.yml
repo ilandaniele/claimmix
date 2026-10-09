@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    # Sin `prd` a propósito: tests/unit/ci-prd.test.ts lo fija.
     branches: [main, qa]
   push:
     branches: [main]
@@ -1167,3 +1168,74 @@ jobs:
 
       - name: La superficie, contra el build local
         run: pnpm pentest --url http://localhost:3000 --solo-superficie
+
+  # ── 13. Bases por cliente ────────────────────────────────────────────────────
+  #
+  # `pnpm bases:empaquetar --comprobar` falla si la cadena de migraciones
+  # empaquetada para las bases nuevas quedó atrás de neon/migrations; no usa
+  # ninguna base y corre siempre, también en un fork.
+  #
+  # `pnpm bases:probar` da de alta dos inquilinos con la función de verdad, les
+  # prepara su base `t_<hex>` y comprueba el aislamiento, el espejo, el tope de
+  # bases y el barrido (ver scripts/probar-bases.mts). Escribe y borra bases, así
+  # que sólo corre contra la rama `ensayo` del proyecto claimmix-prd, con sus propios secretos
+  # `PRD_ENSAYO_*`: nunca con los de la base de ensayo de arriba ni con los de
+  # QA, dev o producción (el veto de scripts/lib/hosts-vetados.mjs los rechaza).
+  #
+  # Sin los secretos, un fork avisa y sigue (no los recibe por diseño); en
+  # cualquier otro caso corta, como `tenencia-capa-datos`: un check que se saltea
+  # en silencio no prueba nada. El `if:` de un job no puede leer `secrets`, así
+  # que la condición va en el paso.
+  #
+  # `concurrency: bases` serializa las corridas de todas las ramas: dos juntas
+  # se pisarían el catálogo de bases del mismo proyecto. Sin `cancel-in-progress`
+  # la que corre termina; GitHub guarda una sola pendiente por grupo y cancela
+  # las demás, y para un check que no bloquea el merge eso alcanza.
+  bases:
+    name: Bases por cliente
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: bases
+      cancel-in-progress: false
+    env:
+      HAY_BASES: ${{ secrets.PRD_ENSAYO_DATABASE_URL != '' && secrets.PRD_ENSAYO_DATABASE_URL_APP != '' && 'true' || '' }}
+      ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm bases:empaquetar --comprobar && pnpm bases:probar
+        run: |
+          pnpm bases:empaquetar --comprobar
+          if [ -n "$HAY_BASES" ]; then
+            pnpm bases:probar
+          elif [ "$ES_FORK" = "true" ]; then
+            echo "::warning title=Bases por cliente sin probar::Fork sin secretos, no se probó."
+          else
+            echo "::error title=Bases por cliente sin probar::Faltan PRD_ENSAYO_DATABASE_URL y PRD_ENSAYO_DATABASE_URL_APP."
+            exit 1
+          fi
+        env:
+          PRD_ENSAYO_DATABASE_URL: ${{ secrets.PRD_ENSAYO_DATABASE_URL }}
+          PRD_ENSAYO_DATABASE_URL_APP: ${{ secrets.PRD_ENSAYO_DATABASE_URL_APP }}

@@ -13,7 +13,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { cerrarSesiones } from "@/lib/auth/sesiones";
 import { tables } from "@/lib/db";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { enControl, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -38,7 +38,7 @@ export async function DELETE(
     }
 
     const objetivo = firstRow(
-      await enTenant(tenantCtx, (db) =>
+      await enControl(tenantCtx, (db) =>
         db
           .select({ id: tables.users.id, role: tables.users.role })
           .from(tables.users)

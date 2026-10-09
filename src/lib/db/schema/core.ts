@@ -118,6 +118,41 @@ export const whatsappNumeros = pgTable("whatsapp_numeros", {
   actualizado_en: timestamp("actualizado_en", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
 });
 
+/**
+ * El estado de la base propia de cada inquilino (migración 0050). Vive en la base
+ * de control y sólo la lee y la escribe el rol dueño: `claimmix_app` no tiene
+ * ningún permiso. Sin fila, el inquilino no tiene base propia. `tomada_at` hace de
+ * lease: quien prepara la base la marca, y otro no la toma hasta que vence.
+ */
+export const tenantBases = pgTable("tenant_bases", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  estado: text("estado", {
+    enum: ["creando", "lista", "fallida", "borrada"],
+  }).notNull(),
+  version_migracion: integer("version_migracion").notNull().default(0),
+  intentos: integer("intentos").notNull().default(0),
+  ultimo_error: text("ultimo_error"),
+  tomada_at: timestamp("tomada_at", { withTimezone: true, mode: "string" }),
+  creada_at: timestamp("creada_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  lista_at: timestamp("lista_at", { withTimezone: true, mode: "string" }),
+});
+
+/**
+ * El registro de migraciones que arma `scripts/migrate.mjs`: una fila por archivo
+ * aplicado, con `version` de cuatro dígitos ("0050") y el checksum del archivo. La
+ * 0050 le cierra el acceso a `claimmix_app`; lo leen y lo escriben los scripts y
+ * el rol dueño.
+ */
+export const schemaMigrations = pgTable("schema_migrations", {
+  version: text("version").primaryKey(),
+  filename: text("filename").notNull(),
+  checksum: text("checksum").notNull(),
+  applied_at: timestamp("applied_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  applied_by: text("applied_by"),
+});
+
 export const users = pgTable("users", {
   id: uuid("id")
     .primaryKey()

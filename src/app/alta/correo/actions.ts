@@ -33,7 +33,7 @@ import { logger } from "@/lib/observability/logger";
 import { clientIpFromHeaders, topePorIp } from "@/lib/rate-limit/index";
 import { crearInquilino, type AltaCreada } from "@/server/alta/crear-inquilino";
 import { soltarCupoDeAlta, tomarCupoDeAlta } from "@/server/alta/cupo-por-ip";
-import { avisarSiLlegoAlTope, conError, SIN_ESPACIO } from "@/server/alta/destinos";
+import { avisarSiLlegoAlTope, conError, prepararEspacio, SIN_ESPACIO } from "@/server/alta/destinos";
 import { abrirToken } from "@/server/alta/token-de-registro";
 
 /** Largos de la contraseña que acepta Better Auth. */
@@ -131,7 +131,7 @@ async function destinoDelEnlace(formData: FormData): Promise<string> {
   }
 
   avisarSiLlegoAlTope(alta);
-  return "/bandeja?bienvenida=1";
+  return prepararEspacio(alta, "/bandeja?bienvenida=1");
 }
 
 export async function crearCuentaDesdeCorreo(formData: FormData): Promise<void> {

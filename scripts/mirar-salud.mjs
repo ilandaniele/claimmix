@@ -18,7 +18,7 @@
  */
 import { interpretarSalud } from "./lib/salud.mjs";
 
-const BASE = (process.env.URL || "https://claimmix.vercel.app").replace(/\/+$/, "");
+const BASE = (process.env.URL || "https://claimmix-dev.vercel.app").replace(/\/+$/, "");
 const SECRET = process.env.CRON_SECRET;
 
 if (!SECRET) {

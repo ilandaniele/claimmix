@@ -9,13 +9,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts } = vi.hoisted(() => {
+const { MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts, mockHayCasillaDelEntorno } = vi.hoisted(() => {
   const MockOAuth2Client = vi.fn(function (this: unknown) {
     (this as Record<string, unknown>).verifyIdToken = vi.fn();
   });
   const mockPollGmail = vi.fn();
   const mockListEnabledGmailAccounts = vi.fn().mockResolvedValue([]);
-  return { MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts };
+  const mockHayCasillaDelEntorno = vi.fn().mockReturnValue(true);
+  return { MockOAuth2Client, mockPollGmail, mockListEnabledGmailAccounts, mockHayCasillaDelEntorno };
 });
 
 vi.mock("google-auth-library", () => ({
@@ -30,6 +31,10 @@ vi.mock("@/server/email/gmail/gmail-poller", () => ({
 
 vi.mock("@/server/email/gmail/accounts", () => ({
   listEnabledGmailAccounts: mockListEnabledGmailAccounts,
+}));
+
+vi.mock("@/server/email/gmail/gmail-client", () => ({
+  hayCasillaDelEntorno: mockHayCasillaDelEntorno,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -67,6 +72,7 @@ describe("POST /api/webhooks/gmail — casilla desconocida", () => {
     delete process.env.PUBSUB_AUDIENCE;
     delete process.env.PUBSUB_SERVICE_ACCOUNT;
     mockPollGmail.mockResolvedValue({ processed: 0 });
+    mockHayCasillaDelEntorno.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -105,5 +111,31 @@ describe("POST /api/webhooks/gmail — casilla desconocida", () => {
 
     expect((await res.json()).ok).toBe(true);
     expect(mockPollGmail).toHaveBeenCalledWith();
+  });
+
+  it("sin casillas conectadas ni la del .env (prd) se acusa y NO llama a pollGmail", async () => {
+    mockListEnabledGmailAccounts.mockResolvedValue([]);
+    mockHayCasillaDelEntorno.mockReturnValue(false);
+    const { POST } = await import("@/app/api/webhooks/gmail/route");
+
+    const res = await POST(buildRequest(buildEnvelope("test@example.com")));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, ignored: true });
+    expect(mockPollGmail).not.toHaveBeenCalled();
+  });
+
+  it("con casillas conectadas no mira la del .env: el aviso por una de ellas la lee igual", async () => {
+    mockListEnabledGmailAccounts.mockResolvedValue([CASILLA]);
+    mockHayCasillaDelEntorno.mockReturnValue(false);
+    const { POST } = await import("@/app/api/webhooks/gmail/route");
+
+    await POST(buildRequest(buildEnvelope(CASILLA.email)));
+
+    expect(mockPollGmail).toHaveBeenCalledWith({
+      tenantId: CASILLA.tenantId,
+      email: CASILLA.email,
+      refreshToken: CASILLA.refreshToken,
+    });
   });
 });

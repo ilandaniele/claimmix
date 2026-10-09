@@ -207,17 +207,28 @@ jobs:
     # workflow_dispatch directo sobre este archivo, dispararlo a mano ya es
     # la decisión.
     steps:
+      # Primero el repositorio: la lista de hosts de ClaimMix vive en
+      # scripts/lib/hosts-vetados.mjs y la leen los workflows y los guiones.
+      # Historia completa: el chequeo compara el commit que pidió este run
+      # con el que producción está sirviendo, y para saber cuál viene
+      # después necesita `merge-base`. Con el clon de un solo commit no
+      # puede, y ante la duda falla — que es el comportamiento viejo.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
       # Este workflow recibe la URL de su caller (o de quien lo dispare a
       # mano) y siete jobs cuelgan de este primero, todos con secretos. Antes
       # de que exista ninguno, se comprueba a qué despliegue apunta.
       #
-      # Sólo los dos alias, no las vistas previas: `CRON_SECRET` es el de
-      # producción (o el de QA), y una vista previa construida desde una rama
-      # tiene el suyo (`PREVIEW_CRON_SECRET`, que sólo usa load-tests.yml).
+      # Sólo los hosts de ClaimMix, no las vistas previas: `CRON_SECRET` es el
+      # de dev, el de QA o el de prd, y una vista previa construida desde una
+      # rama tiene el suyo (`PREVIEW_CRON_SECRET`, que sólo usa load-tests.yml).
       - name: ¿A dónde apunta esto?
         env:
           URL: ${{ inputs.url }}
           EVENTO: ${{ github.event_name }}
+          PRD_URL: ${{ vars.PRD_URL }}
         run: |
           set -u
           case "$URL" in
@@ -228,28 +239,18 @@ jobs:
           case "$HOST" in
             *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
           esac
-          case "$HOST" in
-            claimmix.vercel.app|claimmix-qa.vercel.app) ;;
-            *) echo "::error::Host fuera de la lista: ${HOST}"; exit 1 ;;
-          esac
-          # Por workflow_dispatch los secretos son los de producción (los de QA
-          # sólo los mapea el job `qa` de post-deploy.yml, por deployment_status),
-          # así que el único destino que les corresponde es producción.
+          node scripts/lib/hosts-vetados.mjs --conocido "$URL" ||
+            { echo "::error::Host fuera de la lista: ${HOST}"; exit 1; }
+          # Por workflow_dispatch los secretos son los de dev (los de QA sólo
+          # los mapea el job `qa` de post-deploy.yml, por deployment_status),
+          # así que el único destino que les corresponde es el alias de dev.
           # `github.event_name` es el del caller: por workflow_call desde
           # post-deploy.yml vale lo mismo que allá, y ahí el disparo a mano ya
-          # llega con la URL de producción.
-          if [ "$EVENTO" = "workflow_dispatch" ] && [ "$HOST" != "claimmix.vercel.app" ]; then
-            echo "::error::Un disparo a mano corre con los secretos de producción y sólo admite claimmix.vercel.app, no ${HOST}"
+          # llega con la URL de dev.
+          if [ "$EVENTO" = "workflow_dispatch" ] && [ "$HOST" != "claimmix-dev.vercel.app" ]; then
+            echo "::error::Un disparo a mano corre con los secretos de dev y sólo admite claimmix-dev.vercel.app, no ${HOST}"
             exit 1
           fi
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        # Historia completa: el chequeo compara el commit que pidió este run
-        # con el que producción está sirviendo, y para saber cuál viene
-        # después necesita `merge-base`. Con el clon de un solo commit no
-        # puede, y ante la duda falla — que es el comportamiento viejo.
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -497,7 +498,7 @@ jobs:
           echo "::add-mask::$BETTER_AUTH_SECRET"
           pnpm knock
         env:
-          # Sin esto el script cae a su default, que es la URL de PRODUCCIÓN
+          # Sin esto el script cae a su default, que es la URL de dev
           # (scripts/knock-on-the-door.mts). Un caller de QA tocaría el timbre
           # de producción con la base de QA: lo peor de los dos lados.
           SMOKE_URL: ${{ inputs.url }}
@@ -615,7 +616,7 @@ jobs:
           echo "::add-mask::$BETTER_AUTH_SECRET"
           pnpm load --reporte carga.json
         env:
-          # Ídem: default a producción en scripts/load-test.mts.
+          # Ídem: default a dev en scripts/load-test.mts.
           SMOKE_URL: ${{ inputs.url }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # La capa de datos entra por acá. Sin esto, toda consulta que pase por
@@ -802,22 +803,26 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # La lista de hosts vetados vive en el repositorio, así que el checkout va
+      # primero. No recibe ningún secreto ni corre nada de la URL.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       # `--agent` gasta tokens y escribe casos; `--pared-propia` escribe un
-      # inquilino. Ninguno de los dos va contra producción, venga de donde venga
-      # el pedido. El guion rechaza el segundo por su cuenta; el primero no mira
-      # la URL, así que el freno está acá.
+      # inquilino. Ninguno de los dos va contra dev ni contra prd, venga de donde
+      # venga el pedido. El guion rechaza el segundo por su cuenta; el primero no
+      # mira la URL, así que el freno está acá. Si la URL no se lee, también
+      # frena: `--veto` sale con 1 ante la duda.
       - name: ¿Se escribe donde no se debe?
         env:
           URL: ${{ inputs.url }}
           ATACAR_AGENTE: ${{ inputs.atacar_agente }}
           PARED_PROPIA: ${{ inputs.pared_propia }}
+          PRD_URL: ${{ vars.PRD_URL }}
         run: |
-          if [ "$URL" = "https://claimmix.vercel.app" ] && { [ "$ATACAR_AGENTE" = "true" ] || [ "$PARED_PROPIA" = "true" ]; }; then
+          if { [ "$ATACAR_AGENTE" = "true" ] || [ "$PARED_PROPIA" = "true" ]; } && ! node scripts/lib/hosts-vetados.mjs --veto "$URL"; then
             echo "::error::atacar_agente y pared_propia escriben casos: no corren contra producción."
             exit 1
           fi
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Los ataques al agente llaman al modelo desde el runner, igual que el
       # ensayo: misma identidad, por Workload Identity Federation.
@@ -844,7 +849,7 @@ jobs:
           echo "::add-mask::$BETTER_AUTH_SECRET"
           pnpm pentest $PARED_PROPIA $AGENTE
         env:
-          # Contra la URL del caller. Sin esto ataca la de producción por
+          # Contra la URL del caller. Sin esto ataca la de dev por
           # default (scripts/pen-test.mts), corra quien corra.
           SMOKE_URL: ${{ inputs.url }}
           PARED_PROPIA: ${{ inputs.pared_propia && '--pared-propia' || '' }}

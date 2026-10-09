@@ -145,7 +145,7 @@ describe("las consultas de usuarios.ts", () => {
     vi.doUnmock("@/server/sso/usuarios");
     vi.doMock("@/lib/db", () => ({ db: baseSimulada() }));
     vi.doMock("@/data/scope", () => ({
-      enTenant: async (ctx: unknown, armar: (db: unknown) => unknown) => {
+      enControl: async (ctx: unknown, armar: (db: unknown) => unknown) => {
         h.contextos.push(ctx);
         return armar(baseSimulada());
       },

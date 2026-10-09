@@ -21,12 +21,14 @@ import {
   agregarNumero,
   clasificar,
   codigoYaVerificado,
+  fijarWebhookDelNumero,
   ID_GUARDABLE,
   numeroYaRegistrado,
   partirNumero,
   pedirCodigoAMeta,
   registrarNumero,
   verificarCodigoEnMeta,
+  webhookPropioEs,
   type CredencialDeAlta,
 } from "@/server/whatsapp/alta-de-numero";
 
@@ -39,6 +41,7 @@ const CRED: CredencialDeAlta = { accessToken: "fake-access-token", wabaId: WABA 
 const BASE = "https://graph.facebook.com/v22.0";
 const CON_CUERPO = { Authorization: "Bearer fake-access-token", "Content-Type": "application/json" };
 const SIN_CUERPO = { Authorization: "Bearer fake-access-token" };
+const WEBHOOK = { url: "https://claimmix.example.com/api/webhooks/whatsapp", verifyToken: "fake-verify-token" };
 
 const respuesta = (cuerpo: unknown, status = 200) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => cuerpo }) as Response;
@@ -252,6 +255,115 @@ describe("registrarNumero", () => {
   it("un 200 sin success:true es «meta»", async () => {
     graphContesta({ success: false });
     expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "meta", codigo: null });
+  });
+});
+
+describe("fijarWebhookDelNumero", () => {
+  it("manda POST al número con la URL y el token del ambiente en webhook_configuration", async () => {
+    const fetchFalso = graphContesta({ success: true });
+
+    expect(await fijarWebhookDelNumero(CRED, ID, WEBHOOK)).toEqual({ ok: true, valor: true });
+
+    const { url, init } = unicaLlamada(fetchFalso);
+    expect(url).toBe(`${BASE}/${ID}`);
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual(CON_CUERPO);
+    expect(JSON.parse(init.body as string)).toEqual({
+      webhook_configuration: { override_callback_uri: WEBHOOK.url, verify_token: WEBHOOK.verifyToken },
+    });
+  });
+
+  it("un 2xx sin success:true es «meta», y un 400 es «rechazo» con el code", async () => {
+    graphContesta({ success: false });
+    expect(await fijarWebhookDelNumero(CRED, ID, WEBHOOK)).toEqual({ ok: false, falla: "meta", codigo: null });
+
+    graphContesta({ error: { code: 100 } }, 400);
+    expect(await fijarWebhookDelNumero(CRED, ID, WEBHOOK)).toEqual({ ok: false, falla: "rechazo", codigo: 100 });
+  });
+
+  it("un id de forma rara o el de la plataforma no sale", async () => {
+    const fetchFalso = graphContesta({ success: true });
+    const sin = { ok: false, falla: "rechazo", codigo: null };
+
+    for (const raro of ["../me", "1234/x", "1234", "", PLATAFORMA]) {
+      expect(await fijarWebhookDelNumero(CRED, raro, WEBHOOK)).toEqual(sin);
+    }
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
+});
+
+describe("webhookPropioEs", () => {
+  it("pregunta por webhook_configuration con un GET y sin cuerpo", async () => {
+    const fetchFalso = graphContesta({ webhook_configuration: { phone_number: WEBHOOK.url }, id: ID });
+
+    expect(await webhookPropioEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: true });
+
+    const { url, init } = unicaLlamada(fetchFalso);
+    expect(url).toBe(`${BASE}/${ID}?fields=webhook_configuration`);
+    expect(init.method).toBe("GET");
+    expect(init.headers).toEqual(SIN_CUERPO);
+    expect(init.body).toBeUndefined();
+  });
+
+  it("vale el webhook propio del número (phone_number u override_callback_uri), con o sin barra al final", async () => {
+    for (const conf of [
+      { phone_number: WEBHOOK.url },
+      { phone_number: `${WEBHOOK.url}/` },
+      { override_callback_uri: WEBHOOK.url },
+    ]) {
+      graphContesta({ webhook_configuration: conf });
+      expect(await webhookPropioEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: true });
+    }
+  });
+
+  it("sin el webhook propio no vale nada: ni el de la app ni el de la WABA, ni otra URL, ni una config que no es objeto", async () => {
+    for (const conf of [
+      { application: WEBHOOK.url },
+      { whatsapp_business_account: WEBHOOK.url },
+      { phone_number: "https://dev.example.com/api/webhooks/whatsapp" },
+      { phone_number: `${WEBHOOK.url}/otro` },
+      { phone_number: 1 },
+      {},
+      null,
+      "x",
+      [WEBHOOK.url],
+    ]) {
+      graphContesta({ webhook_configuration: conf });
+      expect(await webhookPropioEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: false });
+    }
+    graphContesta({ id: ID });
+    expect(await webhookPropioEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: false });
+  });
+
+  it("si Graph no contesta bien devuelve la falla, no un «no»", async () => {
+    graphContesta({}, 500);
+    expect(await webhookPropioEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: false, falla: "meta", codigo: null });
+
+    graphContesta({ error: { code: 100 } }, 400);
+    expect(await webhookPropioEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: false, falla: "rechazo", codigo: 100 });
+
+    graphContesta([]);
+    expect(await webhookPropioEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: false, falla: "meta", codigo: null });
+  });
+
+  it("un id de forma rara o el de la plataforma no sale", async () => {
+    const fetchFalso = graphContesta({ webhook_configuration: { phone_number: WEBHOOK.url } });
+    const sin = { ok: false, falla: "rechazo", codigo: null };
+
+    for (const raro of ["../me", "1234/x", "", PLATAFORMA]) {
+      expect(await webhookPropioEs(CRED, raro, WEBHOOK.url)).toEqual(sin);
+    }
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
+
+  it("el token del apretón de manos no se anota, ni cuando Graph falla", async () => {
+    for (const [cuerpo, status] of [[{ success: true }, 200], [{}, 500], [{ error: { code: 100 } }, 400]] as const) {
+      graphContesta(cuerpo, status);
+      await fijarWebhookDelNumero(CRED, ID, WEBHOOK);
+      await webhookPropioEs(CRED, ID, WEBHOOK.url);
+    }
+
+    expect(JSON.stringify(anotado.map((s) => s.mock.calls))).not.toContain(WEBHOOK.verifyToken);
   });
 });
 

@@ -33,10 +33,11 @@ describe("el secreto de sesión de producción no llega a los jobs de PR", () =>
 });
 
 describe("el disparo a mano del post-deploy de producción", () => {
-  it("sólo admite el alias de producción: `produccion` hereda los secretos de producción", () => {
+  it("sólo admite el alias de dev: `produccion` hereda los secretos de dev", () => {
     const yml = sinComentarios("post-deploy.yml");
-    expect(yml).toContain("claimmix.vercel.app) ;;");
+    expect(yml).toContain("claimmix-dev.vercel.app) ;;");
     expect(yml).not.toContain("claimmix-qa.vercel.app) ;;");
+    expect(yml).not.toContain("claimmix-prd.vercel.app) ;;");
     expect(yml).not.toContain("claimmix.vercel.app|claimmix-qa.vercel.app");
   });
 });
@@ -60,7 +61,7 @@ describe("las vistas previas no reciben el CRON_SECRET de producción", () => {
 
 describe("el disparo a mano de deploy-checks.yml", () => {
   // `workflow_dispatch` resuelve los secretos del repositorio, que son los de
-  // producción: el único destino que les corresponde es el alias de producción.
+  // dev: el único destino que les corresponde es el alias de dev.
   // El paso se lee crudo —con sus comentarios, que no cambian el script— para
   // poder correrlo tal como lo corre el runner.
   const pasoDestino = () => {
@@ -83,9 +84,9 @@ describe("el disparo a mano de deploy-checks.yml", () => {
     expect(script()).not.toContain("${{");
   });
 
-  it("por workflow_dispatch corta todo host que no sea el alias de producción", () => {
+  it("por workflow_dispatch corta todo host que no sea el alias de dev", () => {
     expect(script()).toMatch(
-      /\[ "\$EVENTO" = "workflow_dispatch" \] && \[ "\$HOST" != "claimmix\.vercel\.app" \]/,
+      /\[ "\$EVENTO" = "workflow_dispatch" \] && \[ "\$HOST" != "claimmix-dev\.vercel\.app" \]/,
     );
   });
 
@@ -104,14 +105,16 @@ describe("el disparo a mano de deploy-checks.yml", () => {
     spawnSync("bash", ["-c", 'printf %s "$SONDA"'], { encoding: "utf8", env: { ...process.env, SONDA: "ok" } }).stdout === "ok";
 
   it.skipIf(!hayBash).each([
-    ["workflow_dispatch", "https://claimmix.vercel.app", 0],
+    ["workflow_dispatch", "https://claimmix-dev.vercel.app", 0],
     ["workflow_dispatch", "https://claimmix-qa.vercel.app", 1],
+    ["workflow_dispatch", "https://claimmix.vercel.app", 1],
+    ["workflow_dispatch", "https://claimmix-prd.vercel.app", 1],
     ["workflow_dispatch", "https://claimmix-git-rama-equipo.vercel.app", 1],
-    ["workflow_dispatch", "https://claimmix.vercel.app/ruta", 1],
-    ["deployment_status", "https://claimmix.vercel.app", 0],
+    ["workflow_dispatch", "https://claimmix-dev.vercel.app/ruta", 1],
+    ["deployment_status", "https://claimmix-dev.vercel.app", 0],
     ["deployment_status", "https://claimmix-qa.vercel.app", 0],
     ["deployment_status", "https://claimmix-git-rama-equipo.vercel.app", 1],
-    ["deployment_status", "http://claimmix.vercel.app", 1],
+    ["deployment_status", "http://claimmix-dev.vercel.app", 1],
   ])("evento %s, URL %s: sale con %i", (evento, url, esperado) => {
     const r = spawnSync("bash", ["-c", script()], {
       encoding: "utf8",

@@ -27,7 +27,7 @@ import { clientIpFromHeaders } from "@/lib/rate-limit/index";
 import { borrarCookieDeAlta } from "@/server/alta/cookie";
 import { crearInquilino, type AltaCreada } from "@/server/alta/crear-inquilino";
 import { soltarCupoDeAlta, tomarCupoDeAlta } from "@/server/alta/cupo-por-ip";
-import { avisarSiLlegoAlTope, conError, SIN_ESPACIO } from "@/server/alta/destinos";
+import { avisarSiLlegoAlTope, conError, prepararEspacio, SIN_ESPACIO } from "@/server/alta/destinos";
 import { normalizarE164, validarEmpresa } from "@/server/alta/validar";
 
 /** La ruta a la que sigue el pedido. Nunca redirige: de eso se ocupa quien la llama, fuera de todo try/catch. */
@@ -83,7 +83,7 @@ async function destinoDelAlta(formData: FormData): Promise<string> {
   // Los dos resultados dicen lo mismo: no se confirma que el número ya lo había pedido otro.
   await borrarCookieDeAlta();
   avisarSiLlegoAlTope(alta);
-  return "/bandeja?bienvenida=1";
+  return prepararEspacio(alta, "/bandeja?bienvenida=1");
 }
 
 export async function crearMiEspacio(formData: FormData): Promise<void> {

@@ -58,6 +58,8 @@ export async function GET() {
       prompt: "consent select_account",
       scope: GMAIL_SCOPES,
       state,
+      // Le sugiere a Google el correo con que se entró a ClaimMix.
+      ...(user.email ? { login_hint: user.email } : {}),
     });
 
     const respuesta = NextResponse.redirect(url);

@@ -3,7 +3,8 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enControl, type TenantContext } from "@/data/scope";
-import { gmailAccounts } from "@/lib/db/schema";
+import { gmailAccounts, tenants } from "@/lib/db/schema";
+import { SIN_SERVICIO } from "@/lib/billing/plans";
 import { firstRow } from "@/lib/db/helpers";
 import { logger } from "@/lib/observability/logger";
 import { cifrar, descifrar } from "@/lib/security/cifrado";
@@ -43,6 +44,7 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
     email: string;
     refresh_token_encrypted: string;
     enabled: boolean;
+    billing_status: string;
   }>;
   try {
     // sin-inquilino: El poller mira TODAS las casillas, de todos los inquilinos, a
@@ -54,8 +56,10 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
         email: gmailAccounts.email,
         refresh_token_encrypted: gmailAccounts.refresh_token_encrypted,
         enabled: gmailAccounts.enabled,
+        billing_status: tenants.billing_status,
       })
       .from(gmailAccounts)
+      .innerJoin(tenants, eq(tenants.id, gmailAccounts.tenant_id))
       .where(eq(gmailAccounts.enabled, true))
       .orderBy(asc(gmailAccounts.created_at));
   } catch (err) {
@@ -69,6 +73,8 @@ export async function listEnabledGmailAccounts(): Promise<GmailAccount[]> {
 
   const accounts: GmailAccount[] = [];
   for (const row of data) {
+    // Un inquilino sin servicio no recibe ni manda correo: su casilla no se lee.
+    if (SIN_SERVICIO.has(row.billing_status)) continue;
     try {
       accounts.push({
         id: row.id,

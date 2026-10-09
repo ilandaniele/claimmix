@@ -108,7 +108,7 @@ function armadas(llamada: number): Array<{ toSQL: () => { sql: string; params: u
 /** El SQL de la consulta `n` del lote que armó la llamada `llamada`. */
 const consulta = (llamada: number, n: number) => armadas(llamada)[n].toSQL();
 
-async function pintar(params: { wa?: string } = {}) {
+async function pintar(params: { wa?: string; primeros?: string } = {}) {
   const { default: Pagina } = await import("@/app/(app)/configuracion/page");
   return renderToStaticMarkup(await Pagina({ searchParams: Promise.resolve(params) }));
 }
@@ -333,6 +333,69 @@ describe("/configuracion con la prueba", () => {
 
     expect(html).not.toContain("Tu prueba y tu WhatsApp");
     expect(m.enTenantVarias).not.toHaveBeenCalled();
+  });
+});
+
+describe("/configuracion?primeros=1", () => {
+  it("un admin recién dado de alta ve arriba conectar Gmail y conectar WhatsApp", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).toContain("Primeros pasos");
+    expect(html).toContain("Conectar Gmail");
+    expect(html).toContain('href="/api/admin/gmail-accounts/connect"');
+    expect(html).toContain("Conectar WhatsApp");
+    expect(html).toContain('href="#whatsapp"');
+    expect(html).toContain('id="whatsapp"');
+    expect(html.indexOf("Primeros pasos")).toBeLessThan(html.indexOf("Tu prueba y tu WhatsApp"));
+  });
+
+  it("en inglés, con los mismos dos pasos", async () => {
+    m.locale.mockResolvedValue("en-US");
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).toContain("First steps");
+    expect(html).toContain("Connect Gmail");
+    expect(html).toContain("Connect WhatsApp");
+  });
+
+  it.each([undefined, "0"])("sin ?primeros=1 (%s) no hay pasos", async (primeros) => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar({ primeros });
+
+    expect(html).not.toContain("Primeros pasos");
+    expect(html).not.toContain("Conectar WhatsApp");
+  });
+
+  it("quien no administra no los ve: no puede conectar nada", async () => {
+    conRol("analyst");
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).not.toContain("Primeros pasos");
+    expect(html).not.toContain("Conectar Gmail");
+  });
+
+  it("sin panel de prueba queda sólo el paso de Gmail: el WhatsApp no tiene dónde conectarse", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({ autoalta: false }));
+
+    const html = await pintar({ primeros: "1" });
+
+    expect(html).toContain("Conectar Gmail");
+    expect(html).not.toContain("Conectar WhatsApp");
+  });
+
+  it("no suma consultas: el lote es el mismo", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    await pintar({ primeros: "1" });
+
+    expect(m.enTenantVarias).toHaveBeenCalledOnce();
+    expect(armadas(0)).toHaveLength(3);
   });
 });
 

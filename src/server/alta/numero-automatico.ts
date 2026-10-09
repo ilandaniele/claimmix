@@ -204,6 +204,25 @@ function porQueNo(fila: Fila): string | null {
 }
 
 /**
+ * ¿Hay todavía un número por conectar en este espacio? Para /preparando, que muestra
+ * el panel sin tener la copia de /configuracion: la base del cliente aún no existe.
+ *
+ * Neutral hacia afuera (H3): sin fila devuelve lo mismo que «pedido», true. El pedido
+ * de un número que pertenece a otro espacio no puede distinguirse de uno todavía sin
+ * pedir; quien no puede seguir se entera al probar, y `filaHabilitada` avisa «sin_fila».
+ * Acá no hay registro ni aviso: se llama en cada refresco. Si control no contesta,
+ * false y callado: se espera sin formularios en vez de tirar la pantalla.
+ */
+export async function numeroPorConectar(tenantId: string): Promise<boolean> {
+  try {
+    const fila = await leerFila(tenantId);
+    return fila === null || porQueNo(fila) === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * La fila del espacio si puede seguir; si no, null y el motivo queda en el registro.
  * Sin fila no hay nadie mirándolo (la pantalla ya dijo «lo revisamos»): se avisa.
  */

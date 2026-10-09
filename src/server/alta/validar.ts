@@ -18,7 +18,7 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const ENLACE_O_CORREO = /(:\/\/|www\.|@)/i;
 
 /** Los motivos con los que /alta vuelve a mostrarse (`?e=`): lista cerrada, cada uno con su texto. */
-export const ERRORES_DE_ALTA = ["datos", "cerrada", "intentos", "falla"] as const;
+export const ERRORES_DE_ALTA = ["datos", "cerrada", "intentos", "falla", "celular"] as const;
 export type ErrorDeAlta = (typeof ERRORES_DE_ALTA)[number];
 
 export type ResultadoDeEmpresa = { ok: true; empresa: string } | { ok: false };
@@ -47,6 +47,15 @@ export function normalizarE164(crudo: unknown): string | null {
 /** El mismo número sin el 9 que WhatsApp antepone a los celulares de Argentina. */
 function sinNueveArgentino(e164: string): string {
   return e164.startsWith("+549") ? `+54${e164.slice(4)}` : e164;
+}
+
+/**
+ * ¿Es un +54 de diez dígitos sin el 9 de los celulares? Así lo escribe quien copia el número
+ * de su línea fija o de la agenda. Sólo se rechaza con el número automático prendido, donde
+ * el número ES el WhatsApp y un fijo no sirve; si no, se acepta como siempre.
+ */
+export function faltaElNueveArgentino(e164: string): boolean {
+  return /^\+54[0-9]{10}$/.test(e164) && sinNueveArgentino(e164) === e164;
 }
 
 /** ¿Es el mismo número? «+549…» y «+54…» lo son. Un número ilegible no es igual a nada. */

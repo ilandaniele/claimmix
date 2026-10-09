@@ -361,7 +361,8 @@ qué cada una:
   el de producción, y el código de una rama sin revisar corría en Preview con el
   bearer interno de producción. Los otros tres workflows con secretos
   (`deploy-checks.yml`, `post-deploy.yml` y `barrer-trabados.yml`) ya no admiten
-  vistas previas: aceptan sólo `claimmix.vercel.app` y `claimmix-qa.vercel.app`.
+  vistas previas: aceptan sólo `claimmix-dev.vercel.app` y `claimmix-qa.vercel.app`
+  (prd tiene su propio job, con `vars.PRD_URL`).
   El valor propio de Preview todavía hay que cargarlo (ver «Waiting on you» de
   `docs/PROJECT_STATUS.md`).
 
@@ -536,7 +537,7 @@ sección usa los nombres nuevos. El estado de cada paso, y qué falta, está en
 |---|---|---|---|---|
 | dev | `claimmix` | `main` | `ep-proud-resonance`, datos reales; `BASE_POR_CLIENTE` apagado para siempre | `claimmix-dev.vercel.app` |
 | qa | `claimmix-qa` | `qa` | `ep-wispy-flower` | `claimmix-qa.vercel.app` |
-| prd | `claimmix-prd` | `prd` | proyecto de Neon `claimmix-prd` (plan Free, `aws-sa-east-1`): la base de control `neondb` y una `t_<hex>` por cliente | `claimmix-prd.vercel.app`, y `claimmix.vercel.app` después del move |
+| prd | `claimmix-prd` | `prd` | proyecto de Neon `claimmix-prd` (plan Free, `aws-sa-east-1`): la base de control `neondb` y una `t_<hex>` por cliente | `claimmix.vercel.app` desde el move del 2026-10-09; `claimmix-prd.vercel.app` sigue respondiendo |
 
 Fuera de Vercel hay dos más, y ninguno recibe tráfico: la rama `ensayo` del
 proyecto de Neon `claimmix-prd`, que sólo usa `pnpm bases:probar` (secretos `PRD_ENSAYO_DATABASE_URL` y
@@ -716,9 +717,13 @@ detrás de pruebas y de un orden fijo:
 
 ### El move del dominio, en este orden y sin plan B
 
-`claimmix.vercel.app` es hoy el alias de dev, y está impreso, embebido en webhooks y
-registrado en Google, Meta y Cloudflare. Pasa a prd sin soltarlo en ningún momento, y sólo
-cuando todo lo que apunta a él ya apunta a otro lado:
+**Hecho el 2026-10-09**, pasos 1 a 7, con el OK del dueño: Vercel aceptó mover el
+`*.vercel.app` y `vars.PRD_URL` ya es `https://claimmix.vercel.app`. Queda el paso 8. Los
+pasos siguen acá por si alguna vez hay que repetirlo.
+
+`claimmix.vercel.app` era el alias de dev, y estaba impreso, embebido en webhooks y
+registrado en Google, Meta y Cloudflare. Pasó a prd sin soltarlo en ningún momento, y sólo
+cuando todo lo que apuntaba a él ya apuntaba a otro lado:
 
 1. prd está desplegado y probado en `claimmix-prd.vercel.app` (pasos 9 a 12 de la fase 1).
 2. El alias `claimmix-dev.vercel.app` sirve el mismo deploy de dev (paso 2).
@@ -739,8 +744,7 @@ cuando todo lo que apunta a él ya apunta a otro lado:
    **Si responde un error, se aborta.** El dominio sigue en dev, prd sigue en
    `claimmix-prd.vercel.app` y decide el dueño. **Nunca `DELETE` y después `POST`**: entre
    los dos el dominio no tiene dueño, y los webhooks de Meta y de Gmail que apuntan ahí
-   caen en el vacío. Puede que Vercel no deje mover un `*.vercel.app` entre proyectos; es
-   un bloqueante abierto.
+   caen en el vacío.
 7. prd pasa `NEXT_PUBLIC_SITE_URL` a `https://claimmix.vercel.app` y redeploya;
    `vars.PRD_URL` pasa a la misma URL (`gh variable set PRD_URL --body https://claimmix.vercel.app`),
    y se comprueba con `curl -I` y un login.

@@ -7,8 +7,9 @@
  *     es del alta automática, a /bandeja, sin llegar al número automático;
  *   - quién pide sale de la sesión y de los headers, nunca del cuerpo;
  *   - el método y el código se limpian antes de pasar;
- *   - el resultado vuelve en `?wa=` y un fallo inesperado es `meta`, sin que el
- *     mensaje del error llegue al registro;
+ *   - el resultado vuelve en `?wa=`, a /configuracion con la base lista y a
+ *     /preparando si no (lo decide la sesión, nunca el formulario), y un fallo
+ *     inesperado es `meta`, sin que el mensaje del error llegue al registro;
  *   - el `redirect` va afuera de todo try/catch.
  */
 
@@ -21,6 +22,7 @@ const h = vi.hoisted(() => ({
   pedirCodigo: vi.fn(),
   verificarCodigo: vi.fn(),
   cabeceras: vi.fn(),
+  baseLista: vi.fn(),
   error: vi.fn(),
 }));
 
@@ -48,6 +50,7 @@ vi.mock("@/server/alta/numero-automatico", () => ({
   pedirCodigo: h.pedirCodigo,
   verificarCodigo: h.verificarCodigo,
 }));
+vi.mock("@/server/bases/base-lista", () => ({ baseLista: h.baseLista }));
 
 import { AppError } from "@/lib/errors";
 import { pedirCodigoDelNumero, verificarCodigoDelNumero } from "@/app/(app)/configuracion/numero-actions";
@@ -89,6 +92,7 @@ beforeEach(() => {
   h.cabeceras.mockReturnValue(new Headers({ "x-forwarded-for": "203.0.113.7" }));
   h.pedirCodigo.mockResolvedValue("codigo_enviado");
   h.verificarCodigo.mockResolvedValue("conectado");
+  h.baseLista.mockResolvedValue(true);
 });
 
 describe.each(ACCIONES)("%s: la puerta", (_nombre, accion) => {
@@ -278,5 +282,69 @@ describe.each(ACCIONES)("%s: quién pide", (_nombre, accion) => {
 
     const quien = (h.pedirCodigo.mock.calls[0] ?? h.verificarCodigo.mock.calls[0])?.[0];
     expect(quien.ip).toBeNull();
+  });
+});
+
+describe.each(ACCIONES)("%s: adónde vuelve", (_nombre, accion) => {
+  it("con la base lista, a /configuracion", async () => {
+    expect(await destinoDe(accion, formulario({ codigo: "123456" }))).toMatch(/^\/configuracion\?wa=/);
+    expect(h.baseLista).toHaveBeenCalledWith(USUARIO);
+  });
+
+  it("con la base todavía en marcha, a /preparando, y el resultado va igual en ?wa=", async () => {
+    h.baseLista.mockResolvedValue(false);
+
+    expect(await destinoDe(accion, formulario({ codigo: "123456" }))).toMatch(/^\/preparando\?wa=(codigo_enviado|conectado)$/);
+  });
+
+  it("también un fallo de Meta vuelve a /preparando mientras la base se arma", async () => {
+    h.baseLista.mockResolvedValue(false);
+    h.pedirCodigo.mockRejectedValue(new TypeError("fake-meta-token"));
+    h.verificarCodigo.mockRejectedValue(new TypeError("fake-meta-token"));
+
+    expect(await destinoDe(accion, formulario({ codigo: "123456" }))).toBe("/preparando?wa=meta");
+  });
+
+  it("la ruta se decide después del pedido, no antes", async () => {
+    const orden: string[] = [];
+    h.pedirCodigo.mockImplementation(async () => {
+      orden.push("pedido");
+      return "codigo_enviado";
+    });
+    h.verificarCodigo.mockImplementation(async () => {
+      orden.push("pedido");
+      return "conectado";
+    });
+    h.baseLista.mockImplementation(async () => {
+      orden.push("ruta");
+      return true;
+    });
+
+    await destinoDe(accion, formulario({ codigo: "123456" }));
+
+    expect(orden).toEqual(["pedido", "ruta"]);
+  });
+
+  it("si la base no contesta, a /configuracion, que ya sabe mandar a /preparando", async () => {
+    h.baseLista.mockRejectedValue(new Error("la base no contesta"));
+
+    expect(await destinoDe(accion, formulario({ codigo: "123456" }))).toMatch(/^\/configuracion\?wa=/);
+    expect(h.error).not.toHaveBeenCalled();
+  });
+
+  it("ningún campo del formulario cambia la ruta", async () => {
+    expect(await destinoDe(accion, formulario({ codigo: "123456", ruta: "/preparando", destino: "/preparando" }))).toMatch(
+      /^\/configuracion\?wa=/
+    );
+  });
+
+  it("sin la puerta pasada, no consulta la base", async () => {
+    h.requireRole.mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
+    await destinoDe(accion);
+
+    h.requireRole.mockResolvedValue(fila({ autoalta: false }));
+    await destinoDe(accion);
+
+    expect(h.baseLista).not.toHaveBeenCalled();
   });
 });

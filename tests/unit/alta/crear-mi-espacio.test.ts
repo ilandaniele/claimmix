@@ -12,7 +12,7 @@
  */
 
 import { PgDialect } from "drizzle-orm/pg-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   sesion: vi.fn(),
@@ -480,5 +480,36 @@ describe("el aviso al operador", () => {
 
     expect(h.rateLimit).toHaveBeenCalledTimes(1);
     expect(h.enviar).not.toHaveBeenCalled();
+  });
+});
+
+describe("un +54 sin el 9 de los celulares", () => {
+  const SIN_NUEVE = { ...CAMPOS_BUENOS, whatsapp: "+54 11 1234-5678" };
+
+  afterEach(() => {
+    delete process.env.ALTA_NUMERO_AUTOMATICO;
+  });
+
+  it("con el número automático prendido vuelve con «celular» y no cuenta nada", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+
+    expect(await crear(SIN_NUEVE)).toBe("/alta?e=celular");
+    expect(h.rateLimit).not.toHaveBeenCalled();
+    expect(h.enControl).not.toHaveBeenCalled();
+    expect(h.iniciarBase).not.toHaveBeenCalled();
+  });
+
+  it("con el número automático prendido, el 9 y otros países pasan", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+
+    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear({ ...CAMPOS_BUENOS, whatsapp: "+1 202-555-0123" })).toBe("/bandeja?bienvenida=1");
+  });
+
+  it("apagado el número automático se acepta como hoy y se guarda tal cual", async () => {
+    expect(await crear(SIN_NUEVE)).toBe("/bandeja?bienvenida=1");
+
+    const { params } = await llamadaALaBase();
+    expect(params.slice(4)).toContain("+541112345678");
   });
 });

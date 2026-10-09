@@ -45,9 +45,10 @@ import {
 } from "@/lib/rate-limit/index";
 import { SignUpSchema } from "@/lib/schemas/auth";
 import { PARAMETRO_DE_VUELTA, ponerCookieDeAlta } from "@/server/alta/cookie";
+import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { DURACION_DEL_TOKEN_MS, sellarToken } from "@/server/alta/token-de-registro";
 import { verificarTurnstile } from "@/server/alta/turnstile";
-import { normalizarE164, validarEmpresa } from "@/server/alta/validar";
+import { faltaElNueveArgentino, normalizarE164, validarEmpresa, type ErrorDeAlta } from "@/server/alta/validar";
 import { correoDeEnlace, correoYaTenesCuenta } from "@/server/notify/correos-de-alta";
 import { enviarCorreoDelSistema } from "@/server/notify/remitente-sistema";
 import { dominioExigeSsoEnAlgunInquilino } from "@/server/sso/usuarios";
@@ -55,15 +56,21 @@ import { dominioExigeSsoEnAlgunInquilino } from "@/server/sso/usuarios";
 const AVISO_NEUTRO = "/login?aviso=revisa_tu_correo";
 const ERROR_DE_GOOGLE = "/login?error=google_signin_failed";
 
-const conError = (e: "datos" | "intentos") => `/registro?e=${e}`;
+const conError = (e: Extract<ErrorDeAlta, "datos" | "intentos" | "celular">) => `/registro?e=${e}`;
 
 const DIA_MS = 24 * 60 * 60_000;
 
-/** Lo que piden los dos caminos: la empresa, su WhatsApp y los términos aceptados. */
-function datosDeLaEmpresa(formData: FormData): { empresa: string; numero: string } | null {
+/**
+ * Lo que piden los dos caminos: la empresa, su WhatsApp y los términos aceptados. Con el número
+ * automático prendido, un +54 sin el 9 de los celulares no se acepta y se dice por qué.
+ */
+function datosDeLaEmpresa(
+  formData: FormData,
+): { empresa: string; numero: string } | { error: "datos" | "celular" } {
   const empresa = validarEmpresa(formData.get("empresa"));
   const numero = normalizarE164(formData.get("whatsapp"));
-  if (!empresa.ok || numero === null || formData.get("terminos") !== "on") return null;
+  if (!empresa.ok || numero === null || formData.get("terminos") !== "on") return { error: "datos" };
+  if (numeroAutomatico() && faltaElNueveArgentino(numero)) return { error: "celular" };
   return { empresa: empresa.empresa, numero };
 }
 
@@ -115,7 +122,8 @@ async function destinoDelCorreo(formData: FormData): Promise<string> {
     full_name: formData.get("full_name"),
     email: formData.get("email"),
   });
-  if (!empresa || !cuenta.success) return conError("datos");
+  if ("error" in empresa) return conError(empresa.error);
+  if (!cuenta.success) return conError("datos");
 
   const headerStore = await headers();
   // La misma resolución que la ruta HTTP: prefiere `x-vercel-forwarded-for`,
@@ -161,7 +169,7 @@ export async function signUp(formData: FormData): Promise<void> {
 /** La ruta a la que sigue el pedido con Google: la URL de Google, o el error. Nunca redirige. */
 async function destinoDeGoogle(formData: FormData): Promise<string> {
   const empresa = datosDeLaEmpresa(formData);
-  if (!empresa) return conError("datos");
+  if ("error" in empresa) return conError(empresa.error);
 
   const headerStore = await headers();
   const porIp = await topePorIp(clientIpFromHeaders(headerStore));

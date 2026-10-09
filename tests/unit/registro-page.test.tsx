@@ -206,10 +206,18 @@ describe("/registro: los rechazos", () => {
   it.each([
     ["datos", /Revisá los datos/],
     ["intentos", /demasiados intentos/],
+    ["celular", /¿Es un celular\? Escribilo con el 9 después del \+54/],
   ])("%s muestra su texto", async (motivo, texto) => {
     await pintar(motivo);
 
     expect(screen.getByRole("alert")).toHaveTextContent(texto);
+  });
+
+  it("«celular» en inglés pide el 9 en inglés", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintar("celular");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/Write it with the 9 after \+54/);
   });
 
   it("un motivo que no está en la lista no muestra nada, ni se refleja", async () => {

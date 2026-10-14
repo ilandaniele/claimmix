@@ -38,6 +38,11 @@ export interface CredencialesMeta {
   phoneNumberId: string;
   accessToken: string;
   wabaId: string | null;
+  /**
+   * El `appsecret_proof` del token, sólo para la app propia de un cliente: su app puede exigir
+   * «Require App Secret» y una llamada sin prueba falla. Con la app de la plataforma no se manda.
+   */
+  prueba?: string;
 }
 
 /** Default Graph API version; override with WHATSAPP_API_VERSION. */
@@ -45,9 +50,18 @@ function apiVersion(): string {
   return process.env.WHATSAPP_API_VERSION?.trim() || "v22.0";
 }
 
-/** La URL de un recurso de Graph con la versión vigente; para quien consulta y no manda (verificar-en-meta.ts). */
-export function urlDeGraph(ruta: string): string {
-  return `${GRAPH_API_BASE}/${apiVersion()}/${ruta}`;
+/**
+ * La URL de un recurso de Graph con la versión vigente; para quien consulta y no manda (verificar-en-meta.ts).
+ * Con `prueba` suma `appsecret_proof` a la consulta. Sólo vale para `graph.facebook.com`: la descarga del CDN no es Graph.
+ */
+export function urlDeGraph(ruta: string, prueba?: string): string {
+  const url = `${GRAPH_API_BASE}/${apiVersion()}/${ruta}`;
+  return prueba ? `${url}${ruta.includes("?") ? "&" : "?"}appsecret_proof=${encodeURIComponent(prueba)}` : url;
+}
+
+/** La versión de Graph vigente; el SDK del popup de Meta tiene que cargar la misma que usa el servidor, o el flujo y las llamadas hablan versiones distintas. */
+export function versionDeGraph(): string {
+  return apiVersion();
 }
 
 /*
@@ -96,6 +110,21 @@ export function verifyMetaSignature(
   } catch {
     return false;
   }
+}
+
+/**
+ * La firma de un webhook de la app de un cliente, sobre los bytes exactos que llegaron.
+ *
+ * Sin valor por defecto: el secreto es el de esa app, nunca el de la plataforma. Con el secreto
+ * vacío o una cabecera que no sea `sha256=<64 hex>` devuelve false. Compara en tiempo constante.
+ */
+export function verificarFirmaDeApp(crudo: Uint8Array, cabecera: string | null, secreto: string): boolean {
+  if (!secreto || !cabecera?.startsWith("sha256=")) return false;
+  const recibida = cabecera.slice("sha256=".length);
+  if (!/^[0-9a-f]{64}$/i.test(recibida)) return false;
+
+  const esperada = createHmac("sha256", secreto).update(crudo).digest();
+  return timingSafeEqual(esperada, Buffer.from(recibida, "hex"));
 }
 
 // ── Webhook verification (GET handshake) ─────────────────────────────────────
@@ -150,6 +179,11 @@ export interface NormalizedWhatsAppMessage {
    * distinguirlos.
    */
   toPhoneNumberId?: string;
+  /**
+   * La WABA con que Meta dijo que venía el evento (`entry.id`). Sólo sirve para
+   * cotejarla con la fila del número: si no coincide se anota, no se descarta.
+   */
+  toWabaId?: string;
 }
 
 export interface WhatsAppMediaRef {
@@ -214,6 +248,66 @@ function messageBody(msg: CloudApiTextMessage): string {
   }
 }
 
+/** El id de un adjunto de Meta son sólo dígitos. Cualquier otra cosa no se arma en una URL de Graph. */
+const ID_DE_MEDIA = /^\d{1,32}$/;
+
+/** El host del CDN de adjuntos que documenta Meta. Que sea el único es la incógnita I34: `WHATSAPP_MEDIA_HOSTS` suma los que aparezcan sin tocar el código. */
+const HOST_DE_MEDIA = "lookaside.fbsbx.com";
+
+/** Los únicos hosts a los que se manda el token de un adjunto: el de Meta y los que sume `WHATSAPP_MEDIA_HOSTS` (separados por coma o espacio, hosts exactos). */
+function hostsDeMedia(): Set<string> {
+  const sumados = (process.env.WHATSAPP_MEDIA_HOSTS ?? "")
+    .split(/[\s,]+/)
+    .map((h) => h.toLowerCase())
+    .filter((h) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(h));
+  return new Set([HOST_DE_MEDIA, ...sumados]);
+}
+
+/** Una dirección de adjunto (absoluta, o relativa a `base`), o null si no es una URL. */
+function urlDeMedia(url: string, base?: string): URL | null {
+  try {
+    return new URL(url, base);
+  } catch {
+    return null;
+  }
+}
+
+/** Sólo https y sólo un host permitido: a cualquier otro no se le manda el token. */
+function esDeMedia(url: URL): boolean {
+  return url.protocol === "https:" && hostsDeMedia().has(url.hostname);
+}
+
+/**
+ * Pide el archivo sin dejar que `fetch` siga redirecciones solo. Una redirección vale si va a otro host
+ * permitido, un solo salto; el token sólo viaja si el host no cambió. Cualquier otra da null y se anota el host.
+ */
+async function pedirAlCdn(direccion: string, accessToken: string): Promise<Response | null> {
+  const pedir = (url: string, conToken: boolean) =>
+    fetch(url, {
+      headers: conToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      redirect: "manual",
+      signal: AbortSignal.timeout(PLAZO_DESCARGA_MEDIA_MS),
+    });
+  const esRedireccion = (res: Response) => res.status >= 300 && res.status < 400;
+
+  const primera = await pedir(direccion, true);
+  if (!esRedireccion(primera)) return primera;
+  await primera.body?.cancel().catch(() => undefined);
+
+  const destinoDelSalto = primera.headers.get("location");
+  const salto = destinoDelSalto ? urlDeMedia(destinoDelSalto, direccion) : null;
+  if (!salto || !esDeMedia(salto)) {
+    // Sólo el host: la dirección entera lleva el identificador del adjunto de quien escribió.
+    logger.error({ host: salto?.hostname ?? null }, "whatsapp.media_redireccion_no_permitida");
+    return null;
+  }
+  const segunda = await pedir(salto.href, salto.hostname === new URL(direccion).hostname);
+  if (!esRedireccion(segunda)) return segunda;
+  await segunda.body?.cancel().catch(() => undefined);
+  logger.error({ host: salto.hostname }, "whatsapp.media_redireccion_no_permitida");
+  return null;
+}
+
 /** The media a message carries, named but not yet downloaded. */
 function messageMedia(msg: CloudApiTextMessage): WhatsAppMediaRef[] {
   const part =
@@ -228,6 +322,10 @@ function messageMedia(msg: CloudApiTextMessage): WhatsAppMediaRef[] {
             : undefined;
 
   if (!part?.id) return [];
+  if (typeof part.id !== "string" || !ID_DE_MEDIA.test(part.id)) {
+    logger.warn({ tipo: msg.type }, "whatsapp.media_id_invalido");
+    return [];
+  }
 
   const mimeType = part.mime_type || "application/octet-stream";
   const named = msg.type === "document" ? msg.document?.filename?.trim() : undefined;
@@ -272,12 +370,12 @@ function extensionFor(mimeType: string): string {
  * frena la descarga, y `arrayBuffer()` no tiene forma de rendirse a la
  * mitad.
  */
-async function leerHastaElTope(
-  res: Response,
+export async function leerHastaElTope(
+  fuente: { body: ReadableStream<Uint8Array> | null },
   tope: number
 ): Promise<Buffer | "demasiado_grande" | null> {
-  if (!res.body) return null;
-  const lector = res.body.getReader();
+  if (!fuente.body) return null;
+  const lector = fuente.body.getReader();
   const partes: Buffer[] = [];
   let total = 0;
 
@@ -335,12 +433,12 @@ export type MediaDeWhatsApp =
  */
 export async function downloadWhatsAppMedia(
   mediaId: string,
-  cred: Pick<CredencialesMeta, "accessToken">
+  cred: Pick<CredencialesMeta, "accessToken" | "prueba">
 ): Promise<MediaDeWhatsApp | null> {
-  const { accessToken } = cred;
+  const { accessToken, prueba } = cred;
 
   try {
-    const metaRes = await fetch(`${GRAPH_API_BASE}/${apiVersion()}/${mediaId}`, {
+    const metaRes = await fetch(urlDeGraph(mediaId, prueba), {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(PLAZO_METADATA_MEDIA_MS),
     });
@@ -355,6 +453,12 @@ export async function downloadWhatsAppMedia(
       file_size?: number | string;
     };
     if (!meta.url) return null;
+    const destino = urlDeMedia(meta.url);
+    if (!destino || !esDeMedia(destino)) {
+      // Sólo el host: la dirección entera lleva el identificador del adjunto de quien escribió.
+      logger.error({ host: destino?.hostname ?? null }, "whatsapp.media_host_no_permitido");
+      return null;
+    }
 
     const mimeType = meta.mime_type || "application/octet-stream";
 
@@ -395,10 +499,9 @@ export async function downloadWhatsAppMedia(
       return { demasiadoGrande: true, bytes: declarado };
     }
 
-    const fileRes = await fetch(meta.url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(PLAZO_DESCARGA_MEDIA_MS),
-    });
+    // Sin `prueba`: el CDN no es Graph.
+    const fileRes = await pedirAlCdn(meta.url, accessToken);
+    if (!fileRes) return null;
     if (!fileRes.ok) {
       logger.error({ detalle: fileRes.status }, "whatsapp.media_fetch_failed");
       return null;
@@ -431,6 +534,7 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
   const root = payload as {
     object?: string;
     entry?: Array<{
+      id?: string;
       changes?: Array<{
         value?: {
           messages?: CloudApiTextMessage[];
@@ -451,6 +555,7 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
       const messages = value?.messages;
       if (!Array.isArray(messages)) continue; // status/other events → skip
       const toPhoneNumberId = value?.metadata?.phone_number_id;
+      const toWabaId = typeof entry.id === "string" && entry.id ? entry.id : undefined;
 
       const nameByWaId = new Map<string, string>();
       for (const c of value?.contacts ?? []) {
@@ -471,11 +576,114 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
           name: nameByWaId.get(msg.from),
           ...(media.length > 0 ? { media } : {}),
           ...(toPhoneNumberId ? { toPhoneNumberId } : {}),
+          ...(toPhoneNumberId && toWabaId ? { toWabaId } : {}),
         });
       }
     }
   }
 
+  return out;
+}
+
+/**
+ * Lo que cambió en la cuenta de un cliente (la WABA), no en un mensaje: un
+ * `account_update` (se desinstaló la app, se restringió la cuenta…), el veredicto de
+ * Meta sobre la revisión de la cuenta (`account_review_update`, su `decision` va en
+ * `evento`) o sobre el nombre del número (`nombreEstado`, ya en la escala de
+ * `name_status`). Llegan por el mismo webhook y con la misma firma que los mensajes.
+ *
+ * Los campos de plantillas y de capacidades del negocio no se suscriben: si llegan
+ * se parsean sólo para que quien atiende los anote y los ignore.
+ *
+ * `wabaId` es el de `waba_info` y, si falta, el `entry.id` (que en estos
+ * eventos es la WABA). `hora` son los segundos de Meta, para descartar un
+ * evento viejo que llega después de uno nuevo. Lo que no tiene una WABA con
+ * forma de id de Graph se descarta: nada de lo que sigue la va a poder buscar.
+ */
+export interface EventoDeCuenta {
+  campo:
+    | "account_update"
+    | "account_review_update"
+    | "phone_number_name_update"
+    | "business_capability_update"
+    | "template_category_update"
+    | "message_template_quality_update";
+  wabaId: string;
+  evento: string | null;
+  phoneNumberId: string | null;
+  nombreEstado: string | null;
+  hora: number | null;
+}
+
+const CAMPOS_DE_CUENTA = new Set<string>([
+  "account_update",
+  "account_review_update",
+  "phone_number_name_update",
+  "business_capability_update",
+  "template_category_update",
+  "message_template_quality_update",
+]);
+// Dígitos nada más; el mismo criterio que ID_DE_GRAPH, que no se importa porque verificar-en-meta importa este módulo.
+const ID_NUMERICO = /^\d{5,30}$/;
+
+/** Un texto corto de Meta, tal cual: sirve para comparar y anotar, no para mostrar. */
+function textoCorto(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 && v.length <= 64 ? v : null;
+}
+
+/**
+ * El webhook del nombre habla de `decision` (APPROVED, REJECTED, DEFERRED) y el nodo del
+ * número de `name_status` (APPROVED, DECLINED, PENDING_REVIEW…): lo que se guarda y lo que
+ * lee la pantalla es la escala del nodo, así que se traduce acá. Lo que no se conoce no se guarda.
+ */
+const NOMBRE_SEGUN_DECISION: ReadonlyMap<string, string> = new Map([
+  ["APPROVED", "APPROVED"],
+  ["REJECTED", "DECLINED"],
+  ["DEFERRED", "PENDING_REVIEW"],
+  ["PENDING", "PENDING_REVIEW"],
+]);
+
+export function parseEventosDeCuenta(payload: unknown): EventoDeCuenta[] {
+  const out: EventoDeCuenta[] = [];
+  const root = payload as {
+    object?: string;
+    entry?: Array<{
+      id?: unknown;
+      time?: unknown;
+      changes?: Array<{
+        field?: unknown;
+        value?: {
+          event?: unknown;
+          decision?: unknown;
+          phone_number_id?: unknown;
+          waba_info?: { waba_id?: unknown };
+        };
+      }>;
+    }>;
+  };
+  if (root?.object !== "whatsapp_business_account" || !Array.isArray(root.entry)) return out;
+
+  for (const entry of root.entry) {
+    const hora = typeof entry?.time === "number" && Number.isFinite(entry.time) ? entry.time : null;
+    for (const change of entry?.changes ?? []) {
+      const campo = change?.field;
+      if (typeof campo !== "string" || !CAMPOS_DE_CUENTA.has(campo)) continue;
+      const value = change.value;
+      const waba = [value?.waba_info?.waba_id, entry.id].find((v): v is string => typeof v === "string" && ID_NUMERICO.test(v));
+      if (!waba) continue;
+      const idDelNumero = value?.phone_number_id;
+      // La `decision` de la revisión de la cuenta no es la del nombre: no se traduce a `name_status`.
+      const esRevision = campo === "account_review_update";
+      out.push({
+        campo: campo as EventoDeCuenta["campo"],
+        wabaId: waba,
+        evento: textoCorto(esRevision ? value?.decision : value?.event),
+        phoneNumberId: typeof idDelNumero === "string" && ID_NUMERICO.test(idDelNumero) ? idDelNumero : null,
+        nombreEstado: esRevision ? null : (NOMBRE_SEGUN_DECISION.get(textoCorto(value?.decision) ?? "") ?? null),
+        hora,
+      });
+    }
+  }
   return out;
 }
 
@@ -485,6 +693,18 @@ export interface SendResult {
   ok: boolean;
   messageId?: string;
   error?: string;
+  /** El `error.code` que Graph contestó, si el cuerpo lo traía: dice si falla la cuenta del cliente (token, pago) y no el mensaje. */
+  codigoMeta?: number;
+}
+
+/** El código de error de un cuerpo de Graph; null si no es JSON o no lo trae. */
+function codigoDeGraph(cuerpo: string): number | null {
+  try {
+    const codigo = (JSON.parse(cuerpo) as { error?: { code?: unknown } } | null)?.error?.code;
+    return typeof codigo === "number" && Number.isInteger(codigo) ? codigo : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -499,12 +719,12 @@ export interface SendResult {
 async function enviarAMeta(
   to: string,
   contenido: Record<string, unknown>,
-  cred: Pick<CredencialesMeta, "accessToken" | "phoneNumberId">
+  cred: Pick<CredencialesMeta, "accessToken" | "phoneNumberId" | "prueba">
 ): Promise<SendResult> {
-  const { accessToken, phoneNumberId } = cred;
+  const { accessToken, phoneNumberId, prueba } = cred;
 
   try {
-    const res = await fetch(`${GRAPH_API_BASE}/${apiVersion()}/${phoneNumberId}/messages`, {
+    const res = await fetch(urlDeGraph(`${phoneNumberId}/messages`, prueba), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -521,7 +741,12 @@ async function enviarAMeta(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
-      return { ok: false, error: `Cloud API ${res.status}: ${errText.slice(0, 300)}` };
+      const codigoMeta = codigoDeGraph(errText);
+      return {
+        ok: false,
+        error: `Cloud API ${res.status}: ${errText.slice(0, 300)}`,
+        ...(codigoMeta === null ? {} : { codigoMeta }),
+      };
     }
     const data = (await res.json()) as { messages?: Array<{ id?: string }> };
     return { ok: true, messageId: data.messages?.[0]?.id };
@@ -543,7 +768,7 @@ async function enviarAMeta(
 export async function sendWhatsAppText(
   to: string,
   body: string,
-  cred: Pick<CredencialesMeta, "accessToken" | "phoneNumberId">
+  cred: Pick<CredencialesMeta, "accessToken" | "phoneNumberId" | "prueba">
 ): Promise<SendResult> {
   return enviarAMeta(to, { type: "text", text: { preview_url: false, body: body.slice(0, 4096) } }, cred);
 }
@@ -586,7 +811,7 @@ export async function quedaCupoDePlantilla(tenantId: string): Promise<boolean> {
  * de quién es y si cuenta contra el tope de la prueba. Lo arma
  * `credencialesWhatsApp`, sin otra consulta.
  */
-export interface CredencialesDePlantilla extends Pick<CredencialesMeta, "accessToken" | "phoneNumberId"> {
+export interface CredencialesDePlantilla extends Pick<CredencialesMeta, "accessToken" | "phoneNumberId" | "prueba"> {
   tenantId: string;
   enPrueba: boolean;
   vencida: boolean;
@@ -671,9 +896,9 @@ const cacheDeEstadoDePlantilla = new Map<string, { valor: EstadoDePlantilla; ven
 export async function estadoDePlantilla(
   nombre: string,
   idioma: string,
-  cred: Pick<CredencialesMeta, "accessToken" | "wabaId">
+  cred: Pick<CredencialesMeta, "accessToken" | "wabaId" | "prueba">
 ): Promise<EstadoDePlantilla> {
-  const { wabaId, accessToken } = cred;
+  const { wabaId, accessToken, prueba } = cred;
   if (!wabaId) return "no_disponible";
 
   const clave = `${wabaId}:${nombre}:${idioma}`;
@@ -686,7 +911,7 @@ export async function estadoDePlantilla(
   };
 
   try {
-    const url = `${GRAPH_API_BASE}/${apiVersion()}/${wabaId}/message_templates?name=${encodeURIComponent(nombre)}&fields=name,status,language`;
+    const url = urlDeGraph(`${wabaId}/message_templates?name=${encodeURIComponent(nombre)}&fields=name,status,language`, prueba);
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(PLAZO_ESTADO_PLANTILLA_MS),

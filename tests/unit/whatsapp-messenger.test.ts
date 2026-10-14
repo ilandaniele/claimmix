@@ -30,9 +30,16 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   return { ...real, eq: vi.fn((col: unknown, val: unknown) => ({ col, val })) };
 });
 
-const { mockLogError, mockLogInfo } = vi.hoisted(() => ({
+const { mockLogError, mockLogInfo, mockAfter } = vi.hoisted(() => ({
   mockLogError: vi.fn(),
   mockLogInfo: vi.fn(),
+  mockAfter: vi.fn(),
+}));
+
+// `after` sólo corre dentro de un pedido: acá se junta lo que se agenda, o tira como fuera de uno.
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: mockAfter,
 }));
 vi.mock("@/lib/observability/logger", () => ({
   logger: { error: mockLogError, warn: vi.fn(), info: mockLogInfo, debug: vi.fn() },
@@ -48,6 +55,15 @@ vi.mock("@/server/whatsapp/numeros", () => ({
   credencialesWhatsApp: vi.fn(),
   avisarSinNumero: vi.fn(),
 }));
+
+// Lo que el mensajero hace con un rechazo de la cuenta: se prueba que llame, no lo que hace el panel ni el aviso.
+vi.mock("@/server/alta/panel-operador", () => ({
+  wabaEnFalla: vi.fn().mockResolvedValue(undefined),
+  primeraRespuestaDeApp: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/server/alta/aviso-operador", () => ({ avisarNumeroEnRevision: vi.fn().mockResolvedValue(undefined) }));
+// La salud de la WABA que confirma un 131031: lo que contesta Graph se arma en cada test.
+vi.mock("@/server/whatsapp/app-del-cliente", () => ({ leerSalud: vi.fn() }));
 
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),
@@ -69,6 +85,9 @@ import {
 import { db } from "@/lib/db";
 import { sendWhatsAppText, sendWhatsAppTemplate, olvidarEstadoDePlantilla } from "@/server/whatsapp/cloud-api";
 import { avisarSinNumero, credencialesWhatsApp } from "@/server/whatsapp/numeros";
+import { primeraRespuestaDeApp, wabaEnFalla } from "@/server/alta/panel-operador";
+import { avisarNumeroEnRevision } from "@/server/alta/aviso-operador";
+import { leerSalud } from "@/server/whatsapp/app-del-cliente";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
@@ -92,6 +111,7 @@ const CRED = {
   wabaId: "654321",
   autoalta: false,
   vencida: false,
+  propia: true,
 };
 
 let inserted: Record<string, unknown>[];
@@ -952,6 +972,402 @@ describe("whatsappMessenger — el resultado del envío pasa por logger (G29)", 
       ([, msg]) => msg === "whatsapp.messenger.send_failed"
     )!;
     expect(campos).not.toHaveProperty("detalle");
+  });
+});
+
+describe("whatsappMessenger — el rechazo que es de la cuenta y no del mensaje", () => {
+  const rechazo = (codigoMeta?: number) =>
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: "Cloud API",
+      ...(codigoMeta === undefined ? {} : { codigoMeta }),
+    });
+
+  beforeEach(() => {
+    (wabaEnFalla as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (avisarNumeroEnRevision as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  });
+
+  it("con el token vencido (190) deja la WABA en falla y avisa al operador", async () => {
+    rechazo(190);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).toHaveBeenCalledWith(TENANT, "token_vencido");
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("token_vencido", TENANT);
+  });
+
+  it.each([190, 131042])("un espacio con la WABA de la plataforma (%s) no recibe el aviso de «volvé a conectar» ni se marca en falla", async (codigo) => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue({ ...CRED, propia: false });
+    rechazo(codigo);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+    expect(updated).toEqual([{ id: "outbound-1", status: "failed" }]);
+  });
+
+  it("con el pago pendiente (131042) sólo avisa: la conexión sigue en pie", async () => {
+    rechazo(131042);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("pago_pendiente", TENANT);
+  });
+
+  it("un rechazo de otro código no toca la cuenta ni avisa", async () => {
+    rechazo(131047);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+  });
+
+  it("un rechazo sin código tampoco", async () => {
+    rechazo();
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+  });
+
+  it("un envío que salió bien no mira la cuenta", async () => {
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+  });
+
+  it("si marcar la falla tira, lo anota y el envío igual queda como failed sin romper al llamador", async () => {
+    rechazo(190);
+    (wabaEnFalla as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("42P01"));
+
+    await expect(send("confirmation_received", { caseId: CASE })).resolves.toBeUndefined();
+
+    expect(updated).toEqual([{ id: "outbound-1", status: "failed" }]);
+    expect(mockLogError).toHaveBeenCalledWith(
+      { tenantId: TENANT, error: "Error" },
+      "whatsapp.messenger.efecto_error"
+    );
+  });
+
+  it("si el aviso al operador tira, pasa lo mismo", async () => {
+    rechazo(131042);
+    (avisarNumeroEnRevision as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("rate"));
+
+    await expect(send("confirmation_received", { caseId: CASE })).resolves.toBeUndefined();
+
+    expect(mockLogError).toHaveBeenCalledWith(
+      { tenantId: TENANT, error: "Error" },
+      "whatsapp.messenger.efecto_error"
+    );
+  });
+});
+
+describe("whatsappMessenger — el rechazo de la cuenta con la app propia", () => {
+  const APP = { ...CRED, prueba: "fake-proof", primeraRespuestaPendiente: false };
+  const PENDIENTE = { ...APP, primeraRespuestaPendiente: true };
+  const rechazo = (codigoMeta: number) =>
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: "Cloud API", codigoMeta });
+  const salud = (puedeEnviar: string) =>
+    (leerSalud as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, valor: { puedeEnviar, motivos: [] } });
+
+  beforeEach(() => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(APP);
+    (wabaEnFalla as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (avisarNumeroEnRevision as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    // Fuera de un pedido `after` tira, como en un script o un test: el mensajero espera la confirmación.
+    mockAfter.mockReset();
+    mockAfter.mockImplementation(() => {
+      throw new Error("after fuera de un pedido");
+    });
+  });
+
+  it("el token vencido (190) deja la falla y avisa, como con Embedded Signup", async () => {
+    rechazo(190);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).toHaveBeenCalledWith(TENANT, "token_vencido");
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("token_vencido", TENANT);
+  });
+
+  it("la WABA restringida (368) queda en falla y se avisa", async () => {
+    rechazo(368);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).toHaveBeenCalledWith(TENANT, "waba_restringida");
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("waba_restringida", TENANT);
+  });
+
+  it("con Embedded Signup el 368 sólo avisa: el popup no tiene texto para esa falla", async () => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(CRED);
+    rechazo(368);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("waba_restringida", TENANT);
+  });
+
+  it("el pago pendiente (131042) en la primera respuesta deja la falla (E8)", async () => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(PENDIENTE);
+    rechazo(131042);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).toHaveBeenCalledWith(TENANT, "pago_pendiente");
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("pago_pendiente", TENANT);
+  });
+
+  it("después de la primera respuesta el 131042 sólo avisa: la conexión ya anduvo", async () => {
+    rechazo(131042);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("pago_pendiente", TENANT);
+  });
+
+  it("el 131031 se confirma con la salud de la WABA, firmada con la prueba del cliente, y BLOQUEADA deja la falla (R27)", async () => {
+    rechazo(131031);
+    salud("BLOCKED");
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(leerSalud).toHaveBeenCalledWith({ accessToken: "test-token", wabaId: "654321", prueba: "fake-proof" }, "654321");
+    expect(wabaEnFalla).toHaveBeenCalledWith(TENANT, "waba_bloqueada");
+    expect(avisarNumeroEnRevision).toHaveBeenCalledWith("waba_bloqueada", TENANT);
+  });
+
+  it.each(["AVAILABLE", "LIMITED"])("el 131031 con la WABA en %s no la toca ni avisa: era el PIN u otra cosa", async (estado) => {
+    rechazo(131031);
+    salud(estado);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(leerSalud).toHaveBeenCalledTimes(1);
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+  });
+
+  it("si Graph no contesta la salud, el 131031 no cambia nada", async () => {
+    rechazo(131031);
+    (leerSalud as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, falla: "red" });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(wabaEnFalla).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+  });
+
+  it("dentro de un pedido la confirmación va en after(): el envío no espera a Graph", async () => {
+    const agendadas: Array<() => Promise<void>> = [];
+    mockAfter.mockImplementation((cb: () => Promise<void>) => void agendadas.push(cb));
+    rechazo(131031);
+    salud("BLOCKED");
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(agendadas).toHaveLength(1);
+    expect(leerSalud).not.toHaveBeenCalled();
+    await agendadas[0]();
+    expect(wabaEnFalla).toHaveBeenCalledWith(TENANT, "waba_bloqueada");
+  });
+
+  it("también con la plantilla de reapertura", async () => {
+    (sendWhatsAppTemplate as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: "Cloud API", codigoMeta: 131031 });
+    salud("BLOCKED");
+
+    await send("missing_information_request", { caseId: CASE, missingFields: ["policy_number"], porPlantilla: true });
+
+    expect(wabaEnFalla).toHaveBeenCalledWith(TENANT, "waba_bloqueada");
+  });
+
+  describe("con Embedded Signup (sin app propia)", () => {
+    beforeEach(() => (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(CRED));
+
+    it("el 131031 también se confirma con la salud de la WABA, y BLOQUEADA sólo avisa: el popup no tiene texto para la falla (R27)", async () => {
+      rechazo(131031);
+      salud("BLOCKED");
+
+      await send("confirmation_received", { caseId: CASE });
+
+      expect(leerSalud).toHaveBeenCalledWith({ accessToken: "test-token", wabaId: "654321", prueba: undefined }, "654321");
+      expect(wabaEnFalla).not.toHaveBeenCalled();
+      expect(avisarNumeroEnRevision).toHaveBeenCalledWith("waba_bloqueada", TENANT);
+    });
+
+    it.each(["AVAILABLE", "LIMITED"])("el 131031 con la WABA en %s no avisa: era el PIN u otra cosa", async (estado) => {
+      rechazo(131031);
+      salud(estado);
+
+      await send("confirmation_received", { caseId: CASE });
+
+      expect(leerSalud).toHaveBeenCalledTimes(1);
+      expect(wabaEnFalla).not.toHaveBeenCalled();
+      expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+    });
+
+    it("si Graph no contesta la salud, el 131031 no avisa", async () => {
+      rechazo(131031);
+      (leerSalud as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, falla: "red" });
+
+      await send("confirmation_received", { caseId: CASE });
+
+      expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+    });
+  });
+
+  it("con la WABA de la plataforma no hay nada que confirmar", async () => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue({ ...CRED, propia: false });
+    rechazo(131031);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(leerSalud).not.toHaveBeenCalled();
+    expect(avisarNumeroEnRevision).not.toHaveBeenCalled();
+  });
+
+  it("si la confirmación tira, lo anota y el envío queda como failed sin romper al llamador", async () => {
+    rechazo(131031);
+    (leerSalud as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("red"));
+
+    await expect(send("confirmation_received", { caseId: CASE })).resolves.toBeUndefined();
+
+    expect(updated).toEqual([{ id: "outbound-1", status: "failed" }]);
+    expect(mockLogError).toHaveBeenCalledWith(
+      { tenantId: TENANT, error: "Error" },
+      "whatsapp.messenger.efecto_error"
+    );
+  });
+});
+
+describe("whatsappMessenger — la primera respuesta de la app propia", () => {
+  const PENDIENTE = { ...CRED, prueba: "fake-proof", primeraRespuestaPendiente: true };
+  const conId = { ok: true, messageId: "wamid.fake-1" };
+
+  beforeEach(() => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(PENDIENTE);
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue(conId);
+    (sendWhatsAppTemplate as ReturnType<typeof vi.fn>).mockResolvedValue(conId);
+    (primeraRespuestaDeApp as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    // Fuera de un pedido `after` tira, como en un script o un test: el mensajero espera la marca.
+    mockAfter.mockReset();
+    mockAfter.mockImplementation(() => {
+      throw new Error("after fuera de un pedido");
+    });
+  });
+
+  it("el texto que Meta acepta marca la primera respuesta del espacio", async () => {
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(primeraRespuestaDeApp).toHaveBeenCalledTimes(1);
+    expect(primeraRespuestaDeApp).toHaveBeenCalledWith(TENANT);
+  });
+
+  it("la plantilla de reapertura que Meta acepta también la marca", async () => {
+    await send("missing_information_request", { caseId: CASE, missingFields: ["policy_number"], porPlantilla: true });
+
+    expect(primeraRespuestaDeApp).toHaveBeenCalledTimes(1);
+    expect(primeraRespuestaDeApp).toHaveBeenCalledWith(TENANT);
+  });
+
+  it("dentro de un pedido va en after(): no demora la respuesta", async () => {
+    const agendadas: Array<() => Promise<void>> = [];
+    mockAfter.mockImplementation((cb: () => Promise<void>) => void agendadas.push(cb));
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(agendadas).toHaveLength(1);
+    expect(primeraRespuestaDeApp).not.toHaveBeenCalled();
+    await agendadas[0]();
+    expect(primeraRespuestaDeApp).toHaveBeenCalledWith(TENANT);
+  });
+
+  it("si Meta rechaza el envío no la marca: todavía no hay respuesta probada", async () => {
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: "Cloud API" });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(primeraRespuestaDeApp).not.toHaveBeenCalled();
+  });
+
+  it("si Meta acepta pero no devuelve id de mensaje, tampoco", async () => {
+    (sendWhatsAppText as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(primeraRespuestaDeApp).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ya marcada", { ...CRED, prueba: "fake-proof", primeraRespuestaPendiente: false }],
+    ["Embedded Signup", CRED],
+  ])("%s: no vuelve a escribir en la base", async (_cual, cred) => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(cred);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect(primeraRespuestaDeApp).not.toHaveBeenCalled();
+    expect(mockAfter).not.toHaveBeenCalled();
+  });
+
+  it("si marcarla tira, lo anota y el envío queda como sent sin romper al llamador", async () => {
+    (primeraRespuestaDeApp as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("42P01"));
+
+    await expect(send("confirmation_received", { caseId: CASE })).resolves.toBeUndefined();
+
+    expect(updated).toEqual([{ id: "outbound-1", status: "sent" }]);
+    expect(mockLogError).toHaveBeenCalledWith(
+      { tenantId: TENANT, error: "Error" },
+      "whatsapp.messenger.primera_respuesta_fallo"
+    );
+  });
+
+  it("devuelve true al llamador aunque la marca falle: el mensaje salió", async () => {
+    (primeraRespuestaDeApp as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
+
+    const ok = await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "confirmation_received",
+      data: { caseId: CASE },
+    });
+
+    expect(ok).toBe(true);
+  });
+});
+
+describe("whatsappMessenger — la prueba del secreto de la app propia llega a Graph (R5)", () => {
+  const propia = { ...CRED, prueba: "fake-proof-0123", primeraRespuestaPendiente: false };
+
+  it("el texto sale con la credencial entera, prueba incluida", async () => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(propia);
+
+    await send("confirmation_received", { caseId: CASE });
+
+    expect((sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0][2]).toBe(propia);
+  });
+
+  it("la plantilla de reapertura también", async () => {
+    (credencialesWhatsApp as ReturnType<typeof vi.fn>).mockResolvedValue(propia);
+
+    await send("missing_information_request", { caseId: CASE, missingFields: ["policy_number"], porPlantilla: true });
+
+    expect((sendWhatsAppTemplate as ReturnType<typeof vi.fn>).mock.calls[0][4]).toBe(propia);
+  });
+
+  it("con Embedded Signup no se inventa una prueba", async () => {
+    await send("confirmation_received", { caseId: CASE });
+
+    expect((sendWhatsAppText as ReturnType<typeof vi.fn>).mock.calls[0][2]).not.toHaveProperty("prueba");
   });
 });
 

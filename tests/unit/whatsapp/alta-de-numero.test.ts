@@ -16,13 +16,13 @@ vi.mock("node:crypto", async (importOriginal) => {
   return { ...real, randomInt: randomIntFalso, default: { ...real, randomInt: randomIntFalso } };
 });
 
+import { ID_DE_META } from "@/lib/meta-ids";
 import { logger } from "@/lib/observability/logger";
 import {
   agregarNumero,
   clasificar,
   codigoYaVerificado,
   fijarWebhookDelNumero,
-  ID_GUARDABLE,
   numeroYaRegistrado,
   partirNumero,
   pedirCodigoAMeta,
@@ -100,14 +100,14 @@ describe("agregarNumero", () => {
     }
   });
 
-  it("un id de dígitos fuera de lo que guarda la base vuelve igual, para que quien guarda lo descarte con ID_GUARDABLE", async () => {
+  it("un id de dígitos fuera de lo que guarda la base vuelve igual, para que quien guarda lo descarte con ID_DE_META", async () => {
     graphContesta({ id: "12345" });
     expect(await agregarNumero(CRED, { cc: "54", numero: "92915550000" }, "Veltra")).toEqual({ ok: true, valor: "12345" });
-    expect(ID_GUARDABLE.test("12345")).toBe(false);
-    expect(ID_GUARDABLE.test("123456")).toBe(true);
-    expect(ID_GUARDABLE.test("1".repeat(20))).toBe(true);
-    expect(ID_GUARDABLE.test("1".repeat(21))).toBe(false);
-    expect(ID_GUARDABLE.test("12345a")).toBe(false);
+    expect(ID_DE_META.test("12345")).toBe(false);
+    expect(ID_DE_META.test("123456")).toBe(true);
+    expect(ID_DE_META.test("1".repeat(20))).toBe(true);
+    expect(ID_DE_META.test("1".repeat(21))).toBe(false);
+    expect(ID_DE_META.test("12345a")).toBe(false);
   });
 
   it("sin nombre o con una WABA de forma rara no llama a Graph", async () => {
@@ -255,6 +255,37 @@ describe("registrarNumero", () => {
   it("un 200 sin success:true es «meta»", async () => {
     graphContesta({ success: false });
     expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "meta", codigo: null });
+  });
+
+  it("con un PIN dado manda ese PIN y no sortea otro", async () => {
+    const fetchFalso = graphContesta({ success: true });
+
+    expect(await registrarNumero(CRED, ID, "012345")).toEqual({ ok: true, valor: true });
+
+    expect(randomIntFalso).not.toHaveBeenCalled();
+    const { url, init } = unicaLlamada(fetchFalso);
+    expect(url).toBe(`${BASE}/${ID}/register`);
+    expect(JSON.parse(init.body as string)).toEqual({ messaging_product: "whatsapp", pin: "012345" });
+  });
+
+  it("un PIN que no son seis dígitos no sale, ni se reemplaza por uno al azar", async () => {
+    const fetchFalso = graphContesta({ success: true });
+
+    for (const pin of ["", "12345", "1234567", "12345a", "123 45", "000042\n"]) {
+      expect(await registrarNumero(CRED, ID, pin)).toEqual({ ok: false, falla: "rechazo", codigo: null });
+    }
+
+    expect(fetchFalso).not.toHaveBeenCalled();
+    expect(randomIntFalso).not.toHaveBeenCalled();
+  });
+
+  it("el PIN dado no llega al log, ni cuando Meta lo rechaza", async () => {
+    graphContesta({ error: { message: "pin 654321", code: 133005 } }, 400);
+
+    const r = await registrarNumero(CRED, ID, "654321");
+
+    expect(r).toEqual({ ok: false, falla: "rechazo", codigo: 133005 });
+    expect(JSON.stringify([...anotado.map((s) => s.mock.calls), r])).not.toContain("654321");
   });
 });
 
@@ -411,6 +442,11 @@ describe("clasificar", () => {
     }
   });
 
+  it("133008 y 133009 (demasiados intentos de PIN) no cambian el camino de la plataforma: siguen siendo un rechazo", () => {
+    // Sólo la WABA propia los trata como espera, en `fallaDeGraph`: acá los comparten los dos caminos.
+    for (const codigo of [133008, 133009]) expect(clasificar(400, codigo)).toBe("rechazo");
+  });
+
   it("sin respuesta o con 5xx es «meta»; cualquier otro 4xx es «rechazo»", () => {
     expect(clasificar(null, null)).toBe("meta");
     expect(clasificar(500, null)).toBe("meta");
@@ -496,5 +532,106 @@ describe("partirNumero", () => {
     ]) {
       expect(partirNumero(raro)).toBeNull();
     }
+  });
+});
+
+describe("el appsecret_proof de la app propia (R5)", () => {
+  const PRUEBA = "b".repeat(64);
+  const CON_PRUEBA: CredencialDeAlta = { ...CRED, prueba: PRUEBA };
+  const CONSULTA = `appsecret_proof=${PRUEBA}`;
+
+  /** Cada llamada de Graph de este módulo, con su URL sin prueba y lo que contesta Graph. */
+  const llamadas: Array<[string, (c: CredencialDeAlta) => Promise<unknown>, string, unknown]> = [
+    ["agregarNumero", (c) => agregarNumero(c, { cc: "54", numero: "92915550000" }, "Veltra"), `${WABA}/phone_numbers`, { id: ID }],
+    ["pedirCodigoAMeta", (c) => pedirCodigoAMeta(c, ID, "SMS", "es-AR"), `${ID}/request_code`, { success: true }],
+    ["verificarCodigoEnMeta", (c) => verificarCodigoEnMeta(c, ID, "123456"), `${ID}/verify_code`, { success: true }],
+    ["registrarNumero", (c) => registrarNumero(c, ID), `${ID}/register`, { success: true }],
+    ["registrarNumero con PIN", (c) => registrarNumero(c, ID, "654321"), `${ID}/register`, { success: true }],
+    ["fijarWebhookDelNumero", (c) => fijarWebhookDelNumero(c, ID, WEBHOOK), ID, { success: true }],
+    ["codigoYaVerificado", (c) => codigoYaVerificado(c, ID), `${ID}?fields=code_verification_status`, { code_verification_status: "VERIFIED" }],
+    ["numeroYaRegistrado", (c) => numeroYaRegistrado(c, ID), `${ID}?fields=status,platform_type`, { status: "CONNECTED" }],
+    ["webhookPropioEs", (c) => webhookPropioEs(c, ID, WEBHOOK.url), `${ID}?fields=webhook_configuration`, { webhook_configuration: {} }],
+  ];
+
+  it.each(llamadas)("%s sin prueba pide la URL de siempre", async (_nombre, llamar, ruta, cuerpo) => {
+    const fetchFalso = graphContesta(cuerpo);
+
+    await llamar(CRED);
+
+    expect(unicaLlamada(fetchFalso).url).toBe(`${BASE}/${ruta}`);
+  });
+
+  it.each(llamadas)("%s con prueba la manda en la consulta si es un GET y en el cuerpo si es un POST (Q24)", async (_nombre, llamar, ruta, cuerpo) => {
+    const fetchFalso = graphContesta(cuerpo);
+
+    await llamar(CON_PRUEBA);
+
+    const { url, init } = unicaLlamada(fetchFalso);
+    if (init.method === "POST") {
+      expect(url).toBe(`${BASE}/${ruta}`);
+      expect(JSON.parse(init.body as string).appsecret_proof).toBe(PRUEBA);
+    } else {
+      expect(url).toBe(`${BASE}/${ruta}${ruta.includes("?") ? "&" : "?"}${CONSULTA}`);
+      expect(init.body).toBeUndefined();
+    }
+    expect(url).not.toContain("fake-access-token");
+    expect(JSON.stringify(init.headers)).not.toContain(PRUEBA);
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer fake-access-token");
+  });
+
+  it("el cuerpo de register con prueba es el producto, el PIN y la prueba; sin ella, sólo el producto y el PIN", async () => {
+    const fetchFalso = graphContesta({ success: true });
+
+    await registrarNumero(CON_PRUEBA, ID, "654321");
+    await registrarNumero(CRED, ID, "654321");
+
+    const [con, sin] = fetchFalso.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(JSON.parse(con[1].body as string)).toEqual({ messaging_product: "whatsapp", pin: "654321", appsecret_proof: PRUEBA });
+    expect(JSON.parse(sin[1].body as string)).toEqual({ messaging_product: "whatsapp", pin: "654321" });
+    expect(con[1].method).toBe("POST");
+  });
+
+  it("de un error de Graph con subcódigo, vuelve el subcódigo; sin él, la falla queda como siempre (H11)", async () => {
+    graphContesta({ error: { code: 190, error_subcode: 463 } }, 401);
+    expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "rechazo", codigo: 190, subcodigo: 463 });
+
+    graphContesta({ error: { code: 190 } }, 401);
+    expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "rechazo", codigo: 190 });
+  });
+
+  it("el PIN y el código no viajan en la URL, tampoco con prueba", async () => {
+    const fetchFalso = graphContesta({ success: true });
+
+    await registrarNumero(CON_PRUEBA, ID, "654321");
+    await verificarCodigoEnMeta(CON_PRUEBA, ID, "123456");
+
+    for (const [url] of fetchFalso.mock.calls as unknown as Array<[string]>) {
+      expect(url).not.toContain("654321");
+      expect(url).not.toContain("123456");
+    }
+  });
+
+  it("un id de forma rara o el de la plataforma no sale aunque haya prueba", async () => {
+    const fetchFalso = graphContesta({ success: true });
+
+    expect(await registrarNumero(CON_PRUEBA, "../x")).toEqual({ ok: false, falla: "rechazo", codigo: null });
+    expect(await registrarNumero(CON_PRUEBA, PLATAFORMA)).toEqual({ ok: false, falla: "rechazo", codigo: null });
+    expect(await agregarNumero({ ...CON_PRUEBA, wabaId: "../x" }, { cc: "54", numero: "92915550000" }, "Veltra")).toEqual({
+      ok: false,
+      falla: "rechazo",
+      codigo: null,
+    });
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
+
+  it("de un error de Graph no queda la prueba en el log ni en lo que vuelve", async () => {
+    graphContesta({ error: { message: `appsecret_proof ${PRUEBA} inválido`, code: 190 } }, 400);
+
+    const r = await registrarNumero(CON_PRUEBA, ID);
+
+    expect(r).toEqual({ ok: false, falla: "rechazo", codigo: 190 });
+    const todo = JSON.stringify([...anotado.map((s) => s.mock.calls), r]);
+    expect(todo).not.toContain(PRUEBA);
+    expect(todo).not.toContain("fake-access-token");
   });
 });

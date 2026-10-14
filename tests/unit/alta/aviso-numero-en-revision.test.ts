@@ -20,7 +20,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/auth/require-operator", () => ({ operatorEmails: h.operadores }));
+vi.mock("@/lib/auth/operator-emails", () => ({ operatorEmails: h.operadores }));
 vi.mock("@/server/notify/remitente-sistema", () => ({
   remitenteDelSistema: h.remitente,
   enviarCorreoDelSistema: h.enviar,
@@ -51,7 +51,44 @@ const MOTIVOS: MotivoDeRevision[] = [
   "incierto",
   "de_otro_ambiente",
   "sin_webhook",
+  "canje",
+  "suscripcion",
+  "registro",
+  "revocada",
+  "plantilla",
+  "numero_ocupado",
+  "cupo_semanal",
+  "token_vencido",
+  "pago_pendiente",
+  "nombre_rechazado",
+  "waba_huerfana",
+  "cuenta_restringida",
+  "secreto_invalido",
+  "waba_restringida",
+  "waba_bloqueada",
+  "recordatorio",
+  "baja_fallida",
 ];
+
+/** Los motivos de la WABA propia y de la app propia que tienen un aviso por espacio y día (todos menos el tope semanal). */
+const DE_LA_WABA_PROPIA_POR_ESPACIO = [
+  "canje",
+  "suscripcion",
+  "registro",
+  "revocada",
+  "plantilla",
+  "numero_ocupado",
+  "token_vencido",
+  "pago_pendiente",
+  "nombre_rechazado",
+  "waba_huerfana",
+  "cuenta_restringida",
+  "secreto_invalido",
+  "waba_restringida",
+  "waba_bloqueada",
+  "recordatorio",
+  "baja_fallida",
+] as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -96,6 +133,7 @@ describe("avisarNumeroEnRevision", () => {
     const claves = [
       "alta.avisoNumero.asunto",
       "alta.avisoNumero.texto",
+      "alta.avisoNumero.dosPasos",
       ...MOTIVOS.map((m) => `alta.avisoNumero.motivo.${m}` as const),
     ] as const;
     for (const clave of claves) {
@@ -103,6 +141,13 @@ describe("avisarNumeroEnRevision", () => {
       expect(enUS[clave], `en-US le falta '${clave}'`).toBeTruthy();
       expect(enUS[clave]).not.toBe(esAR[clave]);
     }
+  });
+
+  it("waba_huerfana vale para una WABA a medias que la base sí tiene (más de 48 h): el texto no afirma que la base no la tiene", () => {
+    expect(esAR["alta.avisoNumero.motivo.waba_huerfana"]).toContain("48");
+    expect(esAR["alta.avisoNumero.motivo.waba_huerfana"]).not.toContain("que la base no tiene");
+    expect(enUS["alta.avisoNumero.motivo.waba_huerfana"]).toContain("48");
+    expect(enUS["alta.avisoNumero.motivo.waba_huerfana"]).not.toContain("that the database does not have");
   });
 
   it("anota el espacio sólo en el registro, aunque no pueda mandar el mail", async () => {
@@ -166,6 +211,67 @@ describe("avisarNumeroEnRevision", () => {
       `alta:aviso-numero:sin_webhook:${OTRO_TENANT}`,
     ]);
     for (const [mail] of h.enviar.mock.calls) expect(JSON.stringify(mail)).not.toMatch(/1111|2222/);
+  });
+
+  it.each(DE_LA_WABA_PROPIA_POR_ESPACIO)("%s (WABA propia): el cupo es del espacio y el espacio no sale en el mail", async (motivo) => {
+    await avisarNumeroEnRevision(motivo, TENANT);
+    await avisarNumeroEnRevision(motivo, OTRO_TENANT);
+
+    expect(h.rateLimit.mock.calls.map(([clave]) => clave)).toEqual([
+      `alta:aviso-numero:${motivo}:${TENANT}`,
+      `alta:aviso-numero:${motivo}:${OTRO_TENANT}`,
+    ]);
+    for (const [mail] of h.enviar.mock.calls) expect(JSON.stringify(mail)).not.toMatch(/1111|2222/);
+  });
+
+  describe("revocada de la app propia (R6)", () => {
+    it("suma la línea de la verificación en dos pasos, a continuación del motivo", async () => {
+      await avisarNumeroEnRevision("revocada", TENANT, { appPropia: true });
+
+      expect(h.enviar).toHaveBeenCalledTimes(2);
+      for (const [mail] of h.enviar.mock.calls) {
+        expect(mail.texto).toContain(esAR["alta.avisoNumero.motivo.revocada"]);
+        expect(mail.texto).toContain(esAR["alta.avisoNumero.dosPasos"]);
+        expect(mail.texto.indexOf(esAR["alta.avisoNumero.dosPasos"])).toBeGreaterThan(mail.texto.indexOf(esAR["alta.avisoNumero.motivo.revocada"]));
+        expect(`${mail.asunto}${mail.texto}`).not.toMatch(/\{motivo\}/);
+      }
+    });
+
+    it("sin la opción, o con ella apagada, el mail es el de siempre", async () => {
+      await avisarNumeroEnRevision("revocada", TENANT);
+      await avisarNumeroEnRevision("revocada", TENANT, {});
+      await avisarNumeroEnRevision("revocada", TENANT, { appPropia: false });
+
+      expect(h.enviar).toHaveBeenCalledTimes(6);
+      for (const [mail] of h.enviar.mock.calls) expect(mail.texto).not.toContain(esAR["alta.avisoNumero.dosPasos"]);
+    });
+
+    it.each(MOTIVOS.filter((m) => m !== "revocada"))("la opción no cambia el mail de %s: la línea es sólo de la revocación", async (motivo) => {
+      await avisarNumeroEnRevision(motivo, TENANT, { appPropia: true });
+
+      for (const [mail] of h.enviar.mock.calls) expect(mail.texto).not.toContain(esAR["alta.avisoNumero.dosPasos"]);
+    });
+
+    it("el cupo es el mismo con o sin la opción: es un aviso por espacio y día", async () => {
+      await avisarNumeroEnRevision("revocada", TENANT, { appPropia: true });
+      await avisarNumeroEnRevision("revocada", TENANT);
+
+      expect(h.rateLimit.mock.calls.map(([clave]) => clave)).toEqual([`alta:aviso-numero:revocada:${TENANT}`, `alta:aviso-numero:revocada:${TENANT}`]);
+    });
+
+    it("la línea no lleva datos de nadie, y avisa que el PIN lo generamos nosotros", () => {
+      expect(esAR["alta.avisoNumero.dosPasos"]).toContain("PIN");
+      expect(enUS["alta.avisoNumero.dosPasos"]).toContain("PIN");
+      expect(esAR["alta.avisoNumero.dosPasos"]).not.toMatch(/\{[a-z]+\}/);
+      expect(enUS["alta.avisoNumero.dosPasos"]).not.toMatch(/\{[a-z]+\}/);
+    });
+  });
+
+  it("cupo_semanal: un solo aviso por día para todos los espacios, porque el tope es de todos", async () => {
+    await avisarNumeroEnRevision("cupo_semanal", TENANT);
+    await avisarNumeroEnRevision("cupo_semanal", OTRO_TENANT);
+
+    expect(h.rateLimit.mock.calls.map(([clave]) => clave)).toEqual(["alta:aviso-numero:cupo_semanal", "alta:aviso-numero:cupo_semanal"]);
   });
 
   it.each(["sin_fila", "sin_credencial", "de_otro_ambiente"] as const)("%s: un solo aviso por día para todos los espacios", async (motivo) => {

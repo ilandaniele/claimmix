@@ -8,6 +8,7 @@ import { tenants, whatsappNumeros } from "@/lib/db/schema";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { esFaltaDe0036, vistaDeLaConfig, type VistaDeLaConfig } from "@/server/core-sync/config";
+import { origenDelNumero, type OrigenDelNumero } from "@/server/alta/waba-publica";
 import { listaDelTenant } from "@/server/notify/specialist-alert";
 import { panelSso, type PanelSso } from "@/server/sso/panel";
 
@@ -15,7 +16,7 @@ import { panelSso, type PanelSso } from "@/server/sso/panel";
 export type EstadoDelNumero = "pedido" | "conectado" | "suspendido";
 
 /** Lo que /configuracion cuenta de un espacio del alta automática. Es sólo para leer. */
-export interface PruebaDelEspacio {
+export interface PruebaDelEspacio extends OrigenDelNumero {
   /**
    * Días que le quedan a la prueba, para arriba; 0 si ya venció. null: no hay
    * prueba que contar (ya paga un plan, o no tiene fecha de fin).
@@ -70,9 +71,11 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
     funcion_del_numero?: boolean | null;
   };
   // La prueba suma dos lecturas al lote: los datos de la prueba y el número, que por RLS es
-  // el del inquilino. De `whatsapp_numeros` sólo sale el estado, ni el número ni los ids.
+  // el del inquilino. De `whatsapp_numeros` salen el estado y, para saber de qué WABA es, los
+  // ids y si tiene token propio (un booleano, nunca el token), que no salen de acá:
+  // `origenDelNumero` los baja a dos booleanos. El número no sale.
   const leer = (conPrueba: boolean, conHoras: boolean, conMontos: boolean) =>
-    enTenantVarias<[Fila[], VistaDeLaConfig[], { estado: string }[]?]>({ tenantId }, (db) => [
+    enTenantVarias<[Fila[], VistaDeLaConfig[], { estado: string; phoneNumberId: string | null; wabaId: string | null; conToken: boolean }[]?]>({ tenantId }, (db) => [
       db
         .select({
           emails: tenants.specialist_alert_emails,
@@ -94,7 +97,18 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
         .limit(1),
       vistaDeLaConfig(db),
       ...(conPrueba
-        ? [db.select({ estado: whatsappNumeros.estado }).from(whatsappNumeros).where(ne(whatsappNumeros.estado, "baja")).limit(1)]
+        ? [
+            db
+              .select({
+                estado: whatsappNumeros.estado,
+                phoneNumberId: whatsappNumeros.phone_number_id,
+                wabaId: whatsappNumeros.waba_id,
+                conToken: sql<boolean>`${whatsappNumeros.token_cifrado} is not null`,
+              })
+              .from(whatsappNumeros)
+              .where(ne(whatsappNumeros.estado, "baja"))
+              .limit(1),
+          ]
         : []),
     ]);
   try {
@@ -109,6 +123,11 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
       .catch((e) => sinColumna(e, () => leer(false, true, false)))
       .catch((e) => sinColumna(e, () => leer(false, false, false)));
     const estado = numeros?.[0]?.estado;
+    const origen = origenDelNumero({
+      phoneNumberId: numeros?.[0]?.phoneNumberId ?? null,
+      wabaId: numeros?.[0]?.wabaId ?? null,
+      conToken: numeros?.[0]?.conToken === true,
+    });
     return {
       alertas: fila?.emails ?? [],
       recordatorioHoras: fila ? fila.horas : [],
@@ -119,6 +138,7 @@ export async function paraAdmin(tenantId: string): Promise<ParaAdmin> {
             prueba: {
               dias: diasDeLaPrueba(fila, new Date()),
               numero: estado === "conectado" || estado === "suspendido" ? estado : "pedido",
+              ...origen,
               porCodigo:
                 fila.funcion_del_numero === true && (fila.billing_status === "trial" || fila.billing_status === "active"),
             } satisfies PruebaDelEspacio,

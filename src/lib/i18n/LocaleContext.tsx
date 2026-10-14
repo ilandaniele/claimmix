@@ -11,6 +11,7 @@ import {
 } from "react";
 import { esAR, type ClaveDelCliente } from "./es-AR";
 import { enUS } from "./en-US";
+import type { ClaveDePagina } from "./es-AR.servidor";
 import type { Locale } from "./index";
 import { LOCALE_COOKIE, SUPPORTED_LOCALES, DEFAULT_LOCALE } from "./locale-shared";
 
@@ -20,15 +21,18 @@ const DICCIONARIOS: Record<Locale, Record<ClaveDelCliente, string>> = {
   "en-US": enUS,
 };
 
-function getT(locale: Locale): (key: ClaveDelCliente) => string {
-  const map = DICCIONARIOS[locale] ?? esAR;
-  return (key) => map[key] ?? esAR[key];
+type TextosDePagina = Record<ClaveDePagina, string>;
+
+function getT(locale: Locale, textos?: TextosDePagina): (key: ClaveDelCliente | ClaveDePagina) => string {
+  const map: Record<string, string> = DICCIONARIOS[locale] ?? esAR;
+  const deLaPagina: Record<string, string> = textos ?? {};
+  return (key) => deLaPagina[key] ?? map[key] ?? esAR[key as ClaveDelCliente];
 }
 
 interface LocaleContextValue {
   locale: Locale;
   setLocale: (locale: Locale) => void;
-  t: (key: ClaveDelCliente) => string;
+  t: (key: ClaveDelCliente | ClaveDePagina) => string;
 }
 
 const LocaleContext = createContext<LocaleContextValue>({
@@ -39,9 +43,12 @@ const LocaleContext = createContext<LocaleContextValue>({
 
 export function LocaleProvider({
   locale: initialLocale,
+  textos,
   children,
 }: {
   locale: Locale;
+  /** Los textos que no viajan en el JS de todas las páginas: los pasa, como prop, la página que los usa. */
+  textos?: TextosDePagina;
   children: ReactNode;
 }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
@@ -72,7 +79,7 @@ export function LocaleProvider({
     document.cookie = `${LOCALE_COOKIE}=${locale}; path=/; max-age=31536000; SameSite=Lax`;
   }, [locale]);
 
-  const tFn = useMemo(() => getT(locale), [locale]);
+  const tFn = useMemo(() => getT(locale, textos), [locale, textos]);
 
   return (
     <LocaleContext.Provider value={{ locale, setLocale, t: tFn }}>

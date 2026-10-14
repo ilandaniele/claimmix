@@ -6,8 +6,13 @@
  * clase de `Error`. Sin ninguno de los dos, `"UnknownError"`.
  */
 export function errorCode(err: unknown): string {
-  return (
-    (err as { code?: string })?.code ??
-    (err instanceof Error ? err.name : "UnknownError")
-  );
+  return (err as { code?: string })?.code ?? nombreDelError(err);
+}
+
+/**
+ * Sólo el nombre de la clase de `Error`, sin el código nativo: para los registros
+ * donde el código de Postgres o de red va en otro campo, o no se quiere anotar.
+ */
+export function nombreDelError(err: unknown): string {
+  return err instanceof Error ? err.name : "UnknownError";
 }

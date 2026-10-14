@@ -35,14 +35,9 @@ import "server-only";
 import { requireAdmin, type AdminContext } from "@/lib/auth/require-admin";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import { AppError } from "@/lib/errors";
+import { operatorEmails } from "@/lib/auth/operator-emails";
 
-/** Las direcciones que operan el producto, normalizadas. */
-export function operatorEmails(): string[] {
-  return (process.env.ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-}
+export { operatorEmails };
 
 export function isOperatorEmail(email: string | null | undefined): boolean {
   if (!email) return false;

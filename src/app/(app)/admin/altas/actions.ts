@@ -26,9 +26,12 @@ import {
   activarInquilino,
   conectarNumero,
   darDeBajaNumero,
+  desvincularWaba,
+  despublicarLegales as despublicarLegalesDelCliente,
   extenderPrueba,
   reactivarInquilino,
   reactivarNumero,
+  reintentarWaba,
   suspenderInquilino,
   suspenderNumero,
   terminosDeActivacion,
@@ -107,6 +110,31 @@ export async function darDeBajaElNumero(form: FormData): Promise<void> {
   await correr(async (op) => {
     const id = uuid(form, "numero_id");
     return id ? darDeBajaNumero(id, op) : "datos_invalidos";
+  }, form);
+}
+
+export async function reintentarLaWaba(form: FormData): Promise<void> {
+  await correr(async (op) => {
+    const id = uuid(form, "tenant_id");
+    return id ? reintentarWaba(id, op) : "datos_invalidos";
+  }, form);
+}
+
+export async function desvincularLaWaba(form: FormData): Promise<void> {
+  await correr(async (op) => {
+    const id = uuid(form, "tenant_id");
+    return id ? desvincularWaba(id, op) : "datos_invalidos";
+  }, form);
+}
+
+/** Baja las páginas legales públicas de un cliente de la app propia (R3). Pide la casilla de confirmación, como `conectar`: el botón solo no alcanza. */
+export async function despublicarLegales(form: FormData): Promise<void> {
+  await correr(async (op) => {
+    const id = uuid(form, "tenant_id");
+    if (!id) return "datos_invalidos";
+    if (form.get("confirmo") !== "on") return "no_confirmado";
+    const resultado = await despublicarLegalesDelCliente(id, op);
+    return resultado === "ok" ? "legales_despublicadas" : resultado;
   }, form);
 }
 

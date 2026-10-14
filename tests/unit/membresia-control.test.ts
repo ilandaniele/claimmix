@@ -285,7 +285,8 @@ describe("onPasswordReset", () => {
 describe("credencialesWhatsApp", () => {
   it("lee el número y el token de control, no de la base del cliente", async () => {
     vi.stubEnv("WHATSAPP_ACCESS_TOKEN", "fake-access-token");
-    h.respuestas.push([["conectado", "100000000000777", "200000000000001", null, "active", null, false]]);
+    vi.stubEnv("WHATSAPP_BUSINESS_ACCOUNT_ID", "200000000000001");
+    h.respuestas.push([["conectado", "100000000000777", "200000000000001", null, "active", null, false, null, null, null, null]]);
 
     const credenciales = await credencialesWhatsApp(ESPACIO);
 
@@ -314,7 +315,8 @@ describe("ningún sitio de membresía vuelve a enTenant", () => {
     ["src/server/alta/invitacion.ts", 2],
     ["src/app/api/admin/users/[id]/route.ts", 2],
     ["src/lib/auth/provision.ts", 2],
-    ["src/server/whatsapp/numeros.ts", 1],
+    // Dos, y se corre una: la lectura con la WABA y la de respaldo para cuando falta la 0051.
+    ["src/server/whatsapp/numeros.ts", 2],
   ])("%s: %i llamada(s) a enControl y ninguna a enTenant", (archivo, esperadas) => {
     expect(llamadas(archivo, "enControl")).toBe(esperadas);
     expect(llamadas(archivo, "enTenant")).toBe(0);

@@ -116,13 +116,13 @@ describe("parseCloudApiMessages — media", () => {
         from: "5491100000000",
         id: "wamid.1",
         type: "image",
-        image: { id: "media-1", mime_type: "image/jpeg" },
+        image: { id: "1000001", mime_type: "image/jpeg" },
       })
     );
 
     expect(msg).toBeDefined();
     expect(msg.media).toHaveLength(1);
-    expect(msg.media?.[0]).toMatchObject({ id: "media-1", mimeType: "image/jpeg" });
+    expect(msg.media?.[0]).toMatchObject({ id: "1000001", mimeType: "image/jpeg" });
   });
 
   it("names an unnamed photo so two in one claim do not collide", () => {
@@ -131,12 +131,12 @@ describe("parseCloudApiMessages — media", () => {
         from: "5491100000000",
         id: "wamid.2",
         type: "image",
-        image: { id: "media-abc", mime_type: "image/jpeg", caption: "el paragolpes" },
+        image: { id: "1000002", mime_type: "image/jpeg", caption: "el paragolpes" },
       })
     );
 
     expect(msg.body).toBe("el paragolpes");
-    expect(msg.media?.[0].filename).toBe("image-media-abc.jpg");
+    expect(msg.media?.[0].filename).toBe("image-1000002.jpg");
   });
 
   it("uses the filename Meta gives a document", () => {
@@ -145,7 +145,7 @@ describe("parseCloudApiMessages — media", () => {
         from: "5491100000000",
         id: "wamid.3",
         type: "document",
-        document: { id: "media-2", mime_type: "application/pdf", filename: "denuncia.pdf" },
+        document: { id: "1000003", mime_type: "application/pdf", filename: "denuncia.pdf" },
       })
     );
 
@@ -185,22 +185,22 @@ describe("downloadWhatsAppMedia", () => {
         url: u,
         auth: (init?.headers as Record<string, string> | undefined)?.Authorization,
       });
-      if (u.includes("/media-1")) {
+      if (u.includes("/1000001")) {
         return new Response(
-          JSON.stringify({ url: "https://cdn.example/file", mime_type: "image/jpeg" }),
+          JSON.stringify({ url: "https://lookaside.fbsbx.com/file", mime_type: "image/jpeg" }),
           { status: 200 }
         );
       }
       return new Response(Buffer.from("bytes"), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const file = await downloadWhatsAppMedia("media-1", CRED);
+    const file = await downloadWhatsAppMedia("1000001", CRED);
 
     const bajado = loBajado(file);
     expect(bajado.mimeType).toBe("image/jpeg");
     expect(bajado.data.toString()).toBe("bytes");
     expect(calls).toHaveLength(2);
-    expect(calls[1].url).toBe("https://cdn.example/file");
+    expect(calls[1].url).toBe("https://lookaside.fbsbx.com/file");
     expect(calls[1].auth).toBe("Bearer test-token");
   });
 
@@ -209,7 +209,7 @@ describe("downloadWhatsAppMedia", () => {
       new Response("nope", { status: 404 })
     ) as unknown as typeof fetch;
 
-    await expect(downloadWhatsAppMedia("media-x", CRED)).resolves.toBeNull();
+    await expect(downloadWhatsAppMedia("1000009", CRED)).resolves.toBeNull();
   });
 
   it("returns null when the network itself fails", async () => {
@@ -217,7 +217,7 @@ describe("downloadWhatsAppMedia", () => {
       throw new Error("ECONNRESET");
     }) as unknown as typeof fetch;
 
-    await expect(downloadWhatsAppMedia("media-x", CRED)).resolves.toBeNull();
+    await expect(downloadWhatsAppMedia("1000009", CRED)).resolves.toBeNull();
   });
 });
 
@@ -245,10 +245,10 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
     globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
       const u = String(url);
       urls.push(u);
-      if (u.includes("/media-1")) {
+      if (u.includes("/1000001")) {
         return new Response(
           JSON.stringify({
-            url: "https://cdn.example/file",
+            url: "https://lookaside.fbsbx.com/file",
             mime_type: "application/pdf",
             ...(fileSize === undefined ? {} : { file_size: fileSize }),
           }),
@@ -263,20 +263,20 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
   it("con file_size de 100 MB ni abre la conexión con el CDN", async () => {
     const urls = espiar(100 * 1024 * 1024);
 
-    const file = await downloadWhatsAppMedia("media-1", CRED);
+    const file = await downloadWhatsAppMedia("1000001", CRED);
 
     // Con los bytes que declaro Meta: el analista ve cuanto pesaba.
     expect(file).toEqual({ demasiadoGrande: true, bytes: 100 * 1024 * 1024 });
     // La que importa: una sola llamada, la de la metadata. La del archivo no.
     expect(urls).toHaveLength(1);
-    expect(urls[0]).toContain("/media-1");
+    expect(urls[0]).toContain("/1000001");
   });
 
   it("uno que entra en el tope se baja como siempre", async () => {
     // El control que impide que el arreglo sea «rechazar todo».
     const urls = espiar(1024);
 
-    const file = await downloadWhatsAppMedia("media-1", CRED);
+    const file = await downloadWhatsAppMedia("1000001", CRED);
 
     expect(loBajado(file).data.toString()).toBe("bytes");
     expect(urls).toHaveLength(2);
@@ -288,7 +288,7 @@ describe("downloadWhatsAppMedia — el tope se aplica antes de bajar", () => {
     const enorme = "x".repeat(11 * 1024 * 1024);
     const urls = espiar(undefined, enorme);
 
-    const file = await downloadWhatsAppMedia("media-1", CRED);
+    const file = await downloadWhatsAppMedia("1000001", CRED);
 
     // Esto comprueba la FORMA del retorno y nada más: «demasiado grande» y no
     // `null`, que es «no se pudo bajar». Que de esa forma salga después un

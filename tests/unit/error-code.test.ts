@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { errorCode } from "@/lib/observability/error-code";
+import { errorCode, nombreDelError } from "@/lib/observability/error-code";
 
 describe("errorCode", () => {
   it("usa el código nativo cuando está", () => {
@@ -26,5 +26,24 @@ describe("errorCode", () => {
     expect(errorCode("boom")).toBe("UnknownError");
     expect(errorCode(null)).toBe("UnknownError");
     expect(errorCode(undefined)).toBe("UnknownError");
+  });
+
+  it("sin código es exactamente `nombreDelError`: una sola regla para el nombre", () => {
+    for (const valor of [new RangeError("x"), "boom", null, undefined, {}]) {
+      expect(errorCode(valor)).toBe(nombreDelError(valor));
+    }
+  });
+});
+
+describe("nombreDelError", () => {
+  it("es el nombre de la clase de Error, aunque el error traiga un código nativo", () => {
+    const err = new TypeError("boom") as TypeError & { code?: string };
+    err.code = "ECONNRESET";
+    expect(nombreDelError(err)).toBe("TypeError");
+  });
+
+  it("da 'UnknownError' con algo que no es un Error", () => {
+    expect(nombreDelError("boom")).toBe("UnknownError");
+    expect(nombreDelError(null)).toBe("UnknownError");
   });
 });

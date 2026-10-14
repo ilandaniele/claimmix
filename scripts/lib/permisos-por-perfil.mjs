@@ -33,6 +33,7 @@ export const TABLAS_DE_CONTROL = [
   "session",
   "verification",
   "whatsapp_numeros",
+  "whatsapp_wabas",
   "gmail_accounts",
   "gmail_poll_state",
   "formulario_web",

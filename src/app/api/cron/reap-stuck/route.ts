@@ -31,6 +31,7 @@ import { reintentarBases } from "@/server/bases/reintentar";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import { revisarWabas } from "@/server/alta/waba-salud";
 import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
 import { revisarDesvios, type ResultadoDeLaRevision } from "@/server/desvios/revision-nocturna";
 import { avisarDesvios } from "@/server/notify/specialist-alert";
@@ -241,6 +242,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       espejadas: espejadas.ok,
       espejo_fallas: espejadas.fallas,
     };
+  }
+
+  // La salud de las WABAs propias de los clientes: lo que ningún mensaje avisa. Mejor esfuerzo, con su propio
+  // presupuesto de 20 s más la llamada a Graph en curso: corre sólo si quedan 40 s, así nunca pasa de `maxDuration`.
+  // Si hoy no hay lugar, la revisión de mañana (otras WABAs al azar) la alcanza.
+  if (Date.now() < hasta - 40_000) {
+    try {
+      await revisarWabas();
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "cron_reap_stuck.waba_salud_fallo");
+    }
+  } else {
+    logger.warn({}, "cron_reap_stuck.waba_salud_sin_tiempo");
   }
 
   return NextResponse.json({

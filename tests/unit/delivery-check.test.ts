@@ -41,6 +41,29 @@ describe("probarEntrega", () => {
     expect(enviar).toHaveBeenCalledWith("5491100000000", expect.any(String), CRED);
   });
 
+  it("WhatsApp: la credencial llega entera a Meta, con la prueba del secreto de la app propia si la tiene (R5)", async () => {
+    const propia = { ...CRED, prueba: "fake-proof-0123" };
+    const enviar = vi.fn().mockResolvedValue({ ok: true });
+    conNumero(propia);
+    vi.doMock("@/server/whatsapp/cloud-api", () => ({ sendWhatsAppText: enviar }));
+
+    const { probarEntrega } = await import("@/server/notify/delivery-check");
+    await probarEntrega("whatsapp", TENANT, "5491100000000");
+
+    expect(enviar.mock.calls[0][2]).toBe(propia);
+  });
+
+  it("WhatsApp: con Embedded Signup no se inventa una prueba (R5)", async () => {
+    const enviar = vi.fn().mockResolvedValue({ ok: true });
+    conNumero(CRED);
+    vi.doMock("@/server/whatsapp/cloud-api", () => ({ sendWhatsAppText: enviar }));
+
+    const { probarEntrega } = await import("@/server/notify/delivery-check");
+    await probarEntrega("whatsapp", TENANT, "5491100000000");
+
+    expect(enviar.mock.calls[0][2]).not.toHaveProperty("prueba");
+  });
+
   it("WhatsApp: sin número conectado NO salió, y no llama a Meta", async () => {
     const enviar = vi.fn();
     conNumero(null);

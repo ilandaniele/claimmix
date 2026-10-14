@@ -21,7 +21,7 @@
  */
 
 import { esAR as esARCliente, type ClaveDelCliente } from "./es-AR";
-import { esARServidor, type ClaveDelServidor } from "./es-AR.servidor";
+import { esARServidor, type ClaveDelServidor, type ClaveDePagina } from "./es-AR.servidor";
 import { enUS as enUSCliente } from "./en-US";
 import { enUSServidor } from "./en-US.servidor";
 
@@ -48,5 +48,15 @@ export function getT(locale: Locale): (key: TranslationKey) => string {
   return (key: TranslationKey) => map[key] ?? esAR[key];
 }
 
+const CLAVES_DE_PAGINA = (Object.keys(esARServidor) as ClaveDelServidor[]).filter(
+  (clave): clave is ClaveDePagina => clave.startsWith("waba.") || clave.startsWith("appPropia."),
+);
+
+// Estos textos viajan sólo a las páginas que los usan, como prop, y no en el JS de todas.
+export function textosDePagina(locale: Locale): Record<ClaveDePagina, string> {
+  const t = getT(locale);
+  return Object.fromEntries(CLAVES_DE_PAGINA.map((clave) => [clave, t(clave)])) as Record<ClaveDePagina, string>;
+}
+
 // Re-export for consumers that need the raw maps or types.
-export { esAR, enUS, type ClaveDelCliente, type ClaveDelServidor };
+export { esAR, enUS, type ClaveDelCliente, type ClaveDelServidor, type ClaveDePagina };

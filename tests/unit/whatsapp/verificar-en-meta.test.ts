@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { recorrerLaWaba, verificarEnMeta } from "@/server/whatsapp/verificar-en-meta";
+import { estaEnLaWaba, recorrerLaWaba, recorrerLaWabaOFalla, verificarEnMeta } from "@/server/whatsapp/verificar-en-meta";
 
 const SAVED = { ...process.env };
 
@@ -250,5 +250,198 @@ describe("recorrerLaWaba", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => respuesta({ data: "raro" })));
     expect(await recorrerLaWaba(WABA, "id", "fake-access-token")).toBeNull();
+  });
+});
+
+describe("recorrerLaWabaOFalla", () => {
+  const error = (code: number | undefined, status: number, subcode?: number) =>
+    respuesta({ error: { ...(code === undefined ? {} : { code }), ...(subcode === undefined ? {} : { error_subcode: subcode }) } }, status);
+
+  it("con filas devuelve el recorrido en `valor`", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta({ data: [{ id: ID }] })));
+    expect(await recorrerLaWabaOFalla(WABA, "id", "fake-access-token")).toEqual({
+      ok: true,
+      valor: { filas: [{ id: ID, display: null, nombre: null }], completa: true },
+    });
+  });
+
+  it.each<[string, Response, { falla: string; codigo: number | null; subcodigo?: number }]>([
+    ["un 400 con el code 100 de Graph", error(100, 400), { falla: "rechazo", codigo: 100 }],
+    ["un 400 con code y subcode", error(190, 400, 463), { falla: "rechazo", codigo: 190, subcodigo: 463 }],
+    ["un 403 con el code 200", error(200, 403), { falla: "rechazo", codigo: 200 }],
+    ["un 4xx sin code ni cuerpo", respuesta(null, 400), { falla: "rechazo", codigo: null }],
+    ["un 429", error(undefined, 429), { falla: "esperar", codigo: null }],
+    ["un code que pide esperar, con 400", error(4, 400), { falla: "esperar", codigo: 4 }],
+    ["un 502", respuesta({}, 502), { falla: "meta", codigo: null }],
+  ])("%s: la falla lleva lo que Graph dijo", async (_nombre, res, esperado) => {
+    vi.stubGlobal("fetch", vi.fn(async () => res));
+    expect(await recorrerLaWabaOFalla(WABA, "id", "fake-access-token")).toEqual({ ok: false, ...esperado });
+  });
+
+  it("el error de una página posterior también trae el code", async () => {
+    let paginas = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => (++paginas === 1 ? respuesta({ data: [{ id: "1" }], paging: { cursors: { after: "SIGUE" }, next: "https://graph.example.com/x" } }) : error(100, 400)))
+    );
+    expect(await recorrerLaWabaOFalla(WABA, "id", "fake-access-token")).toEqual({ ok: false, falla: "rechazo", codigo: 100 });
+  });
+
+  it("la red caída y un data que no es lista son «meta»: Graph no dijo nada", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNRESET"); }));
+    expect(await recorrerLaWabaOFalla(WABA, "id", "fake-access-token")).toEqual({ ok: false, falla: "meta", codigo: null });
+
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta({ data: "raro" })));
+    expect(await recorrerLaWabaOFalla(WABA, "id", "fake-access-token")).toEqual({ ok: false, falla: "meta", codigo: null });
+  });
+
+  it("recorrerLaWaba sigue dando null con cualquiera de ellas", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => error(100, 400)));
+    expect(await recorrerLaWaba(WABA, "id", "fake-access-token")).toBeNull();
+  });
+});
+
+describe("estaEnLaWaba", () => {
+  it("true si el id figura entre los números de la WABA que se pasa, con el token que se pasa", async () => {
+    const fetchFalso = vi.fn(async () => respuesta({ data: [{ id: "100000000000001" }, { id: ID }] }));
+    vi.stubGlobal("fetch", fetchFalso);
+
+    expect(await estaEnLaWaba("200000000000009", ID, "fake-client-token")).toBe(true);
+
+    const [url, init] = fetchFalso.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://graph.facebook.com/v22.0/200000000000009/phone_numbers?fields=id&limit=100");
+    expect(init.headers).toEqual({ Authorization: "Bearer fake-client-token" });
+  });
+
+  it("false si no figura, y sigue las páginas antes de decirlo", async () => {
+    const pedidos: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        pedidos.push(url);
+        return url.includes("after=PAG2")
+          ? respuesta({ data: [{ id: "100000000000003" }] })
+          : respuesta({ data: [{ id: "100000000000001" }], paging: { cursors: { after: "PAG2" }, next: "https://graph.example.com/x" } });
+      })
+    );
+
+    expect(await estaEnLaWaba(WABA, ID, "fake-client-token")).toBe(false);
+    expect(pedidos).toHaveLength(2);
+  });
+
+  it("null si Meta no contestó: ni un sí ni un no", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta({}, 500)));
+    expect(await estaEnLaWaba(WABA, ID, "fake-client-token")).toBeNull();
+
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("red caída"); }));
+    expect(await estaEnLaWaba(WABA, ID, "fake-client-token")).toBeNull();
+  });
+});
+
+describe("el appsecret_proof de la app propia (R5)", () => {
+  const PRUEBA = "c".repeat(64);
+
+  it("recorrerLaWaba sin prueba pide la URL de siempre, con y sin cursor", async () => {
+    const pedidos: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        pedidos.push(url);
+        return url.includes("after=PAG2")
+          ? respuesta({ data: [{ id: "2" }] })
+          : respuesta({ data: [{ id: "1" }], paging: { cursors: { after: "PAG2" }, next: "https://graph.example.com/x" } });
+      })
+    );
+
+    await recorrerLaWaba(WABA, "id", "fake-client-token");
+
+    expect(pedidos).toEqual([
+      `https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id&limit=100`,
+      `https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id&limit=100&after=PAG2`,
+    ]);
+  });
+
+  it("recorrerLaWaba con prueba la suma al final de la consulta de cada página, tras el cursor", async () => {
+    const pedidos: string[] = [];
+    const fetchFalso = vi.fn(async (url: string) => {
+      pedidos.push(url);
+      return url.includes("after=PAG2")
+        ? respuesta({ data: [{ id: "2" }] })
+        : respuesta({ data: [{ id: "1" }], paging: { cursors: { after: "PAG2" }, next: "https://graph.example.com/x" } });
+    });
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const r = await recorrerLaWaba(WABA, "id", "fake-client-token", undefined, PRUEBA);
+
+    expect(r?.filas.map((f) => f.id)).toEqual(["1", "2"]);
+    expect(pedidos).toEqual([
+      `https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id&limit=100&appsecret_proof=${PRUEBA}`,
+      `https://graph.facebook.com/v22.0/${WABA}/phone_numbers?fields=id&limit=100&after=PAG2&appsecret_proof=${PRUEBA}`,
+    ]);
+    for (const [url, init] of fetchFalso.mock.calls as unknown as Array<[string, RequestInit]>) {
+      expect(url).not.toContain("fake-client-token");
+      expect(init.headers).toEqual({ Authorization: "Bearer fake-client-token" });
+    }
+  });
+
+  it("la prueba no cambia lo que se hace con las filas: parar corta igual", async () => {
+    const fetchFalso = vi.fn(async () =>
+      respuesta({ data: [{ id: "1" }, { id: ID }, { id: "3" }], paging: { cursors: { after: "PAG2" }, next: "https://graph.example.com/x" } })
+    );
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const r = await recorrerLaWaba(WABA, "id", "fake-client-token", (f) => f.id === ID, PRUEBA);
+
+    expect(r).toEqual({
+      filas: [
+        { id: "1", display: null, nombre: null },
+        { id: ID, display: null, nombre: null },
+      ],
+      completa: true,
+    });
+    expect(fetchFalso).toHaveBeenCalledTimes(1);
+  });
+
+  it("estaEnLaWaba con prueba la manda en cada página y decide igual", async () => {
+    const pedidos: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        pedidos.push(url);
+        return url.includes("after=PAG2")
+          ? respuesta({ data: [{ id: ID }] })
+          : respuesta({ data: [{ id: "100000000000001" }], paging: { cursors: { after: "PAG2" }, next: "https://graph.example.com/x" } });
+      })
+    );
+
+    expect(await estaEnLaWaba(WABA, ID, "fake-client-token", PRUEBA)).toBe(true);
+    expect(pedidos).toHaveLength(2);
+    for (const url of pedidos) expect(new URL(url).searchParams.get("appsecret_proof")).toBe(PRUEBA);
+  });
+
+  it("estaEnLaWaba sin prueba no manda appsecret_proof", async () => {
+    const fetchFalso = vi.fn(async (_url: string) => respuesta({ data: [{ id: ID }] }));
+    vi.stubGlobal("fetch", fetchFalso);
+
+    await estaEnLaWaba(WABA, ID, "fake-client-token");
+
+    expect(fetchFalso.mock.calls[0]?.[0]).not.toContain("appsecret_proof");
+  });
+
+  it("verificarEnMeta, la conexión del operador sobre la WABA de la plataforma, nunca manda prueba", async () => {
+    const fetchFalso = vi.fn(async (url: string) =>
+      url.includes("/phone_numbers") ? respuesta({ data: [{ id: ID }] }) : respuesta({ display_phone_number: NUMERO, verified_name: "Seguros Fake" })
+    );
+    vi.stubGlobal("fetch", fetchFalso);
+
+    await verificarEnMeta(PEDIDO);
+
+    for (const [url] of fetchFalso.mock.calls as unknown as Array<[string]>) expect(url).not.toContain("appsecret_proof");
+  });
+
+  it("un fallo de Graph con la prueba puesta sigue siendo null, sin tirar", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta({}, 500)));
+    expect(await recorrerLaWaba(WABA, "id", "fake-client-token", undefined, PRUEBA)).toBeNull();
+    expect(await estaEnLaWaba(WABA, ID, "fake-client-token", PRUEBA)).toBeNull();
   });
 });

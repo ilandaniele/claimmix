@@ -9,6 +9,8 @@ interface Props {
   t: Traducir;
   /** El número por código está prendido y puede andar en este espacio (`prueba.porCodigo`): lo conecta solo, desde `NumeroPanel`. */
   automatico?: boolean;
+  /** Le toca la WABA propia (`metodoDelEspacio`): lo conecta solo, con su cuenta de Meta, desde `WabaPropiaEnlace`. */
+  propia?: boolean;
 }
 
 function Fila({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
@@ -24,19 +26,25 @@ function Fila({ etiqueta, children }: { etiqueta: string; children: React.ReactN
  * Cuánto le queda a la prueba y cómo anda el número de WhatsApp, de un espacio
  * del alta automática. Es de servidor y es sólo para leer: no hay nada que
  * editar, el número lo conecta el operador, o el propio admin desde
- * `NumeroPanel` si el número por código está prendido.
+ * `NumeroPanel` si el número por código está prendido, o desde `WabaPropiaEnlace`
+ * si le toca la WABA propia.
  *
  * Un espacio sin fila de número dice lo mismo que uno con el número pedido, así
  * nadie se entera de si el que pidió ya lo tenía otro espacio (H3).
  */
-export function PruebaPanel({ prueba, t, automatico }: Props) {
+export function PruebaPanel({ prueba, t, automatico, propia }: Props) {
   const { dias, numero } = prueba;
+  const ayudaDelPedido = propia
+    ? "configuracion.prueba.ayuda.pedidoPropia"
+    : automatico
+      ? "configuracion.prueba.ayuda.pedidoAutomatico"
+      : null;
   const ayuda =
     numero === "conectado"
       ? null
       : t(
-          numero === "pedido" && automatico && dias !== 0
-            ? "configuracion.prueba.ayuda.pedidoAutomatico"
+          numero === "pedido" && ayudaDelPedido && dias !== 0
+            ? ayudaDelPedido
             : `configuracion.prueba.ayuda.${numero}`
         );
   return (

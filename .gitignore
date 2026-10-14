@@ -57,8 +57,6 @@ examplemail*.txt
 example-email*.txt
 .env*
 
-# Supabase local state (project-ref, temp files)
-supabase/.temp/
 .git-commit-msg.txt
 
 # Local agent tool state.

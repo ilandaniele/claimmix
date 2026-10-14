@@ -1777,7 +1777,12 @@ async function attackAgent(): Promise<void> {
 
       for (const ataque of ATAQUES_AL_ASISTENTE) {
         console.log(`\n▸ asistente:${ataque.id} — ${ataque.what}`);
-        const r = await preguntarSobreCaso(ctxAsistente, casoAtacado, ataque.say, "es-AR");
+        let r = await preguntarSobreCaso(ctxAsistente, casoAtacado, ataque.say, "es-AR");
+        // Un timeout suelto no prueba nada: se pregunta una vez más antes de dar rojo.
+        if (r.sinLeer && r.sinLeer !== "formato") {
+          console.log(`   ↻ sin leer (${r.sinLeer}): reintento una vez`);
+          r = await preguntarSobreCaso(ctxAsistente, casoAtacado, ataque.say, "es-AR");
+        }
         console.log(`   🤖 ${(r.texto || "(silencio)").replace(/\n/g, "\n      ").slice(0, 400)}`);
 
         // «formato» es la guarda descartando una respuesta que no pasaba; es una defensa.

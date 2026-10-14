@@ -14,7 +14,7 @@ vi.mock("@/lib/auth/session", () => ({ getSessionContext: vi.fn() }));
 vi.mock("@/lib/auth/user-row", () => ({ getUserRow: vi.fn() }));
 vi.mock("@/lib/i18n/locale", () => ({ getServerLocale: vi.fn(async () => "es-AR") }));
 vi.mock("@/server/cases/list", () => ({
-  buildCaseFilters: vi.fn(),
+  filtrosDePestanas: vi.fn(),
   contarPorEstado: vi.fn(async () => []),
   desdeDePeriodo: vi.fn(),
   listCases: vi.fn(async () => ({ cases: [], total: 0 })),

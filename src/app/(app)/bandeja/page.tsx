@@ -18,7 +18,7 @@
 import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
-import { buildCaseFilters, contarPorEstado, desdeDePeriodo, listarTablero, listCases } from "@/server/cases/list";
+import { contarPorEstado, desdeDePeriodo, filtrosDePestanas, listarTablero, listCases } from "@/server/cases/list";
 import { remitenteYAsuntoParaElRol } from "@/server/cases/pii";
 import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { esRamoNativo, FORMATO_DE_CLAVE_DE_RAMO, nombreDeRamoPropio } from "@/core/case/ramos";
@@ -233,15 +233,19 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     cola,
   };
 
-  const [listado, porEstado, ramosPropios] = await Promise.all([
+  const [listado, porEstadoSuelto, ramosPropios] = await Promise.all([
     vista === "tablero"
       ? listarTablero({ tenantId }, consulta, userRow.id)
       : listCases({ tenantId }, consulta, userRow.id),
     // Contadores de las pestañas: sólo búsqueda y período los mueven, nunca
-    // los chips de estado/tipo/severidad — ver `consultaPorEstado`.
-    contarPorEstado({ tenantId }, buildCaseFilters({ q, desde })),
+    // los chips de estado/tipo/severidad — ver `consultaPorEstado`. El tablero
+    // ya los trae en su mismo viaje.
+    vista === "tablero" ? null : contarPorEstado({ tenantId }, filtrosDePestanas(consulta)),
     ramosPendientes,
   ]);
+  const porEstado = "pestanas" in listado
+    ? (listado.pestanas as Array<{ status: string; n: number }>)
+    : (porEstadoSuelto ?? []);
 
   // La vista de descartes trae el asunto y el remitente del primer mensaje: en claro sólo para quien ve el padrón.
   const initialData = { meta: listado.meta, data: remitenteYAsuntoParaElRol(listado.data, userRow.role) };

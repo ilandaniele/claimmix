@@ -49,7 +49,7 @@ describe("completadoConfirmado — el SQL que arma", () => {
   });
 });
 
-describe("getTenantKpis — el lote sigue en once consultas", () => {
+describe("getTenantKpis — el lote sigue en cinco consultas", () => {
   /*
    * Un cliente que acepta cualquier cadena y se devuelve a sí mismo: alcanza
    * para ejecutar el armador y contar cuántas consultas mete en el lote, sin
@@ -64,15 +64,9 @@ describe("getTenantKpis — el lote sigue en once consultas", () => {
 
   it("cambiar cómo se cuenta listo no agrega consultas al lote", async () => {
     mockVarias.mockImplementation(async () => [
-      [{ total: 0, listo: 0, cerrados: 0, minutos: 0 }],
       [],
       [],
-      [{ n: 0 }],
-      [],
-      [SIN_USO],
-      [SIN_USO],
-      [],
-      [],
+      [{ grupo: 3, user_id: null, full_name: null, email: null, model: null, mes: SIN_USO, total: SIN_USO }],
       [{ reclamos: 0, con_listo: 0, mediana_horas_listo: null, con_cierre: 0, mediana_horas_cierre: null, sin_intervencion: 0, mensajes_por_caso: null }],
       [],
     ]);
@@ -80,6 +74,6 @@ describe("getTenantKpis — el lote sigue en once consultas", () => {
     await getTenantKpis(CTX);
 
     expect(mockVarias).toHaveBeenCalledTimes(1);
-    expect(consultasDelLote()).toBe(11);
+    expect(consultasDelLote()).toBe(5);
   });
 });

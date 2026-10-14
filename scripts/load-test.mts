@@ -432,12 +432,13 @@ async function prepararLectura(): Promise<{
     {
       // El tablero pide otra cosa a la base: no los veinticinco más nuevos de
       // todo sino los más nuevos de CADA columna, seis ramas con su propio
-      // LIMIT, y el conteo agrupado por estado. Reemplaza al listado, no se le
-      // suma, pero es otra consulta y se mide aparte. Si el p95 se acerca a
+      // LIMIT, y el conteo agrupado por estado, que trae también los
+      // contadores de las pestañas. Reemplaza al listado y a esos contadores,
+      // no se les suma, pero es otra consulta y se mide aparte. Si el p95 se acerca a
       // `P95_LECTURA_MS`, bajar `TARJETAS_POR_COLUMNA` a 10.
       name: "bandeja en tablero",
       run: async () => {
-        await Promise.all([listarTablero(CTX, { ...QUERY } as never), contarPorEstado(CTX)]);
+        await listarTablero(CTX, { ...QUERY } as never);
       },
     },
     {

@@ -25,7 +25,7 @@ vi.mock("@/lib/auth/user-row", () => ({
 }));
 vi.mock("@/server/i18n/idioma-de-la-cuenta", () => ({ getAccountLocale: m.locale }));
 vi.mock("@/server/cases/list", () => ({
-  buildCaseFilters: vi.fn(),
+  filtrosDePestanas: vi.fn(),
   contarPorEstado: m.contarPorEstado,
   desdeDePeriodo: vi.fn(),
   listCases: m.listCases,

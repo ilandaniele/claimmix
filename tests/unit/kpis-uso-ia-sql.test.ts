@@ -1,14 +1,15 @@
 /**
  * El uso de IA del tablero de métricas, leído del acumulador mensual (0046).
  *
- * Las cuatro consultas de IA del lote (posiciones 5 a 8) recorrían `ai_usage`
- * entera: crecen con la historia del inquilino y no las ayuda ningún índice.
- * Ahora leen `ai_usage_mensual`, una fila por (inquilino, mes, usuario, modelo).
+ * La lectura de IA del lote (posición 2) recorría `ai_usage` entera: crece con
+ * la historia del inquilino y no la ayuda ningún índice. Ahora lee
+ * `ai_usage_mensual`, una fila por (inquilino, mes, usuario, modelo), en UNA
+ * consulta con tres agrupaciones: por persona, por modelo y los totales.
  * Acá se afirma, sin base, lo que se rompe en silencio: que ninguna vuelva a la
  * tabla grande, que el filtro del mes sea el mes argentino (un registro de las
  * 02:30 UTC del 1 de octubre todavía es de septiembre), que se sume `calls` y no
- * se cuenten filas del acumulador, y que el lote siga teniendo las mismas
- * consultas, en el mismo orden.
+ * se cuenten filas del acumulador, y que el lote tenga las consultas que
+ * tiene, en su orden.
  */
 
 vi.mock("server-only", () => ({}));
@@ -36,17 +37,11 @@ const SIN_CICLO = {
   mensajes_por_caso: null,
 };
 
-/** Las once filas fijas del lote, más lo que cada test agregue al final. */
+/** Las cinco filas fijas del lote, más lo que cada test agregue al final. */
 const filasDelLote = (extra: unknown[] = []) => [
-  [{ total: 0, listo: 0, respondidos: 0, minutos: 0 }],
   [],
   [],
-  [{ n: 0 }],
-  [],
-  [SIN_USO],
-  [SIN_USO],
-  [],
-  [],
+  [{ grupo: 3, user_id: null, full_name: null, email: null, model: null, mes: SIN_USO, total: SIN_USO }],
   [SIN_CICLO],
   [],
   ...extra,
@@ -66,80 +61,72 @@ beforeEach(() => mockVarias.mockReset());
 afterEach(() => vi.useRealTimers());
 
 describe("getTenantKpis — el lote con el acumulador de IA", () => {
-  it("no cambia la cantidad de consultas: once, y trece con la serie y ayer", async () => {
-    expect(await lote()).toHaveLength(11);
-    expect(await lote({ serie: "dia", ayer: true })).toHaveLength(13);
+  it("cinco consultas, y siete con la serie y ayer", async () => {
+    expect(await lote()).toHaveLength(5);
+    expect(await lote({ serie: "dia", ayer: true })).toHaveLength(7);
   });
 
-  it("las posiciones 5 a 8 leen ai_usage_mensual y ninguna toca ai_usage", async () => {
+  it("la posición 2 lee ai_usage_mensual y ninguna toca ai_usage", async () => {
     const consultas = await lote();
 
-    for (const i of [5, 6, 7, 8]) {
-      expect(consultas[i].sql, `consulta ${i}`).toContain(`from "ai_usage_mensual"`);
-      expect(consultas[i].sql, `consulta ${i}`).not.toMatch(/\bai_usage\b/);
-    }
+    expect(consultas[2].sql).toContain(`from "ai_usage_mensual"`);
     // El resto del lote no leyó nunca ai_usage: la tabla grande ya no está en el tablero.
     for (const q of consultas) expect(q.sql).not.toMatch(/\bai_usage\b/);
   });
 
-  it("el ciclo y los cuellos siguen en las posiciones 9 y 10, con la valla de los cuellos", async () => {
+  it("el ciclo y los cuellos siguen en las posiciones 3 y 4, con la valla de los cuellos", async () => {
     const consultas = await lote();
 
-    expect(consultas[9].sql).toContain("percentile_cont(0.5)");
-    expect(consultas[10].sql).toContain("lag(estado)");
-    expect(consultas[10].sql).toMatch(/is not null\s+offset 0\s*\)\s*e\b/);
+    expect(consultas[3].sql).toContain("percentile_cont(0.5)");
+    expect(consultas[4].sql).toContain("lag(estado)");
+    expect(consultas[4].sql).toMatch(/is not null\s+offset 0\s*\)\s*e\b/);
   });
 });
 
-describe("getTenantKpis — las cuatro lecturas de IA", () => {
-  it("el mes: filtra por el mes del acumulador y suma las llamadas", async () => {
-    const { sql, params } = (await lote())[5];
+describe("getTenantKpis — la lectura de IA", () => {
+  it("el mes filtra cada suma y el total histórico ninguna, sin WHERE ni HAVING", async () => {
+    const { sql, params } = (await lote())[2];
 
-    expect(sql).toMatch(/where "ai_usage_mensual"\."mes" = \$1$/);
-    expect(params).toHaveLength(1);
-    expect(params[0]).toMatch(/^\d{4}-\d{2}-01$/);
-    expect(sql).toContain(`coalesce(sum("calls"), 0)::float8`);
+    // Sin WHERE: el filtro del mes va dentro de cada suma, y así el total
+    // histórico sale de la misma pasada.
+    const desdeElFrom = sql.slice(sql.indexOf('from "ai_usage_mensual"'));
+    expect(desdeElFrom).not.toMatch(/\bwhere\b/);
+    expect(desdeElFrom).not.toMatch(/\bhaving\b/);
+    expect(sql).toContain(`coalesce(sum("ai_usage_mensual"."calls") filter (where "ai_usage_mensual"."mes" = $1), 0)::float8`);
+    expect(sql).toContain(`coalesce(sum("ai_usage_mensual"."cost_usd"), 0)::float8`);
     expect(sql).not.toMatch(/count\(/);
+    // Una vez por cada una de las cuatro sumas del mes, siempre el mismo.
+    expect(params).toHaveLength(4);
+    expect(new Set(params).size).toBe(1);
+    expect(params[0]).toMatch(/^\d{4}-\d{2}-01$/);
   });
 
-  it("el total histórico: sin ningún filtro", async () => {
-    const { sql, params } = (await lote())[6];
-
-    expect(sql).not.toMatch(/\bwhere\b/);
-    expect(params).toEqual([]);
-    expect(sql).toContain(`coalesce(sum("cost_usd"), 0)::float8`);
-  });
-
-  it("por usuario: mismos joins y mismo agrupado que antes, sólo con el mes y los que usaron algo", async () => {
-    const { sql, params } = (await lote())[7];
+  it("por usuario: mismos joins y mismo agrupado que antes", async () => {
+    const { sql } = (await lote())[2];
 
     expect(sql).toContain(`left join "users" on "users"."id" = "ai_usage_mensual"."user_id"`);
     expect(sql).toContain(`left join "user" on "user"."id" = "ai_usage_mensual"."user_id"`);
-    expect(sql).toMatch(/where "ai_usage_mensual"\."mes" = \$1 /);
-    expect(sql).toContain(`group by "ai_usage_mensual"."user_id", "users"."full_name", "user"."email"`);
-    expect(sql).toMatch(/having sum\("ai_usage_mensual"\."calls"\) > 0$/);
-    expect(sql).toContain(`coalesce(sum("ai_usage_mensual"."calls"), 0)::float8`);
-    expect(params).toHaveLength(1);
+    expect(sql).toContain(`("ai_usage_mensual"."user_id", "users"."full_name", "user"."email")`);
   });
 
-  it("por modelo: agrupa por modelo, con el mes y sólo los que tuvieron llamadas", async () => {
-    const { sql, params } = (await lote())[8];
+  it("por modelo y los totales: tres agrupaciones, y `grupo` dice de cuál es cada fila", async () => {
+    const { sql } = (await lote())[2];
 
-    expect(sql).toMatch(/where "ai_usage_mensual"\."mes" = \$1 group by "ai_usage_mensual"\."model"/);
-    expect(sql).toMatch(/having sum\("ai_usage_mensual"\."calls"\) > 0$/);
-    expect(params).toHaveLength(1);
+    expect(sql).toContain(
+      `group by grouping sets (("ai_usage_mensual"."user_id", "users"."full_name", "user"."email"), ("ai_usage_mensual"."model"), ())`
+    );
+    expect(sql).toContain(`grouping("ai_usage_mensual"."user_id", "ai_usage_mensual"."model")::int`);
   });
 
-  it("las tres lecturas del mes usan el mismo parámetro", async () => {
-    const consultas = await lote();
+  it("las cuatro sumas del mes usan el mismo parámetro", async () => {
+    const { params } = (await lote())[2];
 
-    expect(consultas[7].params).toEqual(consultas[5].params);
-    expect(consultas[8].params).toEqual(consultas[5].params);
+    expect(params).toEqual(Array(4).fill(params[0]));
   });
 });
 
 describe("getTenantKpis — el mes de IA es el mes argentino", () => {
-  const mesDeLaLectura = async () => (await lote())[5].params[0];
+  const mesDeLaLectura = async () => (await lote())[2].params[0];
 
   it("a las 02:30 UTC del 1 de octubre todavía es septiembre en Buenos Aires", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

@@ -29,6 +29,10 @@ updates:
       # local y dejó roja la Carga de dev (558 y 576 ms) el 14/10.
       - dependency-name: "@neondatabase/serverless"
         versions: ["1.2.x"]
+      # Los tipos siguen al Node que corre Vercel (`engines.node`, hoy 24.x):
+      # el major sube junto con ese, no solo.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

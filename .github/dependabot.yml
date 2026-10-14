@@ -10,10 +10,20 @@ updates:
     cooldown:
       default-days: 5
     open-pull-requests-limit: 2
+    # Los majors van en un PR aparte: mezclados rompían el build del lote
+    # entero (#420: zod 4, TypeScript 7, ESLint 10 y Vitest 5 juntos).
     groups:
       npm:
         patterns:
           - "*"
+        update-types:
+          - minor
+          - patch
+      npm-mayores:
+        patterns:
+          - "*"
+        update-types:
+          - major
     ignore:
       # 1.2.0 subió el p95 del tablero con 20 analistas de ~220 a ~300 ms en
       # local y dejó roja la Carga de dev (558 y 576 ms) el 14/10.

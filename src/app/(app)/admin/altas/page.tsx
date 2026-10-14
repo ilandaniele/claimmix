@@ -19,6 +19,7 @@ import { PLANS } from "@/lib/billing/plans";
 import { nombreDePlan } from "@/lib/billing/plan-label";
 import { requireOperator } from "@/lib/auth/require-operator";
 import { AppError } from "@/lib/errors";
+import { ID_DE_META } from "@/lib/meta-ids";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
@@ -29,15 +30,20 @@ import {
   resultadoDelPanel,
   type FilaDeAlta,
   type ResultadoDelPanel,
+  type WabaDeAlta,
 } from "@/server/alta/panel-operador";
+import { FALLAS_DE_WABA } from "@/server/alta/waba-resultados";
 
 import {
   activarElInquilino,
   conectar,
   darDeBajaElNumero,
+  desvincularLaWaba,
+  despublicarLegales,
   extenderLaPrueba,
   reactivarElInquilino,
   reactivarElNumero,
+  reintentarLaWaba,
   suspenderElInquilino,
   suspenderElNumero,
 } from "./actions";
@@ -71,6 +77,11 @@ const NUMERO_STYLES: Record<string, string> = {
   suspendido: STATUS_STYLES.suspended,
   baja: STATUS_STYLES.churned,
 };
+
+/** Los estados de la WABA propia que el operador puede empujar de nuevo; una conectada sana no necesita nada. */
+const WABA_REINTENTABLE = new Set(["vinculada", "suscripta", "falta_codigo", "falta_pin", "falla"]);
+/** Con algo del cliente todavía en la base (su token, o la app que está armando): se puede desvincular, y el número no se conecta a mano. */
+const WABA_VIVA = new Set([...WABA_REINTENTABLE, "conectada", "armando"]);
 
 const CAMPO =
   "rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900";
@@ -206,6 +217,108 @@ function Accion({
   );
 }
 
+const PUEDE_ENVIAR_LABELS: Record<string, TranslationKey> = {
+  AVAILABLE: "altas.waba.puedeEnviar.AVAILABLE",
+  LIMITED: "altas.waba.puedeEnviar.LIMITED",
+  BLOCKED: "altas.waba.puedeEnviar.BLOCKED",
+};
+
+/** Lo que sólo tiene la app de Meta propia del cliente: sus datos, los hitos del alta y las páginas legales. */
+function DeLaApp({ waba, tenantId, locale, t }: { waba: WabaDeAlta; tenantId: string; locale: Locale; t: Traducir }) {
+  const cuando = (iso: string | null) => (iso ? formatDate(iso, locale, dia) : t("altas.waba.todavia"));
+  const puedeEnviar = waba.puedeEnviar ? PUEDE_ENVIAR_LABELS[waba.puedeEnviar] : null;
+  return (
+    <>
+      {waba.appId && (
+        <p className="tabular-nums">
+          {t("altas.waba.appId")}: {waba.appId}
+        </p>
+      )}
+      <p>
+        {t("altas.waba.webhook")}:{" "}
+        {waba.webhookVerificadoEn ? t("altas.waba.webhook.verificado") : t("altas.waba.webhook.pendiente")}
+      </p>
+      <p>
+        {t("altas.waba.datosApp")}:{" "}
+        {waba.datosAppEn ? t("altas.waba.datosApp.cargados") : t("altas.waba.datosApp.pendientes")}
+      </p>
+      <p>
+        {t("altas.waba.primerMensaje")}: {cuando(waba.primerMensajeEn)}
+      </p>
+      <p>
+        {t("altas.waba.primeraRespuesta")}: {cuando(waba.primeraRespuestaEn)}
+      </p>
+      {puedeEnviar && (
+        <p className={waba.puedeEnviar === "AVAILABLE" ? undefined : "text-amber-700 dark:text-amber-300"}>
+          {t("altas.waba.puedeEnviar")}: {t(puedeEnviar)}
+        </p>
+      )}
+      {waba.recordatorioEn && (
+        <p>
+          {t("altas.waba.recordatorio")}: {formatDate(waba.recordatorioEn, locale, dia)}
+        </p>
+      )}
+      <p>
+        {t("altas.waba.legales")}:{" "}
+        {waba.legalesPublicadas ? t("altas.waba.legales.publicadas") : t("altas.waba.legales.despublicadas")}
+      </p>
+      {waba.legalesPublicadas && (
+        <form action={despublicarLegales} className="mt-1 space-y-1">
+          <input type="hidden" name="tenant_id" value={tenantId} />
+          <label className="flex items-start gap-2">
+            <input type="checkbox" name="confirmo" required className="mt-0.5" />
+            <span>{t("altas.legales.confirmo")}</span>
+          </label>
+          <button type="submit" className={BOTON_PELIGRO}>
+            {t("altas.legales.despublicar")}
+          </button>
+        </form>
+      )}
+    </>
+  );
+}
+
+/** La WABA propia del cliente: de dónde viene, cómo está y por qué falló o dónde se cortó. */
+function Waba({ waba, tenantId, locale, t }: { waba: WabaDeAlta; tenantId: string; locale: Locale; t: Traducir }) {
+  const falla = (FALLAS_DE_WABA as readonly string[]).includes(waba.falla ?? "") ? waba.falla : null;
+  const deApp = waba.origen === "app_propia";
+  return (
+    <div className="mt-2 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300">
+      <p className="font-medium">{t("altas.waba.titulo")}</p>
+      <p>
+        {t("altas.waba.origen")}: {t(deApp ? "altas.waba.origen.app" : "altas.waba.origen.propia")}
+      </p>
+      <p>{t(`altas.waba.estado.${waba.estado}` as TranslationKey)}</p>
+      {falla && <p className="text-amber-700 dark:text-amber-300">{t(`altas.waba.falla.${falla}` as TranslationKey)}</p>}
+      {waba.pasoCancelado && (
+        <p>
+          {t("altas.waba.pasoCancelado")}: {waba.pasoCancelado}
+        </p>
+      )}
+      {waba.wabaId && (
+        <p className="tabular-nums">
+          {t("altas.waba.id")}: {waba.wabaId}
+        </p>
+      )}
+      {waba.nombreEstado && (
+        <p>
+          {t("altas.waba.nombre")}: {waba.nombreEstado}
+        </p>
+      )}
+      <p>
+        {t("altas.waba.plantilla")}:{" "}
+        {waba.plantillaEnviadaEn ? t("altas.waba.plantilla.enviada") : t("altas.waba.plantilla.pendiente")}
+      </p>
+      {waba.actualizadoEn && (
+        <p>
+          {t("altas.waba.actualizada")}: {formatDate(waba.actualizadoEn, locale, dia)}
+        </p>
+      )}
+      {deApp && <DeLaApp waba={waba} tenantId={tenantId} locale={locale} t={t} />}
+    </div>
+  );
+}
+
 function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traducir }) {
   const { numero } = fila;
   const dominio = fila.contactEmail ? dominioDelMail(fila.contactEmail) : null;
@@ -271,6 +384,16 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
           <p className="text-xs text-slate-500">{t("altas.numero.sinFila")}</p>
         )}
 
+        {fila.waba ? (
+          <Waba waba={fila.waba} tenantId={fila.tenantId} locale={locale} t={t} />
+        ) : (
+          numero?.wabaId && (
+            <p className="mt-1 text-xs text-slate-500">
+              {t("altas.waba.origen")}: {t("altas.waba.origen.plataforma")}
+            </p>
+          )
+        )}
+
         {fila.numeroEnRevision && (
           <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
             <p className="font-medium">{t("altas.enRevision.titulo")}</p>
@@ -312,6 +435,12 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
           {numero && numero.estado !== "baja" && (
             <Accion accion={darDeBajaElNumero} campos={{ numero_id: numero.id }} etiqueta={t("altas.numero.baja")} peligro />
           )}
+          {fila.waba && WABA_REINTENTABLE.has(fila.waba.estado) && (
+            <Accion accion={reintentarLaWaba} campos={{ tenant_id: fila.tenantId }} etiqueta={t("altas.waba.reintentar")} />
+          )}
+          {fila.waba && WABA_VIVA.has(fila.waba.estado) && (
+            <Accion accion={desvincularLaWaba} campos={{ tenant_id: fila.tenantId }} etiqueta={t("altas.waba.desvincular")} peligro />
+          )}
           {estado === "suspended" && (
             <Accion accion={reactivarElInquilino} campos={{ tenant_id: fila.tenantId }} etiqueta={t("altas.inquilino.reactivar")} />
           )}
@@ -320,7 +449,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
           )}
         </div>
 
-        {numero?.estado === "pedido" && (
+        {numero?.estado === "pedido" && !(fila.waba && WABA_VIVA.has(fila.waba.estado)) && (
           <form action={conectar} className="mt-3 space-y-2">
             <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{t("altas.conectar.titulo")}</p>
             <p className="text-xs text-slate-500">{t("altas.conectar.ayuda")}</p>
@@ -330,7 +459,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
                 name="phone_number_id"
                 required
                 inputMode="numeric"
-                pattern="[0-9]{6,20}"
+                pattern={ID_DE_META.source}
                 placeholder={t("altas.numero.phoneNumberId")}
                 aria-label={t("altas.numero.phoneNumberId")}
                 className={CAMPO}
@@ -339,7 +468,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
                 name="waba_id"
                 required
                 inputMode="numeric"
-                pattern="[0-9]{6,20}"
+                pattern={ID_DE_META.source}
                 placeholder={t("altas.numero.waba")}
                 aria-label={t("altas.numero.waba")}
                 className={CAMPO}

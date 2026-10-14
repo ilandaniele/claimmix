@@ -119,6 +119,69 @@ export const whatsappNumeros = pgTable("whatsapp_numeros", {
 });
 
 /**
+ * El vínculo de cada inquilino con su WABA propia, la que Meta le crea o le deja
+ * elegir en Embedded Signup, o la de su propia app de Meta (migración 0051). Vive
+ * sólo en control y la app sólo la lee: escribe la función claimmix_waba_propia. El
+ * token del cliente no está acá, va en `whatsapp_numeros.token_cifrado`. Una WABA
+ * pertenece a un solo inquilino vivo; `revocada` y `cancelada` la sueltan (índice
+ * único parcial en la migración).
+ *
+ * `origen` dice de dónde viene el vínculo. Las columnas desde `app_id` hasta
+ * `puede_enviar` son de la app propia y valen NULL en Embedded Signup (restricción
+ * `whatsapp_wabas_por_origen`). `armando` es la app propia que todavía no tiene su
+ * app pegada. El App Secret va cifrado con el sobre v2 de `cifrado.ts`.
+ */
+export const whatsappWabas = pgTable("whatsapp_wabas", {
+  tenant_id: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  estado: text("estado", {
+    enum: ["armando", "cancelada", "vinculada", "suscripta", "falta_codigo", "falta_pin", "conectada", "falla", "revocada"],
+  }).notNull(),
+  falla: text("falla"),
+  paso_cancelado: text("paso_cancelado", {
+    enum: [
+      "business_account_selection",
+      "waba_phone_profile_picker",
+      "whatsapp_business_profile_setup",
+      "phone_number_setup",
+      "phone_number_verification",
+      "permissions",
+      "otro",
+    ],
+  }),
+  business_id: text("business_id"),
+  waba_id: text("waba_id"),
+  fb_user_id: text("fb_user_id"),
+  numero_meta: text("numero_meta"),
+  numero_aceptado: boolean("numero_aceptado").notNull().default(false),
+  nombre_estado: text("nombre_estado"),
+  plantilla_enviada_en: timestamp("plantilla_enviada_en", { withTimezone: true, mode: "string" }),
+  pin_cifrado: text("pin_cifrado"),
+  intentos: integer("intentos").notNull().default(0),
+  vinculada_en: timestamp("vinculada_en", { withTimezone: true, mode: "string" }),
+  origen: text("origen", { enum: ["embedded_signup", "app_propia"] })
+    .notNull()
+    .default("embedded_signup"),
+  app_id: text("app_id"),
+  app_secreto_cifrado: text("app_secreto_cifrado"),
+  ruta_webhook: text("ruta_webhook"),
+  webhook_app_verificado_en: timestamp("webhook_app_verificado_en", { withTimezone: true, mode: "string" }),
+  datos_app_en: timestamp("datos_app_en", { withTimezone: true, mode: "string" }),
+  primer_mensaje_en: timestamp("primer_mensaje_en", { withTimezone: true, mode: "string" }),
+  primera_respuesta_en: timestamp("primera_respuesta_en", { withTimezone: true, mode: "string" }),
+  slug_legal: text("slug_legal"),
+  razon_social: text("razon_social"),
+  cuit: text("cuit"),
+  acuerdo_version: text("acuerdo_version"),
+  recordatorio_en: timestamp("recordatorio_en", { withTimezone: true, mode: "string" }),
+  puede_enviar: text("puede_enviar", { enum: ["AVAILABLE", "LIMITED", "BLOCKED"] }),
+  categoria_perfil: text("categoria_perfil"),
+  creado_en: timestamp("creado_en", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  actualizado_en: timestamp("actualizado_en", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+});
+
+/**
  * El estado de la base propia de cada inquilino (migración 0050). Vive en la base
  * de control y sólo la lee y la escribe el rol dueño: `claimmix_app` no tiene
  * ningún permiso. Sin fila, el inquilino no tiene base propia. `tomada_at` hace de

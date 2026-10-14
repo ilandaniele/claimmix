@@ -4797,8 +4797,88 @@ antes.
 - **Pasos del cliente:** correo, celular con el 9, entrar con Google, el código por SMS en
   `/preparando` o Configuración y conectar Gmail en Configuración.
 
+### WABA propia por cliente: la causa de fondo del tope de números (2026-10-09, rama `feat/waba-propia`)
+
+Hasta acá todos los números salían de la WABA «Veltra», y Meta la limita a 2 números hasta
+verificar el negocio. Ahora cada cliente puede traer la suya con el popup de Meta
+(Embedded Signup v4) y los mensajes salen de su número, con su token. Todo detrás de
+`ALTA_WABA_PROPIA` (apagada); con ella apagada nada cambia. Receta, avisos y runbook en la
+Parte G de `docs/whatsapp-setup.md`.
+
+- **Tiempo de ejecución y panel del operador.** El token del cliente (cifrado con
+  `wa:<tenantId>:<wabaId>` como AAD) lo abre `numeros.ts`; la WABA de la plataforma sigue
+  con el token del entorno. Un envío que Graph rechaza con 190 (token) o 131042 (forma de
+  pago) cae al correo y avisa al operador. `/admin/altas` muestra la WABA de cada espacio y
+  tiene «Reintentar la conexión» y «Desvincular la WABA»; «Dar de baja el número» también
+  borra el token pero no llama a Meta.
+- **Lo que mira solo.** Los eventos `account_update` y `phone_number_name_update` del webhook
+  (solo por la ruta firmada; una revocación se confirma con `debug_token` antes de darla por
+  buena) y una revisión diaria dentro de `reap-stuck` (tokens vivos, plantilla, WABAs a
+  medias hace más de 48 h).
+- **Borrado de datos.** `POST /api/meta/borrado` es la URL de eliminación de datos de la app:
+  verifica el `signed_request`, borra el token y el PIN de la WABA de ese usuario de
+  Facebook y contesta con un código.
+- **Arquitectura.** El chequeo #20 ahora cubre `whatsapp_wabas` (solo `panel-operador.ts`
+  la escribe con el rol dueño); `TOPE_FILTROS` subió de 13 a 17 por los cruces de
+  `waba-propia.ts` y `waba-publica.ts`, que se suman a `ARCHIVOS_CON_ENCONTROL`.
+- **Decidido:** sin coexistencia con la app de WhatsApp Business; los clientes que ya están
+  conectados siguen en la WABA de la plataforma; sólo celulares +54; plantilla UTILITY y
+  perfil comercial FINANCE; tope de 10 WABAs nuevas por semana (`ALTA_TOPE_WABAS_SEMANA`).
+
+### App de Meta propia del cliente: salud, panel, envío y documentación (2026-10-13, rama `feat/waba-propia`)
+
+Segunda vía para conectar el número: el cliente arma su app en Meta y pasa App ID, App
+Secret, token y WABA ID, sin depender de que Veltra pase la verificación del negocio ni la
+revisión de la app. Todo detrás de `ALTA_APP_PROPIA` (apagada por omisión; en prd no se
+prende hasta que un abogado revise). Receta, runbook del operador y secretos en la Parte H de
+`docs/whatsapp-setup.md`. La 0051 es la misma de la Parte G (se editó, no hay 0052).
+
+- **Salud diaria** (`waba-salud.ts`, dentro de `reap-stuck`, sólo si quedan 40 s): por cada
+  fila `app_propia` revisa el App Secret y el token, lee `health_status` y escribe
+  `puede_enviar`, mira el nombre visible en revisión, la plantilla y los recordatorios.
+- **Envío** (`messenger.ts`): el `appsecret_proof` va en cada llamada; 368, 131031 (confirmado
+  con la salud) y 131042 avisan al operador sólo en la app propia; el primer `wamid` marca
+  `primera_respuesta_en`.
+- **Panel** (`/admin/altas`): origen, App ID, webhook verificado, datos de la app, páginas
+  legales con «Despublicar las páginas legales» (pide confirmar), primer mensaje, primera
+  respuesta, «Puede enviar (según Meta)» y recordatorio. Avisos nuevos: `secreto_invalido`,
+  `waba_restringida`, `waba_bloqueada`, `recordatorio`, `baja_fallida`.
+- **Pendiente.** W6 (el ensayo manual) no se hizo: las incógnitas I1 a I42 siguen abiertas y
+  el código usa el respaldo de cada una (tabla en la Parte H). Entre ellas, **I7 (App
+  Review)** decide si la vía se publica para autoalta. No hay capturas del asistente. La
+  página del cliente (`/conectar-whatsapp/app`) es de otro ítem y no estaba en este árbol.
+- **Riesgo.** Pedir credenciales al cliente es zona gris en las Platform Terms de Meta (§6.a.iv);
+  se sostiene sólo como proveedor de servicios con acuerdo previo (§5.a).
+
 ### 🙋 Waiting on you (not code)
 
+- **App propia del cliente: antes de prenderla.** (1) W6, el ensayo manual en dev con un
+  portfolio de prueba nuevo y el chip de repuesto; cierra las incógnitas I1 a I42 de la
+  Parte H. (2) Decidir con eso si hace falta App Review (I7, Q35): si hace falta, la vía no se
+  publica para autoalta. (3) Abogado (Q15): anexo `#app-propia`, Platform Terms §6.a.iv y §5.a,
+  y las plantillas `legal.*`; hasta entonces nada en prd. (4) Generar `WHATSAPP_APP_SECRETS_KEY`
+  (32 bytes en base64), una distinta por ambiente y con copia fuera de Vercel. (5) La 0051 a
+  mano en las tres bases (es la misma de la Parte G; si alguna ya tiene una versión anterior,
+  reaplicar lo que cambió). (6) Pegar el texto propuesto del anexo y de la sección de
+  privacidad (Parte H, «pendiente del dueño») en `src/app/terms` y `src/app/privacy`: el código
+  no los toca. (7) `ALTA_APP_PROPIA=1` en dev, y `pnpm check` completo después del deploy.
+
+- **WABA propia: Meta y la 0051, en este orden.** Es el bloqueo de Meta que queda: sin la
+  verificación del negocio y la revisión de la app, un cliente nuevo no puede abrir el
+  popup. (1) Verificar el negocio Veltra (CUIT con la razón social exacta). (2) Datos de la
+  app: ícono, `/privacy`, `/terms` y la URL de eliminación de datos
+  `https://claimmix.vercel.app/api/meta/borrado`. (3) Onboarding de Tech Provider. (4)
+  Revisión de la app con acceso avanzado a `whatsapp_business_management` y
+  `whatsapp_business_messaging`. (5) Facebook Login for Business y una configuración de
+  Embedded Signup v4 con token que no vence: el `config_id` es `META_ES_CONFIG_ID`. (6)
+  Suscribir `account_update` y `phone_number_name_update`. (7) **Aplicar la 0051 a mano**,
+  con el dueño de la base (necesita `BYPASSRLS`), en QA (`ep-wispy-flower`), producción
+  (`ep-proud-resonance`) y la rama `production` de Veltra, y después `pnpm permisos &&
+  pnpm tenancy` en cada una; sin ella el CI queda rojo por `--exigir-al-dia`. (8) Probar
+  solo en dev, con un portfolio de prueba nuevo y una SIM libre, y confirmar que el
+  `user_id` de `debug_token` es el mismo que trae el `signed_request` del borrado. (9)
+  Cambiar el texto de `src/app/privacy/page.tsx` con la sección `#meta` propuesta en la
+  Parte G: ese archivo lo toca el dueño. (10) La app en modo Live y una sola promoción.
 - **Ambiente prd: lo que queda del dueño.** El bucket `claimmix-prd-attachments` de R2 y su
   token cargados en `claimmix-prd` (después Claude redeploya y mira `/api/health?deep=1`);
   los hostnames `claimmix-dev.vercel.app` y `claimmix-prd.vercel.app` en el widget de

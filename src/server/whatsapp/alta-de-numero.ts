@@ -23,20 +23,19 @@
 import "server-only";
 import { randomInt } from "node:crypto";
 import type { Locale } from "@/lib/i18n";
-import { logger } from "@/lib/observability/logger";
-import { urlDeGraph } from "@/server/whatsapp/cloud-api";
+import { clienteDeGraph, SIN_PEDIDO, type Pedido, type RespuestaDeAlta } from "@/server/whatsapp/graph";
 import { idDeLaPlataforma, type WebhookDelEntorno } from "@/server/whatsapp/numeros";
-import { ID_DE_GRAPH, PLAZO_GRAPH_MS } from "@/server/whatsapp/verificar-en-meta";
+import { ID_DE_GRAPH } from "@/server/whatsapp/verificar-en-meta";
 
-export type FallaDeGraph = "esperar" | "meta" | "rechazo";
-
-export type RespuestaDeAlta<T> = { ok: true; valor: T } | { ok: false; falla: FallaDeGraph; codigo: number | null };
+export { clasificar, type FallaDeGraph, type RespuestaDeAlta } from "@/server/whatsapp/graph";
 
 export type MetodoDeCodigo = "SMS" | "VOICE";
 
 export interface CredencialDeAlta {
   accessToken: string;
   wabaId: string;
+  /** El `appsecret_proof` del token: sólo con la app propia de un cliente. Con Embedded Signup y con la plataforma no se manda. */
+  prueba?: string;
 }
 
 /** Un móvil argentino como lo pide Graph: el código de país y el resto, con el 9 adelante. */
@@ -45,32 +44,17 @@ export interface PartesDelNumero {
   numero: string;
 }
 
-/**
- * El id que se guarda: lo mismo que exige la 0049. `ID_DE_GRAPH` es más ancho porque
- * sólo cuida la URL; quien guarda el id de `agregarNumero` pasa también por acá.
- */
-export const ID_GUARDABLE = /^\d{6,20}$/;
-
 /** Cómo le pide Meta el idioma del SMS o de la llamada a cada idioma de la cuenta. */
 const IDIOMA_DEL_CODIGO = { "es-AR": "es", "en-US": "en" } as const satisfies Record<Locale, string>;
 
-/** Meta pide aflojar con estos códigos, venga el status que venga. */
-const CODIGOS_DE_ESPERA = new Set([4, 80007, 130429, 133016]);
-
 const MOVIL_ARGENTINO = /^\+54(9\d{10})$/;
-const CODIGO_DE_SEIS = /^\d{6}$/;
+/** El código de verificación del número y el PIN de registro: seis dígitos, ni más ni menos. */
+export const CODIGO_DE_SEIS = /^\d{6}$/;
 
 /** Sólo móviles argentinos: `+549` y diez dígitos más. Cualquier otra cosa, null. */
 export function partirNumero(e164: string): PartesDelNumero | null {
   const m = MOVIL_ARGENTINO.exec(e164);
   return m ? { cc: "54", numero: m[1] } : null;
-}
-
-/** Qué hacer con lo que Meta contestó, venga o no con un `code`. `status` es null si ni hubo respuesta. */
-export function clasificar(status: number | null, codigo: number | null): FallaDeGraph {
-  if (status === 429 || (codigo !== null && CODIGOS_DE_ESPERA.has(codigo))) return "esperar";
-  if (status === null || status >= 500) return "meta";
-  return status >= 400 ? "rechazo" : "meta";
 }
 
 type Paso =
@@ -83,54 +67,23 @@ type Paso =
   | "fijar_webhook"
   | "leer_webhook";
 
-/** El pedido que ni salió: un id con forma rara, o el de la plataforma. No es culpa de Meta. */
-const SIN_PEDIDO: RespuestaDeAlta<never> = { ok: false, falla: "rechazo", codigo: null };
+const { respuestaRara, pedirObjeto, confirmada: confirmar } = clienteDeGraph<Paso>("whatsapp.alta_numero.graph");
 
-function falla(paso: Paso, status: number | null, codigo: number | null): RespuestaDeAlta<never> {
-  logger.warn({ paso, status, codigo }, "whatsapp.alta_numero.graph");
-  return { ok: false, falla: clasificar(status, codigo), codigo };
-}
+type Credencial = Pick<CredencialDeAlta, "accessToken" | "prueba">;
 
-/** Un 2xx que no trae lo esperado: se anota y no se interpreta. */
-const respuestaRara = (paso: Paso) => falla(paso, 200, null);
+/** Con `cuerpo` es un POST; sin él, un GET. El token va en la cabecera y en ningún otro lado; la prueba, en el cuerpo del POST y en la consulta del GET. */
+const pedido = ({ accessToken, prueba }: Credencial, cuerpo?: Record<string, unknown>): Pedido => ({
+  autorizacion: `Bearer ${accessToken}`,
+  json: cuerpo,
+  prueba,
+});
 
-function codigoDeError(cuerpo: unknown): number | null {
-  const codigo = (cuerpo as { error?: { code?: unknown } } | null)?.error?.code;
-  return typeof codigo === "number" ? codigo : null;
-}
-
-/** Con `cuerpo` es un POST; sin él, un GET. El token va en la cabecera y en ningún otro lado. */
-async function llamar(
-  paso: Paso,
-  ruta: string,
-  accessToken: string,
-  cuerpo?: Record<string, unknown>
-): Promise<RespuestaDeAlta<Record<string, unknown>>> {
-  let res: Response;
-  try {
-    res = await fetch(urlDeGraph(ruta), {
-      method: cuerpo ? "POST" : "GET",
-      headers: cuerpo
-        ? { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
-        : { Authorization: `Bearer ${accessToken}` },
-      body: cuerpo ? JSON.stringify(cuerpo) : undefined,
-      signal: AbortSignal.timeout(PLAZO_GRAPH_MS),
-    });
-  } catch {
-    return falla(paso, null, null);
-  }
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) return falla(paso, res.status, codigoDeError(json));
-  if (typeof json !== "object" || json === null || Array.isArray(json)) return respuestaRara(paso);
-  return { ok: true, valor: json as Record<string, unknown> };
-}
+const llamar = (paso: Paso, ruta: string, cred: Credencial, cuerpo?: Record<string, unknown>) =>
+  pedirObjeto(paso, ruta, pedido(cred, cuerpo));
 
 /** Un POST que Meta confirma con `success: true`. */
-async function confirmada(paso: Paso, ruta: string, accessToken: string, cuerpo: Record<string, unknown>): Promise<RespuestaDeAlta<true>> {
-  const r = await llamar(paso, ruta, accessToken, cuerpo);
-  if (!r.ok) return r;
-  return r.valor.success === true ? { ok: true, valor: true } : respuestaRara(paso);
-}
+const confirmada = (paso: Paso, ruta: string, cred: Credencial, cuerpo: Record<string, unknown>) =>
+  confirmar(paso, ruta, pedido(cred, cuerpo));
 
 /** Un id que va en la URL: sólo dígitos, y nunca el del número de la plataforma. */
 function idDeNumeroValido(id: string): boolean {
@@ -139,12 +92,12 @@ function idDeNumeroValido(id: string): boolean {
 
 /**
  * Suma el número a la WABA, sin verificar ni registrar. Devuelve el id que Graph le dio:
- * sólo dígitos, pero quien lo guarda tiene que pasarlo por `ID_GUARDABLE`.
+ * sólo dígitos, pero quien lo guarda tiene que pasarlo por `ID_DE_META` (`@/lib/meta-ids`, lo que exige la 0049; `ID_DE_GRAPH` es más ancho porque sólo cuida la URL).
  * `nombre` es el nombre verificado de la plataforma, nunca algo que tipeó un cliente.
  */
 export async function agregarNumero(cred: CredencialDeAlta, partes: PartesDelNumero, nombre: string): Promise<RespuestaDeAlta<string>> {
   if (!ID_DE_GRAPH.test(cred.wabaId) || !nombre.trim()) return SIN_PEDIDO;
-  const r = await llamar("agregar", `${cred.wabaId}/phone_numbers`, cred.accessToken, {
+  const r = await llamar("agregar", `${cred.wabaId}/phone_numbers`, cred, {
     cc: partes.cc,
     phone_number: partes.numero,
     verified_name: nombre,
@@ -162,7 +115,7 @@ export async function pedirCodigoAMeta(
   idioma: Locale
 ): Promise<RespuestaDeAlta<true>> {
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
-  return confirmada("pedir_codigo", `${phoneNumberId}/request_code`, cred.accessToken, {
+  return confirmada("pedir_codigo", `${phoneNumberId}/request_code`, cred, {
     code_method: metodo,
     language: IDIOMA_DEL_CODIGO[idioma],
   });
@@ -171,13 +124,13 @@ export async function pedirCodigoAMeta(
 /** Le entrega a Meta el código de seis dígitos que le llegó al número. */
 export async function verificarCodigoEnMeta(cred: CredencialDeAlta, phoneNumberId: string, codigo: string): Promise<RespuestaDeAlta<true>> {
   if (!idDeNumeroValido(phoneNumberId) || !CODIGO_DE_SEIS.test(codigo)) return SIN_PEDIDO;
-  return confirmada("verificar", `${phoneNumberId}/verify_code`, cred.accessToken, { code: codigo });
+  return confirmada("verificar", `${phoneNumberId}/verify_code`, cred, { code: codigo });
 }
 
 /** ¿Meta ya tiene verificado el código del número? Para cuando `verify_code` rechaza un código que ya se aceptó. */
 export async function codigoYaVerificado(cred: CredencialDeAlta, phoneNumberId: string): Promise<RespuestaDeAlta<boolean>> {
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
-  const r = await llamar("estado_codigo", `${phoneNumberId}?fields=code_verification_status`, cred.accessToken);
+  const r = await llamar("estado_codigo", `${phoneNumberId}?fields=code_verification_status`, cred);
   if (!r.ok) return r;
   const estado = r.valor.code_verification_status;
   return typeof estado === "string" ? { ok: true, valor: estado === "VERIFIED" } : respuestaRara("estado_codigo");
@@ -189,7 +142,7 @@ export async function codigoYaVerificado(cred: CredencialDeAlta, phoneNumberId: 
  */
 export async function numeroYaRegistrado(cred: CredencialDeAlta, phoneNumberId: string): Promise<RespuestaDeAlta<boolean>> {
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
-  const r = await llamar("estado_registro", `${phoneNumberId}?fields=status,platform_type`, cred.accessToken);
+  const r = await llamar("estado_registro", `${phoneNumberId}?fields=status,platform_type`, cred);
   if (!r.ok) return r;
   const { status, platform_type: plataforma } = r.valor;
   if (typeof status !== "string" && typeof plataforma !== "string") return respuestaRara("estado_registro");
@@ -197,13 +150,17 @@ export async function numeroYaRegistrado(cred: CredencialDeAlta, phoneNumberId: 
 }
 
 /**
- * Registra el número en Cloud API con un PIN de seis dígitos al azar. El PIN no se
- * devuelve, no se guarda y no se anota: se cambia después con el mismo token.
+ * Registra el número en Cloud API. Sin `pin`, con uno de seis dígitos al azar que no se
+ * devuelve, no se guarda y no se anota: el número queda con un PIN que nadie conoce, y
+ * este módulo no tiene cómo cambiarlo (si hace falta, se cambia en WhatsApp Manager).
+ * Con `pin`, el que quien llama ya guardó, para volver a registrar un número que ya
+ * tenía el suyo (el segundo factor de WhatsApp lo exige idéntico). Nunca se anota.
  */
-export async function registrarNumero(cred: CredencialDeAlta, phoneNumberId: string): Promise<RespuestaDeAlta<true>> {
+export async function registrarNumero(cred: CredencialDeAlta, phoneNumberId: string, pin?: string): Promise<RespuestaDeAlta<true>> {
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
-  const pin = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  return confirmada("registrar", `${phoneNumberId}/register`, cred.accessToken, { messaging_product: "whatsapp", pin });
+  if (pin !== undefined && !CODIGO_DE_SEIS.test(pin)) return SIN_PEDIDO;
+  const elegido = pin ?? String(randomInt(0, 1_000_000)).padStart(6, "0");
+  return confirmada("registrar", `${phoneNumberId}/register`, cred, { messaging_product: "whatsapp", pin: elegido });
 }
 
 /**
@@ -217,7 +174,7 @@ export async function fijarWebhookDelNumero(
   webhook: WebhookDelEntorno
 ): Promise<RespuestaDeAlta<true>> {
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
-  return confirmada("fijar_webhook", phoneNumberId, cred.accessToken, {
+  return confirmada("fijar_webhook", phoneNumberId, cred, {
     webhook_configuration: { override_callback_uri: webhook.url, verify_token: webhook.verifyToken },
   });
 }
@@ -228,7 +185,7 @@ export async function fijarWebhookDelNumero(
  */
 export async function webhookPropioEs(cred: CredencialDeAlta, phoneNumberId: string, url: string): Promise<RespuestaDeAlta<boolean>> {
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
-  const r = await llamar("leer_webhook", `${phoneNumberId}?fields=webhook_configuration`, cred.accessToken);
+  const r = await llamar("leer_webhook", `${phoneNumberId}?fields=webhook_configuration`, cred);
   if (!r.ok) return r;
   const conf = r.valor.webhook_configuration;
   if (typeof conf !== "object" || conf === null || Array.isArray(conf)) return { ok: true, valor: false };

@@ -330,6 +330,71 @@ describe("reenviarPedido — WhatsApp fuera de la ventana", () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
+  describe("el cliente con su propia WABA", () => {
+    // Las plantillas son por WABA: la de un cliente nuevo nace pendiente en Meta, y hasta que la aprueban no hay con qué abrir la conversación.
+    const PROPIA = { ...CRED, accessToken: "test-own-token", phoneNumberId: "777000111", wabaId: "555000111222", autoalta: true };
+
+    it("R5: la prueba del secreto de su app viaja con la credencial hasta la consulta de la plantilla", async () => {
+      const conPrueba = { ...PROPIA, prueba: "fake-proof-0123" };
+      mockCredenciales.mockResolvedValue(conPrueba);
+      mockEstadoDePlantilla.mockResolvedValue("pendiente");
+      configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+      await reenviarPedido(CTX as never, CASE_ID, false);
+
+      expect(mockEstadoDePlantilla.mock.calls[0][2]).toBe(conPrueba);
+    });
+
+    it("R5: con Embedded Signup la consulta de la plantilla va sin prueba", async () => {
+      mockEstadoDePlantilla.mockResolvedValue("pendiente");
+      configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+      await reenviarPedido(CTX as never, CASE_ID, false);
+
+      expect(mockEstadoDePlantilla.mock.calls[0][2]).not.toHaveProperty("prueba");
+    });
+
+    it("la plantilla todavía sin aprobar no sale por WhatsApp: no manda, no reabre y no deja asiento", async () => {
+      mockCredenciales.mockResolvedValue(PROPIA);
+      mockEstadoDePlantilla.mockResolvedValue("pendiente");
+      configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+
+      const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+      expect(r).toEqual({ ok: false, motivo: "plantilla_sin_aprobar" });
+      expect(mockEstadoDePlantilla).toHaveBeenCalledWith("reabrir_denuncia", expect.any(String), PROPIA);
+      expect(mockSend).not.toHaveBeenCalled();
+      expect(db.update).not.toHaveBeenCalled();
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+    });
+
+    it("el mismo espacio por mail no mira la plantilla y sigue mandando", async () => {
+      mockCredenciales.mockResolvedValue(PROPIA);
+      configurarLecturas(filasBase({ channel: "email" }));
+      configurarEscritura([{ id: CASE_ID }]);
+
+      const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+      expect(r).toEqual({ ok: true, claves: ["full_name"], reabierto: false });
+      expect(mockEstadoDePlantilla).not.toHaveBeenCalled();
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("con la plantilla ya aprobada en su WABA, sale por ella", async () => {
+      mockCredenciales.mockResolvedValue(PROPIA);
+      mockEstadoDePlantilla.mockResolvedValue("aprobada");
+      configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));
+      configurarEscritura([{ id: CASE_ID }]);
+
+      const r = await reenviarPedido(CTX as never, CASE_ID, false);
+
+      expect(r).toEqual({ ok: true, claves: ["full_name"], reabierto: false });
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ porPlantilla: true }) })
+      );
+    });
+  });
+
   it("sin plantilla disponible, el motivo sigue siendo ventana_cerrada", async () => {
     mockEstadoDePlantilla.mockResolvedValue("no_disponible");
     configurarLecturas(filasBase({ channel: "whatsapp", ultimoEntrante: "2020-01-01T00:00:00.000Z" }));

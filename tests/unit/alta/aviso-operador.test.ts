@@ -18,7 +18,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/auth/require-operator", () => ({ operatorEmails: h.operadores }));
+vi.mock("@/lib/auth/operator-emails", () => ({ operatorEmails: h.operadores }));
 vi.mock("@/server/notify/remitente-sistema", () => ({
   remitenteDelSistema: h.remitente,
   enviarCorreoDelSistema: h.enviar,

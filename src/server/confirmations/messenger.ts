@@ -21,6 +21,8 @@
 import "server-only";
 
 import { eq } from "drizzle-orm";
+// Con `.js`: el flujo durable empaqueta este archivo y Node no resuelve `next/server` sin extensión.
+import { after } from "next/server.js";
 import { outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import { labelForField, labelForClaimType } from "@/lib/labels/claim-fields";
@@ -32,11 +34,16 @@ import {
   type OrigenDelValor,
 } from "@/server/email/render";
 import { olvidarEstadoDePlantilla, sendWhatsAppTemplate, sendWhatsAppText } from "@/server/whatsapp/cloud-api";
-import { avisarSinNumero, credencialesWhatsApp } from "@/server/whatsapp/numeros";
+import { avisarSinNumero, credencialesWhatsApp, type CredencialesDelNumero } from "@/server/whatsapp/numeros";
+import { leerSalud } from "@/server/whatsapp/app-del-cliente";
+import { efectoDeError } from "@/server/whatsapp/errores-de-graph";
+import { avisarNumeroEnRevision } from "@/server/alta/aviso-operador";
+import { primeraRespuestaDeApp, wabaEnFalla } from "@/server/alta/panel-operador";
 import { PLANTILLA_REABRIR, textoDeReabrir } from "@/core/mensajes/reabrir-denuncia";
 import { composeReply, type ReplyIntent } from "@/server/ai/compose-reply";
 import { isReservedTestNumber } from "@/core/phone/reserved";
 import { enTenant } from "@/data/scope";
+import { nombreDelError } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import {
   laDiferencia,
@@ -582,6 +589,79 @@ function conPie(message: AgentMessage, texto: string): string {
 }
 
 /**
+ * Un rechazo de Graph que es de la cuenta y no del mensaje: el token que dejó de
+ * valer o el pago que falta en la WABA. Nadie del otro lado puede arreglarlo y
+ * reintentar no sirve, así que se marca la conexión caída y se avisa al operador.
+ * Sólo si la WABA es la propia del cliente: el aviso le dice que vuelva a
+ * conectarla, y con la de la plataforma no hay nada que él pueda hacer. Nunca
+ * tira: el envío ya falló y eso es lo que se informa.
+ *
+ * Con la app propia (`cred.prueba`) la conexión además queda en falla, porque el asistente
+ * del cliente tiene texto para cada una; el popup de Embedded Signup no lo tiene y sólo avisa:
+ * - 190 en las dos rutas;
+ * - 368, restringida;
+ * - 131042 mientras no salió la primera respuesta (E8); después es un pago que se cortó y sólo se avisa;
+ * - 131031 no dice por sí solo que la WABA esté bloqueada (también es un PIN mal puesto): en las dos
+ *   rutas se le pregunta a Meta y sólo `BLOCKED` avisa (R27); la falla se anota sólo con la app propia.
+ */
+async function atenderErrorDeCuenta(tenantId: string, codigoMeta: number | undefined, cred: CredencialesDelNumero): Promise<void> {
+  const efecto = efectoDeError(codigoMeta ?? null);
+  if (!efecto || !cred.propia) return;
+  const deApp = cred.prueba !== undefined;
+  try {
+    if (efecto === "waba_bloqueada") return await confirmarBloqueo(tenantId, cred);
+    const cae =
+      efecto === "token_vencido" ||
+      (deApp && (efecto === "waba_restringida" || (efecto === "pago_pendiente" && cred.primeraRespuestaPendiente === true)));
+    if (cae) await wabaEnFalla(tenantId, efecto);
+    await avisarNumeroEnRevision(efecto, tenantId);
+  } catch (err) {
+    logger.error({ tenantId, error: nombreDelError(err) }, "whatsapp.messenger.efecto_error");
+  }
+}
+
+/** Va en `after()` o, fuera de un pedido, se espera: el envío ya salió y no tiene por qué esperar a Graph. Nunca tira. */
+async function confirmarBloqueo(tenantId: string, cred: CredencialesDelNumero): Promise<void> {
+  const { accessToken, wabaId, prueba } = cred;
+  if (!wabaId) return;
+  const confirmar = async () => {
+    try {
+      const salud = await leerSalud({ accessToken, wabaId, prueba }, wabaId);
+      if (!salud.ok || salud.valor.puedeEnviar !== "BLOCKED") return;
+      if (prueba !== undefined) await wabaEnFalla(tenantId, "waba_bloqueada");
+      await avisarNumeroEnRevision("waba_bloqueada", tenantId);
+    } catch (err) {
+      logger.error({ tenantId, error: nombreDelError(err) }, "whatsapp.messenger.efecto_error");
+    }
+  };
+  try {
+    after(confirmar);
+  } catch {
+    await confirmar();
+  }
+}
+
+/**
+ * La primera respuesta que Meta acepta con la app propia del cliente (devuelve un id de mensaje): cierra el
+ * alta, y no hace falta repetirlo porque las credenciales dejan de pedirlo. Va en `after()` o, fuera de un
+ * pedido, se espera. Nunca tira: el envío ya salió.
+ */
+async function marcarPrimeraRespuesta(tenantId: string): Promise<void> {
+  const marcar = async () => {
+    try {
+      await primeraRespuestaDeApp(tenantId);
+    } catch (err) {
+      logger.error({ tenantId, error: nombreDelError(err) }, "whatsapp.messenger.primera_respuesta_fallo");
+    }
+  };
+  try {
+    after(marcar);
+  } catch {
+    await marcar();
+  }
+}
+
+/**
  * Cierra la fila reservada y deja el log, sea el envío de texto o de
  * plantilla. Un envío fallido anota por `logger.error`, no por `logger.info`:
  * quien filtre por nivel —que es lo que hace cualquier alerta— no lo veía, y
@@ -592,7 +672,8 @@ async function anotarEnvio(
   message: AgentMessage,
   outboundId: string | null,
   finalBody: string,
-  res: { ok: boolean; error?: string }
+  res: { ok: boolean; error?: string; codigoMeta?: number },
+  cred: CredencialesDelNumero
 ): Promise<void> {
   const status = res.ok ? "sent" : "failed";
   if (outboundId) {
@@ -615,6 +696,7 @@ async function anotarEnvio(
       },
       "whatsapp.messenger.send_failed"
     );
+    await atenderErrorDeCuenta(message.tenantId, res.codigoMeta, cred);
   }
 }
 
@@ -663,7 +745,8 @@ export const whatsappMessenger: AgentMessenger = {
           cred
         );
         if (!res.ok) olvidarEstadoDePlantilla();
-        await anotarEnvio(message, outboundId, finalBody, res);
+        await anotarEnvio(message, outboundId, finalBody, res, cred);
+        if (res.ok && res.messageId && cred.primeraRespuestaPendiente) await marcarPrimeraRespuesta(message.tenantId);
         return res.ok;
       }
 
@@ -687,7 +770,8 @@ export const whatsappMessenger: AgentMessenger = {
        */
       const outboundId = await reservarSalida(message, finalBody);
       const res = await sendWhatsAppText(message.to, finalBody, cred);
-      await anotarEnvio(message, outboundId, finalBody, res);
+      await anotarEnvio(message, outboundId, finalBody, res, cred);
+      if (res.ok && res.messageId && cred.primeraRespuestaPendiente) await marcarPrimeraRespuesta(message.tenantId);
       return res.ok;
     } catch (err) {
       // Intake already succeeded; a messaging failure must not undo it.

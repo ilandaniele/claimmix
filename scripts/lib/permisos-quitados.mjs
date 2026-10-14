@@ -27,6 +27,8 @@
  *   PERMISOS_POR_COLUMNA: plan, estado de cobro y prueba los fija el operador.
  * - whatsapp_numeros (0048): la app sólo lo lee; escriben la función de alta y el
  *   rol dueño, así que una falla de la app no puede quedarse con un número ajeno.
+ * - whatsapp_wabas (0051): la app sólo la lee; escribe la función claimmix_waba_propia
+ *   (y el rol dueño), así que una falla de la app no puede quedarse con la WABA de otro.
  * - account, session y verification (0048): hashes de contraseña, tokens de
  *   sesión y de restablecimiento. Better Auth y `cerrarSesiones` usan el rol
  *   dueño; la app no tiene nada que hacer ahí. De account se recuperan por
@@ -49,6 +51,7 @@ export const PERMISOS_QUITADOS = {
   ai_usage_mensual: ["INSERT", "UPDATE", "DELETE"],
   tenants: ["INSERT", "UPDATE", "DELETE"],
   whatsapp_numeros: ["INSERT", "UPDATE", "DELETE"],
+  whatsapp_wabas: ["INSERT", "UPDATE", "DELETE"],
   account: ["SELECT", "INSERT", "UPDATE", "DELETE"],
   session: ["SELECT", "INSERT", "UPDATE", "DELETE"],
   verification: ["SELECT", "INSERT", "UPDATE", "DELETE"],

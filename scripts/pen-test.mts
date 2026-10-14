@@ -160,6 +160,11 @@ const INTENTIONALLY_PUBLIC = new Map<string, string>([
   ["/api/demo/public-analyze", "la demo del prospecto; acotada por IP y por presupuesto propio"],
   ["/api/intake/email", "410 Gone, un stub del webhook viejo de Postmark"],
   ["/api/admin/health", "el monitor de uptime la pinga cada 5 minutos; abajo se controla qué dice"],
+  ["/api/auth/salir", "cierra la sesión propia; sin sesión no hay nada que cerrar, y la cookie es SameSite=Lax"],
+  [
+    "/api/meta/borrado",
+    "el aviso de borrado de datos de Meta: lo autentica el signed_request firmado con el secreto de la app, y está acotado por IP",
+  ],
   [
     "/api/denuncia/[slug]",
     "el formulario web de denuncias: quien denuncia no tiene cuenta; abajo se controla qué la frena (token, tope, cuerpo, inquilino)",

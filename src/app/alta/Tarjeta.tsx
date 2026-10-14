@@ -1,10 +1,10 @@
 /**
  * La tarjeta de las pantallas de antes de entrar al panel (/alta, /preparando):
  * título, contenido y «Cerrar sesión» debajo. Viven fuera de `(app)`, así que no
- * tienen barra ni menú.
+ * tienen barra ni menú. Salir es un POST de documento (no una Server Action) para que
+ * /login se pida de cero y no herede el CSP ni el SDK de Meta de /conectar-whatsapp.
  */
 
-import { signOut } from "@/app/login/actions";
 import type { Locale } from "@/lib/i18n";
 
 export function Tarjeta({
@@ -25,7 +25,7 @@ export function Tarjeta({
           <h1 className="mb-4 text-[15px] font-semibold tracking-tight text-slate-900">{titulo}</h1>
           {children}
         </div>
-        <form action={signOut} className="mt-5 text-center">
+        <form method="post" action="/api/auth/salir" className="mt-5 text-center">
           <button
             type="submit"
             className="rounded text-sm font-medium text-slate-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"

@@ -22,6 +22,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { buildCsp, generateNonce } from "@/lib/security/csp";
 import { auth } from "@/lib/auth";
+import { wabaPropia } from "@/server/alta/waba-propia-activa";
 
 /** Public paths that do not require authentication. */
 /**
@@ -64,6 +65,10 @@ const PUBLIC_PREFIXES = [
   "/denuncia/",
   "/privacy",
   "/terms",
+  // Las páginas legales de cada espacio (términos, privacidad, borrado de datos): las
+  // lee Meta y quien escribe por WhatsApp, sin cuenta. Se publican con un enlace
+  // difícil de adivinar y se marcan noindex más abajo.
+  "/legal/",
   "/_next",
   "/favicon.ico",
 ];
@@ -85,7 +90,8 @@ export async function proxy(request: NextRequest) {
 
   // ── 1. Generate per-request CSP nonce ──────────────────────────────────────
   const nonce = generateNonce();
-  const csp = buildCsp(nonce);
+  // El SDK de Facebook y su popup sólo se permiten donde se usan: el alta con la WABA propia.
+  const csp = buildCsp(nonce, { meta: wabaPropia() && pathname === "/conectar-whatsapp" });
 
   // ── 2. Start with a pass-through response ──────────────────────────────────
   let response = NextResponse.next({ request });
@@ -132,6 +138,7 @@ export async function proxy(request: NextRequest) {
       const yaEntro = await getUser(request);
       if (yaEntro) return NextResponse.redirect(new URL("/bandeja", request.url));
     }
+    if (pathname.startsWith("/legal/")) response.headers.set("X-Robots-Tag", "noindex");
     return response;
   }
 

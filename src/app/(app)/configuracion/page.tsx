@@ -38,9 +38,10 @@ import { PruebaPanel } from "./PruebaPanel";
 import { SsoPanel } from "./SsoPanel";
 import { esResultadoSso } from "./sso-resultados";
 import { MONTOS_POR_DEFECTO } from "@/core/case/monto-estimado";
-import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
+import { WabaPropiaEnlace } from "@/app/conectar-whatsapp/WabaPropiaEnlace";
 import { panelDelNumero } from "@/server/alta/numero-resultados";
 import { pasosHechos } from "@/server/alta/pasos-hechos";
+import { leerWabaPublica, metodoDelEspacio } from "@/server/alta/waba-publica";
 import { esExitoDeGmail, esResultadoGmail } from "./gmail-resultados";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -147,11 +148,13 @@ export default async function ConfiguracionPage({
   // Un espacio del alta automática: el único que tiene «Primeros pasos».
   const esAutoalta = esAdmin && userRow?.autoalta === true;
 
-  const [userHasGeminiKey, admin, panelDelSso, pasos] = await Promise.all([
+  const [userHasGeminiKey, admin, panelDelSso, pasos, waba] = await Promise.all([
     getUserGeminiKey(session.user.id).then(Boolean, () => false),
     esAdmin && userRow ? paraAdmin(userRow.tenant_id) : null,
     esAdmin && userRow ? ssoParaAdmin(userRow.tenant_id) : null,
     esAutoalta && userRow ? pasosHechos(userRow.tenant_id) : null,
+    // De dónde nació la fila de la WABA decide el panel, y una fila viva manda sobre las banderas: se lee siempre.
+    esAutoalta && userRow ? leerWabaPublica(userRow.tenant_id) : null,
   ]);
 
   // AI thresholds — read from env with documented defaults
@@ -160,9 +163,25 @@ export default async function ConfiguracionPage({
   );
   const monthlyBudgetCap = 200; // $200/month — hardcoded default per spec
 
-  // El número por código: la bandera y la 0049 (sin ella, lo de siempre), lo que dejó la última acción y si todavía hay un número por conectar.
-  const automatico = numeroAutomatico() && admin?.prueba?.porCodigo === true;
-  const formulariosDelNumero = admin?.prueba?.numero === "pedido" && admin.prueba.dias !== 0;
+  // Qué camino le toca al número: la WABA propia, el código, o ninguno. La 0051 y la 0049 se piden de verdad: sin ellas, lo de siempre.
+  const prueba = admin?.prueba;
+  const metodo = prueba
+    ? metodoDelEspacio({
+        conWaba: prueba.conWaba,
+        idEnLaPlataforma: prueba.idEnLaPlataforma,
+        esAdmin,
+        autoalta: true,
+        yaConectado: prueba.numero === "conectado",
+        origen: waba?.origen,
+      })
+    : null;
+  // Suspendido o con la prueba vencida no hay nada que conectar: lo atiende el operador.
+  const conectable = prueba?.numero !== "suspendido" && !(prueba?.numero === "pedido" && prueba.dias === 0);
+  const propia = metodo === "propia" && conectable;
+  const conSuApp = metodo === "app" && conectable;
+  // El número por código: la 0049 (sin ella, lo de siempre), lo que dejó la última acción y si todavía hay un número por conectar.
+  const automatico = metodo === "codigo" && prueba?.porCodigo === true;
+  const formulariosDelNumero = prueba?.numero === "pedido" && prueba.dias !== 0;
   const panelDelCodigo = panelDelNumero(automatico, formulariosDelNumero, wa);
 
   // Los primeros pasos salen de lo que falta, no de la dirección. El WhatsApp sólo cuenta si hay dónde conectarlo.
@@ -225,7 +244,7 @@ export default async function ConfiguracionPage({
                 ) : (
                   <Paso
                     texto={t("configuracion.primeros.whatsapp")}
-                    href="#whatsapp"
+                    href={propia ? "/conectar-whatsapp" : conSuApp ? "/conectar-whatsapp/app" : "#whatsapp"}
                     boton={t("configuracion.primeros.conectarWhatsapp")}
                   />
                 ))}
@@ -248,10 +267,13 @@ export default async function ConfiguracionPage({
           </div>
         </Section>
 
-        {/* ── Prueba y número de WhatsApp (alta automática, sólo admin; el número se conecta con un código si la bandera está prendida) ── */}
+        {/* ── Prueba y número de WhatsApp (alta automática, sólo admin; el número se conecta con la cuenta de Meta propia o con un código, según `metodoDelEspacio`) ── */}
         {admin?.prueba && (
           <Section id="whatsapp" title={t("configuracion.prueba.titulo")}>
-            <PruebaPanel prueba={admin.prueba} t={t} automatico={automatico} />
+            <PruebaPanel prueba={admin.prueba} t={t} automatico={automatico} propia={propia || conSuApp} />
+            {(propia || conSuApp) && userRow && (
+              <WabaPropiaEnlace tenantId={userRow.tenant_id} t={t} waba={waba ?? undefined} metodo={conSuApp ? "app" : "propia"} />
+            )}
             {panelDelCodigo && !numeroEnPrimeros && (
               <NumeroPanel t={t} resultado={panelDelCodigo.resultado} formularios={panelDelCodigo.formularios} />
             )}

@@ -24,7 +24,7 @@ import { redirect } from "next/navigation";
 
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { auth } from "@/lib/auth";
-import { getSessionContext } from "@/lib/auth/session";
+import { cerrarSesion } from "@/lib/auth/cerrar-sesion";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import {
@@ -172,28 +172,7 @@ export async function signIn(
  * Can be called from any server action or form action.
  */
 export async function signOut(): Promise<void> {
-  const session = await getSessionContext();
-
-  if (session?.user) {
-    // sin-inquilino: Idem.
-    const [userRow] = await db
-      .select({ tenant_id: users.tenant_id })
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1);
-
-    await writeAuditLog({
-      tenant_id: userRow?.tenant_id ?? "00000000-0000-0000-0000-000000000000",
-      actor_id: session.user.id,
-      event_type: AuditEvent.AUTH_SIGN_OUT,
-      target_type: "user",
-      target_id: session.user.id,
-      payload: {},
-    });
-
-    await auth.api.signOut({ headers: await headers() });
-  }
-
+  await cerrarSesion();
   redirect("/login");
 }
 

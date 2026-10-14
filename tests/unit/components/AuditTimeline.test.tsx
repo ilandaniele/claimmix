@@ -55,6 +55,8 @@ const VALORES_EXCLUIDOS = new Set([
   "tenant.created",
   "tenant.plan_changed",
   "tenant.suspended",
+  // El borrado de datos que pide Meta es del inquilino (su WABA), no cuelga de un caso.
+  "meta.borrado_de_datos",
   // El aviso de desvíos es del inquilino (target_type tenant), no cuelga de un caso.
   "quality.desvios_alerted",
 ]);

@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * El lado del IdP del SSO, contra un IdP de mentira: un par de claves de verdad,
  * tokens firmados con jose y `pedirFijado` respondiendo el documento de

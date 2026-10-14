@@ -881,12 +881,13 @@ producción.
 ## Lo que corre solo
 
 **En cada push a `main`** — `.github/workflows/ci.yml`, que ya existía: tipos,
-lint, tests, build, auditoría de dependencias.
+lint, tests, build, auditoría de dependencias. Si ese árbol ya pasó en el PR,
+sólo corre la auditoría (ver «Antes de mergear» en [docs/PROMOCION.md](PROMOCION.md)).
 
 ### Cómo se llama cada check, después de septiembre de 2026
 
 Los nombres cambiaron para que un check leído sin el prefijo del workflow —el
-que arma GitHub en la lista de un PR— siga diciendo qué mira. Catorce son
+que arma GitHub en la lista de un PR— siga diciendo qué mira. Once son
 obligatorios en `main` y en `qa` (ver el paso 9 de
 [docs/PROMOCION.md](PROMOCION.md)); los demás corren en cada PR pero no
 bloquean el merge.
@@ -895,14 +896,12 @@ bloquean el merge.
 
 - **Tipos** (obligatorio) — `pnpm type-check`.
 - **Lint** (obligatorio) — `pnpm lint`.
-- **Tests unitarios** (obligatorio) — la suite unitaria, más los flujos durables.
+- **Tests unitarios** (obligatorio) — la suite unitaria con el piso de cobertura de `vitest.config.ts`, más los flujos durables.
 - **Build** (obligatorio) — `pnpm build`.
 - **Tests de integración** — contra el ensayo, si `STAGING_DATABASE_URL` está.
-- **Cobertura** — el piso de `vitest.config.ts`, como trinquete.
 - **Tests E2E** (obligatorio) — Playwright contra su propia base.
-- **Vulnerabilidades** (obligatorio) — `pnpm audit` de alto para arriba, y semgrep (`p/typescript`, `p/owasp-top-ten` y `p/secrets`, sin métricas) sobre `src/` y `scripts/`.
+- **Vulnerabilidades** (obligatorio) — `pnpm audit` de alto para arriba, semgrep (`p/typescript`, `p/owasp-top-ten` y `p/secrets`, sin métricas) sobre `src/` y `scripts/`, y licencias: sin GPL/AGPL/LGPL/SSPL.
 - **Peso del bundle** (obligatorio) — gzip de los chunks contra un presupuesto.
-- **Licencias** (obligatorio) — sin GPL/AGPL/LGPL/SSPL.
 - **Aislamiento de tenants** (obligatorio) — `pnpm tenancy` y `pnpm capa-datos`.
 - **Pen test local** (obligatorio) — `pnpm pentest --solo-superficie` contra un build local.
 - **Bases por cliente** — `pnpm bases:empaquetar --comprobar` y `pnpm bases:probar` contra la rama `ensayo` de `claimmix-prd` (capa 9).
@@ -913,9 +912,7 @@ bloquean el merge.
 
 `secrets.yml`:
 
-- **Credenciales** (obligatorio) — gitleaks sobre el push; el historial entero corre aparte, los domingos.
-- **Datos personales** (obligatorio) — `bash scripts/check-personal-data.sh`.
-- **Invariantes de arquitectura** (obligatorio) — `node scripts/check-architecture.mjs`.
+- **Credenciales, datos personales y arquitectura** (obligatorio) — gitleaks sobre los commits del PR, `bash scripts/check-personal-data.sh` y `node scripts/check-architecture.mjs`, en un solo job; el historial entero corre aparte, los domingos.
 
 **Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`,
 que llama al workflow reusable `.github/workflows/deploy-checks.yml`. GitHub
@@ -937,18 +934,17 @@ chequeos: el smoke primero, y colgando de él los otros seis.
    extracciones, y borra los casos al terminar.
 5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
-6. Migraciones al día: que no haya una migración del repo sin registrar en
-   `schema_migrations` (`migrate.mjs --exigir-al-dia`, sólo SELECT). La
-   comparación de documentos contra `required_docs_config` se retiró con 0044:
-   la tabla ya no se lee.
-7. `pnpm permisos`: el rol restringido con el que consulta la aplicación puede
-   hacer lo que la capa de datos le pide — y en `audit_log`, que es sólo de
-   alta desde 0032, comprueba que NO tenga UPDATE ni DELETE. Sólo lee. Le sigue
+6. Migraciones y permisos del rol, en un solo job que sólo lee. Primero, que
+   no haya una migración del repo sin registrar en `schema_migrations`
+   (`migrate.mjs --exigir-al-dia`). Después `pnpm permisos`: el rol
+   restringido con el que consulta la aplicación puede hacer lo que la capa de
+   datos le pide — y en `audit_log`, que es sólo de alta desde 0032, comprueba
+   que NO tenga UPDATE ni DELETE. Le sigue
    `pnpm tenancy` en el mismo job: que el rol no tenga `BYPASSRLS` ni `SUPERUSER`
    y que toda tabla con `tenant_id` tenga RLS, `FORCE` y política. Las migraciones
    de QA y de producción se aplican a mano, y un `ALTER ROLE` no deja registro.
 
-Hay un octavo trabajo que no verifica nada, `alcance`. Corre con `if: always()`
+Hay un séptimo trabajo que no verifica nada, `alcance`. Corre con `if: always()`
 y escribe en el resumen del run una fila por chequeo: **corrió**, **corrió y
 falló**, o **NO corrió y por qué**. También nombra si el smoke fue profundo o
 liviano y qué chequeos de salud se toleraron sin verificar. Existe porque un

@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Lo que /configuracion lee de `core_sync_settings` y cómo se reconoce la 0036
  * sin aplicar. La vista va al navegador del admin: si alguna vez trae el

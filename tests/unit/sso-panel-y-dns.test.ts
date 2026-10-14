@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Las piezas de /api/admin/sso que la ruta usa y los tests de la ruta simulan:
  * la consulta de DNS, el cierre de sesiones al exigir SSO y el panel.

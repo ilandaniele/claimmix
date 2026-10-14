@@ -58,7 +58,6 @@ vi.mock("@/lib/db", () => ({ db: { select: mockSelect, update: mockUpdate }, tab
 
 vi.mock("@/server/ai/claim-agent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/ai/claim-agent")>()),
-  runClaimTextAgent: mockAgente,
   runEmailClaimAgent: mockAgente,
 }));
 

@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Empezar el ingreso con el SSO de la empresa (B19): `urlDelSso` y la acción
  * `signInSso` de la pantalla de entrada.

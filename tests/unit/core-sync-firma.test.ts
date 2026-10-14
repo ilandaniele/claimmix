@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La firma del webhook al Core y el verificador que copia la aseguradora
  * (`docs/entrega-al-core/verificar-firma.mjs`). Si alguno de los dos cambia

@@ -11,51 +11,11 @@
  */
 
 import "server-only";
-import type { ClaimType } from "@/lib/schemas/cases";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
-import { runMockExtractor, denunciaSimuladaVacia } from "@/server/ai/mock-extractor";
+import { denunciaSimuladaVacia } from "@/server/ai/mock-extractor";
 import type { EmailClaimPayload } from "@/server/ai/model-response";
-import {
-  runGeminiExtractor,
-  extractEmailClaimGemini,
-  GeminiExtractionError,
-} from "@/server/ai/gemini-extractor";
+import { extractEmailClaimGemini } from "@/server/ai/gemini-extractor";
 import { resolveExtractionEngine, type ExtractionEngine } from "@/server/ai/provider";
-
-export class ClaimAgentError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
-    super(message);
-    this.name = "ClaimAgentError";
-  }
-}
-
-export async function runClaimTextAgent(params: {
-  rawText: string;
-  claimType: ClaimType;
-  caseId: string;
-  tenantId: string;
-  userId: string | null;
-}): Promise<ExtractedClaim> {
-  const engine = await resolveExtractionEngine(params.tenantId, params.userId);
-
-  try {
-    if (engine === "mock") {
-      return runMockExtractor(params.rawText, params.claimType);
-    }
-    return runGeminiExtractor(
-      params.rawText,
-      params.claimType,
-      params.caseId,
-      params.tenantId,
-      params.userId
-    );
-  } catch (e) {
-    if (e instanceof GeminiExtractionError) {
-      throw new ClaimAgentError("agent_output_invalid", e);
-    }
-    throw e;
-  }
-}
 
 export async function runEmailClaimAgent(params: {
   payload: EmailClaimPayload;

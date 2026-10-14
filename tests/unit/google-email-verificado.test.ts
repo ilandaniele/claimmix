@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Google entra sólo con `email_verified === true` en el perfil crudo.
  *

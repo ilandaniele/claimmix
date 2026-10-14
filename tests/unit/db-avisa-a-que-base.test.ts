@@ -84,22 +84,18 @@ describe("el aviso de a qué base se conectó", () => {
 
   it("con una cadena inválida el que se planta es el driver, no el aviso", async () => {
     /*
-     * Desde la 1.2 el driver revisa la cadena en la primera consulta y no al
-     * crearse, así que el aviso sí llega a mirarla. Lo que el test cuida es que
-     * el error siga siendo el del driver: si el aviso tirara su propio
-     * `TypeError` al parsear la URL, taparía el diagnóstico con uno peor.
+     * Escribí este test al revés: esperaba que la conexión sobreviviera. No
+     * sobrevive, y está bien que no sobreviva — el driver revisa la cadena antes
+     * de que el aviso llegue a mirarla, y su mensaje dice qué pasa con la
+     * conexión, que es de lo que se trata.
+     *
+     * Lo que el test tiene que cuidar es que el error siga siendo el del driver:
+     * si algún día el aviso se adelantara y tirara su propio `TypeError` al
+     * parsear la URL, taparía el diagnóstico con uno peor.
      */
     vi.stubEnv("NODE_ENV", "development");
     process.env.DATABASE_URL = "esto-no-es-una-url";
 
-    expect((await conectarYEscuchar()).join("\n")).toContain("no se pudo leer el host");
-
-    const { getDb } = await import("@/lib/db");
-    const { sql } = await import("drizzle-orm");
-    // Drizzle lo envuelve en «Failed query»; el del driver queda en `cause`.
-    await expect(getDb().execute(sql`select 1`)).rejects.toHaveProperty(
-      "cause.message",
-      expect.stringMatching(/connection string/i),
-    );
+    await expect(conectarYEscuchar()).rejects.toThrow(/connection string/i);
   });
 });

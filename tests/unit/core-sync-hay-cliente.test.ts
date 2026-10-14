@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La ficha muestra «Enviar al Core» con `hayClienteDeCoreSync` y la ruta pide
  * `getCoreSyncClient`. Si no coinciden, el botón recibe 501 siempre y la ficha

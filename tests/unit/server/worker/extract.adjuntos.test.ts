@@ -93,8 +93,6 @@ async function correr(opciones: {
   }
   vi.doMock("@/server/ai/claim-agent", () => ({
     runEmailClaimAgent: extractor,
-    runClaimTextAgent: extractor,
-    ClaimAgentError: class extends Error {},
   }));
 
   vi.doMock("@/server/ai/provider", async () => ({

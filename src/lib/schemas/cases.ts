@@ -16,19 +16,6 @@ export const ClaveDeRamoSchema = z.string().regex(FORMATO_DE_CLAVE_DE_RAMO);
 export const ClaimTypeSchema = z.enum(RAMOS_NATIVOS);
 export type ClaimType = z.infer<typeof ClaimTypeSchema>;
 
-/**
- * Original case statuses (existing FNOL simulate flow).
- * Kept as a sub-union for backward compatibility with existing code.
- */
-export const CaseStatusLegacySchema = z.enum([
-  "procesando",
-  "listo",
-  "esperando",
-  "escalado",
-  "cerrado",
-]);
-export type CaseStatusLegacy = z.infer<typeof CaseStatusLegacySchema>;
-
 /** All allowed case statuses (legacy + email-intake) */
 export const CaseStatusSchema = z.enum([
   // Original statuses

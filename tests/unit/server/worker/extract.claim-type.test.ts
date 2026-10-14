@@ -102,7 +102,6 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           suggested_reply: "",
         });
         return {
-          runMockExtractor: vi.fn(),
           extractEmailClaimMock: claimSimulado,
           // claim-agent.ts llama denunciaSimuladaVacia (no extractEmailClaimMock)
           // cuando el motor cae a mock; ver worker-harness.ts.
@@ -166,7 +165,6 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           suggested_reply: "",
         });
         return {
-          runMockExtractor: vi.fn(),
           extractEmailClaimMock: claimSimulado,
           denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
         };
@@ -228,7 +226,6 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           suggested_reply: "",
         });
         return {
-          runMockExtractor: vi.fn(),
           extractEmailClaimMock: claimSimulado,
           denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
         };
@@ -287,7 +284,6 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           suggested_reply: "",
         });
         return {
-          runMockExtractor: vi.fn(),
           extractEmailClaimMock: claimSimulado,
           denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
         };
@@ -343,7 +339,6 @@ describe("runEmailExtractionWorker — claim_type persistence", () => {
           suggested_reply: "",
         });
         return {
-          runMockExtractor: vi.fn(),
           extractEmailClaimMock: claimSimulado,
           denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
         };

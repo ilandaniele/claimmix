@@ -13,7 +13,6 @@ import { describe, it, expect } from "vitest";
 import {
   buildTemporalContext,
   NO_PLACEHOLDER_RULE,
-  buildSystemPrompt,
   buildEmailClaimPrompt,
 } from "@/server/ai/prompt";
 
@@ -80,14 +79,7 @@ describe("NO_PLACEHOLDER_RULE", () => {
   });
 });
 
-describe("both prompt builders carry the rules", () => {
-  it("buildSystemPrompt includes the date and the placeholder ban", () => {
-    const p = buildSystemPrompt("choque");
-
-    expect(p).toContain("TEMPORAL CONTEXT");
-    expect(p).toContain("noreply@example.com");
-  });
-
+describe("the email prompt carries the rules", () => {
   it("buildEmailClaimPrompt includes the date and the placeholder ban", () => {
     const p = buildEmailClaimPrompt("Choque", "Tuve un choque ayer", [], []);
 

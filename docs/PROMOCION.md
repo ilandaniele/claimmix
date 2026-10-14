@@ -35,14 +35,11 @@ Corren en cada PR, y estos son los que **impiden** mergear:
 | | qué mira |
 |---|---|
 | `Tipos`, `Lint`, `Build` | que compile y esté prolijo |
-| `Tests unitarios` | la suite entera, más los flujos |
+| `Tests unitarios` | la suite entera con el piso de cobertura, más los flujos |
 | `Tests E2E` | la pantalla de verdad, contra su propia base |
-| `Vulnerabilidades` | `pnpm audit` de alto para arriba, y semgrep |
-| `Licencias` | ninguna licencia contagiosa |
+| `Vulnerabilidades` | `pnpm audit` de alto para arriba, semgrep y ninguna licencia contagiosa |
 | `Análisis CodeQL` | análisis estático de seguridad |
-| `Credenciales` | gitleaks sobre el historial del PR |
-| `Datos personales` | que no se cuele un dato de una persona |
-| `Invariantes de arquitectura` | las reglas de arquitectura y de CI |
+| `Credenciales, datos personales y arquitectura` | gitleaks sobre los commits del PR, que no se cuele un dato de una persona, y las reglas de arquitectura y de CI |
 | `Peso del bundle` | 310 kB comprimidos de JavaScript |
 | `Aislamiento de tenants` | que la base separe las aseguradoras |
 | `Pen test local` | que ninguna ruta nueva conteste sin credenciales |
@@ -50,11 +47,25 @@ Corren en cada PR, y estos son los que **impiden** mergear:
 
 `Peso del bundle`, `Aislamiento de tenants` y `Pen test local` eran nuevos y ya
 están marcados como requeridos, en `main` y en `qa`: el paso 9 de más abajo
-cuenta cómo se decidió. `Tests de integración` y `Cobertura` también corren en
-cada PR, pero no son requeridos y por eso no están en la tabla: un PR mergea con
-ellos en rojo.
+cuenta cómo se decidió. `Tests de integración` también corre en cada PR, pero
+no es requerido y por eso no está en la tabla: un PR mergea con él en rojo. La
+cobertura dejó de ser un job aparte: `Tests unitarios` corre la suite una sola
+vez, con el piso de `vitest.config.ts`.
 
-El 15, `Post-deploy QA`, no corre en el PR: es el estado que el job
+Un árbol que ya pasó no se vuelve a probar. El PR a `qa`, el PR de `qa` a
+`main` y el push a `main` suelen armar el mismo árbol de archivos; el job
+`arbol` de `ci.yml` busca el artefacto que `marcar` dejó cuando ese árbol
+pasó entero, y si lo encuentra los jobs que sólo miran el código se saltean.
+GitHub cuenta un job salteado como aprobado. `Vulnerabilidades` y `Análisis
+CodeQL` corren igual, porque una alerta nueva no necesita que cambie el código.
+`Análisis CodeQL` y `Credenciales, datos personales y arquitectura` no corren
+en el push a `main`: lo que llega ahí ya pasó por el PR. CodeQL vuelve a mirar
+todo los lunes y gitleaks el historial entero los domingos.
+
+Un PR suelto de Dependabot no corre la suite: el job `lote` lo pone en rojo, y
+los PRs se juntan en una rama desde `qa` que sí la corre entera.
+
+El último, `Post-deploy QA`, no corre en el PR: es el estado que el job
 `qa_veredicto` de `post-deploy.yml` (que se llama «Veredicto de QA», para que
 sólo el estado lleve ese nombre) publica sobre el commit desplegado a QA
 cuando terminan sus chequeos, con el pen test —la pared con un inquilino propio
@@ -71,10 +82,10 @@ de mergear.
 Los siete de `deploy-checks.yml`: smoke, ensayo de conversaciones, timbre, pen
 test de superficie, listas y parejas, permisos del rol y carga.
 
-Contra producción corren los siete. Contra QA corre lo que QA puede correr, que
+Contra producción corren los seis. Contra QA corre lo que QA puede correr, que
 no es ni «ninguno» ni «todos»: `post-deploy.yml` tiene ahora un job `qa` que
 llama al mismo workflow con los secretos de QA mapeados uno por uno —nunca
-`secrets: inherit`, que apuntaría a la base de PRODUCCIÓN los seis trabajos que
+`secrets: inherit`, que apuntaría a la base de PRODUCCIÓN los trabajos que
 corren en el runner, tres de los cuales escriben— y con un interruptor por
 chequeo.
 
@@ -83,8 +94,7 @@ chequeo.
 | Smoke                               | sí, `--deep` | sí, liviano | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba                                                                               |
 | Ensayo                              | sí           | sí          | sube adjuntos de verdad, al balde propio de QA, no al de producción                                                                                   |
 | Canales de entrada                  | sí           | no          | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito                                                                                     |
-| Migraciones al día                  | sí           | sí          | sólo le pregunta al registro de migraciones                                                                                                           |
-| Permisos del rol                    | sí           | sí          | sólo le pregunta al catálogo: permisos, y que el rol no saltee RLS                                                                                    |
+| Migraciones y permisos del rol      | sí           | sí          | sólo le pregunta al registro de migraciones y al catálogo: permisos, y que el rol no saltee RLS                                                       |
 | Pen test                            | sí           | sí          | en QA la pared se arma con un inquilino efímero y un caso propio (`--pared-propia`), que se borran al terminar; producción lo rechaza                 |
 | Ataques al agente (`--agent`)       | no           | sí          | gastan tokens del cupo del inquilino y escriben casos; contra producción se corren a mano al tocar el agente o los prompts                           |
 | Carga de lectura                    | sí           | no          | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |

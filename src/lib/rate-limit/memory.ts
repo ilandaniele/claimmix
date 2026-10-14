@@ -4,9 +4,6 @@
  * Limitation: state is lost on serverless cold starts (each Vercel function
  * instance has its own in-memory state). This is acceptable for MVP.
  *
- * Upgrade path: swap for Upstash Redis (see rate-limit/upstash.ts) when
- * multi-instance consistency is required.
- *
  * The Map is capped at MAX_KEYS entries to prevent unbounded memory growth.
  * Entries older than the window are garbage-collected on access.
  */

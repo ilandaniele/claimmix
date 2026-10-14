@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La purga diferida de adjuntos (B19): borra de R2 lo que el borrado de un caso
  * dejó anotado en `adjuntos_por_purgar`.

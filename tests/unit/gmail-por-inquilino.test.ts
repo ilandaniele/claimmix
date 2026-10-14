@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Correo por inquilino: al conectar, la URL de Google lleva el correo de la
  * sesión como `login_hint` y pide sólo `gmail.modify` y `gmail.send`; mientras la

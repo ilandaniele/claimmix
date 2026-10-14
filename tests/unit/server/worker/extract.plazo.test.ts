@@ -61,8 +61,6 @@ async function correrConSalto(saltoMs: number) {
   });
   vi.doMock("@/server/ai/claim-agent", () => ({
     runEmailClaimAgent: extractor,
-    runClaimTextAgent: extractor,
-    ClaimAgentError: class extends Error {},
   }));
 
   const { runEmailExtractionWorker } = await import("@/server/worker/extract");

@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Las acciones del panel de SSO (B19) y cómo traducen lo que contesta la API a
  * uno de los resultados de la lista cerrada que la página sabe pintar.

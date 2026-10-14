@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * El script que decide el tema antes del primer pintado.
  *

@@ -122,13 +122,11 @@ vi.mock("@/server/ai/severity-classifier", () => ({
 
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
-  runMockExtractor: vi.fn(),
   denunciaSimuladaVacia: vi.fn(),
 }));
 
 vi.mock("@/server/ai/gemini-extractor", () => ({
   extractEmailClaimGemini: vi.fn(),
-  runGeminiExtractor: vi.fn(),
   GeminiExtractionError: class GeminiExtractionError extends Error {},
 }));
 

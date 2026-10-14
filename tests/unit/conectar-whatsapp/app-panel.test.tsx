@@ -640,10 +640,11 @@ describe("E14 con el webhook ya verificado: el callback de la app cambió", () =
     expect(titulo(esAR["appPropia.webhook.titulo"])).toBeInTheDocument();
     expect(screen.getByLabelText("Callback URL")).toHaveValue(WEBHOOK.url);
     expect(screen.getByLabelText("Verify token")).toHaveValue(WEBHOOK.verifyToken);
-    const carteles = screen.getAllByRole("alert").map((c) => c.textContent);
-    expect(carteles).toContain(esAR["appPropia.webhook.ajeno"]);
+    const carteles = () => screen.getAllByRole("alert").map((c) => c.textContent);
+    // El cartel llega con la segunda vuelta del efecto de E14: se espera, no se lee en seco.
+    await waitFor(() => expect(carteles()).toContain(esAR["appPropia.webhook.ajeno"]));
     // La demora es del sondeo; con el callback ajeno el motivo es el cartel de arriba, no «Meta todavía no nos llamó».
-    expect(carteles).not.toContain(esAR["appPropia.r.webhook_demora"]);
+    expect(carteles()).not.toContain(esAR["appPropia.r.webhook_demora"]);
     expect(h.refresh).not.toHaveBeenCalled();
   });
 

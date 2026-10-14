@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -58,8 +57,9 @@ describe("ci.yml: el job de bases por cliente", () => {
     const ramas = m![1].split(",").map((r) => r.trim());
     expect(ramas).toEqual(["main", "qa"]);
     expect(ramas).not.toContain("prd");
-    // Sin `if:` propio: no se saltea por evento ni por rama, y menos con un secreto (el `if:` de un job no lo lee).
-    expect(job).not.toMatch(/^ {4}if:/m);
+    // El único `if:` es el del árbol ya probado: no se saltea por evento ni por rama, y menos con un secreto (el `if:` de un job no lo lee).
+    const condiciones = job.match(/^ {4}if:.*$/gm) ?? [];
+    expect(condiciones).toEqual(["    if: ${{ !cancelled() && needs.arbol.outputs.saltear != 'true' }}"]);
     expect(job).not.toMatch(/\bprd\b/);
   });
 

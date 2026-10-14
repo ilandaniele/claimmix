@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Usuarios, roles y membresía se escriben en control y de ahí se espejan a la
  * base del cliente.

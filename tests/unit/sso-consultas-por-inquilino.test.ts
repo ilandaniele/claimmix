@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Las consultas de «Exigir SSO» miran el inquilino de la cuenta, no sólo el dominio del mail.
  *

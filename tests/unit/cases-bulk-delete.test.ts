@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Borrado múltiple: que no cruce inquilinos, que diga la verdad y que anote los
  * adjuntos de R2 para la purga diferida (B19).

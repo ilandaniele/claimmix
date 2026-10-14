@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La retención de casos (B19): qué se mira, qué se borra y cuándo no se toca nada.
  *

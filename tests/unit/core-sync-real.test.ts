@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * El webhook real al Core. `node:https` se reemplaza por el mismo pedido en
  * claro a un servidor local: lo que se prueba es qué arma el cliente (a qué IP

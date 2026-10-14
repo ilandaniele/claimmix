@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * El alta sin contraseña contra Better Auth de verdad (sus rutas y sus ganchos).
  *

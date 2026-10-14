@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * `migrate.mjs --exigir-al-dia` corre después del deploy contra la base viva.
  *

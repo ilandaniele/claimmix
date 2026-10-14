@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Alta y edición a mano de clientes y pólizas (B16): POST /api/customers,
  * PATCH /api/customers/:id, POST /api/policies, PATCH /api/policies/:id.

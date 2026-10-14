@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * POST /api/padron/vista-previa y /api/padron/importar (B16): el borde HTTP.
  * Quién entra, qué archivos se rechazan y con qué frase, y que el inquilino sale

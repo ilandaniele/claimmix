@@ -16,7 +16,6 @@
     "format:check": "prettier --check .",
     "test:unit": "vitest run --reporter=verbose",
     "test:unit:watch": "vitest",
-    "test:unit:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:integration": "vitest run --reporter=verbose --testTimeout=25000 --hookTimeout=25000 tests/integration",
@@ -68,7 +67,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1151.0",
     "@googleapis/gmail": "^22.0.1",
-    "@neondatabase/serverless": "^1.2.0",
+    "@neondatabase/serverless": "1.1.0",
     "@sentry/nextjs": "^11.7.0",
     "@vercel/oidc": "3.8.5",
     "better-auth": "^1.7.6",

@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Lo que /configuracion lee para un admin. Nunca rechaza: antes de B5 la lista
  * de avisos se leía sola y un error daba una lista vacía, no la página caída.

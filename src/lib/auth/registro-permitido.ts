@@ -36,7 +36,7 @@ export function puedeRegistrarse(email: string, permitidos: Permiso[]): boolean 
   );
 }
 
-export function permitidosConfigurados(): Permiso[] {
+function permitidosConfigurados(): Permiso[] {
   return parsearPermitidos(
     [process.env.SIGNUP_ALLOWED_EMAILS, process.env.ADMIN_EMAILS]
       .filter(Boolean)

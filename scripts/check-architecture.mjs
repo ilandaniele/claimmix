@@ -62,7 +62,7 @@ import { join } from "node:path";
  * vivo de la fila que `appDeLaRuta` busca por la ruta. Unen filas de `whatsapp_wabas`
  * con las de `whatsapp_numeros` del mismo espacio; tampoco filtran por uno de afuera.
  */
-const TOPE_FILTROS = 20;
+const TOPE_FILTROS = 19;
 
 function archivos(dir, ext = [".ts", ".tsx"]) {
   if (!existsSync(dir)) return [];

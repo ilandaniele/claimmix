@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * /api/admin/sso: el IdP de la aseguradora, la prueba del dominio y «exigir» (B19).
  *

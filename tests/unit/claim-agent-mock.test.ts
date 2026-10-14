@@ -19,7 +19,6 @@ vi.mock("@/server/ai/provider", () => ({
 
 vi.mock("@/server/ai/gemini-extractor", () => ({
   extractEmailClaimGemini: vi.fn(),
-  runGeminiExtractor: vi.fn(),
   GeminiExtractionError: class GeminiExtractionError extends Error {},
 }));
 

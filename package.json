@@ -69,7 +69,7 @@
     "@googleapis/gmail": "^22.0.2",
     "@neondatabase/serverless": "1.1.0",
     "@sentry/nextjs": "^11.7.0",
-    "@vercel/oidc": "3.8.5",
+    "@vercel/oidc": "4.0.1",
     "better-auth": "^1.7.8",
     "drizzle-orm": "^0.45.4",
     "google-auth-library": "^11.3.0",

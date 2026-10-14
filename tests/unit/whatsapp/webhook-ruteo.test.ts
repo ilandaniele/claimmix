@@ -79,6 +79,7 @@ function filas(resultado: unknown[] | Error) {
   const cadena = {
     from: () => cadena,
     innerJoin: () => cadena,
+    leftJoin: () => cadena,
     where: () => cadena,
     then: (ok: (v: unknown) => unknown, ko?: (e: unknown) => unknown) => promesa().then(ok, ko),
   };
@@ -166,6 +167,37 @@ describe("/api/webhooks/whatsapp — ruteo por número", () => {
 
     expect(res.status).toBe(200);
     expect(mockCreateWhatsAppIntake).not.toHaveBeenCalled();
+  });
+
+  it("el número de una app propia no entra por acá: firma con otro secreto y su webhook es otro", async () => {
+    mockSelectDb.mockReturnValue(filas([{ ...conectado(NUMERO_OTRO, OTRO), origen: "app_propia" }]));
+
+    const res = await POST(firmado(evento(valor(NUMERO_OTRO, "wamid.1"))));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ received: 0, ignored_other_number: 1 });
+    expect(mockCreateWhatsAppIntake).not.toHaveBeenCalled();
+    expect(afterCallbacks).toHaveLength(0);
+    expect(logs.lineas().find((l) => l.msg === "whatsapp.webhook.app_por_plataforma")).toMatchObject({ tenantId: OTRO });
+  });
+
+  it("un número de Embedded Signup sigue entrando aunque haya una app propia en el mismo pedido", async () => {
+    const PROPIO = "30000000-0000-0000-0000-000000000003";
+    mockSelectDb.mockReturnValue(
+      filas([
+        { ...conectado(NUMERO_OTRO, OTRO), origen: "embedded_signup" },
+        { ...conectado("333333333333333", PROPIO), origen: "app_propia" },
+      ])
+    );
+
+    const res = await POST(
+      firmado(evento(valor(NUMERO_OTRO, "wamid.1"), valor("333333333333333", "wamid.2", "5491100000001")))
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ received: 1, ignored_other_number: 1 });
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledTimes(1);
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(expect.objectContaining({ tenantId: OTRO }));
   });
 
   it("un pedido con dos inquilinos: una consulta, cada mensaje al suyo y un agente por inquilino", async () => {

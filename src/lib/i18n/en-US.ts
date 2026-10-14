@@ -1187,4 +1187,27 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "configuracion.montos.guardados": "Saved.",
   "configuracion.montos.error": "Could not be saved.",
 
+  // ── Own WhatsApp: profile categories, read by the client ───────────────────
+  "waba.categoria.ALCOHOL": "Alcohol",
+  "waba.categoria.APPAREL": "Apparel",
+  "waba.categoria.AUTO": "Automotive",
+  "waba.categoria.BEAUTY": "Beauty and personal care",
+  "waba.categoria.EDU": "Education",
+  "waba.categoria.ENTERTAIN": "Entertainment",
+  "waba.categoria.EVENT_PLAN": "Event planning",
+  "waba.categoria.FINANCE": "Finance and insurance",
+  "waba.categoria.GOVT": "Government",
+  "waba.categoria.GROCERY": "Grocery",
+  "waba.categoria.HEALTH": "Health",
+  "waba.categoria.HOTEL": "Hotel and lodging",
+  "waba.categoria.NONPROFIT": "Nonprofit",
+  "waba.categoria.ONLINE_GAMBLING": "Online gambling",
+  "waba.categoria.OTC_DRUGS": "Over-the-counter drugs",
+  "waba.categoria.OTHER": "Other",
+  "waba.categoria.PHYSICAL_GAMBLING": "In-person gambling",
+  "waba.categoria.PROF_SERVICES": "Professional services",
+  "waba.categoria.RESTAURANT": "Restaurant",
+  "waba.categoria.RETAIL": "Retail",
+  "waba.categoria.TRAVEL": "Travel and tourism",
+
 } as const;

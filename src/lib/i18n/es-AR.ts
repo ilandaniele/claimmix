@@ -1215,6 +1215,29 @@ export const esAR = {
   "configuracion.montos.guardados": "Guardados.",
   "configuracion.montos.error": "No se pudieron guardar.",
 
+  // ── WhatsApp propio: rubros del perfil, los lee el cliente ──────────────────
+  "waba.categoria.ALCOHOL": "Bebidas alcohólicas",
+  "waba.categoria.APPAREL": "Indumentaria",
+  "waba.categoria.AUTO": "Automotor",
+  "waba.categoria.BEAUTY": "Belleza y cuidado personal",
+  "waba.categoria.EDU": "Educación",
+  "waba.categoria.ENTERTAIN": "Entretenimiento",
+  "waba.categoria.EVENT_PLAN": "Organización de eventos",
+  "waba.categoria.FINANCE": "Finanzas y seguros",
+  "waba.categoria.GOVT": "Gobierno",
+  "waba.categoria.GROCERY": "Almacén y supermercado",
+  "waba.categoria.HEALTH": "Salud",
+  "waba.categoria.HOTEL": "Hotelería y alojamiento",
+  "waba.categoria.NONPROFIT": "Organización sin fines de lucro",
+  "waba.categoria.ONLINE_GAMBLING": "Juegos de azar en línea",
+  "waba.categoria.OTC_DRUGS": "Medicamentos de venta libre",
+  "waba.categoria.OTHER": "Otro",
+  "waba.categoria.PHYSICAL_GAMBLING": "Juegos de azar presenciales",
+  "waba.categoria.PROF_SERVICES": "Servicios profesionales",
+  "waba.categoria.RESTAURANT": "Gastronomía",
+  "waba.categoria.RETAIL": "Comercio minorista",
+  "waba.categoria.TRAVEL": "Viajes y turismo",
+
 } as const;
 
 export type ClaveDelCliente = keyof typeof esAR;

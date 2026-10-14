@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   // Optional peer dependencies (upgrade path — not installed by default).
   // Without this, Next.js/Turbopack throws "Module not found" even for dynamic imports.
   serverExternalPackages: ["@upstash/ratelimit", "@upstash/redis"],
+  // Con el mínimo por defecto (50 kB), Turbopack metía los módulos chicos que
+  // comparten todas las páginas (next/link y su pila) dentro del chunk de cada
+  // ruta, una copia por ruta: ~23 kB gz de más. Con 15 kB quedan en un chunk
+  // compartido, a cambio de tres chunks más.
+  experimental: { turbopackChunking: { minChunkSize: 15000 } },
   // Security headers (non-CSP headers that don't require per-request nonce).
   // CSP with per-request nonce is injected by proxy.ts at the middleware layer.
   async headers() {

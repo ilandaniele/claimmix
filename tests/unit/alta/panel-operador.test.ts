@@ -14,30 +14,53 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 
-const h = vi.hoisted(() => ({ execute: vi.fn() }));
+const h = vi.hoisted(() => ({ execute: vi.fn(), after: vi.fn(), continuarWaba: vi.fn(), soltarEnMeta: vi.fn() }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: { execute: h.execute } }));
 vi.mock("@/data/scope", () => ({ enTenant: vi.fn() }));
 vi.mock("@/server/alta/crear-inquilino", () => ({ topeGlobalDelDia: () => 20 }));
+// `after` sólo corre dentro de un pedido: acá se junta lo que se agenda y cada test decide si lo corre.
+vi.mock("next/server", async () => ({ ...(await vi.importActual<typeof import("next/server")>("next/server")), after: h.after }));
+// El alta de la WABA y la suelta en Meta tienen sus propios tests; acá sólo importa con qué se las llama.
+vi.mock("@/server/alta/waba-propia", () => ({ continuarWaba: h.continuarWaba, soltarEnMeta: h.soltarEnMeta }));
 
 import { AuditEvent } from "@/lib/audit/log";
 import { PLAN_CATALOG } from "@/lib/billing/plans";
 import { enUSServidor } from "@/lib/i18n/en-US.servidor";
+import { cifrar } from "@/lib/security/cifrado";
 import { esARServidor } from "@/lib/i18n/es-AR.servidor";
+import { aadDelToken, cerrarSecreto, pruebaDelSecreto } from "@/server/whatsapp/sobres-del-cliente";
+import { capturarLogs } from "../../mocks/capturar-logs";
 import {
   RESULTADOS_DEL_PANEL,
   activarInquilino,
+  almacenDelDueno,
+  bajaDeWaba,
   conectarNumero,
   darDeBajaNumero,
+  desvincularWaba,
+  despublicarLegales,
   extenderPrueba,
   listarAltas,
+  nombreDelNumero,
+  nombreRehabilitado,
+  plantillaCreada,
   reactivarInquilino,
   reactivarNumero,
+  recordatorioEnviado,
+  reintentarWaba,
+  restriccionLevantada,
   resultadoDelPanel,
   suspenderInquilino,
   suspenderNumero,
+  primeraRespuestaDeApp,
+  primerMensajeDeApp,
+  saludDeApp,
   terminosDeActivacion,
+  wabaEnFalla,
+  wabaRevocada,
+  webhookDeAppVerificado,
   type Operador,
 } from "@/server/alta/panel-operador";
 
@@ -64,6 +87,11 @@ const filas = (...rows: Array<Record<string, unknown>>) => ({ rows });
 
 beforeEach(() => {
   h.execute.mockReset();
+  h.after.mockReset();
+  h.continuarWaba.mockReset();
+  h.soltarEnMeta.mockReset();
+  process.env.GMAIL_TOKEN_ENCRYPTION_KEY = "test-encryption-key";
+  process.env.WHATSAPP_APP_SECRETS_KEY = "test-app-secrets-key";
   process.env.WHATSAPP_ACCESS_TOKEN = "fake-access-token";
   process.env.WHATSAPP_PHONE_NUMBER_ID = ID_PLATAFORMA;
   process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = WABA;
@@ -260,6 +288,16 @@ describe("conectarNumero", () => {
     expect(consulta(0).sql).toContain("x.autoalta");
   });
 
+  it("un pedido con token propio (WABA propia) no se conecta a mano: ni al leerlo ni al escribir, para no dejarle su token a otra WABA", async () => {
+    graph();
+    base();
+
+    await pedirConexion();
+
+    expect(consulta(0).sql).toContain("w.token_cifrado is null");
+    expect(consulta(1).sql).toContain("w.token_cifrado is null");
+  });
+
   it("ids sin forma de id de Meta: datos_invalidos, sin tocar la base ni Graph", async () => {
     const g = graph();
 
@@ -400,10 +438,11 @@ describe.each(ACCIONES)("$nombre", (a) => {
   });
 
   it("sin la 0048 devuelve migracion_pendiente, y otro error sube", async () => {
-    h.execute.mockRejectedValueOnce(errorPg("42883"));
+    h.execute.mockRejectedValue(errorPg("42883"));
     expect(await a.correr()).toBe("migracion_pendiente");
 
-    h.execute.mockRejectedValueOnce(errorPg("57014"));
+    h.execute.mockReset();
+    h.execute.mockRejectedValue(errorPg("57014"));
     await expect(a.correr()).rejects.toMatchObject({ code: "57014" });
   });
 });
@@ -424,6 +463,31 @@ describe("reglas de cada acción", () => {
     expect(sql).toContain("set estado = 'baja'");
     expect(sql.toLowerCase()).not.toContain("delete");
     expect(sql).toContain("actualizado_en = now()");
+  });
+
+  it("dar de baja deja el token en NULL y revoca la WABA propia del número, sin pasar por la de la plataforma", async () => {
+    h.execute.mockResolvedValue(filas({ n: 1 }));
+    await darDeBajaNumero(NUMERO, OP);
+    const q = consulta();
+    expect(q.sql).toContain("token_cifrado = null");
+    expect(q.sql).toContain("update public.whatsapp_wabas b set estado = 'revocada', falla = null, pin_cifrado = null");
+    expect(q.sql).toContain("b.waba_id = u.waba_id");
+    expect(q.sql).toContain("b.waba_id is distinct from");
+    expect(q.params).toContain(WABA);
+    expect(q.sql).not.toContain(WABA);
+  });
+
+  it("dar de baja sin la 0051 (falta la tabla de la WABA propia) lo da de baja igual, sin tocarla", async () => {
+    h.execute.mockRejectedValueOnce(errorPg("42P01")).mockResolvedValueOnce(filas({ n: 1, tenant_id: CLIENTE }));
+
+    expect(await darDeBajaNumero(NUMERO, OP)).toBe("ok");
+
+    expect(h.execute).toHaveBeenCalledTimes(2);
+    expect(consulta(0).sql).toContain("whatsapp_wabas");
+    const reintento = consulta(1);
+    expect(reintento.sql).toContain("set estado = 'baja'");
+    expect(reintento.sql).toContain("insert into public.audit_log");
+    expect(reintento.sql).not.toContain("whatsapp_wabas");
   });
 
   it("suspender un espacio sólo parte de prueba o activo; reactivar sólo desde suspendido", async () => {
@@ -461,6 +525,1016 @@ describe("reglas de cada acción", () => {
     // Sólo la alarga y sólo en prueba.
     expect(consulta().sql).toContain("t.billing_status = 'trial'");
     expect(consulta().sql).toContain("t.trial_ends_at < now()");
+  });
+});
+
+// ── La WABA propia ──────────────────────────────────────────────────────────
+
+const WABA_DEL_CLIENTE = "555000111222";
+const TOKEN_DEL_CLIENTE = "test-waba-token";
+
+/** Lo que la sentencia de baja devuelve por cada WABA: el token viene cifrado con el AAD del espacio y la WABA. */
+const filaDeBaja = (cambios: Record<string, unknown> = {}) => ({
+  tenant_id: CLIENTE,
+  waba_id: WABA_DEL_CLIENTE,
+  phone_number_id: ID_DEL_CLIENTE,
+  numero_estado: "conectado",
+  token_cifrado: cifrar(TOKEN_DEL_CLIENTE, aadDelToken(CLIENTE, WABA_DEL_CLIENTE)),
+  ...cambios,
+});
+
+const cuantas = (texto: string, buscada: string) => texto.split(buscada).length - 1;
+
+describe("bajaDeWaba", () => {
+  it("la baja borra también lo de la app propia: el secreto, la ruta del webhook y su verificación", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja()));
+
+    await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+    const { sql } = consulta();
+    expect(sql).toContain("update public.whatsapp_wabas w set estado = 'revocada'");
+    for (const borrado of ["app_secreto_cifrado = null", "ruta_webhook = null", "webhook_app_verificado_en = null"]) {
+      expect(sql, borrado).toContain(borrado);
+    }
+  });
+
+  it("es UNA sentencia: cierra el número sin token, revoca la WABA sin PIN y asienta las dos cosas", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja()));
+
+    await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const { sql } = consulta();
+    expect(sql).toContain("update public.whatsapp_numeros w set estado = 'baja', token_cifrado = null");
+    expect(sql).toContain("update public.whatsapp_wabas w set estado = 'revocada', falla = null, pin_cifrado = null");
+    expect(cuantas(sql, "insert into public.audit_log")).toBe(2);
+    expect(sql.toLowerCase()).not.toContain("delete");
+    // Sólo espacios del alta automática: un id armado a mano contra la casa no hace nada.
+    expect(sql).toContain("x.autoalta");
+  });
+
+  it("la causa `token_vencido` sólo la deja Meta: el cliente o el operador que la sueltan no tienen una falla que mostrar", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await bajaDeWaba({ tenantId: CLIENTE }, OP);
+    expect(consulta().sql).toContain("estado = 'revocada', falla = null, pin_cifrado = null");
+
+    await bajaDeWaba({ wabaId: WABA_DEL_CLIENTE }, "sistema");
+    expect(consulta().sql).toContain("estado = 'revocada', falla = null, pin_cifrado = null");
+
+    await bajaDeWaba({ wabaId: WABA_DEL_CLIENTE }, "meta");
+    expect(consulta().sql).toContain("estado = 'revocada', falla = 'token_vencido'::text, pin_cifrado = null");
+  });
+
+  it("no toca la WABA de la plataforma: su id va por parámetro y la fila sin WABA sí entra", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+    const q = consulta();
+    expect(q.sql).toContain("b.waba_id is null or b.waba_id is distinct from");
+    expect(q.params).toContain(WABA);
+    expect(q.sql).not.toContain(WABA);
+  });
+
+  it.each([
+    [{ tenantId: CLIENTE }, "b.tenant_id =", CLIENTE],
+    [{ wabaId: WABA_DEL_CLIENTE }, "b.waba_id =", WABA_DEL_CLIENTE],
+    [{ fbUserId: "1234567890" }, "b.fb_user_id =", "1234567890"],
+  ])("encuentra por %j, con el valor por parámetro", async (donde, condicion, valor) => {
+    h.execute.mockResolvedValue(filas());
+
+    await bajaDeWaba(donde, OP);
+
+    const q = consulta();
+    expect(q.sql).toContain(condicion);
+    expect(q.params).toContain(valor);
+    expect(q.sql).not.toContain(valor);
+  });
+
+  it("sólo da de baja lo que sigue vivo: una WABA ya revocada no se vuelve a asentar", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await bajaDeWaba({ wabaId: WABA_DEL_CLIENTE }, OP);
+
+    const { sql } = consulta();
+    expect(sql).toContain("b.estado in (");
+    expect(sql).not.toContain("'revocada'::text");
+  });
+
+  it("devuelve el token ya abierto, para soltarlo en Meta: el borrado de la base ya lo borró", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja()));
+
+    const bajas = await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+    expect(bajas).toEqual([
+      {
+        tenantId: CLIENTE,
+        wabaId: WABA_DEL_CLIENTE,
+        phoneNumberId: ID_DEL_CLIENTE,
+        numeroEstado: "conectado",
+        token: TOKEN_DEL_CLIENTE,
+      },
+    ]);
+  });
+
+  describe("con la app propia del cliente", () => {
+    const APP_ID = "500000000000001";
+    const SECRETO = "fake-app-secret-del-cliente";
+    const deApp = (cambios: Record<string, unknown> = {}) =>
+      filaDeBaja({ origen: "app_propia", app_id: APP_ID, app_secreto_cifrado: cerrarSecreto(SECRETO, CLIENTE, APP_ID), ...cambios });
+
+    it("el secreto se lee en la misma sentencia que lo borra: el `with` ve la fila de antes del update", async () => {
+      h.execute.mockResolvedValue(filas(deApp()));
+
+      await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+      const { sql } = consulta();
+      const lectura = sql.slice(0, sql.indexOf("update public.whatsapp_wabas"));
+      expect(lectura).toContain("b.origen, b.app_id, b.app_secreto_cifrado");
+    });
+
+    it("devuelve el appsecret_proof ya armado, no el secreto", async () => {
+      h.execute.mockResolvedValue(filas(deApp()));
+
+      const [baja] = await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+      expect(baja.app).toEqual({ prueba: pruebaDelSecreto(TOKEN_DEL_CLIENTE, SECRETO) });
+      expect(JSON.stringify(baja)).not.toContain(SECRETO);
+    });
+
+    it("un secreto que no abre deja la baja sin prueba: no se inventa una", async () => {
+      h.execute.mockResolvedValue(filas(deApp({ app_secreto_cifrado: cerrarSecreto(SECRETO, PLATAFORMA, APP_ID) })));
+
+      const [baja] = await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+      expect(baja.app).toEqual({ prueba: undefined });
+    });
+
+    it("con Embedded Signup no hay app que firmar", async () => {
+      h.execute.mockResolvedValue(filas(filaDeBaja({ origen: "embedded_signup" })));
+
+      const [baja] = await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+      expect(baja.app).toBeUndefined();
+    });
+  });
+
+  it("un token cifrado para otro espacio no abre: queda en null y el error no lo nombra", async () => {
+    const logs = capturarLogs();
+    h.execute.mockResolvedValue(
+      filas(filaDeBaja({ token_cifrado: cifrar(TOKEN_DEL_CLIENTE, aadDelToken(PLATAFORMA, WABA_DEL_CLIENTE)) }))
+    );
+
+    const bajas = await bajaDeWaba({ tenantId: CLIENTE }, OP);
+    logs.restaurar();
+
+    expect(bajas[0].token).toBeNull();
+    expect(logs.texto()).not.toContain(TOKEN_DEL_CLIENTE);
+  });
+
+  it("una WABA sin número vivo vuelve con todo lo del número en null", async () => {
+    h.execute.mockResolvedValue(
+      filas(filaDeBaja({ phone_number_id: null, numero_estado: null, token_cifrado: null }))
+    );
+
+    const bajas = await bajaDeWaba({ tenantId: CLIENTE }, OP);
+
+    expect(bajas).toEqual([
+      { tenantId: CLIENTE, wabaId: WABA_DEL_CLIENTE, phoneNumberId: null, numeroEstado: null, token: null },
+    ]);
+  });
+
+  it("si nada coincide devuelve una lista vacía", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    expect(await bajaDeWaba({ fbUserId: "1234567890" }, "meta")).toEqual([]);
+  });
+
+  it("el operador firma el asiento con su id y su IP; Meta y el sistema, sin autor", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await bajaDeWaba({ tenantId: CLIENTE }, OP);
+    const delOperador = consulta();
+    expect(delOperador.params).toEqual(
+      expect.arrayContaining([OP.userId, OP.ip, AuditEvent.WHATSAPP_NUMERO_BAJA, AuditEvent.WHATSAPP_WABA_REVOCADA, '{"via":"operador"}'])
+    );
+
+    await bajaDeWaba({ fbUserId: "1234567890" }, "meta");
+    const deMeta = consulta();
+    expect(deMeta.params).toContain('{"via":"meta"}');
+    expect(deMeta.params).not.toContain(OP.userId);
+
+    await bajaDeWaba({ wabaId: WABA_DEL_CLIENTE }, "sistema");
+    expect(consulta().params).toContain('{"via":"sistema"}');
+  });
+
+  it("sin el código de borrado de Meta no asienta nada más que la baja", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await bajaDeWaba({ fbUserId: "1234567890" }, "meta");
+
+    const q = consulta();
+    expect(cuantas(q.sql, "insert into public.audit_log")).toBe(2);
+    expect(q.params).not.toContain(AuditEvent.META_BORRADO_DE_DATOS);
+  });
+
+  it("con el código de borrado de Meta, la constancia entra en la MISMA sentencia: por cada WABA dada de baja, con el código y sin autor", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja()));
+
+    await bajaDeWaba({ fbUserId: "1234567890" }, "meta", "codigo-de-borrado");
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(cuantas(q.sql, "insert into public.audit_log")).toBe(3);
+    expect(q.sql).toContain("coalesce(b.waba_id, b.tenant_id::text) as id from b");
+    expect(q.params).toEqual(expect.arrayContaining([AuditEvent.META_BORRADO_DE_DATOS, '{"codigo":"codigo-de-borrado"}']));
+    expect(q.params).not.toContain(OP.userId);
+  });
+
+  it("sin la 0051 tira el error: quien llama decide qué decirle a su cliente", async () => {
+    h.execute.mockRejectedValue(errorPg("42P01"));
+
+    await expect(bajaDeWaba({ tenantId: CLIENTE }, OP)).rejects.toMatchObject({ code: "42P01" });
+  });
+});
+
+describe("desvincularWaba", () => {
+  it("da de baja el espacio y agenda soltar la WABA en Meta con el número vivo", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja()));
+
+    expect(await desvincularWaba(CLIENTE, OP)).toBe("ok");
+
+    expect(consulta().params).toContain(CLIENTE);
+    expect(h.after).toHaveBeenCalledTimes(1);
+    expect(h.soltarEnMeta).not.toHaveBeenCalled();
+    await h.after.mock.calls[0][0]();
+    expect(h.soltarEnMeta).toHaveBeenCalledWith(CLIENTE, TOKEN_DEL_CLIENTE, WABA_DEL_CLIENTE, ID_DEL_CLIENTE, undefined);
+  });
+
+  it("con la app propia del cliente la suelta en Meta firmada con su appsecret_proof (el secreto ya no está en la base)", async () => {
+    const APP_ID = "500000000000001";
+    const SECRETO = "fake-app-secret-del-cliente";
+    h.execute.mockResolvedValue(
+      filas(filaDeBaja({ origen: "app_propia", app_id: APP_ID, app_secreto_cifrado: cerrarSecreto(SECRETO, CLIENTE, APP_ID) }))
+    );
+
+    await desvincularWaba(CLIENTE, OP);
+    await h.after.mock.calls[0][0]();
+
+    expect(h.soltarEnMeta).toHaveBeenCalledWith(CLIENTE, TOKEN_DEL_CLIENTE, WABA_DEL_CLIENTE, ID_DEL_CLIENTE, {
+      prueba: pruebaDelSecreto(TOKEN_DEL_CLIENTE, SECRETO),
+    });
+  });
+
+  it("un número que la base tiene como «pedido» también viaja: Meta puede tenerlo registrado, y soltarEnMeta decide", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja({ numero_estado: "pedido" })));
+
+    await desvincularWaba(CLIENTE, OP);
+    await h.after.mock.calls[0][0]();
+
+    expect(h.soltarEnMeta).toHaveBeenCalledWith(CLIENTE, TOKEN_DEL_CLIENTE, WABA_DEL_CLIENTE, ID_DEL_CLIENTE, undefined);
+  });
+
+  it("sin número vivo de esa WABA sólo se saca la app", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja({ phone_number_id: null, numero_estado: null })));
+
+    await desvincularWaba(CLIENTE, OP);
+    await h.after.mock.calls[0][0]();
+
+    expect(h.soltarEnMeta).toHaveBeenCalledWith(CLIENTE, TOKEN_DEL_CLIENTE, WABA_DEL_CLIENTE, null, undefined);
+  });
+
+  it("un número suspendido sigue siendo de la WABA: también se da de baja en Meta", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja({ numero_estado: "suspendido" })));
+
+    await desvincularWaba(CLIENTE, OP);
+    await h.after.mock.calls[0][0]();
+
+    expect(h.soltarEnMeta).toHaveBeenCalledWith(CLIENTE, TOKEN_DEL_CLIENTE, WABA_DEL_CLIENTE, ID_DEL_CLIENTE, undefined);
+  });
+
+  it("sin token que soltar la baja igual se hace, y no se agenda nada", async () => {
+    h.execute.mockResolvedValue(filas(filaDeBaja({ token_cifrado: null })));
+
+    expect(await desvincularWaba(CLIENTE, OP)).toBe("ok");
+
+    expect(h.after).not.toHaveBeenCalled();
+  });
+
+  it("si no había nada vivo es no_aplica", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    expect(await desvincularWaba(CLIENTE, OP)).toBe("no_aplica");
+
+    expect(h.after).not.toHaveBeenCalled();
+  });
+
+  it("sin la 0051 devuelve migracion_pendiente, y otro error sube", async () => {
+    h.execute.mockRejectedValueOnce(errorPg("42P01"));
+    expect(await desvincularWaba(CLIENTE, OP)).toBe("migracion_pendiente");
+
+    h.execute.mockRejectedValueOnce(errorPg("57014"));
+    await expect(desvincularWaba(CLIENTE, OP)).rejects.toMatchObject({ code: "57014" });
+  });
+});
+
+describe("reintentarWaba", () => {
+  it("retoma con el almacén del operador y avisa que se reintentó", async () => {
+    h.continuarWaba.mockResolvedValue("conectado");
+
+    expect(await reintentarWaba(CLIENTE, OP)).toBe("waba_reintentada");
+
+    expect(h.continuarWaba).toHaveBeenCalledTimes(1);
+    const [espacio, almacen] = h.continuarWaba.mock.calls[0];
+    expect(espacio).toBe(CLIENTE);
+    expect(almacen).toEqual({ leer: expect.any(Function), guardar: expect.any(Function) });
+  });
+
+  it.each([
+    ["vencido", "waba_sin_token"],
+    ["apagado", "no_aplica"],
+    ["de_la_plataforma", "no_aplica"],
+    ["meta", "meta_no_responde"],
+    ["falta_codigo", "waba_reintentada"],
+    ["falta_pin", "waba_reintentada"],
+    ["conectado", "waba_reintentada"],
+    ["coexistencia", "waba_reintentada"],
+  ])("lo que devuelve la retoma (%s) se cuenta como %s", async (resultado, esperado) => {
+    h.continuarWaba.mockResolvedValue(resultado);
+
+    expect(await reintentarWaba(CLIENTE, OP)).toBe(esperado);
+  });
+});
+
+describe("almacenDelDueno", () => {
+  const filaDeLectura = (cambios: Record<string, unknown> = {}) => ({
+    estado: "falla",
+    falla: "suscripcion",
+    waba_id: WABA_DEL_CLIENTE,
+    business_id: "999000111",
+    numero_meta: "+5491100000000",
+    numero_aceptado: false,
+    nombre_estado: null,
+    plantilla_enviada_en: null,
+    pin_cifrado: cifrar("123456", `wa-pin:${CLIENTE}:${WABA_DEL_CLIENTE}`),
+    numero_estado: "pedido",
+    phone_number_id: ID_DEL_CLIENTE,
+    numero_tipeado: E164_DEL_CLIENTE,
+    waba_del_numero: WABA_DEL_CLIENTE,
+    token_cifrado: cifrar(TOKEN_DEL_CLIENTE, aadDelToken(CLIENTE, WABA_DEL_CLIENTE)),
+    contact_email: "contacto@fake.example.com",
+    ...cambios,
+  });
+
+  it("lee en UNA consulta, solo de un espacio del alta, y abre el token y el PIN con el AAD de la WABA", async () => {
+    h.execute.mockResolvedValue(filas(filaDeLectura()));
+
+    const fila = await almacenDelDueno(CLIENTE, OP).leer();
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("t.autoalta");
+    expect(q.params).toContain(CLIENTE);
+    expect(fila).toMatchObject({
+      estado: "falla",
+      falla: "suscripcion",
+      wabaId: WABA_DEL_CLIENTE,
+      phoneNumberId: ID_DEL_CLIENTE,
+      token: TOKEN_DEL_CLIENTE,
+      pin: "123456",
+      numeroEstado: "pedido",
+      emailDeContacto: "contacto@fake.example.com",
+    });
+  });
+
+  it("el token de un número de OTRA WABA no se usa: sólo vale el de esta", async () => {
+    h.execute.mockResolvedValue(filas(filaDeLectura({ waba_del_numero: "888000111222" })));
+
+    expect((await almacenDelDueno(CLIENTE, OP).leer())?.token).toBeNull();
+  });
+
+  it("sin fila de WABA (el espacio usa la de la plataforma) no hay token ni PIN que abrir", async () => {
+    h.execute.mockResolvedValue(
+      filas(filaDeLectura({ estado: null, waba_id: null, pin_cifrado: null, token_cifrado: null, waba_del_numero: null }))
+    );
+
+    expect(await almacenDelDueno(CLIENTE, OP).leer()).toMatchObject({ estado: null, wabaId: null, token: null, pin: null });
+  });
+
+  it("un espacio que no es del alta no existe para el operador, y sin la 0051 tampoco hay nada que leer", async () => {
+    h.execute.mockResolvedValueOnce(filas());
+    expect(await almacenDelDueno(CLIENTE, OP).leer()).toBeNull();
+
+    h.execute.mockRejectedValueOnce(errorPg("42P01"));
+    expect(await almacenDelDueno(CLIENTE, OP).leer()).toBeNull();
+
+    h.execute.mockRejectedValueOnce(errorPg("57014"));
+    await expect(almacenDelDueno(CLIENTE, OP).leer()).rejects.toMatchObject({ code: "57014" });
+  });
+
+  it("el operador sólo escribe `estado` y `conectar`: cualquier otro paso es de la persona", async () => {
+    for (const paso of ["pin", "codigo", "vincular", "cancelar", "numero"]) {
+      expect(await almacenDelDueno(CLIENTE, OP).guardar(paso, {})).toBe("datos_invalidos");
+    }
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it("estado: solo estados y fallas de la lista, y nada fuera de ella toca la base", async () => {
+    const casos: Array<Record<string, unknown>> = [
+      { estado: "revocada" },
+      { estado: "conectada", falla: "canje" },
+      { estado: "falla", falla: "inventada" },
+      { estado: "falla" },
+      { estado: "conectada", nombre_estado: "approved" },
+      { estado: "conectada", plantilla_enviada_en: "no es una fecha" },
+    ];
+    for (const datos of casos) {
+      expect(await almacenDelDueno(CLIENTE, OP).guardar("estado", datos)).toBe("datos_invalidos");
+    }
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it("estado: una escritura válida es UNA sentencia, con el estado de salida por parámetro, y sin asiento", async () => {
+    h.execute.mockResolvedValue(filas({ tenant_id: CLIENTE }));
+
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("estado", { estado: "falla", falla: "suscripcion" })).toBe("ok");
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("update public.whatsapp_wabas b");
+    expect(q.sql).toContain("b.estado in (");
+    expect(q.sql).not.toContain("audit_log");
+    expect(q.params).toEqual(expect.arrayContaining([CLIENTE, "falla", "suscripcion"]));
+  });
+
+  it("estado: si la fila ya no está en un estado de salida es `transicion`", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("estado", { estado: "suscripta" })).toBe("transicion");
+  });
+
+  it("guardar traduce los errores de la base: 23505 id_ocupado, sin la 0051 sin_migracion, y el resto error", async () => {
+    const datos = { estado: "suscripta" };
+    h.execute.mockRejectedValueOnce(errorPg("23505"));
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("estado", datos)).toBe("id_ocupado");
+
+    h.execute.mockRejectedValueOnce(errorPg("42703"));
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("estado", datos)).toBe("sin_migracion");
+
+    const logs = capturarLogs();
+    h.execute.mockRejectedValueOnce(errorPg("57014"));
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("estado", datos)).toBe("error");
+    logs.restaurar();
+    expect(logs.texto()).toContain("57014");
+  });
+
+  it("conectar: el número tiene que ser un id de Meta y no el de la plataforma, antes de tocar la base", async () => {
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("conectar", { phone_number_id: "no-es-un-id" })).toBe("datos_invalidos");
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("conectar", {})).toBe("datos_invalidos");
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("conectar", { phone_number_id: ID_PLATAFORMA })).toBe("de_la_plataforma");
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it("conectar: una sentencia con su asiento, firmada por el operador, y la respuesta sale de la misma sentencia", async () => {
+    h.execute.mockResolvedValue(filas({ resultado: "ok" }));
+
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("conectar", { phone_number_id: ID_DEL_CLIENTE })).toBe("ok");
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("insert into public.audit_log");
+    expect(q.sql).toContain("n.token_cifrado is not null as con_token");
+    expect(q.params).toEqual(expect.arrayContaining([CLIENTE, ID_DEL_CLIENTE, OP.userId, OP.ip, WABA]));
+  });
+
+  it("estado y conectar piden el mismo «espacio en prueba vigente o activo»: la condición está escrita una sola vez", async () => {
+    h.execute.mockResolvedValue(filas({ tenant_id: CLIENTE, resultado: "ok" }));
+    const condicion = (sentencia: string) =>
+      /x\.autoalta and x\.billing_status in \('trial', 'active'\)\s+and \(x\.billing_status <> 'trial' or x\.trial_ends_at is null or x\.trial_ends_at > now\(\)\)/.exec(sentencia)?.[0];
+
+    await almacenDelDueno(CLIENTE, OP).guardar("estado", { estado: "suscripta" });
+    const delEstado = condicion(consulta().sql);
+    await almacenDelDueno(CLIENTE, OP).guardar("conectar", { phone_number_id: ID_DEL_CLIENTE });
+    const delConectar = condicion(consulta().sql);
+
+    expect(delEstado).toBeDefined();
+    expect(delConectar).toBe(delEstado);
+  });
+
+  it.each(["no_aplica", "transicion", "de_la_plataforma", "numero_ocupado"])(
+    "conectar: lo que la sentencia contesta (%s) vuelve tal cual",
+    async (resultado) => {
+      h.execute.mockResolvedValue(filas({ resultado }));
+
+      expect(await almacenDelDueno(CLIENTE, OP).guardar("conectar", { phone_number_id: ID_DEL_CLIENTE })).toBe(resultado);
+    }
+  );
+
+  it("conectar: una respuesta que no es de la lista es error, no una conexión", async () => {
+    h.execute.mockResolvedValue(filas({ resultado: "inventado" }));
+
+    expect(await almacenDelDueno(CLIENTE, OP).guardar("conectar", { phone_number_id: ID_DEL_CLIENTE })).toBe("error");
+  });
+});
+
+describe("lo que cuenta Meta de la WABA", () => {
+  it("wabaRevocada da de baja por el id de la WABA, firmada por Meta", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await wabaRevocada(WABA_DEL_CLIENTE);
+
+    const q = consulta();
+    expect(q.sql).toContain("b.waba_id =");
+    expect(q.params).toEqual(expect.arrayContaining([WABA_DEL_CLIENTE, '{"via":"meta"}']));
+    expect(q.params).not.toContain(OP.userId);
+  });
+
+  it("wabaEnFalla sólo sale de `conectada` y deja el token y el número como están", async () => {
+    h.execute.mockResolvedValue(filas({ tenant_id: CLIENTE }));
+
+    await wabaEnFalla(CLIENTE, "token_vencido");
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("set estado = 'falla'");
+    expect(q.sql).toContain("b.estado = 'conectada'");
+    expect(q.sql).not.toContain("whatsapp_numeros");
+    expect(q.sql).not.toContain("token_cifrado");
+    expect(q.params).toEqual(expect.arrayContaining([CLIENTE, "token_vencido"]));
+  });
+
+  it("wabaEnFalla anota el cambio solo si la fila cambió", async () => {
+    const logs = capturarLogs();
+    h.execute.mockResolvedValueOnce(filas({ tenant_id: CLIENTE }));
+    await wabaEnFalla(CLIENTE, "nombre_rechazado");
+    expect(logs.lineas().map((l) => l.msg)).toContain("whatsapp.waba_en_falla");
+
+    h.execute.mockResolvedValueOnce(filas());
+    await wabaEnFalla(CLIENTE, "nombre_rechazado");
+    logs.restaurar();
+    expect(logs.lineas().filter((l) => l.msg === "whatsapp.waba_en_falla")).toHaveLength(1);
+  });
+
+  it("wabaEnFalla dice si la fila cambió, para que nadie avise de lo que no pasó", async () => {
+    h.execute.mockResolvedValueOnce(filas({ tenant_id: CLIENTE }));
+    expect(await wabaEnFalla(CLIENTE, "secreto_invalido")).toBe(true);
+
+    h.execute.mockResolvedValueOnce(filas());
+    expect(await wabaEnFalla(CLIENTE, "secreto_invalido")).toBe(false);
+  });
+
+  it("wabaEnFalla con `secretoCifrado` sólo marca la fila si todavía guarda ese secreto (el cliente pudo cambiarlo)", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await wabaEnFalla(CLIENTE, "secreto_invalido", { secretoCifrado: "cifrado:fake-viejo-key" });
+
+    const q = consulta();
+    expect(q.sql).toContain("b.app_secreto_cifrado =");
+    expect(q.params).toContain("cifrado:fake-viejo-key");
+    // Es un parámetro: el secreto en su sobre no viaja dentro del texto de la sentencia.
+    expect(q.sql).not.toContain("cifrado:fake-viejo-key");
+  });
+
+  it("wabaEnFalla sin `secretoCifrado` no mira el secreto de la fila", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await wabaEnFalla(CLIENTE, "token_vencido");
+
+    expect(consulta().sql).not.toContain("app_secreto_cifrado");
+  });
+
+  it.each([
+    ["token_vencido", true],
+    ["secreto_invalido", true],
+    ["nombre_rechazado", false],
+    ["waba_restringida", false],
+    ["waba_bloqueada", false],
+    ["pago_pendiente", false],
+  ] as const)(
+    "wabaEnFalla «%s»: pisar una restricción o un bloqueo de Meta es %s",
+    async (falla, pisa) => {
+      h.execute.mockResolvedValue(filas());
+
+      await wabaEnFalla(CLIENTE, falla);
+
+      const q = consulta();
+      // Un token o un secreto muertos bajo la restricción pisan la vieja; ninguna otra falla pisa una falla.
+      expect(q.sql).toContain("b.falla in ('waba_restringida', 'waba_bloqueada')");
+      expect(q.params).toEqual([falla, CLIENTE, pisa]);
+    }
+  );
+
+  it("restriccionLevantada devuelve la fila de la restricción o el bloqueo a conectada, sólo con el número vivo", async () => {
+    h.execute.mockResolvedValue(filas({ tenant_id: CLIENTE }));
+
+    expect(await restriccionLevantada(CLIENTE)).toBe(true);
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("set estado = 'conectada', falla = null");
+    expect(q.sql).toContain("b.origen = 'app_propia' and b.estado = 'falla'");
+    expect(q.sql).toContain("b.falla in ('waba_restringida', 'waba_bloqueada')");
+    expect(q.sql).toContain("n.waba_id = b.waba_id and n.estado in ('conectado', 'suspendido')");
+    expect(q.params).toEqual([CLIENTE]);
+    expect(q.sql).not.toContain("token_cifrado");
+  });
+
+  it("restriccionLevantada dice que no cuando la fila ya no estaba restringida", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    expect(await restriccionLevantada(CLIENTE)).toBe(false);
+  });
+
+  it("plantillaCreada anota la fecha una sola vez y solo de una WABA conectada", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await plantillaCreada(CLIENTE);
+
+    const q = consulta();
+    expect(q.sql).toContain("plantilla_enviada_en = now()");
+    expect(q.sql).toContain("b.estado = 'conectada'");
+    expect(q.sql).toContain("b.plantilla_enviada_en is null");
+    expect(q.params).toContain(CLIENTE);
+    // Es información: no mueve la hora del último cambio de estado, con la que se descarta un aviso de Meta viejo.
+    expect(q.sql).not.toContain("actualizado_en");
+  });
+
+  it("nombreDelNumero guarda el estado del nombre tal cual lo manda Meta, y no toca una WABA revocada", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await nombreDelNumero(WABA_DEL_CLIENTE, "APPROVED");
+
+    const q = consulta();
+    expect(q.sql).toContain("nombre_estado =");
+    expect(q.sql).toContain("b.estado not in ('revocada', 'cancelada')");
+    expect(q.params).toEqual(expect.arrayContaining([WABA_DEL_CLIENTE, "APPROVED"]));
+    expect(q.sql).not.toContain("actualizado_en");
+  });
+
+  it("nombreDelNumero ignora lo que no parece un estado de Meta (mayúsculas y guion bajo, hasta 30)", async () => {
+    for (const raro of ["approved", "APPROVED; drop table", "", "A".repeat(31), "ESTADO 1"]) {
+      await nombreDelNumero(WABA_DEL_CLIENTE, raro);
+    }
+
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it("nombreRehabilitado devuelve la fila a conectada, con una sola sentencia y el espacio por parámetro", async () => {
+    h.execute.mockResolvedValue(filas({ tenant_id: CLIENTE }));
+
+    expect(await nombreRehabilitado(CLIENTE)).toBe(true);
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("set estado = 'conectada', falla = null, nombre_estado = 'APPROVED'");
+    expect(q.params).toEqual([CLIENTE]);
+    expect(q.sql).not.toContain(CLIENTE);
+  });
+
+  it("nombreRehabilitado sólo toca una fila caída por el nombre y sólo si su número sigue conectado o suspendido", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await nombreRehabilitado(CLIENTE);
+
+    const q = consulta();
+    expect(q.sql).toContain("b.estado = 'falla' and b.falla = 'nombre_rechazado'");
+    expect(q.sql).toMatch(/n\.waba_id = b\.waba_id and n\.estado in \('conectado', 'suspendido'\)/);
+    // Rehabilita sin dejar rastro del token ni del PIN: no los lee.
+    expect(q.sql).not.toContain("token_cifrado");
+    expect(q.sql).not.toContain("pin_cifrado");
+  });
+
+  it("nombreRehabilitado dice que no cuando la fila ya no estaba caída por el nombre", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    expect(await nombreRehabilitado(CLIENTE)).toBe(false);
+  });
+
+  it("recordatorioEnviado marca el recordatorio una sola vez y sólo en un alta que sigue a medias", async () => {
+    h.execute.mockResolvedValue(filas());
+
+    await recordatorioEnviado(CLIENTE);
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("set recordatorio_en = now()");
+    expect(q.sql).toContain("b.estado = 'armando'");
+    expect(q.sql).toContain("b.recordatorio_en is null");
+    expect(q.params).toEqual([CLIENTE]);
+    // Es información: no mueve la hora del último cambio, con la que se mide cuánto lleva a medias.
+    expect(q.sql).not.toContain("actualizado_en");
+  });
+});
+
+describe("la app propia: su webhook y su envío", () => {
+  const RUTA = "fake-ruta-webhook-0123456789abcdef";
+
+  it.each(["token_vencido", "nombre_rechazado", "secreto_invalido", "waba_restringida", "waba_bloqueada", "pago_pendiente"] as const)(
+    "wabaEnFalla deja la falla «%s» en la fila, por parámetro",
+    async (falla) => {
+      h.execute.mockResolvedValue(filas({ tenant_id: CLIENTE }));
+
+      await wabaEnFalla(CLIENTE, falla);
+
+      const q = consulta();
+      expect(q.params).toEqual([falla, CLIENTE, falla === "token_vencido" || falla === "secreto_invalido"]);
+      expect(q.sql).toContain("falla = $1::text");
+    }
+  );
+
+  describe("webhookDeAppVerificado", () => {
+    it("marca la hora en la fila de esa ruta, de una app propia y viva, con la ruta por parámetro", async () => {
+      h.execute.mockResolvedValue(filas({ tenant_id: CLIENTE }));
+
+      expect(await webhookDeAppVerificado(RUTA)).toBe(true);
+
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      const q = consulta();
+      expect(q.sql).toContain("webhook_app_verificado_en = now()");
+      expect(q.sql).toContain("b.ruta_webhook =");
+      expect(q.sql).toContain("b.origen = 'app_propia'");
+      expect(q.sql).toContain("b.estado not in ('revocada', 'cancelada')");
+      expect(q.params).toEqual([RUTA]);
+      expect(q.sql).not.toContain(RUTA);
+    });
+
+    it("una ruta que no es de ninguna fila viva: false, para que el webhook conteste 404", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      expect(await webhookDeAppVerificado(RUTA)).toBe(false);
+    });
+
+    it("un error de la base se tira: el webhook responde 500 y Meta reintenta", async () => {
+      h.execute.mockRejectedValue(new Error("fetch failed"));
+
+      await expect(webhookDeAppVerificado(RUTA)).rejects.toThrow("fetch failed");
+    });
+  });
+
+  describe("primerMensajeDeApp", () => {
+    it("anota la hora una sola vez y sólo en una app propia", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      await primerMensajeDeApp(CLIENTE);
+
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      const q = consulta();
+      expect(q.sql).toContain("set primer_mensaje_en = now()");
+      expect(q.sql).toContain("b.origen = 'app_propia'");
+      expect(q.sql).toContain("b.primer_mensaje_en is null");
+      expect(q.params).toEqual([CLIENTE]);
+    });
+
+    it("sólo en una fila conectada o en falla: en una alta a medias nadie atendió el mensaje", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      await primerMensajeDeApp(CLIENTE);
+
+      expect(consulta().sql).toContain("b.estado in ('conectada', 'falla')");
+    });
+
+    it("es información: no mueve la hora del último cambio de estado", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      await primerMensajeDeApp(CLIENTE);
+
+      expect(consulta().sql).not.toContain("actualizado_en");
+    });
+  });
+
+  describe("primeraRespuestaDeApp", () => {
+    it("anota la hora una sola vez, sólo en una app propia conectada o en falla, con el espacio por parámetro", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      await primeraRespuestaDeApp(CLIENTE);
+
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      const q = consulta();
+      expect(q.sql).toContain("primera_respuesta_en = now()");
+      expect(q.sql).toContain("b.origen = 'app_propia'");
+      expect(q.sql).toContain("b.primera_respuesta_en is null");
+      expect(q.sql).toContain("b.estado in ('conectada', 'falla')");
+      expect(q.params).toEqual(expect.arrayContaining([CLIENTE]));
+      expect(q.sql).not.toContain(CLIENTE);
+    });
+
+    it("sólo levanta la falla pago_pendiente: ninguna otra falla vuelve a conectada por una respuesta", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      await primeraRespuestaDeApp(CLIENTE);
+
+      const q = consulta();
+      expect(q.sql).toContain("when b.estado = 'falla' and b.falla = 'pago_pendiente' then 'conectada'");
+      expect(q.sql).toContain("when b.estado = 'falla' and b.falla = 'pago_pendiente' then null else b.falla");
+      for (const otra of ["token_vencido", "secreto_invalido", "waba_restringida", "waba_bloqueada", "nombre_rechazado"]) {
+        expect(q.sql).not.toContain(otra);
+      }
+    });
+
+    it("no toca el número, el token ni el secreto", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      await primeraRespuestaDeApp(CLIENTE);
+
+      const q = consulta();
+      expect(q.sql).not.toContain("whatsapp_numeros");
+      expect(q.sql).not.toContain("token_cifrado");
+      expect(q.sql).not.toContain("app_secreto_cifrado");
+    });
+  });
+
+  describe("saludDeApp", () => {
+    it.each(["AVAILABLE", "LIMITED", "BLOCKED"] as const)("guarda «%s» por parámetro, sólo si cambió", async (puede) => {
+      h.execute.mockResolvedValue(filas());
+
+      await saludDeApp(CLIENTE, puede);
+
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      const q = consulta();
+      expect(q.sql).toContain("set puede_enviar =");
+      expect(q.sql).toContain("b.puede_enviar is distinct from");
+      expect(q.sql).toContain("b.origen = 'app_propia'");
+      expect(q.sql).toContain("b.estado in ('conectada', 'falla')");
+      expect(q.params).toEqual(expect.arrayContaining([CLIENTE, puede]));
+      expect(q.sql).not.toContain(puede);
+    });
+
+    it("es información: no mueve la hora del último cambio de estado", async () => {
+      h.execute.mockResolvedValue(filas());
+
+      await saludDeApp(CLIENTE, "AVAILABLE");
+
+      expect(consulta().sql).not.toContain("actualizado_en");
+    });
+  });
+});
+
+describe("despublicarLegales", () => {
+  it("es una sola sentencia: borra el slug de una app propia y asienta el evento, con el actor, la IP y el espacio por parámetro", async () => {
+    h.execute.mockResolvedValue(filas({ n: 1, tenant_id: CLIENTE }));
+
+    expect(await despublicarLegales(CLIENTE, OP)).toBe("ok");
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const q = consulta();
+    expect(q.sql).toContain("update public.whatsapp_wabas b set slug_legal = null");
+    expect(q.sql).toContain("b.origen = 'app_propia'");
+    expect(q.sql).toContain("b.slug_legal is not null");
+    expect(cuantas(q.sql, "insert into public.audit_log")).toBe(1);
+    expect(q.params).toEqual(
+      expect.arrayContaining([CLIENTE, OP.userId, OP.ip, AuditEvent.WHATSAPP_APP_LEGALES_DESPUBLICADAS, "whatsapp_waba"])
+    );
+    expect(q.sql).not.toContain(CLIENTE);
+    expect(q.sql).not.toContain(OP.userId);
+  });
+
+  it("el asiento lleva sólo la vía del operador: ni el slug ni nada del cliente", async () => {
+    h.execute.mockResolvedValue(filas({ n: 1, tenant_id: CLIENTE }));
+
+    await despublicarLegales(CLIENTE, OP);
+
+    const { params } = consulta();
+    expect(params.filter((x) => typeof x === "string" && x.startsWith("{"))).toEqual([JSON.stringify({ via: "operador" })]);
+  });
+
+  it("no toca el estado, el token ni el secreto: el cliente sigue conectado, sólo cambian las páginas", async () => {
+    h.execute.mockResolvedValue(filas({ n: 1, tenant_id: CLIENTE }));
+
+    await despublicarLegales(CLIENTE, OP);
+
+    const { sql } = consulta();
+    expect(sql).not.toContain("estado =");
+    expect(sql).not.toContain("token_cifrado");
+    expect(sql).not.toContain("app_secreto_cifrado");
+    expect(sql.toLowerCase()).not.toContain("delete");
+  });
+
+  it("es sólo de control: no espeja a la base del cliente", async () => {
+    h.execute.mockResolvedValue(filas({ n: 1, tenant_id: CLIENTE }));
+
+    await despublicarLegales(CLIENTE, OP);
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("si no había páginas publicadas (ya bajadas, otra vía, otro espacio) es no_aplica, no un error", async () => {
+    h.execute.mockResolvedValue(filas({ n: 0, tenant_id: null }));
+
+    expect(await despublicarLegales(CLIENTE, OP)).toBe("no_aplica");
+  });
+
+  it("sin la 0051 devuelve migracion_pendiente, y otro error de la base sube", async () => {
+    h.execute.mockRejectedValue(errorPg("42P01"));
+    expect(await despublicarLegales(CLIENTE, OP)).toBe("migracion_pendiente");
+
+    h.execute.mockReset();
+    h.execute.mockRejectedValue(errorPg("57014"));
+    await expect(despublicarLegales(CLIENTE, OP)).rejects.toMatchObject({ code: "57014" });
+  });
+});
+
+describe("listarAltas con la WABA propia", () => {
+  const sinWaba = { creadas_24h: 1, tenant_id: CLIENTE, nombre: "Seguros Fake", plan: "piloto", billing_status: "trial", numero_id: null };
+
+  it("trae la WABA en la misma consulta y la arma en camelCase", async () => {
+    h.execute.mockResolvedValue(
+      filas({
+        ...sinWaba,
+        waba_estado: "falla",
+        waba_falla: "token_vencido",
+        waba_paso_cancelado: null,
+        waba_propia_id: WABA_DEL_CLIENTE,
+        waba_business_id: "999000111",
+        waba_nombre_estado: "APPROVED",
+        waba_plantilla_enviada_en: new Date("2026-10-08T12:00:00Z"),
+        waba_actualizado_en: "2026-10-09T01:02:03Z",
+      })
+    );
+
+    const panel = await listarAltas();
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    expect(consulta().sql).toContain("left join public.whatsapp_wabas b on b.tenant_id = t.id");
+    expect(panel.altas[0].waba).toEqual({
+      estado: "falla",
+      falla: "token_vencido",
+      pasoCancelado: null,
+      wabaId: WABA_DEL_CLIENTE,
+      businessId: "999000111",
+      nombreEstado: "APPROVED",
+      plantillaEnviadaEn: "2026-10-08T12:00:00.000Z",
+      actualizadoEn: "2026-10-09T01:02:03Z",
+      origen: "embedded_signup",
+      appId: null,
+      webhookVerificadoEn: null,
+      datosAppEn: null,
+      primerMensajeEn: null,
+      primeraRespuestaEn: null,
+      puedeEnviar: null,
+      recordatorioEn: null,
+      legalesPublicadas: false,
+    });
+  });
+
+  it("de la app propia trae el origen, el App ID y los hitos del alta, en la misma consulta", async () => {
+    h.execute.mockResolvedValue(
+      filas({
+        ...sinWaba,
+        waba_estado: "conectada",
+        waba_origen: "app_propia",
+        waba_app_id: "123456789012345",
+        waba_webhook_verificado_en: "2026-10-09T01:00:00Z",
+        waba_datos_app_en: new Date("2026-10-09T01:05:00Z"),
+        waba_primer_mensaje_en: "2026-10-09T02:00:00Z",
+        waba_primera_respuesta_en: "2026-10-09T02:00:30Z",
+        waba_puede_enviar: "LIMITED",
+        waba_recordatorio_en: "2026-10-10T12:00:00Z",
+        waba_legales: true,
+      })
+    );
+
+    const panel = await listarAltas();
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const { sql: texto } = consulta();
+    for (const columna of ["b.origen", "b.app_id", "b.webhook_app_verificado_en", "b.datos_app_en", "b.primer_mensaje_en"]) {
+      expect(texto).toContain(columna);
+    }
+    expect(texto).toContain("(b.slug_legal is not null) as waba_legales");
+    expect(panel.altas[0].waba).toMatchObject({
+      origen: "app_propia",
+      appId: "123456789012345",
+      webhookVerificadoEn: "2026-10-09T01:00:00Z",
+      datosAppEn: "2026-10-09T01:05:00.000Z",
+      primerMensajeEn: "2026-10-09T02:00:00Z",
+      primeraRespuestaEn: "2026-10-09T02:00:30Z",
+      puedeEnviar: "LIMITED",
+      recordatorioEn: "2026-10-10T12:00:00Z",
+      legalesPublicadas: true,
+    });
+  });
+
+  it("nunca trae el secreto ni el slug de las páginas legales: el panel sólo ve si hay páginas publicadas", async () => {
+    h.execute.mockResolvedValue(filas(sinWaba));
+
+    await listarAltas();
+
+    const { sql: texto } = consulta();
+    expect(texto).not.toContain("app_secreto_cifrado");
+    expect(texto).not.toMatch(/b\.slug_legal(?! is not null)/);
+  });
+
+  it.each(["otra", null, undefined])("un origen raro (%s) se muestra como Embedded Signup, la vía de antes", async (origen) => {
+    h.execute.mockResolvedValue(filas({ ...sinWaba, waba_estado: "conectada", waba_origen: origen }));
+
+    expect((await listarAltas()).altas[0].waba?.origen).toBe("embedded_signup");
+  });
+
+  it("sin fila de WABA la propiedad es null: el espacio usa la de la plataforma", async () => {
+    h.execute.mockResolvedValue(filas(sinWaba));
+
+    expect((await listarAltas()).altas[0].waba).toBeNull();
   });
 });
 
@@ -583,11 +1657,29 @@ describe("listarAltas", () => {
 
   it("sin la 0048 devuelve migracionPendiente, y otro error sube", async () => {
     for (const codigo of ["42P01", "42703", "42883"]) {
-      h.execute.mockRejectedValueOnce(errorPg(codigo));
+      h.execute.mockReset();
+      h.execute.mockRejectedValue(errorPg(codigo));
       expect(await listarAltas()).toEqual({ migracionPendiente: true, altas: [], creadas24h: 0, tope: 20 });
     }
-    h.execute.mockRejectedValueOnce(errorPg("08006"));
+    h.execute.mockReset();
+    h.execute.mockRejectedValue(errorPg("08006"));
     await expect(listarAltas()).rejects.toMatchObject({ code: "08006" });
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin la 0051 (falta sólo whatsapp_wabas) el panel sigue: reintenta sin esa tabla y ningún espacio tiene WABA propia", async () => {
+    h.execute
+      .mockRejectedValueOnce(errorPg("42P01"))
+      .mockResolvedValueOnce(filas({ creadas_24h: 1, tenant_id: CLIENTE, nombre: "Seguros Fake", plan: "piloto", billing_status: "trial", numero_id: null, waba_estado: null }));
+
+    const panel = await listarAltas();
+
+    expect(panel.migracionPendiente).toBe(false);
+    expect(panel.altas).toHaveLength(1);
+    expect(panel.altas[0].waba).toBeNull();
+    expect(h.execute).toHaveBeenCalledTimes(2);
+    expect(consulta(0).sql).toContain("public.whatsapp_wabas");
+    expect(consulta(1).sql).not.toContain("whatsapp_wabas");
   });
 });
 
@@ -597,6 +1689,11 @@ describe("resultadoDelPanel", () => {
   it("acepta sólo los códigos de la lista cerrada: lo demás del ?r= se descarta", () => {
     for (const r of RESULTADOS_DEL_PANEL) expect(resultadoDelPanel(r)).toBe(r);
     for (const raro of [undefined, null, "", "<script>", "OK", "ok ", ["ok"], 7]) expect(resultadoDelPanel(raro)).toBeNull();
+  });
+
+  it("bajar las páginas legales tiene su código", () => {
+    expect(RESULTADOS_DEL_PANEL).toContain("legales_despublicadas");
+    expect(resultadoDelPanel("legales_despublicadas")).toBe("legales_despublicadas");
   });
 
   it("cada código tiene su mensaje en los dos idiomas", () => {

@@ -50,8 +50,19 @@ import { join } from "node:path";
  * que no son de un inquilino, de las cuentas de ese inquilino. Sin ese filtro
  * «exigir» de una aseguradora tocaba a las cuentas de otra con un mail del mismo
  * dominio. `correoExigeSso`, que sí conoce el inquilino, va por `enControl`.
+ *
+ * Del catorce al diecisiete son los cruces de la WABA propia
+ * (`waba-propia.ts` y `waba-publica.ts`): `tenants` con `whatsapp_wabas` y con
+ * `whatsapp_numeros` por `tenant_id`, en una sola consulta por `enControl`. No filtran
+ * por un inquilino que venga de afuera, unen las filas de uno que ya se eligió con
+ * `where tenants.id = …`; el regex no distingue un cruce de un filtro.
+ *
+ * Del diecisiete al veinte son tres cruces de `numeros.ts` para el webhook de la app
+ * propia: el origen de la WABA al ruteo por número y a las credenciales, y el número
+ * vivo de la fila que `appDeLaRuta` busca por la ruta. Unen filas de `whatsapp_wabas`
+ * con las de `whatsapp_numeros` del mismo espacio; tampoco filtran por uno de afuera.
  */
-const TOPE_FILTROS = 13;
+const TOPE_FILTROS = 20;
 
 function archivos(dir, ext = [".ts", ".tsx"]) {
   if (!existsSync(dir)) return [];
@@ -1079,9 +1090,10 @@ console.log("\n▸ El número de WhatsApp se lee en un solo lugar");
   }
 }
 
-// ── 20. Sólo el panel del operador escribe tenants y whatsapp_numeros ─────
+// ── 20. Sólo el panel del operador escribe tenants, whatsapp_numeros y whatsapp_wabas ─
 //
-// Desde la 0048 la app (`claimmix_app`) no puede escribir esas dos tablas: el
+// Desde la 0048 la app (`claimmix_app`) no puede escribir esas dos tablas, y desde la
+// 0051 tampoco `whatsapp_wabas` (la WABA propia de cada cliente: token, PIN, estado): el
 // plan, la facturación, la prueba y el número de cada inquilino los cambia el
 // rol dueño, que no tiene RLS y no sabe de quién es lo que toca. Por eso todo lo
 // que las escribe vive en `panel-operador.ts`: cada acción es una sentencia con
@@ -1090,15 +1102,16 @@ console.log("\n▸ El número de WhatsApp se lee en un solo lugar");
 // rol dueño es una escritura sobre cualquier inquilino sin asiento ni guarda.
 //
 // Cuenta como escritura el SQL (`update tenants`, `insert into whatsapp_numeros`…)
-// o `.update(tenants)` / `.insert(whatsappNumeros)`… en un archivo que importe el
+// o `.update(tenants)` / `.insert(whatsappWabas)`… en un archivo que importe el
 // `db` del dueño. Los que sólo usan el de la capa (`enTenant`) escriben con
 // `claimmix_app`, que de estas tablas sólo puede tocar las siete columnas de
-// configuración de tenants; `pnpm permisos` vigila ese borde.
-console.log("\n▸ Sólo el panel del operador escribe tenants y whatsapp_numeros con el rol dueño");
+// configuración de tenants (y nada de `whatsapp_wabas`, que sólo lee); `pnpm permisos`
+// vigila ese borde.
+console.log("\n▸ Sólo el panel del operador escribe tenants, whatsapp_numeros y whatsapp_wabas con el rol dueño");
 {
   const PANEL = "src/server/alta/panel-operador.ts";
-  const ESCRIBE_SQL = /\b(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?(?:tenants|whatsapp_numeros)\b/i;
-  const ESCRIBE_DRIZZLE = /\.\s*(?:update|insert|delete)\s*\(\s*(?:tenants|whatsappNumeros)\b/;
+  const ESCRIBE_SQL = /\b(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?(?:tenants|whatsapp_numeros|whatsapp_wabas)\b/i;
+  const ESCRIBE_DRIZZLE = /\.\s*(?:update|insert|delete)\s*\(\s*(?:tenants|whatsappNumeros|whatsappWabas)\b/;
   const ROL_DUENO = /import\s*\{[^}]*\b(?:db|getDb)\b[^}]*\}\s*from\s*["']@\/lib\/db["']/;
   // Los comentarios afuera y las cadenas adentro: el SQL que se busca vive en una cadena.
   const sinSoloComentarios = (texto) => {
@@ -1130,11 +1143,11 @@ console.log("\n▸ Sólo el panel del operador escribe tenants y whatsapp_numero
     return ROL_DUENO.test(texto) && (ESCRIBE_SQL.test(texto) || ESCRIBE_DRIZZLE.test(texto));
   });
   if (sueltos.length === 0) {
-    bien("sólo `panel-operador.ts` escribe tenants y whatsapp_numeros con el rol dueño");
+    bien("sólo `panel-operador.ts` escribe tenants, whatsapp_numeros y whatsapp_wabas con el rol dueño");
   } else {
-    mal(`${sueltos.length} archivo(s) escriben tenants o whatsapp_numeros fuera del panel del operador`);
+    mal(`${sueltos.length} archivo(s) escriben tenants, whatsapp_numeros o whatsapp_wabas fuera del panel del operador`);
     for (const x of sueltos) console.log(`     ${x}`);
-    console.log("     Una acción nueva sobre un inquilino o su número va en `panel-operador.ts`:");
+    console.log("     Una acción nueva sobre un inquilino, su número o su WABA va en `panel-operador.ts`:");
     console.log("     una sentencia con su asiento de auditoría y detrás de `requireOperator`.");
   }
 }
@@ -1202,6 +1215,9 @@ console.log("\n▸ enControl sólo desde su lista");
     "src/server/alta/numero-automatico.ts",
     "src/server/alta/panel-operador.ts",
     "src/server/alta/pasos-hechos.ts",
+    // La WABA propia: el estado de cada cliente, la pantalla pública y el alta por el popup de Meta
+    "src/server/alta/waba-propia.ts",
+    "src/server/alta/waba-publica.ts",
     // Casillas, formulario y SSO
     "src/server/email/gmail/accounts.ts",
     "src/app/api/admin/gmail-accounts/route.ts",

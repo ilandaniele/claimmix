@@ -73,10 +73,22 @@ function turnstileOrigin(): string {
   return clavesDeTurnstile() ? " https://challenges.cloudflare.com" : "";
 }
 
-export function buildCsp(nonce: string): string {
+/**
+ * Lo que /conectar-whatsapp le abre a Meta: el SDK de Facebook (script), sus llamadas
+ * (connect) y el popup del registro (frame). Sólo esa ruta lo pide: en el resto el
+ * origen de Facebook no tiene nada que hacer y un permiso que no se usa lo puede usar
+ * otro. `img-src` ya admite `https:`.
+ */
+const META = {
+  script: " https://connect.facebook.net",
+  connect: " https://www.facebook.com https://graph.facebook.com https://connect.facebook.net",
+  frame: " https://www.facebook.com https://web.facebook.com https://business.facebook.com https://staticxx.facebook.com",
+} as const;
+
+export function buildCsp(nonce: string, { meta = false }: { meta?: boolean } = {}): string {
   const directives: string[] = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${turnstileOrigin()}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${turnstileOrigin()}${meta ? META.script : ""}`,
     /*
      * Sin 'unsafe-inline', y eso costó sacar siete `style={{ width }}`.
      *
@@ -96,7 +108,7 @@ export function buildCsp(nonce: string): string {
      * salen diecisiete, y son del overlay de Next, no del producto.
      */
     `style-src 'self' 'nonce-${nonce}'`,
-    `connect-src 'self'${sentryOrigin()}`,
+    `connect-src 'self'${sentryOrigin()}${meta ? META.connect : ""}`,
     "img-src 'self' data: https:",
     "font-src 'self' data:",
     /*
@@ -106,7 +118,7 @@ export function buildCsp(nonce: string): string {
      * `/demo`. `-nocookie` y no `youtube.com`: no pone cookies hasta que se
      * aprieta play, y esta página es pública y no tiene cartel de consentimiento.
      */
-    `frame-src https://www.youtube-nocookie.com${turnstileOrigin()}`,
+    `frame-src https://www.youtube-nocookie.com${turnstileOrigin()}${meta ? META.frame : ""}`,
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",

@@ -26,6 +26,9 @@
  * pedido (aunque sea el GET que cuenta los números de la WABA) se quedan gastados,
  * porque cada vuelta cuesta lo mismo contra los topes de Meta.
  *
+ * Los cupos, las salidas y el webhook propio del número, que comparten otros caminos
+ * del alta, viven en `pasos-del-numero.ts`.
+ *
  * Lo que no sale de acá: el número de la plataforma (`idDeLaPlataforma()`) no se
  * toca ni se guarda en una fila, no se borra nada de la WABA, y ni el token, ni el
  * código de seis dígitos, ni el PIN llegan al registro, a la base o al resultado.
@@ -36,56 +39,56 @@
 import "server-only";
 
 import { eq, ne, sql } from "drizzle-orm";
-import { after } from "next/server";
+import { after } from "next/server.js";
 
 import { enControl } from "@/data/scope";
 import { pruebaVencida } from "@/lib/billing/plans";
 import { filasDe } from "@/lib/db/filas";
 import { tenants, whatsappNumeros } from "@/lib/db/schema";
 import { entero } from "@/lib/entero";
-import type { Locale } from "@/lib/i18n";
+import { ID_DE_META } from "@/lib/meta-ids";
+import { nombreDelError } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
-import { liberarCupo, rateLimit } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
-import { avisarNumeroEnRevision, type MotivoDeRevision } from "@/server/alta/aviso-operador";
+import { avisarNumeroEnRevision } from "@/server/alta/aviso-operador";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import type { ResultadoDelNumero } from "@/server/alta/numero-resultados";
+import {
+  aRevision,
+  cuposDePedirCodigo,
+  cuposDeRegistrar,
+  cuposDeVerificar,
+  deFalla,
+  DIA_MS,
+  fijarElWebhook,
+  HORA_MS,
+  sinDueno,
+  soltar,
+  tomar,
+  type Entorno,
+  type Guardado,
+  type QuienPide,
+  type Tomado,
+} from "@/server/alta/pasos-del-numero";
 import { mismoNumero } from "@/server/alta/validar";
 import { esNumeroDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { codigoPg } from "@/server/core-sync/config";
 import {
   agregarNumero,
+  CODIGO_DE_SEIS,
   codigoYaVerificado,
-  fijarWebhookDelNumero,
-  ID_GUARDABLE,
   numeroYaRegistrado,
   partirNumero,
   pedirCodigoAMeta,
   registrarNumero,
   verificarCodigoEnMeta,
-  webhookPropioEs,
-  type CredencialDeAlta,
-  type FallaDeGraph,
   type MetodoDeCodigo,
 } from "@/server/whatsapp/alta-de-numero";
-import { credencialDelEntorno, idDeLaPlataforma, webhookDelEntorno, type WebhookDelEntorno } from "@/server/whatsapp/numeros";
+import { credencialDelEntorno, idDeLaPlataforma, webhookDelEntorno } from "@/server/whatsapp/numeros";
 import { recorrerLaWaba } from "@/server/whatsapp/verificar-en-meta";
 
-const HORA_MS = 60 * 60_000;
-const DIA_MS = 24 * HORA_MS;
-/** `register` admite unos 10 pedidos por número cada 72 h: tres por día es de sobra para quien lo hace una vez. */
-const REGISTROS_POR_DIA = 3;
-const CODIGO_DE_SEIS = /^\d{6}$/;
-
-/** Quién pide, sacado de la sesión y de los headers: nada de esto entra por el cuerpo de un pedido. */
-export interface QuienPide {
-  tenantId: string;
-  userId: string;
-  /** Una IP válida o null: es la clave del cupo por red y lo que anota la auditoría. */
-  ip: string | null;
-  idioma: Locale;
-}
+export type { QuienPide };
 
 /** Los topes del número automático, leídos del entorno cada vez (cada uno acotado, ver `entero`). */
 export function topesDelNumero() {
@@ -102,60 +105,6 @@ export function topesDelNumero() {
 }
 
 type Topes = ReturnType<typeof topesDelNumero>;
-
-/* ── Cupos ────────────────────────────────────────────────────────────────── */
-
-interface Cupo {
-  /** Cuál es, para decirle a quien llama cuál cortó. */
-  cual: string;
-  clave: string;
-  limit: number;
-  windowMs: number;
-}
-
-/** Lo que el contador anotó: lo único que hace falta para devolverlo. */
-interface Tomado {
-  clave: string;
-  windowMs: number;
-  ventana: number;
-}
-
-type Toma = { ok: true; tomados: Tomado[] } | { ok: false; cual: string };
-
-/** Devuelve los intentos al contador. Nunca tira: un cupo que no vuelve no rompe lo que sigue. */
-async function soltar(tomados: Tomado[]): Promise<void> {
-  await Promise.all(
-    tomados.map(async (t) => {
-      try {
-        await liberarCupo(t.clave, t.windowMs, t.ventana);
-      } catch {
-        logger.warn({}, "alta.numero_cupo_no_liberado");
-      }
-    })
-  );
-}
-
-/**
- * Toma los cupos en orden, siempre cerrando si el contador no contesta. Si uno no
- * tiene lugar devuelve todo lo tomado, también el intento que el contador contó y
- * rechazó, y dice cuál fue. Un límite 0 es «sin lugar» y no llama al contador.
- */
-async function tomar(lista: Cupo[]): Promise<Toma> {
-  const tomados: Tomado[] = [];
-  for (const cupo of lista) {
-    if (cupo.limit <= 0) {
-      await soltar(tomados);
-      return { ok: false, cual: cupo.cual };
-    }
-    const cuenta = await rateLimit(cupo.clave, { limit: cupo.limit, windowMs: cupo.windowMs, fallaCerrada: true });
-    tomados.push({ clave: cupo.clave, windowMs: cupo.windowMs, ventana: cuenta.ventana });
-    if (!cuenta.allowed) {
-      await soltar(tomados);
-      return { ok: false, cual: cupo.cual };
-    }
-  }
-  return { ok: true, tomados };
-}
 
 /* ── La base ──────────────────────────────────────────────────────────────── */
 
@@ -238,8 +187,6 @@ async function filaHabilitada(tenantId: string): Promise<Fila | null> {
   return fila;
 }
 
-type Guardado = "ok" | "no_aplica" | "datos_invalidos" | "id_de_la_plataforma" | "id_ocupado" | "sin_migracion" | "error";
-
 const GUARDADOS: ReadonlySet<string> = new Set<Guardado>([
   "ok",
   "no_aplica",
@@ -249,8 +196,6 @@ const GUARDADOS: ReadonlySet<string> = new Set<Guardado>([
   "sin_migracion",
   "error",
 ]);
-
-const nombreDe = (e: unknown) => (e instanceof Error ? e.name : "UnknownError");
 
 /**
  * Escribe un paso con la función de la 0049: 'agregado' (el id que Graph dio) o
@@ -284,34 +229,9 @@ async function guardarPaso(
     const codigo = codigoPg(e);
     if (codigo === "23505") return "id_ocupado";
     if (codigo === "42883" || codigo === "42P01" || codigo === "42703") return "sin_migracion";
-    logger.error({ error: nombreDe(e), codigo }, "alta.numero_automatico_guardado_fallo");
+    logger.error({ error: nombreDelError(e), codigo }, "alta.numero_automatico_guardado_fallo");
     return "error";
   }
-}
-
-/* ── Salidas ──────────────────────────────────────────────────────────────── */
-
-/** Un número que se mira a mano: el aviso sale después de contestar y la persona ve «revision». */
-function aRevision(motivo: MotivoDeRevision, tenantId: string): ResultadoDelNumero {
-  after(() => avisarNumeroEnRevision(motivo, tenantId));
-  return "revision";
-}
-
-/** Lo que Graph dijo, como lo ve la persona: esperar y meta tal cual, un rechazo se mira a mano. */
-function deFalla(falla: FallaDeGraph, tenantId: string): ResultadoDelNumero {
-  return falla === "rechazo" ? aRevision("rechazo", tenantId) : falla;
-}
-
-/** Meta tiene el número y la base no pudo asignárselo al espacio: se anota qué dijo la función y se avisa. */
-function sinDueno(quien: QuienPide, paso: "agregado" | "conectado", guardado: Guardado): ResultadoDelNumero {
-  logger.error({ tenantId: quien.tenantId, paso, guardado }, "alta.numero_automatico_no_guardado");
-  return aRevision("sin_dueno", quien.tenantId);
-}
-
-interface Entorno {
-  cred: CredencialDeAlta;
-  plataforma: string;
-  webhook: WebhookDelEntorno;
 }
 
 /**
@@ -383,7 +303,7 @@ async function sumarALaWaba(
   // Desde acá el número está en la WABA: el operador se entera pase lo que pase después.
   after(() => avisarNumeroEnRevision("agregado", tenantId));
   const id = agregado.valor;
-  if (!ID_GUARDABLE.test(id) || id === entorno.plataforma) return corta(sinDueno(quien, "agregado", "datos_invalidos"));
+  if (!ID_DE_META.test(id) || id === entorno.plataforma) return corta(sinDueno(quien, "agregado", "datos_invalidos"));
   const guardado = await guardarPaso(quien, "agregado", id, entorno.cred.wabaId, entorno.plataforma);
   if (guardado !== "ok") return corta(sinDueno(quien, "agregado", guardado));
   return { ok: true, valor: id };
@@ -405,11 +325,7 @@ export async function pedirCodigo(quien: QuienPide, metodo: MetodoDeCodigo): Pro
   let deCodigo: Tomado[] = [];
   let salio = false;
   try {
-    const toma = await tomar([
-      { cual: "inquilino", clave: claveDeCupo("wa:codigo", tenantId), limit: topes.codigosInquilino, windowMs: DIA_MS },
-      { cual: "ip", clave: claveDeCupo("wa:codigo-ip", quien.ip ?? "sin-ip"), limit: topes.codigosIp, windowMs: DIA_MS },
-      { cual: "global", clave: claveDeCupo("wa:codigos"), limit: topes.codigosDia, windowMs: DIA_MS },
-    ]);
+    const toma = await tomar(cuposDePedirCodigo(tenantId, quien.ip, topes));
     if (!toma.ok) return "esperar";
     deCodigo = toma.tomados;
 
@@ -434,7 +350,7 @@ export async function pedirCodigo(quien: QuienPide, metodo: MetodoDeCodigo): Pro
     const pedido = await pedirCodigoAMeta(entorno.cred, id, metodo, quien.idioma);
     return pedido.ok ? "codigo_enviado" : deFalla(pedido.falla, tenantId);
   } catch (e) {
-    logger.error({ error: nombreDe(e) }, "alta.numero_automatico_fallo");
+    logger.error({ error: nombreDelError(e) }, "alta.numero_automatico_fallo");
     return "meta";
   } finally {
     if (!salio) await soltar(deCodigo);
@@ -442,18 +358,6 @@ export async function pedirCodigo(quien: QuienPide, metodo: MetodoDeCodigo): Pro
 }
 
 /* ── Verificar el código ──────────────────────────────────────────────────── */
-
-/**
- * Le pone al número el webhook de este ambiente y lo lee de Graph. null si quedó; si
- * no, qué contestar. Poner no alcanza: lo que Graph devuelve es lo único que vale.
- */
-async function fijarElWebhook(tenantId: string, id: string, entorno: Entorno): Promise<ResultadoDelNumero | null> {
-  const puesto = await fijarWebhookDelNumero(entorno.cred, id, entorno.webhook);
-  if (!puesto.ok) return deFalla(puesto.falla, tenantId);
-  const leido = await webhookPropioEs(entorno.cred, id, entorno.webhook.url);
-  if (!leido.ok) return deFalla(leido.falla, tenantId);
-  return leido.valor ? null : aRevision("sin_webhook", tenantId);
-}
 
 /**
  * Registra el número en Cloud API (si Meta no lo tiene ya registrado: `register`
@@ -467,9 +371,7 @@ async function registrarYConectar(quien: QuienPide, id: string, entorno: Entorno
   if (!registrado.ok) return deFalla(registrado.falla, tenantId);
 
   if (!registrado.valor) {
-    const toma = await tomar([
-      { cual: "registrar", clave: claveDeCupo("wa:registrar", tenantId), limit: REGISTROS_POR_DIA, windowMs: DIA_MS },
-    ]);
+    const toma = await tomar(cuposDeRegistrar(tenantId));
     if (!toma.ok) return "esperar";
     const registro = await registrarNumero(entorno.cred, id);
     if (!registro.ok) return deFalla(registro.falla, tenantId);
@@ -496,14 +398,7 @@ export async function verificarCodigo(quien: QuienPide, codigo: string): Promise
   let tomados: Tomado[] = [];
   let salio = false;
   try {
-    const toma = await tomar([
-      {
-        cual: "verificar",
-        clave: claveDeCupo("wa:verificar", tenantId),
-        limit: topesDelNumero().verificacionesHora,
-        windowMs: HORA_MS,
-      },
-    ]);
+    const toma = await tomar(cuposDeVerificar(tenantId, topesDelNumero()));
     if (!toma.ok) return "esperar";
     tomados = toma.tomados;
 
@@ -526,7 +421,7 @@ export async function verificarCodigo(quien: QuienPide, codigo: string): Promise
 
     return await registrarYConectar(quien, id, entorno);
   } catch (e) {
-    logger.error({ error: nombreDe(e) }, "alta.numero_automatico_fallo");
+    logger.error({ error: nombreDelError(e) }, "alta.numero_automatico_fallo");
     return "meta";
   } finally {
     if (!salio) await soltar(tomados);

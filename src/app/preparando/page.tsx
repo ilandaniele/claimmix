@@ -13,16 +13,19 @@
  * dada de baja, un texto. Lee la fila sin la copia en memoria: acá se espera justo
  * a que el estado cambie.
  *
- * En un espacio del alta automática con el número por código prendido, su admin
- * conecta su WhatsApp mientras espera, con el mismo panel de /configuracion: el número
- * vive en control y no necesita la base del cliente. `?wa=` trae lo que dijo la última
- * acción. Quien no administra no ve el panel ni se consulta el número.
+ * En un espacio del alta automática, su admin conecta su WhatsApp mientras espera: con
+ * el mismo panel de /configuracion si le toca el número por código, o con el enlace a
+ * /conectar-whatsapp (o /conectar-whatsapp/app, con su propia app de Meta) si le toca la WABA
+ * propia (`metodoDelEspacio`). El número vive en control y no necesita la base del cliente.
+ * `?wa=` trae lo que dijo la última acción. Quien no administra no ve nada de esto ni se
+ * consulta el número; y con las dos vías propias apagadas no se lee su estado.
  */
 
 import { redirect } from "next/navigation";
 
 import { Tarjeta } from "@/app/alta/Tarjeta";
 import { NumeroPanel } from "@/app/(app)/configuracion/NumeroPanel";
+import { WabaPropiaEnlace } from "@/app/conectar-whatsapp/WabaPropiaEnlace";
 import { basePorCliente } from "@/data/bases";
 import { filaDeUsuario, olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
@@ -30,9 +33,9 @@ import { getSessionContext } from "@/lib/auth/session";
 import { getT } from "@/lib/i18n";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { numeroPorConectar } from "@/server/alta/numero-automatico";
-import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { esResultadoDelNumero, panelDelNumero } from "@/server/alta/numero-resultados";
 import { destinoAlTerminarLaBase, pasosHechos } from "@/server/alta/pasos-hechos";
+import { leerWabaPublica, metodoDelEspacio } from "@/server/alta/waba-publica";
 import { vistaDeBase } from "@/server/bases/espera";
 
 import { reintentarMiBase } from "./actions";
@@ -71,15 +74,36 @@ export default async function PreparandoPage({
     );
   }
 
-  // Sólo para quien puede conectar el número por código (admin de un espacio del alta automática); sin eso no se consulta nada más.
-  const automatico = (ADMIN_ROLES as string[]).includes(fila.role) && fila.autoalta === true && numeroAutomatico();
+  // Sólo para el admin de un espacio del alta automática; sin eso no se consulta nada más.
+  const esAdmin = (ADMIN_ROLES as string[]).includes(fila.role) && fila.autoalta === true;
+  // Una fila viva de WABA manda sobre las banderas (metodoDelNumero): se lee aunque estén apagadas.
+  const waba = esAdmin ? await leerWabaPublica(fila.tenant_id) : null;
+  const metodo = esAdmin
+    ? metodoDelEspacio({
+        conWaba: waba?.conWaba ?? false,
+        idEnLaPlataforma: waba?.idEnLaPlataforma ?? false,
+        esAdmin,
+        autoalta: true,
+        yaConectado: waba?.numero === "conectado",
+        origen: waba?.origen,
+      })
+    : null;
+  const automatico = metodo === "codigo";
   const panel = panelDelNumero(automatico, automatico && (await numeroPorConectar(fila.tenant_id)), wa);
-  const numero = panel && (
-    <>
-      {panel.formularios && <p className="mt-5 text-sm font-medium text-slate-700">{t("preparando.whatsapp")}</p>}
-      <NumeroPanel t={t} resultado={panel.resultado} formularios={panel.formularios} />
-    </>
-  );
+  const numero =
+    metodo === "propia" || metodo === "app" ? (
+      <>
+        <p className="mt-5 text-sm font-medium text-slate-700">{t("preparando.whatsapp")}</p>
+        <WabaPropiaEnlace tenantId={fila.tenant_id} t={t} waba={waba} metodo={metodo} />
+      </>
+    ) : (
+      panel && (
+        <>
+          {panel.formularios && <p className="mt-5 text-sm font-medium text-slate-700">{t("preparando.whatsapp")}</p>}
+          <NumeroPanel t={t} resultado={panel.resultado} formularios={panel.formularios} />
+        </>
+      )
+    );
 
   if (vista === "reintentable") {
     return (

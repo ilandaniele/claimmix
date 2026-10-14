@@ -39,11 +39,20 @@ const conClaves = () => {
   process.env.TURNSTILE_SECRET_KEY = "test-turnstile-secret-key";
 };
 
+const BANDERAS = ["ALTA_NUMERO_AUTOMATICO", "ALTA_WABA_PROPIA", "META_APP_ID", "META_ES_CONFIG_ID", "WHATSAPP_APP_SECRET"];
+const sinBanderas = () => BANDERAS.forEach((nombre) => delete process.env[nombre]);
+const conWabaPropia = () => {
+  process.env.ALTA_WABA_PROPIA = "1";
+  process.env.META_APP_ID = "fake-app-id";
+  process.env.META_ES_CONFIG_ID = "fake-config-id";
+  process.env.WHATSAPP_APP_SECRET = "fake-app-secret";
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.TURNSTILE_SITE_KEY;
   delete process.env.TURNSTILE_SECRET_KEY;
-  delete process.env.ALTA_NUMERO_AUTOMATICO;
+  sinBanderas();
   h.locale.mockResolvedValue("es-AR");
   h.remitente.mockReturnValue(null);
 });
@@ -51,7 +60,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.TURNSTILE_SITE_KEY;
   delete process.env.TURNSTILE_SECRET_KEY;
-  delete process.env.ALTA_NUMERO_AUTOMATICO;
+  sinBanderas();
   scriptDeTurnstile()?.remove();
 });
 
@@ -87,6 +96,50 @@ describe("/registro: los campos", () => {
     expect(container.querySelector("#registro-whatsapp-ayuda")).toHaveTextContent(
       "It must be able to receive an SMS or a phone call, and it can't be in use in the WhatsApp or WhatsApp Business app."
     );
+  });
+
+  describe("con la WABA propia prendida", () => {
+    beforeEach(conWabaPropia);
+
+    it("la ayuda avisa que el número se conecta con la cuenta de Facebook en el paso siguiente", async () => {
+      const { container } = await pintar();
+
+      const ayuda = container.querySelector("#registro-whatsapp-ayuda");
+      expect(ayuda).toHaveTextContent("Con código de país, por ejemplo +54 9 11 5555 0000.");
+      expect(ayuda).toHaveTextContent("en el paso siguiente lo conectás con tu cuenta de Facebook");
+      expect(ayuda).toHaveTextContent("Tiene que poder recibir un SMS o una llamada");
+      expect(screen.getByLabelText("WhatsApp de tu empresa")).toHaveAccessibleDescription(/cuenta de Facebook/);
+    });
+
+    it("gana sobre el aviso del código si las dos están prendidas: es una sola frase", async () => {
+      process.env.ALTA_NUMERO_AUTOMATICO = "1";
+      const { container } = await pintar();
+
+      const ayuda = container.querySelector("#registro-whatsapp-ayuda");
+      expect(ayuda).toHaveTextContent("cuenta de Facebook");
+      expect(ayuda?.textContent?.match(/Tiene que poder recibir un SMS/g)).toHaveLength(1);
+    });
+
+    it("en inglés", async () => {
+      h.locale.mockResolvedValue("en-US");
+      const { container } = await pintar();
+
+      expect(container.querySelector("#registro-whatsapp-ayuda")).toHaveTextContent("in the next step you connect it with your Facebook account");
+    });
+
+    it.each(["META_APP_ID", "META_ES_CONFIG_ID", "WHATSAPP_APP_SECRET"])("sin %s la ayuda es la de hoy", async (falta) => {
+      delete process.env[falta];
+      const { container } = await pintar();
+
+      expect(container.querySelector("#registro-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
+    });
+
+    it.each(["0", "true", ""])("con ALTA_WABA_PROPIA=%j la ayuda es la de hoy", async (valor) => {
+      process.env.ALTA_WABA_PROPIA = valor;
+      const { container } = await pintar();
+
+      expect(container.querySelector("#registro-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
+    });
   });
 
   it.each([undefined, "0", "true", ""])("con ALTA_NUMERO_AUTOMATICO=%j la ayuda del WhatsApp es la de hoy", async (valor) => {

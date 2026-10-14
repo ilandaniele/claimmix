@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   getUserRow: vi.fn(),
   locale: vi.fn(),
   pasos: vi.fn(),
+  leerWaba: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -34,6 +35,17 @@ vi.mock("@/data/scope", () => ({ enTenantVarias: m.enTenantVarias }));
 vi.mock("@/server/notify/specialist-alert", () => ({ listaDelTenant: m.listaDelTenant }));
 vi.mock("@/server/sso/panel", () => ({ panelSso: m.panelSso }));
 vi.mock("@/server/alta/pasos-hechos", () => ({ pasosHechos: m.pasos }));
+// El enlace a /conectar-whatsapp es un componente de servidor asíncrono: acá sólo importa dónde y para quién sale.
+vi.mock("@/app/conectar-whatsapp/WabaPropiaEnlace", () => ({
+  WabaPropiaEnlace: ({ tenantId, metodo }: { tenantId: string; metodo?: string }) => (
+    <i data-enlace-waba={tenantId} data-metodo={metodo} />
+  ),
+}));
+// Sólo la lectura de la WABA se reemplaza: `metodoDelEspacio` y lo demás corren de verdad.
+vi.mock("@/server/alta/waba-publica", async (original) => ({
+  ...(await original<typeof import("@/server/alta/waba-publica")>()),
+  leerWabaPublica: m.leerWaba,
+}));
 vi.mock("@/app/(app)/configuracion/numero-actions", () => ({
   pedirCodigoDelNumero: vi.fn(),
   verificarCodigoDelNumero: vi.fn(),
@@ -73,6 +85,8 @@ const TENANT = "10000000-0000-0000-0000-000000000001";
 const AHORA = new Date("2026-10-08T12:00:00.000Z");
 const VISTA = { webhook_url: "https://core.aseguradora.com.ar/hook", enabled: true };
 const falta = (code: string) => Object.assign(new Error("no existe"), { code });
+const WABA_PLATAFORMA = "100000000000001";
+const WABA_PROPIA = "200000000000002";
 const enDias = (dias: number) => new Date(AHORA.getTime() + dias * 24 * 60 * 60 * 1000).toISOString();
 
 /** Lo que devuelve el lote con la 0048 aplicada. */
@@ -83,7 +97,7 @@ function lote(
     autoalta?: boolean | null;
     funcion_del_numero?: boolean;
   },
-  numeros: Array<{ estado: string }> = []
+  numeros: Array<{ estado: string; phoneNumberId?: string | null; wabaId?: string | null; conToken?: boolean }> = []
 ) {
   return [
     [
@@ -125,9 +139,41 @@ function conRol(role: string, extra: Record<string, unknown> = { autoalta: true 
 /** Cuántas veces sale un trozo de HTML: el panel del código tiene que salir una sola vez. */
 const veces = (html: string, trozo: string) => html.split(trozo).length - 1;
 
+const BANDERAS = [
+  "ALTA_NUMERO_AUTOMATICO",
+  "ALTA_WABA_PROPIA",
+  "ALTA_APP_PROPIA",
+  "NEXT_PUBLIC_SITE_URL",
+  "WHATSAPP_APP_SECRETS_KEY",
+  "META_APP_ID",
+  "META_ES_CONFIG_ID",
+  "WHATSAPP_APP_SECRET",
+  "WHATSAPP_BUSINESS_ACCOUNT_ID",
+];
+const sinBanderas = () => BANDERAS.forEach((nombre) => delete process.env[nombre]);
+
+/** La WABA propia prendida: la bandera y las tres credenciales de la app de Meta, más la WABA de la plataforma. */
+function conWabaPropia() {
+  process.env.ALTA_WABA_PROPIA = "1";
+  process.env.META_APP_ID = "fake-app-id";
+  process.env.META_ES_CONFIG_ID = "fake-config-id";
+  process.env.WHATSAPP_APP_SECRET = "fake-app-secret";
+  process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = WABA_PLATAFORMA;
+}
+
+/** La app propia prendida: la bandera, la dirección del sitio, la clave de los secretos y las credenciales de la app de Meta de la plataforma. */
+function conAppPropia() {
+  process.env.ALTA_APP_PROPIA = "1";
+  process.env.NEXT_PUBLIC_SITE_URL = "https://claimmix.example.com";
+  process.env.WHATSAPP_APP_SECRETS_KEY = "fake-secrets-key-1";
+  process.env.META_APP_ID = "fake-app-id";
+  process.env.WHATSAPP_APP_SECRET = "fake-app-secret";
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  delete process.env.ALTA_NUMERO_AUTOMATICO;
+  sinBanderas();
+  m.leerWaba.mockResolvedValue(null);
   vi.useFakeTimers({ now: AHORA, toFake: ["Date"] });
   m.listaDelTenant.mockResolvedValue([]);
   m.panelSso.mockRejectedValue(falta("42P01"));
@@ -138,7 +184,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  delete process.env.ALTA_NUMERO_AUTOMATICO;
+  sinBanderas();
 });
 
 describe("paraAdmin: la prueba y el número", () => {
@@ -175,15 +221,51 @@ describe("paraAdmin: la prueba y el número", () => {
     expect((await paraAdmin(TENANT)).prueba?.porCodigo).toBe(esperado);
   });
 
-  it("del número sólo lee el estado, y deja afuera lo dado de baja", async () => {
+  it("del número lee el estado y los ids (sólo para saber de qué WABA es), y deja afuera lo dado de baja", async () => {
     m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
     await paraAdmin(TENANT);
 
     const { sql, params } = consulta(0, 2);
-    expect(sql).toMatch(/^select "estado" from "whatsapp_numeros" where "whatsapp_numeros"\."estado" <> \$1/);
+    expect(sql).toMatch(
+      /^select "estado", "phone_number_id", "waba_id", "token_cifrado" is not null from "whatsapp_numeros" where "whatsapp_numeros"\."estado" <> \$1/
+    );
     expect(params).toEqual(["baja", 1]);
-    for (const columna of ["numero_e164", "phone_number_id", "waba_id", "token_cifrado"]) expect(sql).not.toContain(columna);
+    for (const columna of ["numero_e164", "pin_cifrado"]) expect(sql).not.toContain(columna);
+  });
+
+  it.each([
+    ["sin fila", [], { conWaba: false, idEnLaPlataforma: false }],
+    ["pedido sin ids", [{ estado: "pedido" }], { conWaba: false, idEnLaPlataforma: false }],
+    [
+      "con id en la WABA de la plataforma",
+      [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PLATAFORMA }],
+      { conWaba: false, idEnLaPlataforma: true },
+    ],
+    [
+      "con id y sin WABA (el .env es el que lo lleva)",
+      [{ estado: "pedido", phoneNumberId: "300000000000003", wabaId: null }],
+      { conWaba: false, idEnLaPlataforma: true },
+    ],
+    [
+      "en una WABA propia, con su token",
+      [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }],
+      { conWaba: true, idEnLaPlataforma: false },
+    ],
+    [
+      "de la plataforma pero en otra WABA, sin token propio",
+      [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: false }],
+      { conWaba: false, idEnLaPlataforma: true },
+    ],
+  ])("de dónde viene el número, %s: sólo dos booleanos, nunca los ids", async (_caso, numeros, esperado) => {
+    process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = WABA_PLATAFORMA;
+    m.enTenantVarias.mockResolvedValueOnce(lote({}, numeros));
+
+    const { prueba } = await paraAdmin(TENANT);
+
+    expect(prueba).toMatchObject(esperado);
+    expect(Object.keys(prueba ?? {}).sort()).toEqual(["conWaba", "dias", "idEnLaPlataforma", "numero", "porCodigo"]);
+    expect(JSON.stringify(prueba)).not.toContain("300000000000003");
   });
 
   it.each([
@@ -791,20 +873,22 @@ describe("/configuracion con el número por código", () => {
   });
 });
 
+const DE_LA_PLATAFORMA = { conWaba: false, idEnLaPlataforma: false };
+
 describe("PruebaPanel", () => {
   it("no tiene nada que se pueda editar", () => {
     const t = getT("es-AR");
     for (const numero of ["pedido", "conectado", "suspendido"] as const) {
-      const html = renderToStaticMarkup(<PruebaPanel prueba={{ dias: 5, numero, porCodigo: true }} t={t} />);
+      const html = renderToStaticMarkup(<PruebaPanel prueba={{ dias: 5, numero, porCodigo: true, ...DE_LA_PLATAFORMA }} t={t} />);
       for (const control of ["<input", "<button", "<form", "<select", "<textarea", "<a "]) expect(html).not.toContain(control);
     }
   });
 
   it("dice 'queda 1 día' en singular", () => {
-    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido", porCodigo: false }} t={getT("es-AR")} />)).toContain(
+    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido", porCodigo: false, ...DE_LA_PLATAFORMA }} t={getT("es-AR")} />)).toContain(
       "Queda 1 día"
     );
-    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido", porCodigo: false }} t={getT("en-US")} />)).toContain(
+    expect(renderToStaticMarkup(<PruebaPanel prueba={{ dias: 1, numero: "pedido", porCodigo: false, ...DE_LA_PLATAFORMA }} t={getT("en-US")} />)).toContain(
       "1 day left"
     );
   });
@@ -814,12 +898,28 @@ describe("PruebaPanel", () => {
     const pintarPrueba = (prueba: Parameters<typeof PruebaPanel>[0]["prueba"], automatico: boolean) =>
       renderToStaticMarkup(<PruebaPanel prueba={prueba} t={t} automatico={automatico} />);
 
-    expect(pintarPrueba({ dias: 5, numero: "pedido", porCodigo: true }, true)).toContain("Conectalo vos abajo");
-    expect(pintarPrueba({ dias: null, numero: "pedido", porCodigo: true }, true)).toContain("Conectalo vos abajo");
-    expect(pintarPrueba({ dias: 5, numero: "pedido", porCodigo: true }, false)).toContain("Lo conectamos nosotros y te avisamos.");
-    expect(pintarPrueba({ dias: 0, numero: "pedido", porCodigo: true }, true)).toContain("Lo conectamos nosotros y te avisamos.");
-    expect(pintarPrueba({ dias: 5, numero: "suspendido", porCodigo: true }, true)).toContain("Escribinos y lo vemos.");
-    expect(pintarPrueba({ dias: 5, numero: "conectado", porCodigo: true }, true)).not.toContain("Conectalo vos abajo");
+    expect(pintarPrueba({ dias: 5, numero: "pedido", porCodigo: true, ...DE_LA_PLATAFORMA }, true)).toContain("Conectalo vos abajo");
+    expect(pintarPrueba({ dias: null, numero: "pedido", porCodigo: true, ...DE_LA_PLATAFORMA }, true)).toContain("Conectalo vos abajo");
+    expect(pintarPrueba({ dias: 5, numero: "pedido", porCodigo: true, ...DE_LA_PLATAFORMA }, false)).toContain("Lo conectamos nosotros y te avisamos.");
+    expect(pintarPrueba({ dias: 0, numero: "pedido", porCodigo: true, ...DE_LA_PLATAFORMA }, true)).toContain("Lo conectamos nosotros y te avisamos.");
+    expect(pintarPrueba({ dias: 5, numero: "suspendido", porCodigo: true, ...DE_LA_PLATAFORMA }, true)).toContain("Escribinos y lo vemos.");
+    expect(pintarPrueba({ dias: 5, numero: "conectado", porCodigo: true, ...DE_LA_PLATAFORMA }, true)).not.toContain("Conectalo vos abajo");
+  });
+
+  it("con la WABA propia, el pedido con prueba vigente manda a conectarlo con la cuenta de Meta", () => {
+    const pintarPrueba = (dias: number | null, propia: boolean, automatico = false) =>
+      renderToStaticMarkup(
+        <PruebaPanel prueba={{ dias, numero: "pedido", porCodigo: true, ...DE_LA_PLATAFORMA }} t={getT("es-AR")} automatico={automatico} propia={propia} />
+      );
+
+    expect(pintarPrueba(5, true)).toContain("Conectalo vos abajo con tu cuenta de Meta.");
+    expect(pintarPrueba(null, true)).toContain("Conectalo vos abajo con tu cuenta de Meta.");
+    expect(pintarPrueba(5, true, true)).not.toContain("código de WhatsApp");
+    expect(pintarPrueba(0, true)).toContain("Lo conectamos nosotros y te avisamos.");
+    expect(pintarPrueba(5, false)).not.toContain("tu cuenta de Meta");
+    expect(
+      renderToStaticMarkup(<PruebaPanel prueba={{ dias: 5, numero: "conectado", porCodigo: true, ...DE_LA_PLATAFORMA }} t={getT("es-AR")} propia />)
+    ).not.toContain("Conectalo vos abajo");
   });
 
   it("es de servidor: no baja JavaScript al navegador", () => {
@@ -827,6 +927,132 @@ describe("PruebaPanel", () => {
 
     expect(fuente).not.toMatch(/["']use client["']/);
     expect(fuente).not.toMatch(/\buse(State|Effect|T|Transition)\b/);
+  });
+});
+
+describe("/configuracion con la WABA propia prendida", () => {
+  const ENLACE = `data-enlace-waba="${TENANT}"`;
+  const NADA = { whatsapp: false, gmail: false };
+
+  beforeEach(() => {
+    conWabaPropia();
+    m.pasos.mockResolvedValue(NADA);
+  });
+
+  it("al espacio sin número le da el enlace a /conectar-whatsapp, en la sección y en los primeros pasos, y no el panel del código", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(veces(html, ENLACE)).toBe(1);
+    expect(html).toContain('href="/conectar-whatsapp"');
+    expect(html).not.toContain('href="#whatsapp"');
+    expect(html).toContain("Conectalo vos abajo con tu cuenta de Meta.");
+    expect(html).not.toContain('name="codigo"');
+    expect(html.indexOf('href="/conectar-whatsapp"')).toBeLessThan(html.indexOf('id="whatsapp"'));
+  });
+
+  it("con el número por código también prendido, quien no tiene número va por la WABA propia", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(veces(html, ENLACE)).toBe(1);
+    expect(html).not.toContain('name="codigo"');
+  });
+
+  it("quien pidió su número en la WABA de la plataforma sigue con el código si está prendido", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "pedido", phoneNumberId: "300000000000003", wabaId: WABA_PLATAFORMA }])
+    );
+
+    const html = await pintar();
+
+    expect(html).toContain('name="codigo"');
+    expect(html).not.toContain(ENLACE);
+    expect(html).not.toContain('href="/conectar-whatsapp"');
+  });
+
+  it("quien ya anda por la plataforma no recibe el enlace de la WABA propia (Q7)", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PLATAFORMA }])
+    );
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).not.toContain("/conectar-whatsapp");
+  });
+
+  it("quien conectó su WABA propia ve el enlace al estado aunque ya esté conectado", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
+    );
+
+    const html = await pintar();
+
+    expect(veces(html, ENLACE)).toBe(1);
+    expect(html).not.toContain("Conectalo vos abajo");
+  });
+
+  it.each([
+    ["suspendido, lo atiende el operador", lote({}, [{ estado: "suspendido", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])],
+    ["con la prueba vencida", lote({ trial_ends_at: enDias(-3) })],
+  ])("sin enlace si el número está %s", async (_caso, respuesta) => {
+    m.enTenantVarias.mockResolvedValueOnce(respuesta);
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).toContain('href="#whatsapp"');
+  });
+
+  it("quien no administra, o no es del alta automática, no ve el enlace", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({ autoalta: false }));
+    expect(await pintar()).not.toContain(ENLACE);
+
+    conRol("analyst");
+    expect(await pintar()).not.toContain(ENLACE);
+  });
+
+  it("apagada la bandera, quien nunca conectó una WABA propia sigue como antes", async () => {
+    delete process.env.ALTA_WABA_PROPIA;
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).toContain('href="#whatsapp"');
+    expect(html).toContain("Lo conectamos nosotros y te avisamos.");
+  });
+
+  it("apagada la bandera, un número de la plataforma que quedó en otra WABA no manda a /conectar-whatsapp", async () => {
+    delete process.env.ALTA_WABA_PROPIA;
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: false }])
+    );
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).not.toContain("/conectar-whatsapp");
+  });
+
+  it("apagada la bandera, quien conectó su WABA propia sigue viendo el enlace a su estado", async () => {
+    delete process.env.ALTA_WABA_PROPIA;
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
+    );
+
+    const html = await pintar();
+
+    expect(veces(html, ENLACE)).toBe(1);
   });
 });
 
@@ -845,5 +1071,183 @@ describe("los textos de la prueba", () => {
       expect(en, clave).toBeTruthy();
       if (clave !== "configuracion.prueba.whatsapp") expect(en, clave).not.toBe(es);
     }
+  });
+});
+
+describe("/configuracion con la app propia prendida", () => {
+  const ENLACE = `data-enlace-waba="${TENANT}"`;
+  const NADA = { whatsapp: false, gmail: false };
+  const deApp = (extra: object = {}) => ({ origen: "app_propia", estado: "armando", numero: null, nombre: "Seguros del Sur", ...extra });
+
+  beforeEach(() => {
+    conAppPropia();
+    m.pasos.mockResolvedValue(NADA);
+  });
+
+  it("al espacio sin número le da el enlace a su asistente, en la sección y en los primeros pasos, y no el panel del código", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(veces(html, ENLACE)).toBe(1);
+    expect(html).toContain('data-metodo="app"');
+    expect(html).toContain('href="/conectar-whatsapp/app"');
+    expect(html).not.toContain('href="/conectar-whatsapp"');
+    expect(html).not.toContain('href="#whatsapp"');
+    expect(html).toContain("Conectalo vos abajo con tu cuenta de Meta.");
+    expect(html).not.toContain('name="codigo"');
+    expect(html.indexOf('href="/conectar-whatsapp/app"')).toBeLessThan(html.indexOf('id="whatsapp"'));
+  });
+
+  it("lee la WABA una sola vez para el espacio y se la pasa al enlace", async () => {
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    await pintar();
+
+    expect(m.leerWaba).toHaveBeenCalledOnce();
+    expect(m.leerWaba).toHaveBeenCalledWith(TENANT);
+  });
+
+  it("quien ya empezó con la app propia sigue en ella aunque el popup se prenda después", async () => {
+    conWabaPropia();
+    m.leerWaba.mockResolvedValue(deApp());
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).toContain('data-metodo="app"');
+    expect(html).toContain('href="/conectar-whatsapp/app"');
+  });
+
+  it("con las dos vías prendidas y nada empezado gana el popup", async () => {
+    conWabaPropia();
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).toContain('data-metodo="propia"');
+    expect(html).toContain('href="/conectar-whatsapp"');
+    expect(html).not.toContain("/conectar-whatsapp/app");
+  });
+
+  it("quien conectó por el popup no pasa a la app propia aunque ésta se prenda", async () => {
+    m.leerWaba.mockResolvedValue(deApp({ origen: "embedded_signup", estado: "conectada" }));
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "pedido", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
+    );
+
+    const html = await pintar();
+
+    expect(html).not.toContain("/conectar-whatsapp/app");
+    expect(html).not.toContain('data-metodo="app"');
+  });
+
+  it("quien ya anda por la plataforma no recibe el enlace de la app propia", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PLATAFORMA }])
+    );
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).not.toContain("/conectar-whatsapp");
+  });
+
+  it("quien conectó con su app ve el enlace al estado aunque ya esté conectado", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.leerWaba.mockResolvedValue(deApp({ estado: "conectada", numero: "conectado" }));
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
+    );
+
+    const html = await pintar();
+
+    expect(veces(html, ENLACE)).toBe(1);
+    expect(html).toContain('data-metodo="app"');
+    expect(html).not.toContain("Conectalo vos abajo");
+  });
+
+  it.each([
+    ["suspendido, lo atiende el operador", lote({}, [{ estado: "suspendido", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])],
+    ["con la prueba vencida", lote({ trial_ends_at: enDias(-3) })],
+  ])("sin enlace si el número está %s", async (_caso, respuesta) => {
+    m.enTenantVarias.mockResolvedValueOnce(respuesta);
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).toContain('href="#whatsapp"');
+  });
+
+  it("quien no administra, o no es del alta automática, no ve el enlace ni se lee su WABA", async () => {
+    conRol("owner", { autoalta: false });
+    m.enTenantVarias.mockResolvedValueOnce(lote({ autoalta: false }));
+    expect(await pintar()).not.toContain(ENLACE);
+
+    conRol("analyst");
+    expect(await pintar()).not.toContain(ENLACE);
+    expect(m.leerWaba).not.toHaveBeenCalled();
+  });
+
+  it("apagada la bandera, quien nunca empezó sigue como antes", async () => {
+    delete process.env.ALTA_APP_PROPIA;
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).toContain('href="#whatsapp"');
+    expect(html).toContain("Lo conectamos nosotros y te avisamos.");
+  });
+
+  it("apagadas las dos banderas, la fila viva de la app propia manda: el enlace va a su asistente y no al del popup", async () => {
+    sinBanderas();
+    process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = WABA_PLATAFORMA;
+    m.leerWaba.mockResolvedValue(deApp({ numero: "pedido" }));
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "pedido", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
+    );
+
+    const html = await pintar();
+
+    expect(m.leerWaba).toHaveBeenCalledWith(TENANT);
+    expect(html).toContain('data-metodo="app"');
+    expect(html).toContain('href="/conectar-whatsapp/app"');
+    expect(html).not.toContain('href="/conectar-whatsapp"');
+  });
+
+  it("apagadas las dos banderas y sin fila viva, la sección sigue como antes", async () => {
+    sinBanderas();
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
+    expect(html).toContain('href="#whatsapp"');
+  });
+
+  it("apagada la bandera, quien ya conectó con su app sigue viendo el enlace a su estado", async () => {
+    delete process.env.ALTA_APP_PROPIA;
+    conWabaPropia();
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.leerWaba.mockResolvedValue(deApp({ estado: "conectada", numero: "conectado" }));
+    m.enTenantVarias.mockResolvedValueOnce(
+      lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
+    );
+
+    const html = await pintar();
+
+    expect(veces(html, ENLACE)).toBe(1);
+    expect(html).toContain('data-metodo="app"');
+  });
+
+  it("sin la clave de los secretos la vía está cerrada", async () => {
+    delete process.env.WHATSAPP_APP_SECRETS_KEY;
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).not.toContain(ENLACE);
   });
 });

@@ -29,6 +29,7 @@ const m = vi.hoisted(() => ({
   paraCadaBase: vi.fn(),
   reintentar: vi.fn(),
   espejar: vi.fn(),
+  revisarWabas: vi.fn(),
 }));
 
 // La base que el recorrido le da a cada barrido cuando la bandera está apagada.
@@ -47,6 +48,7 @@ vi.mock("@/lib/rate-limit/postgres", () => ({ purgeExpiredRateLimits: m.purgar }
 vi.mock("@/server/bases/cada-base", () => ({ paraCadaBase: m.paraCadaBase }));
 vi.mock("@/server/bases/reintentar", () => ({ reintentarBases: m.reintentar }));
 vi.mock("@/server/bases/espejo", () => ({ espejarTodas: m.espejar }));
+vi.mock("@/server/alta/waba-salud", () => ({ revisarWabas: m.revisarWabas }));
 vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: m.rateLimit,
   RATE_LIMIT_CONFIGS: {
@@ -91,6 +93,7 @@ beforeEach(() => {
   }));
   m.reintentar.mockResolvedValue({ lanzadas: 0 });
   m.espejar.mockResolvedValue({ ok: 0, fallas: 0 });
+  m.revisarWabas.mockResolvedValue(undefined);
   m.reap.mockImplementation(anota("reap", { reaped: 2, caseIds: [] }));
   m.retomar.mockImplementation(anota("retomar", { retomados: 1 }));
   m.recordar.mockImplementation(anota("recordar", { enviados: 3, salteados: 1 }));
@@ -612,5 +615,71 @@ describe("GET /api/cron/reap-stuck: una pasada por base (P10)", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ reaped: 0, retomados: 0, abandoned_closed: 0, bases: { fallas: 6 } });
+  });
+});
+
+describe("GET /api/cron/reap-stuck: la salud de las WABAs propias", () => {
+  it("corre en cada pasada, después de la purga y de las bases, y antes de contestar", async () => {
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    m.purgar.mockImplementation(anota("purgar", 5));
+    m.reintentar.mockImplementation(anota("reintentar", { lanzadas: 0 }));
+    m.espejar.mockImplementation(anota("espejar", { ok: 0, fallas: 0 }));
+    m.revisarWabas.mockImplementation(anota("revisarWabas", undefined));
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(m.revisarWabas).toHaveBeenCalledOnce();
+    expect(m.orden.slice(-3)).toEqual(["reintentar", "espejar", "revisarWabas"]);
+  });
+
+  it("corre aunque la bandera de bases por cliente esté apagada", async () => {
+    await GET(pedido());
+
+    expect(m.revisarWabas).toHaveBeenCalledOnce();
+  });
+
+  it("si revienta la ruta contesta 200 igual y deja sólo el código en el log", async () => {
+    const { logger } = await import("@/lib/observability/logger");
+    m.revisarWabas.mockRejectedValue(new Error("token-de-la-waba"));
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, reaped: 2, rate_limit_rows_purged: 5 });
+    expect(logger.error).toHaveBeenCalledWith(expect.any(Object), "cron_reap_stuck.waba_salud_fallo");
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("token-de-la-waba");
+  });
+
+  it("si lo anterior se comió el tiempo (quedan menos de 40 s) no la corre: pasarse de maxDuration corta la función", async () => {
+    const { logger } = await import("@/lib/observability/logger");
+    m.purgar.mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 270_000);
+      return 5;
+    });
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(m.revisarWabas).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith({}, "cron_reap_stuck.waba_salud_sin_tiempo");
+  });
+
+  it("con 40 s o más por delante sí la corre", async () => {
+    m.purgar.mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 250_000);
+      return 5;
+    });
+
+    await GET(pedido());
+
+    expect(m.revisarWabas).toHaveBeenCalledOnce();
+  });
+
+  it("sin el secreto del cron no revisa nada", async () => {
+    const res = await GET(new NextRequest("http://localhost/api/cron/reap-stuck"));
+
+    expect(res.status).toBe(401);
+    expect(m.revisarWabas).not.toHaveBeenCalled();
   });
 });

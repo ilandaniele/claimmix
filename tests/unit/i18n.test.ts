@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { t, getT, esAR, enUS } from "@/lib/i18n/index";
+import { t, getT, esAR, enUS, textosDePagina } from "@/lib/i18n/index";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locale-shared";
 import { textoDeSesionesCerradas } from "@/lib/i18n/sesiones-cerradas";
 import { RESULTADOS_SSO } from "@/app/(app)/configuracion/sso-resultados";
@@ -11,6 +11,7 @@ import { enUS as enUSCliente } from "@/lib/i18n/en-US";
 import { enUSServidor } from "@/lib/i18n/en-US.servidor";
 import { esAR as esARCliente } from "@/lib/i18n/es-AR";
 import { esARServidor } from "@/lib/i18n/es-AR.servidor";
+import { FALLAS_DE_WABA } from "@/server/alta/waba-resultados";
 
 describe("t() translation helper", () => {
   it("returns the correct string for 'nav.bandeja'", () => {
@@ -381,5 +382,97 @@ describe("las claves con marcas del lote de decisiones", () => {
         expect(enUSServidor[clave], clave).toBeTruthy();
       }
     }
+  });
+
+  it("la ayuda del PIN de dos pasos avisa que puede ser de una conexión anterior y dónde se cambia", () => {
+    expect(esARServidor["waba.pin.ayuda"]).toContain("WhatsApp Manager");
+    expect(esARServidor["waba.pin.ayuda"]).toContain("conexión anterior");
+    expect(enUSServidor["waba.pin.ayuda"]).toContain("WhatsApp Manager");
+    expect(enUSServidor["waba.pin.ayuda"]).toContain("earlier connection");
+  });
+});
+
+/**
+ * Las claves del panel del operador (`altas.*`) y las del enlace a la conexión con la app propia
+ * (`enlaceWaba.app.*`): de servidor a propósito, así que no viajan al navegador. Cada estado y cada
+ * falla de la WABA que la pantalla puede pintar tiene su texto en los dos idiomas.
+ */
+describe("las claves de altas y del enlace de la app propia", () => {
+  const marcas = (texto: string) => (texto.match(/\{\w+\}/g) ?? []).sort();
+  const delPanel = (k: string) => k.startsWith("altas.") || k.startsWith("enlaceWaba.app.");
+  // «App ID» y «WABA» son los nombres que Meta usa en su consola; «Plan» se escribe igual en los dos idiomas.
+  const IGUALES_A_PROPOSITO = new Set(["altas.waba.appId", "altas.waba.id", "altas.numero.waba", "altas.activar.plan"]);
+  const claves = Object.keys(esARServidor).filter(delPanel);
+
+  it("hay claves, y las mismas en los dos idiomas", () => {
+    expect(claves.length).toBeGreaterThan(100);
+    expect(Object.keys(enUSServidor).filter(delPanel).sort()).toEqual([...claves].sort());
+  });
+
+  it("ninguna quedó vacía, ninguna es el castellano copiado y las marcas coinciden", () => {
+    for (const clave of claves) {
+      const es = (esARServidor as Record<string, string>)[clave]!;
+      const en = (enUSServidor as Record<string, string>)[clave]!;
+      expect(es, clave).toBeTruthy();
+      expect(en, clave).toBeTruthy();
+      if (!IGUALES_A_PROPOSITO.has(clave)) expect(en, `${clave}: el inglés es el castellano copiado`).not.toBe(es);
+      expect(marcas(en), clave).toEqual(marcas(es));
+    }
+  });
+
+  it("la lista de iguales a propósito no junta polvo", () => {
+    for (const clave of IGUALES_A_PROPOSITO) {
+      expect((esARServidor as Record<string, string>)[clave], clave).toBe((enUSServidor as Record<string, string>)[clave]);
+    }
+  });
+
+  it("no viajan al navegador: ninguna está en los diccionarios de cliente", () => {
+    expect(Object.keys(esARCliente).filter(delPanel)).toEqual([]);
+    expect(Object.keys(enUSCliente).filter(delPanel)).toEqual([]);
+  });
+
+  it("cada falla de la WABA y cada estado de su fila tiene su texto, en los dos idiomas", () => {
+    const estados = ["armando", "cancelada", "vinculada", "suscripta", "falta_codigo", "falta_pin", "conectada", "falla", "revocada"];
+    const pedidas = [...FALLAS_DE_WABA.map((f) => `altas.waba.falla.${f}`), ...estados.map((e) => `altas.waba.estado.${e}`)];
+    for (const clave of pedidas) {
+      expect((esARServidor as Record<string, string>)[clave], clave).toBeTruthy();
+      expect((enUSServidor as Record<string, string>)[clave], clave).toBeTruthy();
+    }
+  });
+
+  it("el enlace de la app propia tiene los cuatro estados y los cuatro botones", () => {
+    for (const parte of ["estado", "boton"]) {
+      for (const estado of ["nuevo", "enCurso", "falla", "conectado"]) {
+        const clave = `enlaceWaba.app.${parte}.${estado}`;
+        expect((esARServidor as Record<string, string>)[clave], clave).toBeTruthy();
+        expect((enUSServidor as Record<string, string>)[clave], clave).toBeTruthy();
+      }
+    }
+  });
+});
+
+/**
+ * Los textos de los paneles de /conectar-whatsapp (`waba.*` y `appPropia.*`, menos los rubros) viajan
+ * como prop a las dos páginas que los usan: de servidor a propósito, así que no están en el JS de todas.
+ */
+describe("textosDePagina", () => {
+  const delPanel = (k: string) => k.startsWith("waba.") || k.startsWith("appPropia.");
+
+  it("trae todas las claves de servidor de los paneles, en los dos idiomas, y ninguna otra", () => {
+    const claves = Object.keys(esARServidor).filter(delPanel).sort();
+    expect(claves.length).toBeGreaterThan(0);
+    expect(Object.keys(textosDePagina("es-AR")).sort()).toEqual(claves);
+    expect(Object.keys(textosDePagina("en-US")).sort()).toEqual(claves);
+  });
+
+  it("devuelve el texto del idioma pedido", () => {
+    expect(textosDePagina("es-AR")["waba.pin.ayuda"]).toBe(esARServidor["waba.pin.ayuda"]);
+    expect(textosDePagina("en-US")["waba.pin.ayuda"]).toBe(enUSServidor["waba.pin.ayuda"]);
+  });
+
+  it("los rubros del perfil siguen en el diccionario del cliente, que los lee el selector", () => {
+    expect(Object.keys(esARCliente).filter((k) => k.startsWith("waba.")).every((k) => k.startsWith("waba.categoria."))).toBe(true);
+    expect(Object.keys(esARCliente).some((k) => k.startsWith("appPropia."))).toBe(false);
+    expect(Object.keys(textosDePagina("es-AR")).some((k) => k.startsWith("waba.categoria."))).toBe(false);
   });
 });

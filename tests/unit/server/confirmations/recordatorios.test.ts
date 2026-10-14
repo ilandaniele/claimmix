@@ -212,6 +212,24 @@ describe("recordarCaso", () => {
     expect(m.logWarn).toHaveBeenCalledWith({ case_id: expect.any(String) }, "recordatorio.plantilla_sin_respuesta");
   });
 
+  it("WhatsApp fuera de ventana: la credencial llega entera a la consulta de la plantilla, con la prueba de la app propia si la tiene (R5)", async () => {
+    const propia = {
+      accessToken: "test-client-system-token-key",
+      phoneNumberId: "777000111",
+      wabaId: "555000111222",
+      autoalta: false,
+      vencida: false,
+      prueba: "fake-proof-0123",
+    };
+    s.canal = "whatsapp";
+    m.credenciales.mockResolvedValue(propia);
+    m.plantilla.mockResolvedValue("aprobada");
+
+    await recordar(48);
+
+    expect(m.plantilla.mock.calls[0][2]).toBe(propia);
+  });
+
   it("WhatsApp fuera de ventana con la plantilla APPROVED: manda por plantilla", async () => {
     s.canal = "whatsapp";
     m.plantilla.mockResolvedValue("aprobada");

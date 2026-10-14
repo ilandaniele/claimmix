@@ -316,6 +316,36 @@ export const RATE_LIMIT_CONFIGS = {
    * mandarle correo a un tercero.
    */
   DENUNCIA_WEB_MAIL: { limit: 3, windowMs: 60 * 60_000 },
+
+  /**
+   * APP_PROPIA: 10 pedidos por hora y por inquilino a las acciones del asistente de la
+   * app propia que llaman a Graph con las claves del cliente. Un cliente que se
+   * equivoca de pegado reintenta varias veces; diez cubren eso y frenan a quien las
+   * use para probar claves ajenas contra Meta.
+   */
+  APP_PROPIA: { limit: 10, windowMs: 60 * 60_000 },
+
+  /**
+   * APP_PROPIA_INICIO: 3 arranques del asistente por día y por inquilino. `fallaCerrada`:
+   * si el contador no contesta, no se abre otra alta, porque cada una crea una ruta
+   * de webhook pública.
+   */
+  APP_PROPIA_INICIO: { limit: 3, windowMs: 24 * 60 * 60_000, fallaCerrada: true },
+
+  /**
+   * ESTADO_APP: 120 lecturas por minuto y por inquilino del estado del asistente. La
+   * pantalla sondea mientras espera el primer mensaje, así que va con `lote`: gasta en
+   * memoria y toca la base una vez cada diez pedidos.
+   */
+  ESTADO_APP: { limit: 120, windowMs: 60_000, lote: 10 },
+
+  /**
+   * REVISION_SECRETO: una revisión del App Secret por hora y por ruta de webhook, entre
+   * todas las instancias. Se pide sólo cuando el tope en memoria de firmas malas se llena:
+   * un atacante que manda cuerpos mal firmados provoca como mucho una llamada a Graph por
+   * hora. `fallaCerrada`: sin contador no se revisa, para no abrir la puerta a una ráfaga.
+   */
+  REVISION_SECRETO: { limit: 1, windowMs: 60 * 60_000, fallaCerrada: true },
 } as const;
 
 /**

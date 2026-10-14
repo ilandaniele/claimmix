@@ -72,7 +72,7 @@ export interface CorreoDelSistema {
 }
 
 /** Cada tipo tiene su propio cupo global: ver arriba. */
-export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador";
+export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador" | "recordatorio";
 
 export interface OpcionesDeCorreo {
   tipo: TipoDeCorreo;

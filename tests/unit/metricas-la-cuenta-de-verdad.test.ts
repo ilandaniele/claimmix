@@ -49,7 +49,11 @@ const SIN_CICLO: FilaDeCiclo = {
 };
 
 /**
- * Las once consultas fijas del lote, en el orden en que `getTenantKpis` las arma.
+ * Las cinco consultas fijas del lote, en el orden en que `getTenantKpis` las arma.
+ *
+ * La primera trae en una sola pasada las filas por estado (`por_tipo` 0) y por
+ * tipo (`por_tipo` 1); la tercera, las del uso de IA según `grupo` (1 por
+ * persona, 2 por modelo, 3 los totales). Cada opción arma las filas de lo suyo.
  *
  * Lo que NO se prueba acá es el SQL: el armador no se ejecuta, así que una
  * consulta mal construida no se cae en este archivo. Eso lo cubren los tests
@@ -57,29 +61,45 @@ const SIN_CICLO: FilaDeCiclo = {
  * que hay entre las filas y la pantalla, que es lo que no tenía nada.
  */
 function baseCon(over: Partial<{
-  resumen: { total: number; listo: number; respondidos: number; minutos: number };
-  porEstado: Array<{ status: string; n: number }>;
-  porTipo: Array<{ claim_type: string | null; n: number }>;
-  escalados: number;
+  porEstado: Array<{ status: string; n: number; listo?: number; respondidos?: number; minutos?: number }>;
+  porTipo: Array<{ claim_type: string | null; n: number; reclamos?: number }>;
   analistas: Array<{ assigned_to: string | null; full_name: string | null; n: number }>;
   usoDelMes: typeof SIN_USO;
   usoHistorico: typeof SIN_USO;
-  porPersona: Array<Record<string, unknown>>;
-  porModelo: Array<Record<string, unknown>>;
+  porPersona: Array<{ user_id: string | null; full_name: string | null; email: string | null; mes: typeof SIN_USO }>;
+  porModelo: Array<{ model: string | null; mes: typeof SIN_USO }>;
   ciclo: Partial<FilaDeCiclo>;
   cuellos: Array<Omit<FilaDeCuello, "horas_promedio"> & { horas_promedio: number }>;
   serie: PuntoSerie[];
 }> = {}) {
+  const sinAgrupar = { user_id: null, full_name: null, email: null, model: null };
   mockVarias.mockImplementation(async () => [
-    [over.resumen ?? { total: 0, listo: 0, respondidos: 0, minutos: 0 }],
-    over.porEstado ?? [],
-    over.porTipo ?? [],
-    [{ n: over.escalados ?? 0 }],
+    [
+      ...(over.porEstado ?? []).map((fila) => ({
+        por_tipo: 0,
+        claim_type: null,
+        reclamos: 0,
+        listo: 0,
+        respondidos: 0,
+        minutos: 0,
+        ...fila,
+      })),
+      ...(over.porTipo ?? []).map((fila) => ({
+        por_tipo: 1,
+        status: null,
+        reclamos: fila.n,
+        listo: 0,
+        respondidos: 0,
+        minutos: 0,
+        ...fila,
+      })),
+    ],
     over.analistas ?? [],
-    [over.usoDelMes ?? SIN_USO],
-    [over.usoHistorico ?? SIN_USO],
-    over.porPersona ?? [],
-    over.porModelo ?? [],
+    [
+      ...(over.porPersona ?? []).map((fila) => ({ ...sinAgrupar, grupo: 1, total: fila.mes, ...fila })),
+      ...(over.porModelo ?? []).map((fila) => ({ ...sinAgrupar, grupo: 2, total: fila.mes, ...fila })),
+      { ...sinAgrupar, grupo: 3, mes: over.usoDelMes ?? SIN_USO, total: over.usoHistorico ?? SIN_USO },
+    ],
     // Lo que la base devuelve para una agregación sin filas es UNA fila de nulos.
     [{ ...SIN_CICLO, ...over.ciclo }],
     over.cuellos ?? [],
@@ -91,8 +111,13 @@ function baseCon(over: Partial<{
 beforeEach(() => mockVarias.mockReset());
 
 describe("getTenantKpis — la tasa de completitud", () => {
-  it("es el porcentaje redondeado de los completados del mes", async () => {
-    baseCon({ resumen: { total: 455, listo: 28, respondidos: 0, minutos: 0 } });
+  it("es el porcentaje redondeado de los completados del mes, sumando todos los estados", async () => {
+    baseCon({
+      porEstado: [
+        { status: "procesando", n: 400 },
+        { status: "en_liquidacion", n: 55, listo: 28 },
+      ],
+    });
 
     const { summary } = await getTenantKpis(CTX);
 
@@ -102,7 +127,7 @@ describe("getTenantKpis — la tasa de completitud", () => {
 
   it("sin casos en el mes es 0 y no NaN", async () => {
     // `0 / 0` es NaN, y un NaN en esta pantalla se renderiza como «NaN%».
-    baseCon({ resumen: { total: 0, listo: 0, respondidos: 0, minutos: 0 } });
+    baseCon();
 
     const { summary } = await getTenantKpis(CTX);
 
@@ -110,7 +135,7 @@ describe("getTenantKpis — la tasa de completitud", () => {
   });
 
   it("ya no se publica con el nombre viejo, que prometía lo que no medía", async () => {
-    baseCon({ resumen: { total: 10, listo: 5, respondidos: 0, minutos: 0 } });
+    baseCon({ porEstado: [{ status: "procesando", n: 10, listo: 5 }] });
 
     const { summary } = await getTenantKpis(CTX);
 
@@ -211,8 +236,13 @@ describe("getTenantKpis — el período elegido", () => {
 });
 
 describe("getTenantKpis — el tiempo hasta la primera respuesta", () => {
-  it("promedia sólo los casos que de verdad se respondieron", async () => {
-    baseCon({ resumen: { total: 10, listo: 2, respondidos: 4, minutos: 1000 } });
+  it("promedia sólo los casos que de verdad se respondieron, de todos los estados", async () => {
+    baseCon({
+      porEstado: [
+        { status: "procesando", n: 6, respondidos: 1, minutos: 100 },
+        { status: "cerrado", n: 4, listo: 2, respondidos: 3, minutos: 900 },
+      ],
+    });
 
     const { summary } = await getTenantKpis(CTX);
 
@@ -222,7 +252,7 @@ describe("getTenantKpis — el tiempo hasta la primera respuesta", () => {
   it("sin respuestas es null, no cero", async () => {
     // Cero minutos es una afirmación —«se responde al instante»— y no hubo
     // ninguna respuesta que la respalde. La pantalla muestra un guión con null.
-    baseCon({ resumen: { total: 10, listo: 2, respondidos: 0, minutos: 0 } });
+    baseCon({ porEstado: [{ status: "procesando", n: 10, listo: 2 }] });
 
     const { summary } = await getTenantKpis(CTX);
 
@@ -253,16 +283,39 @@ describe("getTenantKpis — la distribución por tipo", () => {
     expect(Object.values(by_type)).not.toContain(7);
   });
 
-  it("cuenta sólo reclamos: el where trae is_claim is true", async () => {
+  it("un tipo que sólo trae casos no reclamo se queda en cero", async () => {
+    // Un `no_relevante` puede arrastrar un `claim_type` del intento previo:
+    // la fila existe pero no tiene reclamos.
+    baseCon({ porTipo: [{ claim_type: "robo", n: 4, reclamos: 0 }] });
+
+    const { by_type } = await getTenantKpis(CTX);
+
+    expect(by_type.robo).toBe(0);
+  });
+
+  it("las filas por tipo no suman al total del mes ni al conteo por estado", async () => {
+    baseCon({
+      porEstado: [{ status: "procesando", n: 10 }],
+      porTipo: [{ claim_type: "choque", n: 10 }],
+    });
+
+    const { summary, by_status } = await getTenantKpis(CTX);
+
+    expect(summary.total_cases_month).toBe(10);
+    expect(by_status).toEqual({ procesando: 10 });
+  });
+
+  it("cuenta sólo reclamos: el conteo de la consulta lleva is_claim is true", async () => {
     // Un `no_relevante` puede arrastrar un `claim_type` del intento previo, y
     // sin este filtro sumaba como si fuera un reclamo de verdad.
     baseCon();
     await getTenantKpis(CTX);
 
     const armador = mockVarias.mock.calls[0]![1] as (db: unknown) => { toSQL(): { sql: string } }[];
-    const { sql } = armador(new QueryBuilder() as never)[2]!.toSQL();
+    const { sql } = armador(new QueryBuilder() as never)[0]!.toSQL();
 
-    expect(sql).toMatch(/"cases"\."is_claim" is true/);
+    expect(sql).toMatch(/count\(\*\) filter \(where "cases"\."is_claim" is true\)/);
+    expect(sql).toContain(`group by grouping sets (("cases"."status"), ("cases"."claim_type"))`);
   });
 });
 
@@ -270,8 +323,8 @@ describe("getTenantKpis — el consumo de IA", () => {
   it("suma los tokens de las dos puntas y ordena por consumo", async () => {
     baseCon({
       porPersona: [
-        { user_id: "u-1", full_name: "Ana", email: "ana@x.com", calls: 2, prompt_tokens: 100, completion_tokens: 50, cost_usd: 1 },
-        { user_id: "u-2", full_name: "Beto", email: "beto@x.com", calls: 9, prompt_tokens: 900, completion_tokens: 100, cost_usd: 5 },
+        { user_id: "u-1", full_name: "Ana", email: "ana@x.com", mes: { calls: 2, prompt_tokens: 100, completion_tokens: 50, cost_usd: 1 } },
+        { user_id: "u-2", full_name: "Beto", email: "beto@x.com", mes: { calls: 9, prompt_tokens: 900, completion_tokens: 100, cost_usd: 5 } },
       ],
     });
 
@@ -286,7 +339,7 @@ describe("getTenantKpis — el consumo de IA", () => {
     // `user_id: null` es el worker: el gasto existe y alguien lo paga.
     baseCon({
       porPersona: [
-        { user_id: null, full_name: null, email: null, calls: 3, prompt_tokens: 30, completion_tokens: 3, cost_usd: 0.1 },
+        { user_id: null, full_name: null, email: null, mes: { calls: 3, prompt_tokens: 30, completion_tokens: 3, cost_usd: 0.1 } },
       ],
     });
 
@@ -302,10 +355,7 @@ describe("getTenantKpis — el consumo de IA", () => {
         user_id: `u-${i}`,
         full_name: `Persona ${i}`,
         email: `p${i}@x.com`,
-        calls: 1,
-        prompt_tokens: i * 10,
-        completion_tokens: 0,
-        cost_usd: 0,
+        mes: { calls: 1, prompt_tokens: i * 10, completion_tokens: 0, cost_usd: 0 },
       })),
     });
 
@@ -326,21 +376,47 @@ describe("getTenantKpis — el consumo de IA", () => {
     expect(ai_usage.month.total_tokens).toBe(1500);
     expect(ai_usage.month.cost_usd).toBeCloseTo(0.045, 4);
   });
+
+  it("por persona y por modelo salen sólo los que usaron IA este mes; el total histórico, de la fila de totales", async () => {
+    // Quien sólo tiene uso de meses anteriores trae `mes.calls` en cero.
+    baseCon({
+      porPersona: [
+        { user_id: "u-1", full_name: "Ana", email: "ana@x.com", mes: { calls: 2, prompt_tokens: 100, completion_tokens: 50, cost_usd: 1 } },
+        { user_id: "u-2", full_name: "Beto", email: "beto@x.com", mes: SIN_USO },
+      ],
+      porModelo: [
+        { model: "gemini-2.5-flash", mes: { calls: 2, prompt_tokens: 100, completion_tokens: 50, cost_usd: 1 } },
+        { model: "gemini-viejo", mes: SIN_USO },
+      ],
+      usoHistorico: { calls: 40, prompt_tokens: 4000, completion_tokens: 1000, cost_usd: 9 },
+    });
+
+    const { ai_usage } = await getTenantKpis(CTX);
+
+    expect(ai_usage.by_user.map((u) => u.full_name)).toEqual(["Ana"]);
+    expect(ai_usage.by_model.map((m) => m.model)).toEqual(["gemini-2.5-flash"]);
+    expect(ai_usage.month.calls).toBe(0);
+    expect(ai_usage.all_time.total_tokens).toBe(5000);
+  });
 });
 
 describe("getTenantKpis — los escalados", () => {
-  it("salen de su propia consulta, no del conteo por estado", async () => {
-    // Son dos consultas: si la tarjeta leyera el conteo por estado, dejaría de
-    // coincidir con los escalados en cuanto cambie un solo filtro de una de las dos.
+  it("suman los dos estados de escalado del mismo conteo por estado", async () => {
+    // Una sola consulta para la tarjeta y la distribución: no pueden dejar de
+    // coincidir aunque cambie un filtro.
     baseCon({
-      escalados: 43,
-      porEstado: [{ status: "requiere_especialista", n: 260 }],
+      porEstado: [
+        { status: "requiere_especialista", n: 40 },
+        { status: "escalado", n: 3 },
+        { status: "procesando", n: 200 },
+      ],
     });
 
     const { summary, by_status } = await getTenantKpis(CTX);
 
     expect(summary.escalated_count).toBe(43);
-    expect(by_status.requiere_especialista).toBe(260);
+    expect(summary.total_cases_month).toBe(243);
+    expect(by_status.requiere_especialista).toBe(40);
   });
 });
 
@@ -351,7 +427,7 @@ describe("getTenantKpis — la serie de actividad", () => {
    * Un cliente que acepta cualquier cadena y se devuelve a sí mismo: alcanza
    * para ejecutar el armador y contar cuántas consultas mete en el lote, sin
    * base. Lo que se afirma es que la serie viaja en el MISMO lote y que
-   * /api/metricas, que no la pide, sigue en las once fijas.
+   * /api/metricas, que no la pide, sigue en las cinco fijas.
    */
   const cadena: unknown = new Proxy(() => cadena, {
     get: () => cadena,
@@ -360,23 +436,23 @@ describe("getTenantKpis — la serie de actividad", () => {
   const consultasDelLote = () =>
     (mockVarias.mock.calls[0]![1] as (db: unknown) => unknown[])(cadena).length;
 
-  it("sin pedirla vuelve null y el lote sigue en once consultas", async () => {
+  it("sin pedirla vuelve null y el lote sigue en cinco consultas", async () => {
     baseCon();
 
     const { serie } = await getTenantKpis(CTX);
 
     expect(serie).toBeNull();
     expect(mockVarias).toHaveBeenCalledTimes(1);
-    expect(consultasDelLote()).toBe(11);
+    expect(consultasDelLote()).toBe(5);
   });
 
-  it("pedida, va como consulta doce del mismo viaje", async () => {
+  it("pedida, va como consulta seis del mismo viaje", async () => {
     baseCon({ serie: [] });
 
     await getTenantKpis(CTX, { serie: "dia" });
 
     expect(mockVarias).toHaveBeenCalledTimes(1);
-    expect(consultasDelLote()).toBe(12);
+    expect(consultasDelLote()).toBe(6);
   });
 
   it("el resumen de ayer también viaja en el mismo lote", async () => {
@@ -384,12 +460,12 @@ describe("getTenantKpis — la serie de actividad", () => {
 
     await getTenantKpis(CTX, { serie: "dia", ayer: true });
     expect(mockVarias).toHaveBeenCalledTimes(1);
-    expect(consultasDelLote()).toBe(13);
+    expect(consultasDelLote()).toBe(7);
 
     mockVarias.mockClear();
     baseCon();
     await getTenantKpis(CTX, { ayer: true });
-    expect(consultasDelLote()).toBe(12);
+    expect(consultasDelLote()).toBe(6);
   });
 
   it("pone las filas en su mes y rellena los doce con cero", async () => {

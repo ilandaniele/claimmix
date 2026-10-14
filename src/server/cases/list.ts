@@ -312,14 +312,24 @@ export function desdeDePeriodo(periodo: Periodo | undefined, cuando: Date = new 
  * plan que corre.
  */
 export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: string, ahora: Date = new Date()) {
-  const { page, per_page, sort, order } = query;
+  const { page, per_page } = query;
+  return filasDelListado(datos, query)
+    .where(buildCaseFilters(query, yo, ahora))
+    .orderBy(...ordenDelListado(query, ahora))
+    // Pagination — max 100 per page (enforced in CaseQuerySchema)
+    .limit(per_page)
+    .offset((page - 1) * per_page);
+}
+
+function ordenDelListado(query: CaseQuery, ahora: Date): SQL[] {
+  const { sort, order } = query;
   const sortColumn = SORT_COLUMNS[sort];
   // En «Para responder» va primero el que espera hace más tiempo. El índice
   // parcial de la 0031 sirve este orden recorrido al revés. En «Mi cola» va
   // primero lo vencido, después lo más grave, y a igual gravedad el más viejo:
   // es el que lleva más tiempo sin que nadie lo mire. Los dos terminan en `id`
   // porque con muchos casos empatados dos páginas seguidas repetían o saltaban filas.
-  const orden: SQL[] = query.para_responder
+  return query.para_responder
     ? [asc(cases.para_responder_desde), asc(cases.id)]
     : query.cola === "mia"
       ? [
@@ -332,6 +342,10 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
         ? // Muchos casos comparten puntaje o plazo: sin desempate, dos páginas seguidas pueden repetir o saltear filas.
           [sql`${sortColumn} ${order === "asc" ? sql`asc` : sql`desc`} nulls last`, asc(cases.id)]
         : [order === "asc" ? asc(sortColumn) : desc(sortColumn)];
+}
+
+/** Las columnas de una fila de la bandeja, sin WHERE ni orden: las comparten el listado y el tablero. */
+function filasDelListado(datos: ClienteDatos, query: CaseQuery) {
   return datos
     .select({
       id: cases.id,
@@ -443,12 +457,7 @@ export function consultaListado(datos: ClienteDatos, query: CaseQuery, yo?: stri
              and om.status = 'sent'
         )`,
     })
-    .from(cases)
-    .where(buildCaseFilters(query, yo, ahora))
-    .orderBy(...orden)
-    // Pagination — max 100 per page (enforced in CaseQuerySchema)
-    .limit(per_page)
-    .offset((page - 1) * per_page);
+    .from(cases);
 }
 
 /** El `count(*)` que viaja con el listado. Sin LIMIT: es el que crece. */
@@ -467,6 +476,12 @@ export function consultaConteo(datos: ClienteDatos, query: CaseQuery, yo?: strin
  * leía como un tablero roto. Acá cada columna pide lo suyo: `status in (su
  * grupo) order by … limit 20`, sobre los mismos índices que la lista.
  *
+ * Las ramas traen sólo el `id`, y las columnas de la fila se arman una vez
+ * afuera. Con la fila entera en cada rama, Postgres analizaba, expandía la RLS
+ * y planeaba seis veces las cinco subconsultas correlacionadas, y eso pesaba
+ * más que ejecutarlas. Afuera va el mismo orden que adentro, así que cada
+ * columna sale ordenada después de `agruparEnColumnas`.
+ *
  * Con un filtro de estado, cada rama se queda con la parte de su grupo que el
  * filtro cubre y la que no cubre nada se saltea. Volver a expandir los estados
  * con `estadosAConsultar` no saca a nadie de su columna: un estado que también
@@ -478,29 +493,53 @@ export function consultaConteo(datos: ClienteDatos, query: CaseQuery, yo?: strin
  */
 export function consultaTablero(datos: ClienteDatos, query: CaseQuery, yo?: string, ahora: Date = new Date()) {
   const pedidos = query.status?.length ? new Set(query.status.flatMap(estadosAConsultar)) : null;
+  const orden = ordenDelListado(query, ahora);
   const ramas = CLAVES_DE_ESTADO.flatMap((clave) => {
     const estados = [...ESTADOS_DE_LA_OPCION[clave]].filter((s) => !pedidos || pedidos.has(s));
     return estados.length > 0
       ? [
-          consultaListado(
-            datos,
-            { ...query, status: estados as NonNullable<CaseQuery["status"]>, page: 1, per_page: TARJETAS_POR_COLUMNA },
-            yo,
-            ahora
-          ),
+          datos
+            .select({ id: cases.id })
+            .from(cases)
+            .where(buildCaseFilters({ ...query, status: estados as NonNullable<CaseQuery["status"]> }, yo, ahora))
+            .orderBy(...orden)
+            .limit(TARJETAS_POR_COLUMNA),
         ]
       : [];
   });
   const [primera, ...resto] = ramas;
   if (!primera) return undefined;
-  let union = primera;
-  for (const rama of resto) union = union.unionAll(rama) as typeof primera;
-  return union;
+  let ids = primera;
+  for (const rama of resto) ids = ids.unionAll(rama) as typeof primera;
+  return filasDelListado(datos, query).where(inArray(cases.id, ids)).orderBy(...orden);
 }
 
-/** Cuántos casos hay por estado bajo TODOS los filtros de la consulta: son los totales de las columnas. */
+/** Lo único que mueve los contadores de las pestañas: la búsqueda y el período. Ver `consultaPorEstado`. */
+export function filtrosDePestanas({ q, desde }: Pick<CaseQuery, "q" | "desde">): SQL | undefined {
+  return buildCaseFilters({ q, desde });
+}
+
+/**
+ * Cuántos casos hay por estado, contado de dos maneras en una sola pasada: `n`
+ * bajo TODOS los filtros de la consulta, que son los totales de las columnas, y
+ * `pestana` bajo los de las pestañas, que son sus contadores.
+ *
+ * Alcanza con recorrer lo que ven las pestañas porque `buildCaseFilters` es un
+ * `and` de condiciones: lo que pasa todos los filtros es lo que pasa la búsqueda
+ * y el período, y además el resto. El `filter` lleva sólo el resto, para no
+ * correr dos veces el EXISTS de la búsqueda por fila.
+ */
 export function consultaConteoPorEstado(datos: ClienteDatos, query: CaseQuery, yo?: string, ahora: Date = new Date()) {
-  return consultaPorEstado(datos, buildCaseFilters(query, yo, ahora));
+  const resto = buildCaseFilters({ ...query, q: undefined, desde: undefined }, yo, ahora);
+  return datos
+    .select({
+      status: cases.status,
+      n: resto ? sql<number>`count(*) filter (where ${resto})::int` : sql<number>`count(*)::int`,
+      pestana: sql<number>`count(*)::int`,
+    })
+    .from(cases)
+    .where(filtrosDePestanas(query))
+    .groupBy(cases.status);
 }
 
 /**
@@ -594,12 +633,15 @@ export async function listCases(
 }
 
 /**
- * La bandeja en tablero: las más nuevas de cada columna y el total real de cada una.
+ * La bandeja en tablero: las más nuevas de cada columna, el total real de cada
+ * una y los contadores de las pestañas.
  *
- * Reemplaza a `listCases` cuando la vista es el tablero, no se suma: sigue
- * siendo un solo viaje con dos sentencias, el conteo por estado y la unión de
- * `consultaTablero`. La unión sale en el orden de sus ramas y cada rama ya viene
- * ordenada, así que agrupar por columna no necesita reordenar nada.
+ * Reemplaza a `listCases` y a `contarPorEstado` cuando la vista es el tablero:
+ * un solo viaje con dos sentencias, el conteo por estado y la unión de
+ * `consultaTablero`. Las pestañas salían en un viaje aparte con su propio
+ * recorrido de la tabla, y con veinte analistas a la vez ese segundo viaje era
+ * lo que más pesaba. Las filas salen en el orden de la bandeja y agrupar por
+ * columna lo conserva, así que no hace falta reordenar nada.
  *
  * `page` y `per_page` de la consulta no cuentan: el tablero no pagina.
  */
@@ -607,15 +649,17 @@ export async function listarTablero(
   ctx: TenantContext,
   query: CaseQuery,
   yo?: string
-): Promise<CaseListResult & { totales: Record<ClaveDeEstado, number> }> {
+): Promise<
+  CaseListResult & { totales: Record<ClaveDeEstado, number>; pestanas: Array<{ status: string; n: number }> }
+> {
   // El mismo instante para el conteo y las ramas, igual que en `listCases`.
   const ahora = new Date();
 
-  let conteo: Array<{ status: string; n: number }>;
+  let conteo: Array<{ status: string; n: number; pestana: number }>;
   let filas: Record<string, unknown>[];
   try {
     const [porEstado, tarjetas] = await enTenantVarias<
-      [Array<{ status: string; n: number }>, Record<string, unknown>[] | undefined]
+      [Array<{ status: string; n: number; pestana: number }>, Record<string, unknown>[] | undefined]
     >(ctx, (db) => {
       const tablero = consultaTablero(db, query, yo, ahora);
       const conteoPorEstado = consultaConteoPorEstado(db, query, yo, ahora);
@@ -638,6 +682,7 @@ export async function listarTablero(
       pages: 1,
     },
     totales,
+    pestanas: conteo.map(({ status, pestana }) => ({ status, n: pestana })),
   };
 }
 

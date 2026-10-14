@@ -25,18 +25,12 @@ const CTX = { tenantId: "10000000-0000-0000-0000-000000000001" };
 const SIN_USO = { calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
 const SIN_CICLO = { reclamos: 0, con_listo: 0, mediana_horas_listo: null, con_cierre: 0, mediana_horas_cierre: null, sin_intervencion: 0, mensajes_por_caso: null };
 
-/** Las once filas fijas del lote, más lo que cada test agregue al final. */
+/** Las cinco filas fijas del lote, más lo que cada test agregue al final. */
 function filasDelLote(extra: unknown[] = []) {
   return [
-    [{ total: 0, listo: 0, respondidos: 0, minutos: 0 }],
     [],
     [],
-    [{ n: 0 }],
-    [],
-    [SIN_USO],
-    [SIN_USO],
-    [],
-    [],
+    [{ grupo: 3, user_id: null, full_name: null, email: null, model: null, mes: SIN_USO, total: SIN_USO }],
     [SIN_CICLO],
     [],
     ...extra,
@@ -58,15 +52,15 @@ const consultasDelLote = () =>
 beforeEach(() => mockVarias.mockReset());
 
 describe("getTenantKpis — el resumen de ayer, según lo que se pida", () => {
-  it("con serie y ayer, el lote lleva trece consultas", async () => {
+  it("con serie y ayer, el lote lleva siete consultas", async () => {
     mockVarias.mockResolvedValue(filasDelLote([[], []]));
 
     await getTenantKpis(CTX, { serie: "dia", ayer: true });
 
-    expect(consultasDelLote()).toBe(13);
+    expect(consultasDelLote()).toBe(7);
   });
 
-  it("pedido solo, va como consulta doce y llega en `ayer`", async () => {
+  it("pedido solo, va como consulta seis y llega en `ayer`", async () => {
     const sentinela: ResumenDeAyer = {
       reclamos: 1,
       whatsapps: 2,
@@ -80,16 +74,16 @@ describe("getTenantKpis — el resumen de ayer, según lo que se pida", () => {
 
     const result = await getTenantKpis(CTX, { ayer: true });
 
-    expect(consultasDelLote()).toBe(12);
+    expect(consultasDelLote()).toBe(6);
     expect(result.ayer).toEqual(sentinela);
   });
 
-  it("sin pedirlo, el lote sigue en once y la clave no aparece", async () => {
+  it("sin pedirlo, el lote sigue en cinco y la clave no aparece", async () => {
     mockVarias.mockResolvedValue(filasDelLote());
 
     const result = await getTenantKpis(CTX);
 
-    expect(consultasDelLote()).toBe(11);
+    expect(consultasDelLote()).toBe(5);
     expect("ayer" in result).toBe(false);
   });
 });
@@ -131,7 +125,7 @@ describe("los cierres cuentan pagado y rechazado", () => {
 
   it.each([
     ["el resumen de ayer", -1],
-    ["los cinco analistas del mes", 4],
+    ["los cinco analistas del mes", 1],
   ])("%s", async (_, i) => {
     mockVarias.mockResolvedValue(filasDelLote([[]]));
 

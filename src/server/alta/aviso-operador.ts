@@ -18,7 +18,7 @@
 
 import "server-only";
 
-import { operatorEmails } from "@/lib/auth/require-operator";
+import { operatorEmails } from "@/lib/auth/operator-emails";
 import { getT } from "@/lib/i18n";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
@@ -82,6 +82,23 @@ export async function avisarAlOperador(creadas24h: number, tope: number): Promis
  * no se toca en Meta y alguien tiene que mirar cómo llegó acá.
  * `sin_webhook`: el número ya está registrado pero Meta no confirmó el webhook
  * propio de este ambiente; sin él lo que le escriben puede caer en el otro.
+ *
+ * Los de la WABA propia del cliente (Embedded Signup):
+ * `canje`, `suscripcion` y `registro`: Meta rechazó ese paso y reintentar no lo arregla;
+ * `revocada`: la cuenta quedó sin token, porque el cliente sacó la app o Meta la dio de baja;
+ * `plantilla`: no se pudo crear `reabrir_denuncia` en su WABA;
+ * `numero_ocupado`: el número o la WABA ya son de otro espacio;
+ * `cupo_semanal`: se llegó al tope de WABAs nuevas por semana, de todos los espacios juntos;
+ * `token_vencido` y `pago_pendiente`: Graph dijo que el token no sirve o que la WABA debe;
+ * `nombre_rechazado`: Meta no aprobó el nombre visible;
+ * `waba_huerfana`: una WABA que Meta tiene vinculada y no terminó de conectarse (a medias hace más de 48 h, o falló al desvincularla); la base puede ya no tenerla;
+ * `cuenta_restringida`: Meta restringió, deshabilitó o sancionó la cuenta del cliente.
+ *
+ * Los de la vía de la app propia del cliente:
+ * `secreto_invalido`: el secreto de su app ya no vale (lo cambió) y Meta lo confirmó;
+ * `waba_restringida` y `waba_bloqueada`: Graph dijo que la cuenta está restringida (368) o bloqueada (131031 con la salud en BLOCKED);
+ * `recordatorio`: se le mandó al cliente el recordatorio de un alta que quedó a medias hace más de 24 horas;
+ * `baja_fallida`: al desconectar, Meta no dio de baja el número y sigue registrado en la API de WhatsApp.
  */
 export type MotivoDeRevision =
   | "sin_lugar"
@@ -95,23 +112,74 @@ export type MotivoDeRevision =
   | "agregado"
   | "incierto"
   | "de_otro_ambiente"
-  | "sin_webhook";
+  | "sin_webhook"
+  | "canje"
+  | "suscripcion"
+  | "registro"
+  | "revocada"
+  | "plantilla"
+  | "numero_ocupado"
+  | "cupo_semanal"
+  | "token_vencido"
+  | "pago_pendiente"
+  | "nombre_rechazado"
+  | "waba_huerfana"
+  | "cuenta_restringida"
+  | "secreto_invalido"
+  | "waba_restringida"
+  | "waba_bloqueada"
+  | "recordatorio"
+  | "baja_fallida";
+
+/** Los motivos con un aviso por espacio y día; el resto, uno por día para todos. */
+const POR_ESPACIO: ReadonlySet<MotivoDeRevision> = new Set<MotivoDeRevision>([
+  "agregado",
+  "incierto",
+  "sin_webhook",
+  "canje",
+  "suscripcion",
+  "registro",
+  "revocada",
+  "plantilla",
+  "numero_ocupado",
+  "token_vencido",
+  "pago_pendiente",
+  "nombre_rechazado",
+  "waba_huerfana",
+  "cuenta_restringida",
+  "secreto_invalido",
+  "waba_restringida",
+  "waba_bloqueada",
+  "recordatorio",
+  "baja_fallida",
+]);
+
+/** Lo que cambia el aviso según de qué vía es la cuenta. */
+export interface OpcionesDelAviso {
+  /** La cuenta es de la vía de la app propia: `revocada` suma la línea de la verificación en dos pasos (R6). */
+  appPropia?: boolean;
+}
 
 /**
  * Avisa al operador de un número del alta automática. El mail dice el motivo y
  * nada más: qué espacio fue queda sólo en el registro. Un aviso por día y motivo,
- * salvo `agregado`, `incierto` y `sin_webhook`: cada número que entra (o puede haber
- * entrado) a la WABA, o que quedó sin su webhook, tiene el suyo (el tope diario de
- * números nuevos ya acota cuántos hay).
+ * salvo `agregado`, `incierto` y `sin_webhook` (cada número que entra, o puede haber
+ * entrado, a la WABA, o que quedó sin su webhook, tiene el suyo: el tope diario de
+ * números nuevos ya acota cuántos hay) y los de la WABA propia, que van uno por día
+ * y espacio. `cupo_semanal` no: es del conjunto, y un aviso por día alcanza.
  */
-export async function avisarNumeroEnRevision(motivo: MotivoDeRevision, tenantId: string): Promise<void> {
+export async function avisarNumeroEnRevision(
+  motivo: MotivoDeRevision,
+  tenantId: string,
+  opciones: OpcionesDelAviso = {}
+): Promise<void> {
   try {
     logger.warn({ motivo, tenantId }, "alta.numero_en_revision");
     if (!remitenteDelSistema()) return;
     const destinatarios = operatorEmails();
     if (destinatarios.length === 0) return;
 
-    const porEspacio = motivo === "agregado" || motivo === "incierto" || motivo === "sin_webhook";
+    const porEspacio = POR_ESPACIO.has(motivo);
     const clave = porEspacio ? claveDeCupo("alta:aviso-numero", motivo, tenantId) : claveDeCupo("alta:aviso-numero", motivo);
     const cupo = await rateLimit(clave, { limit: 1, windowMs: DIA_MS, fallaCerrada: true });
     if (!cupo.allowed) {
@@ -120,7 +188,8 @@ export async function avisarNumeroEnRevision(motivo: MotivoDeRevision, tenantId:
     }
 
     const t = getT("es-AR");
-    const texto = t("alta.avisoNumero.texto").replace("{motivo}", t(`alta.avisoNumero.motivo.${motivo}`));
+    const dosPasos = motivo === "revocada" && opciones.appPropia ? ` ${t("alta.avisoNumero.dosPasos")}` : "";
+    const texto = t("alta.avisoNumero.texto").replace("{motivo}", `${t(`alta.avisoNumero.motivo.${motivo}`)}${dosPasos}`);
     const resultados = await Promise.all(
       destinatarios.map((to) =>
         enviarCorreoDelSistema({ to, asunto: t("alta.avisoNumero.asunto"), texto }, { tipo: "operador" })

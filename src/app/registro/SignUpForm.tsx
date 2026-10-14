@@ -16,6 +16,7 @@ import Link from "next/link";
 
 import type { getT } from "@/lib/i18n";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
+import { wabaPropia } from "@/server/alta/waba-propia-activa";
 
 import { empezarAltaConGoogle, signUp } from "./actions";
 
@@ -70,7 +71,7 @@ export function SignUpForm({
         />
         <p id="registro-whatsapp-ayuda" className="mt-1.5 text-xs text-slate-500">
           {t("alta.whatsapp.ayuda")}
-          {numeroAutomatico() ? ` ${t("alta.whatsapp.aviso")}` : null}
+          {wabaPropia() ? ` ${t("alta.whatsapp.avisoPropia")}` : numeroAutomatico() ? ` ${t("alta.whatsapp.aviso")}` : null}
         </p>
       </div>
       <label className="flex items-start gap-2.5 text-sm text-slate-600">

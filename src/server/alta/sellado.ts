@@ -10,7 +10,7 @@
 
 import "server-only";
 
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
 
 const ALGORITMO = "aes-256-gcm";
 /** El largo de la etiqueta se declara a mano en los dos lados, como en `cifrado.ts`. */
@@ -29,6 +29,15 @@ export function sellar(info: string, datos: unknown): string {
   const cipher = createCipheriv(ALGORITMO, clave(info), iv, { authTagLength: TAG_BYTES });
   const cifrado = Buffer.concat([cipher.update(JSON.stringify(datos), "utf8"), cipher.final()]);
   return [VERSION, ...[iv, cipher.getAuthTag(), cifrado].map((b) => b.toString("base64url"))].join(".");
+}
+
+/**
+ * Una marca que sólo este servidor sabe armar para ese `dato`: HMAC-SHA256 con la clave del `info`,
+ * en base64url. Se recalcula cada vez, no se guarda; cambia si se rota BETTER_AUTH_SECRET.
+ * Lanza si falta BETTER_AUTH_SECRET.
+ */
+export function derivar(info: string, dato: string): string {
+  return createHmac("sha256", clave(info)).update(dato, "utf8").digest("base64url");
 }
 
 /** Lo que se selló con ese `info`, sin revisar su forma; null si falta, no abre o falta el secreto. */

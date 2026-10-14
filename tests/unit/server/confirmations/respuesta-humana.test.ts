@@ -213,6 +213,26 @@ describe("responderPorWhatsApp", () => {
     expect(JSON.stringify(payload)).not.toContain(TEXTO);
   });
 
+  it("R5: la credencial llega entera a Meta, con la prueba del secreto de la app propia si la tiene", async () => {
+    const propia = { ...CRED, propia: true, prueba: "fake-proof-0123" };
+    mockCredenciales.mockResolvedValueOnce(propia);
+    mockEnTenantVarias.mockResolvedValueOnce(caso()).mockResolvedValueOnce([undefined, undefined]);
+    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-1" }]);
+
+    await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
+
+    expect(mockSend.mock.calls[0]![2]).toBe(propia);
+  });
+
+  it("R5: con Embedded Signup no se inventa una prueba", async () => {
+    mockEnTenantVarias.mockResolvedValueOnce(caso()).mockResolvedValueOnce([undefined, undefined]);
+    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-1" }]);
+
+    await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
+
+    expect(mockSend.mock.calls[0]![2]).not.toHaveProperty("prueba");
+  });
+
   it("si Meta rechaza el envío, guarda la fila como failed, no saca la marca y avisa envio_fallido", async () => {
     mockSend.mockResolvedValueOnce({ ok: false, error: "meta_down" });
     mockEnTenantVarias.mockResolvedValueOnce(caso());

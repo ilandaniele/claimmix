@@ -646,6 +646,18 @@ export const AuditEvent = {
   WHATSAPP_NUMERO_AGREGADO: "whatsapp.numero_agregado",
   WHATSAPP_NUMERO_SUSPENDIDO: "whatsapp.numero_suspendido",
   WHATSAPP_NUMERO_BAJA: "whatsapp.numero_baja",
+  /** El cliente terminó el popup de Embedded Signup y su WABA quedó vinculada. Payload: { via, waba_id, phone_number_id }. */
+  WHATSAPP_WABA_VINCULADA: "whatsapp.waba_vinculada",
+  /** El cliente se desconectó (o Meta revocó el permiso) y la WABA quedó revocada, sin token ni PIN. Payload: { via }. */
+  WHATSAPP_WABA_REVOCADA: "whatsapp.waba_revocada",
+  /** El cliente aceptó el acuerdo de la WABA propia y empezó a armar su app. Payload: { acuerdo } — la versión. */
+  WHATSAPP_APP_ACUERDO: "whatsapp.app_acuerdo",
+  /** El cliente guardó o cambió las credenciales de su app de Meta. Payload: { que } — «app», «secreto» o «token»; nunca el valor. */
+  WHATSAPP_APP_CREDENCIALES: "whatsapp.app_credenciales",
+  /** El operador despublicó las páginas legales de la app propia de un espacio (slug_legal en NULL). */
+  WHATSAPP_APP_LEGALES_DESPUBLICADAS: "whatsapp.app_legales_despublicadas",
+  /** Meta pidió borrar los datos de un usuario de Facebook (callback de borrado de datos). Payload: { codigo } — el de confirmación que se le devuelve a Meta. */
+  META_BORRADO_DE_DATOS: "meta.borrado_de_datos",
   /** USER_INVITED: un admin invitó a una persona al espacio. Payload: { rol } — sin el mail. */
   USER_INVITED: "auth.user_invited",
   /** INVITATION_ACCEPTED: la persona invitada aceptó y se le creó el perfil. */

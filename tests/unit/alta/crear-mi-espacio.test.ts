@@ -58,8 +58,8 @@ vi.mock("next/server", async (importOriginal) => ({
 
 vi.mock("@/lib/auth/session", () => ({ getSessionContext: h.sesion }));
 vi.mock("@/lib/auth/user-row", () => ({ getUserRowOrThrow: h.fila }));
+vi.mock("@/lib/auth/operator-emails", () => ({ operatorEmails: () => ["ops@example.com"] }));
 vi.mock("@/lib/auth/require-operator", () => ({
-  operatorEmails: () => ["ops@example.com"],
   isOperatorEmail: (e: string | null | undefined) => e === "ops@example.com",
 }));
 vi.mock("@/data/scope", () => ({ enControl: h.enControl }));

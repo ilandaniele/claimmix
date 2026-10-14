@@ -5,7 +5,8 @@
  * pasos); `creando` reciente espera y se refresca sola cada 5 s; `fallida` o
  * `creando` vencida ofrecen reintentar; borrada dice que se dio de baja. Apagada
  * la bandera, la pantalla no tiene nada que mostrar. Con el número por código
- * prendido, quien espera o puede reintentar conecta su WhatsApp ahí mismo.
+ * prendido, quien espera o puede reintentar conecta su WhatsApp ahí mismo; con la
+ * WABA propia prendida, le toca el enlace a /conectar-whatsapp en vez del código.
  */
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +19,7 @@ const h = vi.hoisted(() => ({
   reintentar: vi.fn(),
   pasos: vi.fn(),
   porConectar: vi.fn(),
+  waba: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -42,6 +44,16 @@ vi.mock("@/app/(app)/configuracion/numero-actions", () => ({
   verificarCodigoDelNumero: vi.fn(),
 }));
 vi.mock("@/server/alta/numero-automatico", () => ({ numeroPorConectar: h.porConectar }));
+vi.mock("@/server/alta/waba-publica", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/alta/waba-publica")>()),
+  leerWabaPublica: h.waba,
+}));
+// El enlace es un componente de servidor asíncrono: acá sólo importa para quién sale y si le llegó la lectura.
+vi.mock("@/app/conectar-whatsapp/WabaPropiaEnlace", () => ({
+  WabaPropiaEnlace: ({ tenantId, waba, metodo }: { tenantId: string; waba?: unknown; metodo?: string }) => (
+    <p data-testid="enlace-waba" data-tenant={tenantId} data-lectura={waba === undefined ? "sin" : "con"} data-metodo={metodo ?? "sin"} />
+  ),
+}));
 vi.mock("@/server/alta/pasos-hechos", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/alta/pasos-hechos")>()),
   pasosHechos: h.pasos,
@@ -61,6 +73,19 @@ const fila = (base: string | null, baseDesde: Date | null = hace(1), locale: str
 });
 const deAutoalta = <T extends object>(f: T) => ({ ...f, autoalta: true });
 
+const BANDERAS = [
+  "ALTA_NUMERO_AUTOMATICO",
+  "ALTA_WABA_PROPIA",
+  "ALTA_APP_PROPIA",
+  "NEXT_PUBLIC_SITE_URL",
+  "WHATSAPP_APP_SECRETS_KEY",
+  "META_APP_ID",
+  "META_ES_CONFIG_ID",
+  "WHATSAPP_APP_SECRET",
+  "WHATSAPP_BUSINESS_ACCOUNT_ID",
+];
+const sinBanderas = () => BANDERAS.forEach((nombre) => delete process.env[nombre]);
+
 async function pintar(wa?: string | string[]) {
   return render(await PreparandoPage({ searchParams: Promise.resolve(wa === undefined ? {} : { wa }) }));
 }
@@ -68,7 +93,8 @@ async function pintar(wa?: string | string[]) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.BASE_POR_CLIENTE = "1";
-  delete process.env.ALTA_NUMERO_AUTOMATICO;
+  sinBanderas();
+  h.waba.mockResolvedValue(null);
   h.sesion.mockResolvedValue({ user: { id: "u-1", email: "ana@example.com" } });
   h.fila.mockResolvedValue(fila("creando"));
   h.pasos.mockResolvedValue({ whatsapp: false, gmail: false });
@@ -78,6 +104,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  sinBanderas();
 });
 
 describe("antes de mostrar nada", () => {
@@ -399,5 +426,254 @@ describe("el WhatsApp mientras la base se arma", () => {
 
     expect(h.porConectar).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Por SMS" })).toBeNull();
+  });
+});
+
+describe("la WABA propia mientras la base se arma", () => {
+  const PLATAFORMA = "100000000000001";
+  const INTRO = "Mientras preparamos tu espacio, conectá tu WhatsApp.";
+  const lectura = (extra: object = {}) => ({ conWaba: false, idEnLaPlataforma: false, numero: null, ...extra });
+
+  beforeEach(() => {
+    process.env.ALTA_WABA_PROPIA = "1";
+    process.env.META_APP_ID = "fake-app-id";
+    process.env.META_ES_CONFIG_ID = "fake-config-id";
+    process.env.WHATSAPP_APP_SECRET = "fake-app-secret";
+    process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = PLATAFORMA;
+    h.waba.mockResolvedValue(lectura());
+  });
+
+  describe.each([
+    ["esperando", fila("creando", hace(2))],
+    ["reintentable", fila("fallida", hace(1))],
+  ])("%s", (_vista, base) => {
+    beforeEach(() => {
+      h.fila.mockResolvedValue(deAutoalta(base));
+    });
+
+    it("al admin le da el enlace con su frase, y no el panel del código", async () => {
+      const { container } = await pintar();
+
+      expect(h.waba).toHaveBeenCalledWith("t-1");
+      expect(screen.getByText(INTRO)).toBeInTheDocument();
+      expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-tenant", "t-1");
+      expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "propia");
+      expect(container.querySelector("input[name=codigo]")).toBeNull();
+      expect(h.porConectar).not.toHaveBeenCalled();
+    });
+
+    it("le pasa al enlace la lectura que ya hizo: no se lee dos veces", async () => {
+      await pintar();
+
+      expect(h.waba).toHaveBeenCalledOnce();
+      expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-lectura", "con");
+    });
+
+    it("si la lectura no contesta, el enlace sale igual (es el de empezar)", async () => {
+      h.waba.mockResolvedValue(null);
+      await pintar();
+
+      expect(screen.getByTestId("enlace-waba")).toBeInTheDocument();
+    });
+
+    it("quien ya tiene su número en la plataforma sigue con el código si está prendido", async () => {
+      process.env.ALTA_NUMERO_AUTOMATICO = "1";
+      h.waba.mockResolvedValue(lectura({ idEnLaPlataforma: true, numero: "pedido" }));
+      const { container } = await pintar();
+
+      expect(screen.queryByTestId("enlace-waba")).toBeNull();
+      expect(container.querySelector("input[name=codigo]")).not.toBeNull();
+      expect(h.porConectar).toHaveBeenCalledWith("t-1");
+    });
+
+    it("quien ya anda por la plataforma y no tiene el código prendido no ve ningún enlace (Q7)", async () => {
+      h.waba.mockResolvedValue(lectura({ idEnLaPlataforma: true, numero: "conectado" }));
+      await pintar();
+
+      expect(screen.queryByTestId("enlace-waba")).toBeNull();
+      expect(screen.queryByText(INTRO)).toBeNull();
+    });
+
+    it("quien ya conectó su WABA propia ve el enlace", async () => {
+      h.waba.mockResolvedValue(lectura({ conWaba: true, numero: "conectado" }));
+      await pintar();
+
+      expect(screen.getByTestId("enlace-waba")).toBeInTheDocument();
+    });
+
+    it("en inglés si la cuenta lo pide", async () => {
+      h.fila.mockResolvedValue(deAutoalta({ ...base, locale: "en-US" }));
+      await pintar();
+
+      expect(screen.getByText("While we set up your workspace, connect your WhatsApp.")).toBeInTheDocument();
+      expect(screen.getByTestId("enlace-waba")).toBeInTheDocument();
+    });
+
+    it("apagada la bandera y sin fila viva, no pinta el enlace", async () => {
+      delete process.env.ALTA_WABA_PROPIA;
+      await pintar();
+
+      expect(screen.queryByTestId("enlace-waba")).toBeNull();
+    });
+
+    it("apagadas las banderas, la fila viva de la app propia manda: el enlace va a su asistente", async () => {
+      delete process.env.ALTA_WABA_PROPIA;
+      h.waba.mockResolvedValue(lectura({ conWaba: true, origen: "app_propia", numero: "pedido" }));
+      await pintar();
+
+      expect(h.waba).toHaveBeenCalledWith("t-1");
+      expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "app");
+    });
+
+    it("apagadas las banderas, la fila viva del popup sigue en su panel", async () => {
+      delete process.env.ALTA_WABA_PROPIA;
+      h.waba.mockResolvedValue(lectura({ conWaba: true, origen: "embedded_signup", numero: "pedido" }));
+      await pintar();
+
+      expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "propia");
+    });
+
+    it.each(["analyst", "specialist", "viewer"])("un %s no lee ni pinta nada", async (role) => {
+      h.fila.mockResolvedValue(deAutoalta({ ...base, role }));
+      await pintar();
+
+      expect(h.waba).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("enlace-waba")).toBeNull();
+      expect(screen.queryByText(INTRO)).toBeNull();
+    });
+
+    it.each([false, null, undefined])("un espacio con autoalta %s no lee ni pinta nada", async (autoalta) => {
+      h.fila.mockResolvedValue({ ...base, autoalta });
+      await pintar();
+
+      expect(h.waba).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("enlace-waba")).toBeNull();
+    });
+  });
+
+  it("una base dada de baja no lee ni pinta nada", async () => {
+    h.fila.mockResolvedValue(deAutoalta(fila("borrada", hace(600))));
+    await pintar();
+
+    expect(h.waba).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("enlace-waba")).toBeNull();
+  });
+
+  it("con la base lista redirige sin leer la WABA", async () => {
+    h.fila.mockResolvedValue(deAutoalta(fila("lista", hace(600))));
+
+    await expect(pintar()).rejects.toThrow("REDIRECT:/configuracion?primeros=1");
+    expect(h.waba).not.toHaveBeenCalled();
+  });
+});
+
+describe("la app propia mientras la base se arma", () => {
+  const INTRO = "Mientras preparamos tu espacio, conectá tu WhatsApp.";
+  const lectura = (extra: object = {}) => ({ conWaba: false, idEnLaPlataforma: false, numero: null, origen: null, ...extra });
+
+  beforeEach(() => {
+    process.env.ALTA_APP_PROPIA = "1";
+    process.env.NEXT_PUBLIC_SITE_URL = "https://claimmix.example.com";
+    process.env.WHATSAPP_APP_SECRETS_KEY = "fake-secrets-key-1";
+    process.env.META_APP_ID = "fake-app-id";
+    process.env.WHATSAPP_APP_SECRET = "fake-app-secret";
+    h.fila.mockResolvedValue(deAutoalta(fila("creando", hace(2))));
+    h.waba.mockResolvedValue(lectura());
+  });
+
+  it("con sólo la app propia prendida, el admin ve el enlace a su asistente", async () => {
+    await pintar();
+
+    expect(h.waba).toHaveBeenCalledWith("t-1");
+    expect(screen.getByText(INTRO)).toBeInTheDocument();
+    expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "app");
+    expect(h.porConectar).not.toHaveBeenCalled();
+  });
+
+  it("le pasa al enlace la lectura que ya hizo: no se lee dos veces", async () => {
+    await pintar();
+
+    expect(h.waba).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-lectura", "con");
+  });
+
+  it("quien ya empezó con la app propia sigue ahí aunque el popup esté prendido también", async () => {
+    process.env.ALTA_WABA_PROPIA = "1";
+    process.env.META_ES_CONFIG_ID = "fake-config-id";
+    h.waba.mockResolvedValue(lectura({ conWaba: true, origen: "app_propia", numero: "pedido" }));
+
+    await pintar();
+
+    expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "app");
+  });
+
+  it("con las dos vías prendidas y nada empezado gana el popup", async () => {
+    process.env.ALTA_WABA_PROPIA = "1";
+    process.env.META_ES_CONFIG_ID = "fake-config-id";
+
+    await pintar();
+
+    expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "propia");
+  });
+
+  it("si la lectura no contesta, el enlace sale igual (es el de empezar)", async () => {
+    h.waba.mockResolvedValue(null);
+
+    await pintar();
+
+    expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "app");
+  });
+
+  it("quien ya anda por la plataforma y no tiene el código prendido no ve ningún enlace", async () => {
+    h.waba.mockResolvedValue(lectura({ idEnLaPlataforma: true, numero: "conectado" }));
+
+    await pintar();
+
+    expect(screen.queryByTestId("enlace-waba")).toBeNull();
+  });
+
+  it("apagada la bandera y sin fila viva, no pinta el enlace", async () => {
+    delete process.env.ALTA_APP_PROPIA;
+
+    await pintar();
+
+    expect(screen.queryByTestId("enlace-waba")).toBeNull();
+  });
+
+  it("apagada la bandera, quien ya empezó con su app sigue yendo a su asistente", async () => {
+    delete process.env.ALTA_APP_PROPIA;
+    h.waba.mockResolvedValue(lectura({ conWaba: true, origen: "app_propia", numero: "pedido" }));
+
+    await pintar();
+
+    expect(h.waba).toHaveBeenCalledWith("t-1");
+    expect(screen.getByTestId("enlace-waba")).toHaveAttribute("data-metodo", "app");
+  });
+
+  it("sin la clave de los secretos y sin fila viva, la vía está cerrada", async () => {
+    delete process.env.WHATSAPP_APP_SECRETS_KEY;
+
+    await pintar();
+
+    expect(screen.queryByTestId("enlace-waba")).toBeNull();
+  });
+
+  it.each(["analyst", "specialist", "viewer"])("un %s no lee ni pinta nada", async (role) => {
+    h.fila.mockResolvedValue(deAutoalta({ ...fila("creando", hace(2)), role }));
+
+    await pintar();
+
+    expect(h.waba).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("enlace-waba")).toBeNull();
+    expect(screen.queryByText(INTRO)).toBeNull();
+  });
+
+  it.each([false, null, undefined])("un espacio con autoalta %s no lee ni pinta nada", async (autoalta) => {
+    h.fila.mockResolvedValue({ ...fila("creando", hace(2)), autoalta });
+
+    await pintar();
+
+    expect(h.waba).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("enlace-waba")).toBeNull();
   });
 });

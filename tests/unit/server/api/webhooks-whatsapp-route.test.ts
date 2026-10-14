@@ -12,7 +12,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 
-const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent, mockReap, mockRetomar, mockMarcarPendientes, mockResolverNumeros } = vi.hoisted(() => {
+const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent, mockReap, mockRetomar, mockMarcarPendientes, mockResolverNumeros, mockAtender } = vi.hoisted(() => {
   const afterCallbacks: Array<() => unknown | Promise<unknown>> = [];
   return {
     afterCallbacks,
@@ -23,6 +23,7 @@ const { afterCallbacks, mockAfter, mockCreateWhatsAppIntake, mockRunIntakeAgent,
     mockRetomar: vi.fn(),
     mockMarcarPendientes: vi.fn(),
     mockResolverNumeros: vi.fn(),
+    mockAtender: vi.fn(),
   };
 });
 
@@ -48,6 +49,10 @@ vi.mock("@/server/whatsapp/numeros", () => ({
   resolverNumeros: mockResolverNumeros,
   inquilinoDeLaPlataforma: () => process.env.WHATSAPP_TENANT_ID?.trim() || null,
 }));
+
+// Los avisos de la cuenta se prueban en tests/unit/alta/eventos-de-cuenta.test.ts;
+// acá sólo importa que el camino firmado los encole y el del Bearer no.
+vi.mock("@/server/alta/eventos-de-cuenta", () => ({ atenderEventosDeCuenta: mockAtender }));
 
 import { GET, POST, maxDuration } from "@/app/api/webhooks/whatsapp/route";
 
@@ -506,7 +511,7 @@ describe("/api/webhooks/whatsapp — a qué número le hablaron", () => {
     const res = await POST(metaReq(cuerpo, sign(cuerpo)));
 
     expect(res.status).toBe(200);
-    expect(mockResolverNumeros).toHaveBeenCalledWith([NUMERO]);
+    expect(mockResolverNumeros).toHaveBeenCalledWith([NUMERO], expect.any(Map));
     expect(mockCreateWhatsAppIntake).toHaveBeenCalledTimes(1);
     expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT }));
   });
@@ -525,5 +530,132 @@ describe("/api/webhooks/whatsapp — a qué número le hablaron", () => {
     // no lo va a cambiar.
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ignored_other_number: 1 });
+  });
+
+  it("le pasa al ruteo la WABA que trae el evento para cada número", async () => {
+    const cuerpo = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "555000111222", changes: [{ value: {
+        metadata: { phone_number_id: NUMERO },
+        contacts: [{ wa_id: "5492916426930", profile: { name: "Ilan" } }],
+        messages: [{ from: "5492916426930", id: "wamid.10", type: "text", text: { body: "Choqué" } }],
+      } }] }],
+    });
+    const res = await POST(metaReq(cuerpo, sign(cuerpo)));
+
+    expect(res.status).toBe(200);
+    const [ids, wabaDe] = mockResolverNumeros.mock.calls[0] as [string[], Map<string, string>];
+    expect(ids).toEqual([NUMERO]);
+    expect(wabaDe.get(NUMERO)).toBe("555000111222");
+  });
+
+  it("sin id de WABA en el evento el mapa llega vacío y el ruteo sigue por el número", async () => {
+    const cuerpo = payload(NUMERO);
+    await POST(metaReq(cuerpo, sign(cuerpo)));
+
+    const [, wabaDe] = mockResolverNumeros.mock.calls[0] as [string[], Map<string, string>];
+    expect(wabaDe.size).toBe(0);
+  });
+});
+
+describe("/api/webhooks/whatsapp — avisos de la cuenta", () => {
+  const EVENTO = {
+    object: "whatsapp_business_account",
+    entry: [{
+      id: "555000111222",
+      time: 1_790_000_000,
+      changes: [{
+        field: "account_update",
+        value: { event: "PARTNER_APP_UNINSTALLED", waba_info: { waba_id: "555000111222" } },
+      }],
+    }],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterCallbacks.length = 0;
+    process.env.WHATSAPP_APP_SECRET = APP_SECRET;
+    process.env.WHATSAPP_TENANT_ID = TENANT;
+    process.env.WHATSAPP_WEBHOOK_SECRET = "bearer-secret";
+    mockAtender.mockResolvedValue(undefined);
+    mockResolverNumeros.mockImplementation(async (ids: string[]) => new Map(ids.map((id) => [id, TENANT])));
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("un aviso firmado se contesta 200 y se atiende después de contestar", async () => {
+    const cuerpo = JSON.stringify(EVENTO);
+    const res = await POST(metaReq(cuerpo, sign(cuerpo)));
+
+    expect(res.status).toBe(200);
+    expect(mockAtender).not.toHaveBeenCalled();
+
+    expect(afterCallbacks).toHaveLength(1);
+    await afterCallbacks[0]();
+
+    expect(mockAtender).toHaveBeenCalledTimes(1);
+    expect(mockAtender).toHaveBeenCalledWith([
+      expect.objectContaining({
+        campo: "account_update",
+        wabaId: "555000111222",
+        evento: "PARTNER_APP_UNINSTALLED",
+        hora: 1_790_000_000,
+      }),
+    ]);
+  });
+
+  it("un aviso no pasa por el ruteo de mensajes ni crea casos", async () => {
+    const cuerpo = JSON.stringify(EVENTO);
+    await POST(metaReq(cuerpo, sign(cuerpo)));
+
+    expect(mockResolverNumeros).toHaveBeenCalledWith([], expect.any(Map));
+    expect(mockCreateWhatsAppIntake).not.toHaveBeenCalled();
+  });
+
+  it("el cambio de nombre del número también se atiende", async () => {
+    const cuerpo = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{
+        id: "555000111222",
+        time: 1_790_000_000,
+        changes: [{ field: "phone_number_name_update", value: { phone_number_id: NUMERO, decision: "APPROVED" } }],
+      }],
+    });
+    await POST(metaReq(cuerpo, sign(cuerpo)));
+    await afterCallbacks[0]();
+
+    expect(mockAtender).toHaveBeenCalledWith([
+      expect.objectContaining({ campo: "phone_number_name_update", phoneNumberId: NUMERO, nombreEstado: "APPROVED" }),
+    ]);
+  });
+
+  it("un pedido de mensajes sin avisos no encola nada para la cuenta", async () => {
+    const cuerpo = TEXT_PAYLOAD;
+    await POST(metaReq(cuerpo, sign(cuerpo)));
+    for (const cb of afterCallbacks) await cb();
+
+    expect(mockAtender).not.toHaveBeenCalled();
+  });
+
+  it("un aviso con firma que no vale no se atiende", async () => {
+    const cuerpo = JSON.stringify(EVENTO);
+    const res = await POST(metaReq(cuerpo, "sha256=" + "0".repeat(64)));
+
+    expect(res.status).toBe(401);
+    expect(afterCallbacks).toHaveLength(0);
+    expect(mockAtender).not.toHaveBeenCalled();
+  });
+
+  it("el camino del Bearer no atiende avisos de la cuenta", async () => {
+    const req = new NextRequest("http://localhost/api/webhooks/whatsapp", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer bearer-secret" },
+      body: JSON.stringify(EVENTO),
+    });
+    await POST(req);
+    for (const cb of afterCallbacks) await cb();
+
+    expect(mockAtender).not.toHaveBeenCalled();
   });
 });

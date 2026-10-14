@@ -12,7 +12,7 @@
  *
  * Estos cuatro son las consultas más baratas que contestan «¿se está perdiendo
  * trabajo?». Van sobre índices que ya existen y son lo que convierte al job
- * `salud` de `barrer-trabados.yml` —que ya pone el workflow en rojo cuando algo
+ * `barrer` de `barrer-trabados.yml` —que ya pone el workflow en rojo cuando algo
  * está `down`, y avisa por mail— en una alarma de producto y no de plomería.
  *
  * Sin Sentry esto es lo más cerca que se llega gratis: se pasa de «me entero el

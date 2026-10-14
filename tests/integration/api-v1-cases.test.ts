@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * /api/v1: el sistema de la aseguradora lee con su clave, sin sesión (B5).
  *

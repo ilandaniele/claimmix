@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * POST /api/cases/:id/attachments/:attachmentId/presupuesto (B21, B23): lee el
  * presupuesto del taller a pedido, lo coteja con fotos y relato, y ajusta el

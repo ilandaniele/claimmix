@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La puerta de /api/v1 con un inquilino que no tiene base (3D000).
  *

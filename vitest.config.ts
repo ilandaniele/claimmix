@@ -5,11 +5,29 @@ import { resolve } from "path";
 export default defineConfig({
   plugins: [react()],
   test: {
-    environment: "jsdom",
     globals: true,
     setupFiles: ["./tests/setup.ts"],
-    include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx", "tests/integration/**/*.test.ts"],
-    exclude: ["tests/e2e/**", "tests/stress/**"],
+    // jsdom sólo para los componentes: armarlo en cada archivo se llevaba casi
+    // la mitad del tiempo de la suite, y los `.ts` que lo usan lo piden con
+    // `// @vitest-environment jsdom`.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          environment: "jsdom",
+          include: ["tests/unit/**/*.test.tsx"],
+        },
+      },
+    ],
     // Process-level isolation: each test file runs in its own worker process.
     // This prevents module-cache contamination when multiple test files
     // import the same Next.js route handler via `await import(...)`.
@@ -17,7 +35,8 @@ export default defineConfig({
     pool: "forks",
     coverage: {
       provider: "v8",
-      reporter: ["text", "lcov", "json-summary"],
+      // Sólo la tabla: nadie leía el lcov ni el json, y escribirlos es tiempo.
+      reporter: ["text"],
       reportsDirectory: "./coverage",
       // `src/core/**` y `src/data/**` no estaban, y son el código donde vive
       // ahora la decisión (el núcleo) y el aislamiento entre aseguradoras (la
@@ -49,8 +68,6 @@ export default defineConfig({
         // Observability — require Sentry DSN and pino runtime at module init.
         // Covered by manual/integration testing.
         "src/lib/observability/**",
-        // Upstash rate-limit adapter — requires UPSTASH_* env vars at runtime.
-        "src/lib/rate-limit/upstash.ts",
         // Acá se excluían cinco archivos con la explicación «sólo se cubre por
         // integración». Medido, no era cierto en ninguno de los cinco:
         //

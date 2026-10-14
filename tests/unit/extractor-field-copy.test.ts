@@ -164,7 +164,6 @@ vi.mock("@/lib/email/claim-parser", () => ({
  */
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
-  runMockExtractor: vi.fn(),
   denunciaSimuladaVacia: vi.fn(),
 }));
 

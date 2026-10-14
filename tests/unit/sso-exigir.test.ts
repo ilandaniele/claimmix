@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * «Exigir SSO» y el control de inquilino del gancho de sesión.
  *

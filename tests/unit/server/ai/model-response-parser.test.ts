@@ -13,7 +13,6 @@ vi.mock("@/server/ai/provider", () => ({
 import {
   extractJsonObjectTexts,
   parseEmailResponse,
-  parseResponse,
 } from "@/server/ai/model-response";
 
 function validExtraction() {
@@ -67,25 +66,10 @@ describe("model JSON parser", () => {
     expect(parsed?.extraction_model).toBe("gemini-2.5-flash");
   });
 
-  it("parses simulate output when JSON has leading text", () => {
-    const parsed = parseResponse(
-      `Aqui esta:\n${JSON.stringify(validExtraction())}`,
-      "choque",
-      "gemini-2.5-flash"
-    );
-    expect(parsed?.extracted_fields?.claim_type).toBe("choque");
-  });
-
   it("skips invalid leading JSON and parses the final email extraction", () => {
     const content = `${JSON.stringify({ thinking: "not the schema" })}\n${JSON.stringify(validExtraction())}`;
     const parsed = parseEmailResponse(content, "gemini-2.5-flash");
     expect(parsed?.is_claim).toBe(true);
     expect(parsed?.extraction_model).toBe("gemini-2.5-flash");
-  });
-
-  it("skips invalid leading JSON and parses the final simulate extraction", () => {
-    const content = `${JSON.stringify({ reasoning: { likely_claim: true } })}\n${JSON.stringify(validExtraction())}`;
-    const parsed = parseResponse(content, "choque", "gemini-2.5-flash");
-    expect(parsed?.extracted_fields?.claim_type).toBe("choque");
   });
 });

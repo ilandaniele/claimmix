@@ -154,6 +154,14 @@ function makeRequest(body: Record<string, unknown> = { count: 3 }) {
   });
 }
 
+/** Corre el after() con reloj falso: la pausa entre casos (1,5 s por defecto) no se espera de verdad. */
+async function correrAfter() {
+  vi.useFakeTimers();
+  const corrida = afterCallbacks[0]();
+  await vi.runAllTimersAsync();
+  await corrida;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("POST /api/admin/batch-simulate", () => {
@@ -179,6 +187,7 @@ describe("POST /api/admin/batch-simulate", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -228,7 +237,7 @@ describe("POST /api/admin/batch-simulate", () => {
   it("after() callback calls runIntakeAgent once per created case", async () => {
     const res = await POST(makeRequest({ count: 3 }));
     const body = await res.json();
-    await afterCallbacks[0]();
+    await correrAfter();
     expect(mockRunIntakeAgent).toHaveBeenCalledTimes(3);
     for (const caseId of body.case_ids) {
       expect(mockRunIntakeAgent).toHaveBeenCalledWith(
@@ -386,7 +395,7 @@ describe("POST /api/admin/batch-simulate", () => {
     // Before callback fires
     expect(mockRunIntakeAgent).not.toHaveBeenCalled();
     // After callback fires
-    await afterCallbacks[0]();
+    await correrAfter();
     expect(mockRunIntakeAgent).toHaveBeenCalledTimes(3);
   });
 

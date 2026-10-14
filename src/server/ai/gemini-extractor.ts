@@ -14,16 +14,15 @@
  * mensual en dólares contra una suma que siempre da cero no salta nunca.
  *
  * Postura de seguridad:
- * LLM01: prompts built by buildEmailClaimPrompt / buildSystemPrompt (XML sentinels).
+ * LLM01: prompts built by buildEmailClaimPrompt (XML sentinels).
  * LLM02: JSON output requested via Gemini structured output plus schema
  *        embedded in the prompt; output validated against ExtractedClaimSchema
- *        before any DB write (parseEmailResponse / parseResponse are shared
- *        histórico).
+ *        before any DB write (parseEmailResponse).
  * LLM06: Logs only case_id/tenant_id + token counts — never email bodies/PII.
  *        The API key travels in the x-goog-api-key header, never in the URL.
  *
- * Retry policy: one retry with a stricter prompt, then
- * safe default (email flow) or thrown error (simulate flow → case escalates).
+ * Retry policy: one retry with a stricter prompt, then a thrown
+ * GeminiExtractionError (the case escalates).
  */
 
 import "server-only";
@@ -31,12 +30,10 @@ import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { tokenDeGcp } from "@/server/gcp/credenciales";
 import { RESPUESTA_JSON_SCHEMA } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
-import type { ClaimType } from "@/lib/schemas/cases";
-import { buildSystemPrompt, buildUserMessage, buildEmailClaimPrompt } from "./prompt";
+import { buildEmailClaimPrompt } from "./prompt";
 import { computeCostUsd, recordUsage } from "./budget";
 import { logProviderUsage } from "./provider-usage";
 import {
-  parseResponse,
   parseEmailResponse,
 } from "./model-response";
 import type { EmailClaimPayload } from "./model-response";
@@ -917,90 +914,6 @@ export async function extractEmailClaimGemini(
       status: causa?.status ?? undefined,
       code: causa?.code ?? undefined,
       ...(pasajero?.red ? { red: true } : {}),
-    }
-  );
-}
-
-// ── Simulate-flow extractor ────────────────────────────────────────────────────
-
-/**
- * El extractor del camino de simulación.
- * Throws GeminiExtractionError after two failed attempts (worker escalates).
- */
-export async function runGeminiExtractor(
-  rawText: string,
-  claimType: ClaimType,
-  caseId: string,
-  tenantId?: string,
-  userId?: string | null
-): Promise<ExtractedClaim> {
-  // Transport-aware: on Vertex the tenant/AI-Studio model name is not used
-  // (different catalog), so resolve the real one here — otherwise logs and
-  // agent_runs would record a model that was never actually called.
-  const model = isVertexTransport()
-    ? getVertexModel()
-    : await getTenantGeminiModel(tenantId);
-  const tenantKey = tenantId ? await getTenantGeminiKey(tenantId, userId ?? undefined) : null;
-  const systemPrompt = buildSystemPrompt(claimType) + schemaSuffix();
-  const userMessage = buildUserMessage(rawText);
-
-  let result: ExtractedClaim | null = null;
-  let totalPromptTokens = 0;
-  let totalCompletionTokens = 0;
-  let lastErrMeta: { name: string; status: number | null; code: string | null } | null = null;
-
-  for (let attempt = 1; attempt <= 2 && !result; attempt++) {
-    const prompt =
-      attempt === 1
-        ? systemPrompt
-        : systemPrompt +
-          "\n\nIMPORTANT: Your previous response was invalid JSON. Return ONLY valid JSON matching the schema exactly. No markdown, no code blocks, no extra text.";
-
-    try {
-      const { text, usage } = await callGemini(prompt, userMessage, tenantKey, model);
-      totalPromptTokens += usage.promptTokens;
-      totalCompletionTokens += usage.completionTokens;
-
-      logger.info({
-        provider: "gemini",
-        case_id: caseId,
-        model,
-        prompt_tokens: usage.promptTokens,
-        completion_tokens: usage.completionTokens,
-        cached_tokens: usage.cachedTokens ?? 0,
-      }, `ai.extraction.attempt${attempt}`);
-
-      result = parseResponse(text, claimType, model);
-    } catch (e) {
-      const meta = errMeta(e);
-      lastErrMeta = meta;
-      logger.error({
-        provider: "gemini",
-        case_id: caseId,
-        error_name: meta.name,
-        status: meta.status,
-        code: meta.code,
-      }, `ai.extraction.attempt${attempt}.error`);
-    }
-  }
-
-  if (result) {
-    return {
-      ...result,
-      extraction_model: model,
-      prompt_tokens: totalPromptTokens,
-      completion_tokens: totalCompletionTokens,
-      cost_usd: computeCostUsd(totalPromptTokens, totalCompletionTokens, model),
-    };
-  }
-
-  throw new GeminiExtractionError(
-    `AI extraction failed after 2 attempts for case ${caseId}`,
-    {
-      provider_error: true,
-      case_id: caseId,
-      status: lastErrMeta?.status ?? undefined,
-      code: lastErrMeta?.code ?? undefined,
     }
   );
 }

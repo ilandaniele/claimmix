@@ -147,7 +147,8 @@ jobs:
   validar_url:
     name: ¿A dónde apunta esto?
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 2
     steps:
       - name: ¿A dónde apunta esto?
         env:
@@ -246,7 +247,8 @@ jobs:
   # rojo: un ensayo apagado no es un ensayo pasado.
   qa_secretos:
     name: Secretos de QA
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 2
     # Misma condición que el grupo de `concurrency`, con el sufijo al revés.
     if: >
       github.event.deployment_status.state == 'success' &&
@@ -429,7 +431,8 @@ jobs:
       github.event.deployment_status.state == 'success' &&
       startsWith(github.event.deployment.environment, 'Production') &&
       endsWith(github.event.deployment.environment, '-qa')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
     permissions:
       statuses: write
     steps:
@@ -480,6 +483,7 @@ jobs:
       startsWith(github.event.deployment.environment, 'Production') &&
       endsWith(github.event.deployment.environment, '-prd')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:

@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * POST /api/policies/:id/condiciones (B6): sube el PDF de condiciones y lo lee
  * una vez. Sin lectura queda «subido, sin leer», nunca con coberturas

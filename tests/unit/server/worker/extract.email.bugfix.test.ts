@@ -44,7 +44,6 @@ vi.mock("@/data/scope", () => import("../../../mocks/puente-de-alcance").then((m
 
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
-  runMockExtractor: vi.fn(),
 }));
 
 vi.mock("@/server/ai/budget", () => ({
@@ -78,7 +77,6 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
 
 vi.mock("@/server/ai/gemini-extractor", () => ({
   extractEmailClaimGemini: mockExtractEmailClaim,
-  runGeminiExtractor: vi.fn(),
   GeminiExtractionError: class GeminiExtractionError extends Error {
     constructor(msg: string) {
       super(msg);

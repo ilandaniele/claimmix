@@ -3,7 +3,6 @@
 import "server-only";
 import { ExtractedClaimSchema } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
-import type { ClaimType } from "@/lib/schemas/cases";
 import type { MemoryHint, KnownPattern, PromptLearningContext } from "./prompt";
 import { getDefaultGeminiModel } from "./provider";
 import { logger } from "@/lib/observability/logger";
@@ -112,33 +111,6 @@ function withEmailDefaults(
   if (typeof raw.suggested_reply !== "string") raw.suggested_reply = "";
   if (!raw.not_relevant_reason) raw.not_relevant_reason = undefined;
   return raw;
-}
-
-/**
- * Parse and validate the model response content as an ExtractedClaim.
- * Returns null if parsing or validation fails.
- * Exported for reuse by other providers (gemini-extractor).
- */
-export function parseResponse(content: string | null, claimType: ClaimType, model?: string): ExtractedClaim | null {
-  if (!content) return null;
-  try {
-    const candidates = parseModelJsonCandidates(content);
-    let issueCount = 0;
-    for (const rawCandidate of candidates) {
-      const raw = { ...rawCandidate };
-      if (!raw.extraction_model) raw.extraction_model = model ?? getDefaultGeminiModel();
-      const parsed = ExtractedClaimSchema.safeParse(raw);
-      if (parsed.success) return parsed.data;
-      issueCount += parsed.error.issues.length;
-    }
-
-    if (candidates.length > 0) {
-      logger.error({ issues: issueCount, candidatos: candidates.length }, "model_response.schema_validation_failed");
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 

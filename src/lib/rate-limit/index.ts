@@ -1,5 +1,5 @@
 /**
- * Rate-limit facade — Postgres by default, memory in tests, Upstash if asked.
+ * Rate-limit facade — Postgres by default, memory in tests.
  *
  * It used to default to memory, and on serverless that means counting per
  * instance. Vercel answers parallel requests by starting more instances, each
@@ -10,7 +10,7 @@
  *
  * Postgres is the only thing every instance shares, and it is already there.
  * No extra vendor, no extra credential to rotate, nothing new to expire
- * unnoticed. RATE_LIMIT_PROVIDER can still force `upstash` or `memory`.
+ * unnoticed. RATE_LIMIT_PROVIDER can still force `postgres` or `memory`.
  *
  * Auth endpoint limits (per spec):
  *   /api/auth/sign-in: 5 attempts / 10s per IP+email tuple
@@ -30,33 +30,6 @@ import { claveDeCupo } from "./clave";
 import { logger } from "@/lib/observability/logger";
 
 export { resetRateLimit, clearAllRateLimits };
-
-/**
- * Synchronous, memory-only limiter.
- *
- * Written for /api/intake/email, which is now a 410 stub — nothing in the
- * application calls this any more, only its tests. Left in place because a
- * synchronous limiter is occasionally the only option (no await available),
- * but do not reach for it: being memory-only it counts per instance, which on
- * serverless means counting per attacker. Use `rateLimit()`.
- *
- * @param identifier - Unique key (e.g. IP address for webhook endpoint)
- * @param maxRequests - Maximum requests allowed within the window
- * @param windowMs    - Window duration in milliseconds
- * @returns { allowed, retryAfter? } where retryAfter is seconds until reset
- */
-export function checkRateLimit(
-  identifier: string,
-  maxRequests: number,
-  windowMs: number
-): { allowed: boolean; retryAfter?: number } {
-  const result = checkMemory(identifier, maxRequests, windowMs);
-  if (result.allowed) {
-    return { allowed: true };
-  }
-  const retryAfter = Math.ceil(Math.max(0, result.resetAt - Date.now()) / 1000);
-  return { allowed: false, retryAfter };
-}
 
 /** Rate-limit configuration profiles */
 export const RATE_LIMIT_CONFIGS = {
@@ -115,15 +88,6 @@ export const RATE_LIMIT_CONFIGS = {
    * porqué de que sea seguro.
    */
   CASES_API: { limit: 100, windowMs: 60_000, lote: 5 },
-
-  // ── Email-intake rate limits (spec §Security posture) ─────────────────────
-
-  /**
-   * EMAIL_INTAKE_WEBHOOK: 100 requests per 10 seconds per IP.
-   * Protects /api/intake/email from flood attacks without blocking
-   * legitimate provider delivery bursts. AC20.
-   */
-  EMAIL_INTAKE_WEBHOOK: { limit: 100, windowMs: 10_000 },
 
   /**
    * CONFIRM_FIELD: 30 requests per minute per user.
@@ -355,9 +319,9 @@ export const RATE_LIMIT_CONFIGS = {
  * they run thousands of times, and none of them should need a database to say
  * whether a sixth attempt in ten seconds is refused.
  */
-export function resolveProvider(): "postgres" | "memory" | "upstash" {
+export function resolveProvider(): "postgres" | "memory" {
   const forced = process.env.RATE_LIMIT_PROVIDER?.trim().toLowerCase();
-  if (forced === "upstash" || forced === "memory" || forced === "postgres") {
+  if (forced === "memory" || forced === "postgres") {
     avisarSiEsMemoriaEnProduccion(forced, "RATE_LIMIT_PROVIDER lo fuerza");
     return forced;
   }
@@ -476,10 +440,6 @@ async function contar(
   if (provider === "postgres" && config.lote) {
     return rateLimitDeALotes(key, config.limit, config.windowMs, config.lote, config.fallaCerrada);
   }
-  if (provider === "upstash") {
-    const { checkRateLimitUpstash } = await import("./upstash");
-    return checkRateLimitUpstash(key, config.limit, config.windowMs);
-  }
   if (provider === "postgres") {
     const { checkRateLimitPostgres } = await import("./postgres");
     return checkRateLimitPostgres(key, config.limit, config.windowMs, 1, config.fallaCerrada);
@@ -497,8 +457,7 @@ async function contar(
  * que esta llamada nunca llegó a contar). Por eso quien la usa toma primero los
  * cupos, guarda cuáles dieron `allowed: true` y libera sólo esos.
  *
- * Upstash es un stub sin esta operación, y los perfiles con `lote` reservan por
- * adelantado: no aplica.
+ * Los perfiles con `lote` reservan por adelantado: no aplica.
  */
 export async function liberarCupo(key: string, windowMs: number, ventana: number): Promise<void> {
   const provider = resolveProvider();
@@ -515,7 +474,7 @@ export async function liberarCupo(key: string, windowMs: number, ventana: number
  * y sólo si no queda va a la base a pedir un lote nuevo.
  *
  * Sólo tiene sentido contra Postgres — es la escritura que se quiere evitar.
- * Memoria no tiene ese costo, y Upstash no tiene esta forma de lote.
+ * Memoria no tiene ese costo.
  */
 async function rateLimitDeALotes(
   key: string,

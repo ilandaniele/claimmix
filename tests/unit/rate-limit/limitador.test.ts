@@ -91,15 +91,6 @@ describe("fallaCerrada", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("cierra cuando el proveedor entero no está (Upstash sin instalar)", async () => {
-    vi.stubEnv("RATE_LIMIT_PROVIDER", "upstash");
-
-    const cerrado = await rateLimit("wa:plantilla:t-1", { limit: 3, windowMs: DIA, fallaCerrada: true });
-    expect(cerrado.allowed).toBe(false);
-
-    await expect(rateLimit("wa:plantilla:t-1", { limit: 3, windowMs: DIA })).rejects.toThrow(/Upstash/);
-  });
-
   it("con la base sana no cambia nada: cuenta y frena en el límite", async () => {
     execute.mockReset();
     hits(3);

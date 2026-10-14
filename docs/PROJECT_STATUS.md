@@ -312,7 +312,7 @@ What it found, all fixed and deployed:
 
 The **rate limiter** was in-memory, which in serverless means per instance — one
 counter per attacker. It runs on Postgres now (`rate_limit_counters`, migration
-0015, fail-open); `RATE_LIMIT_PROVIDER` forces upstash/memory.
+0015, fail-open); `RATE_LIMIT_PROVIDER` forces postgres/memory.
 
 The **tenant wall** had tests that did not cover it: they mocked `@/lib/db` to
 return zero rows and then asserted a 404 — verifying the mock. A query written
@@ -5367,7 +5367,6 @@ ships, so a second non-blocking step keeps dev advisories visible.
 | `export-training.mjs` | Dumps approved examples + prompt rules to `training-export/*.json`. **Run before any DB cleanup** — the approved set is the only thing here that cannot be regenerated. |
 | `reset-cases-keep-training.mjs` | Wipes every case but keeps the trained agent. Dry-run by default; `--apply` to execute. |
 | `cleanup-junk-cases.mjs` | Deletes only dead-end cases (`no_relevante` / unrecovered `escalado`) that back no approved example. Dry-run by default. |
-| `activate-gemini.mjs` | Legacy: verifies the AI Studio key and re-drives the escalado backlog. Superseded by the Vertex transport; kept for the prepay path. |
 | `create-tenant.mjs` | Onboards a client: creates the tenant with its plan's commercial terms. Dry-run by default; `--apply` to execute. Prints the remaining manual steps (SIGNUP_ALLOWED_EMAILS, the client's own Gemini key). |
 | `migrate.mjs` | Applies pending SQL migrations and records them in `schema_migrations`. Status by default; `--apply` to run; `--baseline NNNN` to adopt already-hand-applied ones without executing; `--forget NNNN` to drop a ledger row that turned out to be a lie (the schema is not touched). Detects a migration edited after it ran. Falls back to Neon over HTTPS when port 5432 is blocked. |
 | `knock-on-the-door.mts` | `pnpm knock` — deposita un mail con forma de denuncia en la casilla de verdad y le manda al webhook un payload firmado como lo firma Meta. Prueba el primer metro de la cadena sin que salga nada del edificio. Corre en cada deploy. |

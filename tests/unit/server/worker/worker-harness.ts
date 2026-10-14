@@ -386,7 +386,6 @@ export function registrarMocks(opciones: {
   });
 
   vi.doMock("@/server/ai/mock-extractor", () => ({
-    runMockExtractor: vi.fn(),
     extractEmailClaimMock: claimSimulado,
     // Stub agregado porque `claim-agent.ts` ahora llama `denunciaSimuladaVacia`
     // en vez de `extractEmailClaimMock` cuando el motor cae a mock (fuera de

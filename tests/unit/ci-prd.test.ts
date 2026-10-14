@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -197,10 +196,16 @@ describe("barrer-trabados.yml: prd tiene su cron, su cola y su secreto", () => {
     expect(yml).toMatch(/concurrency:\n {2}group: .*'barrer-trabados-prd'.*'barrer-trabados'/);
   });
 
-  it("los jobs de dev no corren con el cron de prd", () => {
-    for (const id of ["barrer", "salud"]) {
-      expect(cuerpoDe(yml, id)).toContain(`if: github.event.schedule != '${CRON_PRD}'`);
-    }
+  it("el job de dev no corre con el cron de prd", () => {
+    expect(cuerpoDe(yml, "barrer")).toContain(`if: github.event.schedule != '${CRON_PRD}'`);
+  });
+
+  it("el secreto de dev sólo viaja después de mirar el host", () => {
+    const barrer = cuerpoDe(yml, "barrer");
+    const pasos = barrer.split("\n      - ").filter((p) => p.includes("CRON_SECRET:"));
+    expect(pasos).toHaveLength(2);
+    for (const p of pasos) expect(p).toContain("if: ${{ !cancelled() && steps.host.outcome == 'success' }}");
+    expect(barrer).toMatch(/- name: ¿A dónde apunta esto\?\n {8}id: host\n/);
   });
 
   it("el job de prd corre sólo con su cron y sólo si hay vars.PRD_URL", () => {
@@ -212,10 +217,8 @@ describe("barrer-trabados.yml: prd tiene su cron, su cola y su secreto", () => {
     expect(prd).not.toMatch(/secrets\.(CRON_SECRET|QA_CRON_SECRET)/);
   });
 
-  it("los jobs de dev no tocan el secreto ni la URL de prd", () => {
-    for (const id of ["barrer", "salud"]) {
-      expect(cuerpoDe(yml, id)).not.toMatch(/PRD_/);
-    }
+  it("el job de dev no toca el secreto ni la URL de prd", () => {
+    expect(cuerpoDe(yml, "barrer")).not.toMatch(/PRD_/);
   });
 });
 

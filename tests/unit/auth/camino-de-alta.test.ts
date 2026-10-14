@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La puerta del alta contra Better Auth de verdad (1.7.7): sus rutas, sus
  * ganchos y su callback de OAuth.

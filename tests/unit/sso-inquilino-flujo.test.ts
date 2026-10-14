@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * El SSO de punta a punta: Better Auth de verdad (sus rutas, sus ganchos, su
  * state en cookie), nuestro plugin, y un IdP de mentira que firma tokens con jose.

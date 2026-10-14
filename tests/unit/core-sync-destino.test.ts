@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La guarda SSRF del webhook al Core. La URL la escribe un admin y la pide
  * nuestro servidor: sin esto, un admin (o quien le robe la sesión) apunta el

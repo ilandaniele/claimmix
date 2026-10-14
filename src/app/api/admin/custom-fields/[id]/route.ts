@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 const FieldTypeSchema = z.enum(["text", "number", "date", "boolean", "enum", "email", "phone"]);
 // Una clave de ramo cualquiera: nativa o propia del inquilino (`tenant_claim_types`).
 const ClaimTypeSchema = ClaveDeRamoSchema;
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 
 const PatchCustomFieldSchema = z.object({
   label: z.string().trim().min(2).max(120).optional(),

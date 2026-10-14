@@ -42,7 +42,7 @@ const Cursor = z
   .pipe(
     z.tuple([
       z.string().datetime({ offset: true, message: CURSOR_INVALIDO }),
-      z.string().uuid(CURSOR_INVALIDO),
+      z.guid(CURSOR_INVALIDO),
     ])
   );
 

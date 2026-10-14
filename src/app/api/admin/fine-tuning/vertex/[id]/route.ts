@@ -22,7 +22,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 const PostSchema = z.object({
   action: z.enum(["activate", "rollback", "approve", "reject"]),
 });

@@ -34,11 +34,10 @@ export const SCENARIO_IDS = [
 
 export type ScenarioId = (typeof SCENARIO_IDS)[number];
 
-const ScenarioIdSchema = z.enum(SCENARIO_IDS, {
-  errorMap: () => ({
-    message: `ID de escenario inválido. Opciones válidas: ${SCENARIO_IDS.join(", ")}.`,
-  }),
-});
+const ScenarioIdSchema = z.enum(
+  SCENARIO_IDS,
+  `ID de escenario inválido. Opciones válidas: ${SCENARIO_IDS.join(", ")}.`
+);
 
 /**
  * POST /api/intake/simulate body.

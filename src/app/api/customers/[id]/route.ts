@@ -22,7 +22,7 @@ import { cambiosDelCliente, consultaCambioCliente } from "@/server/padron/manual
 
 export const dynamic = "force-dynamic";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {

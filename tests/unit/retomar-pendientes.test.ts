@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs";
 
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockSelect, mockUpdate, mockRunIntakeAgent, mockDbDeBase } = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 vi.mock("@/server/agents/intake-agent", () => ({ runIntakeAgent: mockRunIntakeAgent }));
 
+import { FUNCION_MAS_CORTA_MS } from "@/core/case/reserva-de-extraccion";
 import { retomarExtraccionesPendientes, marcarPendientes, MINIMO_PARA_RETOMAR_MS } from "@/server/intake/retomar-pendientes";
 
 /** El `select(...).from(...).where(...).limit(n)` del barrido. */
@@ -181,6 +183,92 @@ describe("con el reloj", () => {
     expect(r.retomados).toBe(1);
     expect(r.caseIds).toEqual(["caso-1"]);
     expect(avisos.join(" ")).toMatch(/quedaron\D+1/);
+  });
+});
+
+describe("con caseId: sólo ese caso, sin la espera", () => {
+  const TENANT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const SAVED = process.env.BASE_POR_CLIENTE;
+
+  /** Lo que el barrido le pasó a `.where(...)` y a `.limit(...)`, ya serializado a SQL. */
+  function capturando() {
+    const visto: { where?: { sql: string; params: unknown[] }; limit?: number } = {};
+    mockSelect.mockReturnValue({
+      from: () => ({
+        where: (filtro: Parameters<PgDialect["sqlToQuery"]>[0]) => {
+          const { sql, params } = new PgDialect().sqlToQuery(filtro);
+          visto.where = { sql, params };
+          return {
+            limit: (n: number) => {
+              visto.limit = n;
+              return Promise.resolve([{ id: "caso-1", tenant_id: TENANT }]);
+            },
+          };
+        },
+      }),
+    });
+    return visto;
+  }
+
+  beforeEach(() => {
+    delete process.env.BASE_POR_CLIENTE;
+  });
+
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.BASE_POR_CLIENTE;
+    else process.env.BASE_POR_CLIENTE = SAVED;
+  });
+
+  it("filtra por el caso y por el inquilino, y no espera los dos minutos", async () => {
+    const visto = capturando();
+
+    await retomarExtraccionesPendientes({ tenantId: TENANT, caseId: "caso-1", limit: 1 });
+
+    expect(visto.where?.params).toContain("caso-1");
+    expect(visto.where?.params).toContain(TENANT);
+    expect(visto.where?.sql).not.toContain("coalesce");
+    expect(visto.limit).toBe(1);
+  });
+
+  it("sigue pasando por los mismos predicados: estado, marca y reserva", async () => {
+    const visto = capturando();
+
+    await retomarExtraccionesPendientes({ tenantId: TENANT, caseId: "caso-1" });
+
+    expect(visto.where?.sql).toContain('"cases"."status" in');
+    expect(visto.where?.sql).toContain('"cases"."extraction_pending" =');
+    expect(visto.where?.sql).toContain('"cases"."extraction_lease_at"');
+  });
+
+  it("sin caseId espera como siempre", async () => {
+    const visto = capturando();
+
+    await retomarExtraccionesPendientes({ tenantId: TENANT });
+
+    expect(visto.where?.sql).toContain("coalesce");
+    expect(visto.where?.params).not.toContain("caso-1");
+  });
+
+  it("la función más corta alcanza para que el barrido empiece la corrida", () => {
+    // El flujo de la retoma le pasa ese corte: si no alcanzara, cortaría con
+    // `sin_tiempo` sin retomar nada.
+    expect(FUNCION_MAS_CORTA_MS).toBeGreaterThanOrEqual(MINIMO_PARA_RETOMAR_MS);
+  });
+
+  it("corre el agente sobre ese caso con la retoma y el corte que le dieron", async () => {
+    capturando();
+    const hasta = Date.now() + MINIMO_PARA_RETOMAR_MS + 60_000;
+
+    const r = await retomarExtraccionesPendientes({ tenantId: TENANT, caseId: "caso-1", limit: 1, hasta });
+
+    expect(r).toEqual({ retomados: 1, caseIds: ["caso-1"] });
+    expect(mockRunIntakeAgent).toHaveBeenCalledWith({
+      caseId: "caso-1",
+      tenantId: TENANT,
+      source: "worker",
+      retoma: true,
+      hasta,
+    });
   });
 });
 

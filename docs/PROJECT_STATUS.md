@@ -4896,7 +4896,37 @@ pen test verdes) y por #439 a main (`080eb325`); Dependabot cerró #434 solo.
   `pnpm check` completo dio verde en 14,4 min: 14 497 tests, flujos 3/3, 26 conversaciones y
   smoke sobre `080eb32`.
 
+### Actions sin cuota hasta el 1/11, y CI que saltea lo que es sólo documentación (2026-10-15, rama `ci/solo-docs`)
+
+El presupuesto de US$ 50 por mes de GitHub Actions de la cuenta se gastó entero el 15/10:
+octubre suma US$ 64,08 brutos, de los que claimmix son 42,44 y uns-study 20,40 (propflow
+0,85, republica-en-llamas 0,38). Desde ahí ningún job arranca («The job was not started
+because an Actions budget is preventing further use») hasta que el ciclo se reinicia el
+1/11. No se sube el presupuesto ni se cambia de plan.
+
+- **Qué queda parado.** CI, CodeQL y Secretos de los PR, los Post-deploy de QA, dev y PRD, la
+  Carga y el barrido `barrer-trabados`. Los casos trabados en prd los levanta sólo el cron
+  diario de Vercel `/api/cron/reap-stuck` (04:07 UTC). #440 (sólo docs) está en qa sin
+  veredicto: el ensayo del run 38711929216 se canceló a los 75 min por timeouts de Vertex y
+  el reintento (el primero de dos) no arrancó por el presupuesto.
+- **Dónde se fueron los minutos de octubre.** 7058 en total: CI de PR 3298, Post-deploy 1728,
+  CI de push 795, CodeQL de PR 414, Secretos de PR 197, barrido 170, CodeQL de push 134 y
+  Carga 101. Un PR que sólo tocaba documentación costaba unos 60 minutos (CI 30, CodeQL 5,
+  Secretos 1 y QA de 22 a 25).
+- **Sólo docs** (rama `ci/solo-docs`). Un commit que sólo cambia archivos `.md` (salvo
+  `docs/PROMOCION.md`, que leen los tests) sobre un árbol que ya pasó hereda su marca: `arbol`
+  saltea los jobs de código, CodeQL no analiza y el Post-deploy de QA corre todo menos el
+  ensayo, con el veredicto en verde y la marca `ensayo-verde-<árbol>`, así que dev tampoco
+  ensaya. Un renombre desde un archivo de código, 300 archivos o más, o un error de la API
+  cuentan como código. `tests/unit/ci-solo-docs.test.ts` corre los scripts reales con un `gh`
+  falso; en Actions no se puede probar hasta el 1/11.
+- **Aviso.** GitHub pasa `ubuntu-latest` a Ubuntu 26 desde el 19/10.
+
 ### 🙋 Waiting on you (not code)
+
+- **Actions sin cuota hasta el 1/11.** Sin planes pagos, las opciones son esperar, un runner
+  propio en tu máquina (con tu OK) o un cron externo gratis para el barrido de trabados, que
+  configurás vos. Sin CI no hay promoción a prd: la próxima lleva #436–#440 y `ci/solo-docs`.
 
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner

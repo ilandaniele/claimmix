@@ -987,6 +987,16 @@ veredicto de QA sale verde, `qa_veredicto` deja el artefacto `ensayo-verde-<árb
 el resumen. Ante cualquier duda (sin marca, error de la API, disparo a mano) ensaya. Contra
 la base de dev lo vuelve a correr el `pnpm check` completo de después de cada deploy.
 
+**Un cambio que sólo toca documentación no se ensaya.** Si el commit desplegado a QA difiere
+de su padre sólo en archivos `.md` (salvo `docs/PROMOCION.md`, que leen los tests) y el
+padre tiene la marca `ensayo-verde-<árbol>`, `qa_secretos` lo detecta y `QA` corre smoke,
+migraciones y pen test, pero no el ensayo. El veredicto sale verde con la descripción «sólo
+docs, el ensayo es el del árbol anterior» y deja la marca del árbol nuevo, así que dev
+tampoco lo repite. Con la misma comparación, `arbol` de `ci.yml` saltea los jobs de código y
+CodeQL no analiza. Ante cualquier duda (el padre sin marca, un renombre desde un archivo de
+código, 300 archivos o más, un error de la API) corre todo. `tests/unit/ci-solo-docs.test.ts`
+corre los scripts reales de los tres workflows con un `gh` falso.
+
 **Contra prd corre todavía menos, a propósito.** `claimmix-prd` es el proyecto de Vercel
 con los clientes de verdad, y el job `PRD` de `post-deploy.yml` (se dispara con el
 entorno `Production` de ese proyecto, igual que el de QA) no escribe nada: corre

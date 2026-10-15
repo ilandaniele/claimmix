@@ -303,8 +303,12 @@ jobs:
       github.event.deployment_status.state == 'success' &&
       startsWith(github.event.deployment.environment, 'Production') &&
       endsWith(github.event.deployment.environment, '-qa')
+    permissions:
+      actions: read
+      contents: read
     outputs:
       ensayo: ${{ steps.mirar.outputs.ensayo }}
+      solo_docs: ${{ steps.docs.outputs.solo_docs }}
     steps:
       - name: Que estén, y que no sean los de producción
         id: mirar
@@ -384,6 +388,33 @@ jobs:
             echo "::notice title=QA sin ensayo::Faltan los QA_R2_* - el ensayo no corre."
           fi
 
+      # Un merge a `qa` que sólo trae `.md` arma el mismo código que el commit
+      # anterior. Si ese árbol ya tiene la marca de QA, el ensayo no se repite:
+      # corre todo lo demás, como `ensayo_previo` en dev, y el veredicto deja la
+      # marca para este árbol. Mismo filtro que `arbol` en ci.yml. Cualquier
+      # error cae del lado seguro: ensaya.
+      - name: ¿Sólo documentación sobre un árbol ensayado?
+        id: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          solo_docs=false
+          padre=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA" --jq '.parents[0].sha' 2>/dev/null || true)
+          arbol_padre=""
+          [ -z "$padre" ] || arbol_padre=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$padre" --jq .tree.sha 2>/dev/null || true)
+          if [ -n "$arbol_padre" ]; then
+            hay=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ensayo-verde-$arbol_padre&per_page=20"               --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)] | length" 2>/dev/null || echo 0)
+            if [ "$hay" -gt 0 ] 2>/dev/null; then
+              otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md") and . != "docs/PROMOCION.md") | not)] | length end' 2>/dev/null || echo 1)
+              if [ "$otros" = 0 ]; then solo_docs=true; fi
+            fi
+          fi
+          echo "solo_docs=$solo_docs" >> "$GITHUB_OUTPUT"
+          if [ "$solo_docs" = true ]; then
+            echo "Sólo cambió documentación sobre un árbol que QA ya ensayó: el ensayo no se repite." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # ── QA: lo que sí puede correr ──────────────────────────────────────────────
   #
   # Corre el smoke, las dos comparaciones contra el catálogo, el pen test —con
@@ -425,7 +456,7 @@ jobs:
       url: https://claimmix-qa.vercel.app
       entorno: QA
       smoke_profundo: false
-      correr_ensayo: ${{ needs.qa_secretos.outputs.ensayo == '1' }}
+      correr_ensayo: ${{ needs.qa_secretos.outputs.ensayo == '1' && needs.qa_secretos.outputs.solo_docs != 'true' }}
       correr_timbre: false
       correr_pentest: true
       pared_propia: true
@@ -493,12 +524,16 @@ jobs:
           SECRETOS: ${{ needs.qa_secretos.result }}
           QA: ${{ needs.qa.result }}
           ENSAYO: ${{ needs.qa_secretos.outputs.ensayo }}
+          SOLO_DOCS: ${{ needs.qa_secretos.outputs.solo_docs }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$SECRETOS" = "success" ] && [ "$QA" = "success" ]; then
             if [ "$ENSAYO" = "1" ]; then
               estado=success
               descripcion="QA pasó todos sus chequeos"
+              if [ "$SOLO_DOCS" = "true" ]; then
+                descripcion="QA pasó; sólo docs, el ensayo es el del árbol anterior"
+              fi
             else
               estado=failure
               descripcion="QA sin ensayo (faltan QA_R2_*)"
@@ -515,7 +550,8 @@ jobs:
           [ "$estado" = "success" ] || exit 1
 
       # La marca que lee `ensayo_previo`. Sólo llega acá con el veredicto
-      # verde, que exige el ensayo corrido y pasado.
+      # verde, que exige el ensayo corrido y pasado, o heredado de un árbol que
+      # difiere sólo en documentación.
       - name: Hash del árbol ensayado
         id: arbol
         env:

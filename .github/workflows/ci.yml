@@ -51,6 +51,13 @@ jobs:
   # probaron sigue valiendo porque los archivos son los mismos. Quedan afuera
   # los que dependen del día y no del código: `Vulnerabilidades` y CodeQL.
   #
+  # Lo mismo cuando el árbol es nuevo pero el del padre ya pasó y lo único que
+  # cambió son archivos `.md` que ningún test lee: un PR de documentación
+  # gastaba media hora de tests sobre el código de siempre. Ese árbol hereda la
+  # marca acá mismo, así el PR de `qa` a `main` y el push tampoco repiten. El
+  # filtro de jq es el mismo en codeql.yml y post-deploy.yml, y
+  # tests/unit/ci-solo-docs.test.ts lo fija junto con los `.md` que sí se leen.
+  #
   # Cualquier error acá cae del lado seguro: corre todo. `workflow_dispatch`
   # corre todo siempre.
   arbol:
@@ -72,22 +79,50 @@ jobs:
           AUTOR: ${{ github.event.pull_request.user.login }}
         run: |
           saltear=false
+          solo_docs=false
+          # Sólo cuenta una marca de este repo: un fork no puede dejar una.
+          marca() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ci-verde-$1&per_page=20" \
+              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)] | length" 2>/dev/null || echo 0
+          }
           # En un PR, GITHUB_SHA es el merge con la base: el árbol que quedaría.
           arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha 2>/dev/null || true)
           if [ "$AUTOR" = "dependabot[bot]" ]; then
             # No se mergea suelto (ver `lote`): probarlo es gastar minutos.
             saltear=true
           elif [ "$EVENTO" != "workflow_dispatch" ] && [ -n "$arbol" ]; then
-            # Sólo cuenta una marca de este repo: un fork no puede dejar una.
-            hay=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ci-verde-$arbol&per_page=20" \
-              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)] | length" 2>/dev/null || echo 0)
-            if [ "$hay" -gt 0 ] 2>/dev/null; then saltear=true; fi
+            if [ "$(marca "$arbol")" -gt 0 ] 2>/dev/null; then
+              saltear=true
+            else
+              padre=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha' 2>/dev/null || true)
+              arbol_padre=""
+              [ -z "$padre" ] || arbol_padre=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$padre" --jq .tree.sha 2>/dev/null || true)
+              if [ -n "$arbol_padre" ] && [ "$(marca "$arbol_padre")" -gt 0 ] 2>/dev/null; then
+                otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$GITHUB_SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md") and . != "docs/PROMOCION.md") | not)] | length end' 2>/dev/null || echo 1)
+                if [ "$otros" = 0 ]; then saltear=true; solo_docs=true; fi
+              fi
+            fi
           fi
           echo "arbol=$arbol" >> "$GITHUB_OUTPUT"
           echo "saltear=$saltear" >> "$GITHUB_OUTPUT"
-          if [ "$saltear" = true ]; then
+          echo "solo_docs=$solo_docs" >> "$GITHUB_OUTPUT"
+          if [ "$solo_docs" = true ]; then
+            echo "Sólo cambió documentación sobre un árbol ya probado: se saltean los jobs que sólo dependen del código." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$saltear" = true ]; then
             echo "Árbol \`${arbol:-?}\` ya probado: se saltean los jobs que sólo dependen del código." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Marca del árbol de sólo docs
+        if: steps.buscar.outputs.solo_docs == 'true' && github.event.pull_request.head.repo.fork != true
+        run: echo "$GITHUB_SHA" > marca.txt
+
+      - if: steps.buscar.outputs.solo_docs == 'true' && github.event.pull_request.head.repo.fork != true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-verde-${{ steps.buscar.outputs.arbol }}
+          path: marca.txt
+          retention-days: 7
+          overwrite: true
 
   # ── 1. Tipos ─────────────────────────────────────────────────────────────────
   typecheck:

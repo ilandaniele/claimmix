@@ -314,6 +314,51 @@ describe("rehostAttachments", () => {
     expect(mockUploadAttachment).not.toHaveBeenCalled();
   });
 
+  it("AC11: al vencer el plazo de una subida en vuelo se aborta el PutObject", async () => {
+    /*
+     * Dejar de esperar no alcanza: si la subida sigue, el objeto aparece en R2
+     * sin fila que lo apunte y el barrido de retención (que borra por
+     * storage_path) nunca lo purga. El plazo tiene que cancelarla.
+     */
+    let senal: AbortSignal | undefined;
+    mockUploadAttachment.mockImplementation(
+      (opts: { abortSignal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          senal = opts.abortSignal;
+          opts.abortSignal?.addEventListener("abort", () => resolve({ error: "STORAGE_UPLOAD_FAILED" }));
+        })
+    );
+
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [buildPdfAttachment()],
+      budgetMs: 20,
+    });
+
+    expect(results).toEqual([{ stored: false, reason: "rehost_timeout" }]);
+    expect(senal).toBeDefined();
+    expect(senal?.aborted).toBe(true);
+  });
+
+  it("una subida que termina a tiempo no queda abortada", async () => {
+    let senal: AbortSignal | undefined;
+    mockUploadAttachment.mockImplementation((opts: { abortSignal?: AbortSignal }) => {
+      senal = opts.abortSignal;
+      return Promise.resolve({ storagePath: "p" });
+    });
+
+    const results = await rehostAttachments({
+      ...BASE_OPTS,
+      attachments: [buildPdfAttachment()],
+      budgetMs: 30,
+    });
+    // Pasado el plazo: el timer tiene que estar apagado, no abortar una subida ya hecha.
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(results[0].stored).toBe(true);
+    expect(senal?.aborted).toBe(false);
+  });
+
   // ── Upload failure ────────────────────────────────────────────────────────────
 
   it("upload failure → stored:false, reason=storage_upload_failed", async () => {

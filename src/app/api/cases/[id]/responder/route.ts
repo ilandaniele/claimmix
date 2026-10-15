@@ -22,7 +22,7 @@ import { getClientIp, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { RespuestaHumanaSchema } from "@/lib/schemas/respuesta";
 import { responderPorWhatsApp } from "@/server/confirmations/respuesta-humana";
 
-const ParamsSchema = z.object({ id: z.string().uuid("ID de caso inválido.") });
+const ParamsSchema = z.object({ id: z.guid("ID de caso inválido.") });
 
 export async function POST(
   request: NextRequest,

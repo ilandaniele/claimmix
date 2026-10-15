@@ -86,6 +86,7 @@ export function RestablecerForm({ token }: { token: string }) {
           name="password"
           type="password"
           autoComplete="new-password"
+          maxLength={128}
           required
           aria-required="true"
           aria-describedby="password-ayuda"
@@ -94,7 +95,7 @@ export function RestablecerForm({ token }: { token: string }) {
           disabled={isPending}
         />
         <p id="password-ayuda" className="mt-1 text-xs text-slate-500">
-          Al menos 8 caracteres.
+          Entre 8 y 128 caracteres.
         </p>
         {state.fieldErrors?.password && (
           <p role="alert" className="mt-1 text-xs text-red-600">
@@ -112,6 +113,7 @@ export function RestablecerForm({ token }: { token: string }) {
           name="repetir"
           type="password"
           autoComplete="new-password"
+          maxLength={128}
           required
           aria-required="true"
           aria-invalid={!!state.fieldErrors?.repetir}

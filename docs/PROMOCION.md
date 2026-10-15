@@ -219,23 +219,23 @@ marcando Production, Preview y Development.
 
 ⛔ **Nunca las de producción.** QA existe para poder romper cosas.
 
-### 4bis. Las dieciocho variables de `claimmix-qa`
+### 4bis. Las diecisiete variables de `claimmix-qa`
 
 Las 63 que Vercel creó al importar salen de `.env.example` y vienen VACÍAS. Estas
-dieciocho hay que llenarlas. La que cuenta es Production: `claimmix-qa` sólo
+diecisiete hay que llenarlas. La que cuenta es Production: `claimmix-qa` sólo
 construye la rama `qa`, y ése es su entorno de producción. Hoy casi todas están
 también en Preview, y las dos `DATABASE_URL*` también en Development; no hace
 falta, pero no molesta. `NEXT_PUBLIC_SITE_URL` está sólo en Production.
 
-Tres se **crean**: `GEMINI_TRANSPORT` y `VERTEX_EXTRACTION_MODEL` porque hasta
-#212 no estaban en `.env.example` y Vercel no las detectó; `ADMIN_EMAILS` porque
-nunca estuvo ahí, sólo nombrada en un comentario. Las otras quince ya existen
-vacías: se **editan**.
+Dos se **crean**: `GEMINI_TRANSPORT` porque hasta #212 no estaba en
+`.env.example` y Vercel no la detectó; `ADMIN_EMAILS` porque nunca estuvo ahí,
+sólo nombrada en un comentario. Las otras quince ya existen vacías: se
+**editan**. `VERTEX_EXTRACTION_MODEL` ya no va: el modelo lo fija el código, y
+una variable cargada lo pisa.
 
 | variable | valor | tipo | crear o editar |
 |---|---|---|---|
 | `GEMINI_TRANSPORT` | `vertex` | Config | **crear** |
-| `VERTEX_EXTRACTION_MODEL` | de `.env.local` | Secret | **crear** |
 | `GOOGLE_CLOUD_PROJECT` | `claimmix-506321` | Config | editar |
 | `GOOGLE_CLOUD_LOCATION` | `us-central1` | Config | editar |
 | `AI_TENANT_DAILY_TOKEN_CAP` | `20000000` | Config | editar |
@@ -289,12 +289,10 @@ contra producción contesta `401 INVALID_EMAIL_OR_PASSWORD` — o sea que allá
 llega a mirar la credencial y en QA ni eso. Rompe el login del navegador, no
 sólo el de k6.
 
-**Los cinco valores que no se escriben a mano.** Todo esto va en Git Bash, que
+**Los cuatro valores que no se escriben a mano.** Todo esto va en Git Bash, que
 viene con Git para Windows; `clip` es de Windows y deja el valor en el
 portapapeles, listo para pegar en Vercel sin que pase por pantalla.
 
-- `VERTEX_EXTRACTION_MODEL`:
-  `grep '^VERTEX_EXTRACTION_MODEL=' .env.local | cut -d= -f2- | tr -d '\r\n' | clip`
 - `BETTER_AUTH_SECRET`: `openssl rand -base64 32 | tr -d '\r\n' | clip`
 - `CRON_SECRET`: `openssl rand -hex 32 | tr -d '\r\n' | clip`. Pegalo en Vercel
   y, sin cerrar el portapapeles, también en el secreto de repositorio
@@ -305,9 +303,10 @@ portapapeles, listo para pegar en Vercel sin que pase por pantalla.
   rol `neondb_owner` (esa es `DATABASE_URL`) y la otra con `claimmix_app` (esa
   es `DATABASE_URL_APP`).
 
-⚠ **Si el agente de QA queda mudo, mirá las dos primeras.** Son las que deciden
-por dónde sale la extracción y con qué modelo, y su ausencia no rompe el build ni
-el arranque: el síntoma llega recién con el primer mensaje que nadie contesta.
+⚠ **Si el agente de QA queda mudo, mirá `GEMINI_TRANSPORT` y que no haya quedado
+un `VERTEX_EXTRACTION_MODEL` viejo.** Deciden por dónde sale la extracción y con
+qué modelo, y ninguna rompe el build ni el arranque: el síntoma llega recién con
+el primer mensaje que nadie contesta.
 
 ⛔ **`GMAIL_TENANT_ID`, `GMAIL_USER_EMAIL` y `WHATSAPP_ACCESS_TOKEN` se dejan
 vacías.** Así QA lee, extrae, clasifica y decide, pero no le escribe a nadie.

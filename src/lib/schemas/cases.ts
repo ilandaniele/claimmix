@@ -136,8 +136,8 @@ export const CaseQuerySchema = z.object({
   // Filtro de fraude de la bandeja (G35). Aditivo: sin él, ninguna consulta
   // ni el CSV cambian.
   fraude: listaDe(FraudRiskLevelSchema),
-  customer_id: z.string().uuid().optional(),
-  policy_id: z.string().uuid().optional(),
+  customer_id: z.guid().optional(),
+  policy_id: z.guid().optional(),
   channel: listaDe(ChannelSchema),
   // Varios a la vez se leen «cualquiera de estos», como el resto de los grupos.
   vencimiento: listaDe(VencimientoFiltroSchema),
@@ -148,8 +148,8 @@ export const CaseQuerySchema = z.object({
   // rompía el sondeo y el CSV de una página que sí se veía.
   para_responder: z
     .string()
-    .optional()
-    .transform((v) => (v === "true" ? true : undefined)),
+    .transform((v) => (v === "true" ? true : undefined))
+    .optional(),
   // «Mi cola»: nunca acepta un id de usuario por la query, sólo esta marca.
   // Quién es «mi» lo resuelve el servidor con la sesión.
   cola: z.literal("mia").optional(),
@@ -161,7 +161,7 @@ export type CaseQuery = z.infer<typeof CaseQuerySchema>;
 export const CasePatchSchema = z
   .object({
     status: CaseStatusSchema.optional(),
-    assigned_to: z.string().uuid("ID de analista inválido.").optional().nullable(),
+    assigned_to: z.guid("ID de analista inválido.").optional().nullable(),
     reason: z.string().max(500).optional(),
     confirmar_listo: z.literal(true).optional(),
   })

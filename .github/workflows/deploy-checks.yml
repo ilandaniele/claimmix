@@ -129,8 +129,6 @@ on:
         required: false
       GOOGLE_CLOUD_LOCATION:
         required: false
-      VERTEX_EXTRACTION_MODEL:
-        required: false
       R2_ACCOUNT_ID:
         required: false
       R2_ACCESS_KEY_ID:
@@ -255,7 +253,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -352,7 +350,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -419,7 +417,6 @@ jobs:
           GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
-          VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
           # El cupo diario de tokens del tenant.
           #
           # El ensayo corre acá, en el runner, no adentro del deploy — así que
@@ -482,7 +479,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -612,7 +609,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -718,7 +715,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -827,7 +824,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -861,7 +858,6 @@ jobs:
           GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
-          VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
           AI_TENANT_DAILY_TOKEN_CAP: ${{ vars.AI_TENANT_DAILY_TOKEN_CAP || '20000000' }}
           AI_ANONIMO_DAILY_TOKEN_CAP: ${{ vars.AI_ANONIMO_DAILY_TOKEN_CAP }}
 

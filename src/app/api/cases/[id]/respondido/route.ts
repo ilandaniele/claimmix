@@ -20,7 +20,7 @@ import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 import { getClientIp, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { marcarRespondido } from "@/server/cases/para-responder";
 
-const ParamsSchema = z.object({ id: z.string().uuid("ID de caso inválido.") });
+const ParamsSchema = z.object({ id: z.guid("ID de caso inválido.") });
 const BodySchema = z.object({ visto: z.string().datetime({ offset: true }) });
 
 export async function POST(

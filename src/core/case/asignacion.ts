@@ -36,7 +36,7 @@ const ReglaSchema = z
   .object({
     tipos: z.array(ClaimTypeSchema).min(1).max(ClaimTypeSchema.options.length).optional(),
     turno: TurnoSchema.optional(),
-    personas: z.array(z.string().uuid()).min(1).max(50),
+    personas: z.array(z.guid()).min(1).max(50),
   })
   .strict();
 

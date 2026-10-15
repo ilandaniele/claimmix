@@ -34,8 +34,9 @@ const BASE: ExtractedClaim = ExtractedClaimSchema.parse({
   cost_usd: 0,
 });
 
+/** Parcial: en Zod 4 un campo con `.catch()` es obligatorio en el input, y `BASE` ya lo aporta. */
 export function extraccion(
-  parcial: z.input<typeof ExtractedClaimSchema>
+  parcial: Partial<z.input<typeof ExtractedClaimSchema>>
 ): ExtractedClaim {
   return { ...BASE, ...parcial } as ExtractedClaim;
 }

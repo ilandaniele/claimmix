@@ -33,7 +33,11 @@ const SIN_DATOS_DE_PERSONAS: Required<Omit<DataCollection, "frameContextLines">>
 if (process.env.SENTRY_DSN) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
-    environment: process.env.NODE_ENV,
+    // NODE_ENV vale production también en los previews; VERCEL_ENV los separa.
+    // Prd, dev y QA son tres proyectos que dan production los tres: eso no se
+    // distingue acá. Fuera de Vercel cae a NODE_ENV.
+    environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
+    release: process.env.VERCEL_GIT_COMMIT_SHA,
     tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
     dataCollection: SIN_DATOS_DE_PERSONAS,
     // La v11 manda los spans en tandas por defecto y ahí ignora

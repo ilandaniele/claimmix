@@ -19,7 +19,7 @@ import { autenticarClave, SIN_CACHE } from "../../_auth";
 
 export const dynamic = "force-dynamic";
 
-const IdSchema = z.string().uuid("ID de caso inválido.");
+const IdSchema = z.guid("ID de caso inválido.");
 
 export async function GET(
   request: NextRequest,

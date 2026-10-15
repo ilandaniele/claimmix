@@ -30,7 +30,7 @@ const CLAVE_DE_TIPO = z.union([ClaimTypeSchema, z.literal("*")]);
 
 export const PlanSchema = z
   .object({
-    porTipo: z.record(CLAVE_DE_TIPO, z.array(PasoSchema).min(1).max(30)),
+    porTipo: z.partialRecord(CLAVE_DE_TIPO, z.array(PasoSchema).min(1).max(30)),
   })
   .strict()
   .superRefine((plan, ctx) => {

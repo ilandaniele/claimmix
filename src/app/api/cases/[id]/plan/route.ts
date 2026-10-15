@@ -16,7 +16,7 @@ import { AppError } from "@/lib/errors";
 import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { marcarPaso } from "@/server/cases/plan-de-trabajo";
 
-const ParamsSchema = z.object({ id: z.string().uuid("ID de caso inválido.") });
+const ParamsSchema = z.object({ id: z.guid("ID de caso inválido.") });
 const BodySchema = z
   .object({ clave: z.string().min(1).max(80), hecho: z.boolean() })
   .strict();

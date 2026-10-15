@@ -7,8 +7,9 @@
  * Storage path convention (IC2):
  *   {tenant_id}/{case_id}/{message_id}/{random8hex}-{sanitized_filename}
  *
- * The bucket is private; signed URLs (TTL 1h) are used for read access.
- * This module handles write only; read URL generation is out of scope for W6.
+ * El bucket es privado y no hay URLs firmadas a propósito: la lectura se sirve
+ * en streaming desde la ruta autenticada GET /api/cases/:id/attachments/:attachmentId
+ * (ver `abrirAdjunto`), así que el permiso se decide en cada pedido.
  *
  * AC7: Attachments uploaded with content_hash in claim_attachments row.
  */
@@ -61,8 +62,18 @@ export function createStorageClient(): S3Client {
   return client;
 }
 
-/** Writes a new object; a key that already exists fails with 412. */
-async function put(key: string, contentType: string, data: Buffer): Promise<void> {
+/**
+ * Writes a new object; a key that already exists fails with 412.
+ *
+ * `abortSignal` corta el PutObject en vuelo: quien le pone un plazo a la subida
+ * tiene que poder cancelarla, no sólo dejar de esperarla.
+ */
+async function put(
+  key: string,
+  contentType: string,
+  data: Buffer,
+  abortSignal?: AbortSignal
+): Promise<void> {
   await createStorageClient().send(
     new PutObjectCommand({
       Bucket: bucketName(),
@@ -71,7 +82,8 @@ async function put(key: string, contentType: string, data: Buffer): Promise<void
       ContentType: contentType,
       // Fail when the key already exists (replicates Neon upsert: false).
       IfNoneMatch: "*",
-    })
+    }),
+    { abortSignal }
   );
 }
 
@@ -87,6 +99,8 @@ export interface UploadAttachmentOpts {
   filename: string;
   contentType: string;
   data: Buffer;
+  /** Si se aborta, la subida se corta y el resultado es `STORAGE_UPLOAD_FAILED`. */
+  abortSignal?: AbortSignal;
 }
 
 export type UploadAttachmentResult =
@@ -108,13 +122,13 @@ export type UploadAttachmentResult =
 export async function uploadAttachment(
   opts: UploadAttachmentOpts
 ): Promise<UploadAttachmentResult> {
-  const { tenantId, caseId, messageId, filename, contentType, data } = opts;
+  const { tenantId, caseId, messageId, filename, contentType, data, abortSignal } = opts;
 
   const sanitizedName = sanitizeFilename(filename);
   const storagePath = `${tenantId}/${caseId}/${messageId}/${sanitizedName}`;
 
   try {
-    await put(storagePath, contentType, data);
+    await put(storagePath, contentType, data, abortSignal);
   } catch (error) {
     // Log status code only — path may contain tenant/case IDs but not PII.
     // 412 PreconditionFailed = key already exists (duplicate upload).

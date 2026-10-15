@@ -21,7 +21,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 export const dynamic = "force-dynamic";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 
 export async function DELETE(
   _request: NextRequest,

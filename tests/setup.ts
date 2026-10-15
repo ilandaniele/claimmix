@@ -7,6 +7,12 @@
  */
 
 import "@testing-library/jest-dom";
+import type { TestingLibraryMatchers } from "@testing-library/jest-dom/matchers";
+
+// Vitest 5 ya no lee `jest.Matchers`: los matchers de jest-dom se declaran acá.
+declare module "vitest" {
+  interface Matchers<R extends void | Promise<void>, T> extends TestingLibraryMatchers<unknown, R> {}
+}
 
 /*
  * El secreto de sesión, para los tests que importan `@/lib/auth`.

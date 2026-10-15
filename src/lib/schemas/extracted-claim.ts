@@ -226,13 +226,17 @@ export const ExtractedClaimSchema = z.object({
   /**
    * Advisory customer match hints from the extractor.
    * Server-side customer-matcher module runs the authoritative match.
+   *
+   * El modelo no conoce ningún id: Gemini 3.8 pone el número de póliza en
+   * `policy_id` y eso tiraba la extracción entera. Una pista mal escrita queda
+   * vacía, como `adjuntos`.
    */
-  possible_customer_matches: z.array(PossibleCustomerMatchSchema).default([]),
+  possible_customer_matches: z.array(PossibleCustomerMatchSchema).default([]).catch([]),
 
   /**
    * Advisory policy match hints from the extractor.
    */
-  possible_policy_matches: z.array(PossiblePolicyMatchSchema).default([]),
+  possible_policy_matches: z.array(PossiblePolicyMatchSchema).default([]).catch([]),
 
   /**
    * Severity level determined by the severity classifier.

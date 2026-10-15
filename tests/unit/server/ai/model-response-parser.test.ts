@@ -72,4 +72,16 @@ describe("model JSON parser", () => {
     expect(parsed?.is_claim).toBe(true);
     expect(parsed?.extraction_model).toBe("gemini-2.5-flash");
   });
+
+  it("una pista de póliza con el número en vez del id no tira la extracción (Gemini 3.8)", () => {
+    const content = JSON.stringify({
+      ...validExtraction(),
+      possible_policy_matches: [{ policy_id: "POL-9982-C", policy_number: "POL-9982-C", match_score: 0.9 }],
+      possible_customer_matches: [{ customer_id: "", match_score: 1, match_reason: "name" }],
+    });
+    const parsed = parseEmailResponse(content, "gemini-3.8-flash");
+    expect(parsed?.is_claim).toBe(true);
+    expect(parsed?.possible_policy_matches).toEqual([]);
+    expect(parsed?.possible_customer_matches).toEqual([]);
+  });
 });

@@ -4896,11 +4896,47 @@ pen test verdes) y por #439 a main (`080eb325`); Dependabot cerró #434 solo.
   `pnpm check` completo dio verde en 14,4 min: 14 497 tests, flujos 3/3, 26 conversaciones y
   smoke sobre `080eb32`.
 
+### DNI o CUIT, y tres decisiones de auth (2026-10-15, #442)
+
+- **DNI o CUIT del titular** (#442, en la rama `agente/dni-o-cuit`). En `consorcio-por-mail` el
+  agente le pedía DNI a un consorcio, que no tiene. La etiqueta de `dni` pasa a «DNI o CUIT del
+  titular», la oración de pedido de `dni` y `dni_asegurado` nombra el CUIT para consorcios y
+  empresas, el prompt de extracción acepta el CUIT en `dni`, y el control de campos caídos de
+  `compose-reply.ts` toma «CUIT» como pedido del dato. Ensayo verde con 2.5-flash y con
+  3.8-flash; unit tests y `pnpm check --local --fast` verdes. Espera CI (ver abajo).
+- **Póliza cambiada a mitad de caso: decisión del dueño, sin código.** Si la persona corrige el
+  número de póliza (4455 → 4471), el valor nuevo pisa `extracted_fields` antes del análisis de
+  faltantes (`extract.ts`) y `detectConflicts` sólo compara nombre, mail y DNI, así que el agente
+  no lo menciona. El arreglo está mapeado (un `poliza-cambiada.ts` en `src/core/case`, el
+  worker pasa la póliza anterior, el orquestador arma un conflicto con `conflictWithValue`),
+  pero choca con AC24: `maskPolicyNumber` tapa el número entero y `template-render.test.ts`
+  exige que no aparezca. Ya figura como decisión abierta en `docs/AUDITORIA-2026-09.md` (LOW).
+  Falta decidir si el agente avisa el cambio y si AC24 se afloja para valores que escribió la
+  propia persona.
+- **Prefetch fuera del proxy: descartado.** Sacar del matcher los pedidos con
+  `next-router-prefetch` ahorraría invocaciones, pero ese header lo pone el cliente: cualquiera
+  se saltearía la redirección a `/login` y el CSP con nonce.
+- **`cookieCache` de 60 s: se queda.** Ya estaba decidido (ver más arriba): el remedio es
+  invalidar, no acortar, y eso pide un hook de Better Auth. La pantalla avisa la demora.
+- **Restablecer contraseña no es atómico: aceptado.** Better Auth cambia la clave y cierra las
+  sesiones en sentencias separadas sobre `neon-http`, que no tiene transacciones interactivas.
+  Hacerlo atómico pide pasar ese camino a un pool por WebSocket; no compensa el riesgo hoy.
+- **Latencia de 3.8 en prd: sin datos.** La base de prd tiene 0 casos y 0 eventos de
+  proveedor; no hay tráfico que medir. En local, una extracción tardó 25 s.
+- **CI parado hasta el 1/11.** El presupuesto de Actions del mes se agotó y todos los jobs
+  fallan a los 2–3 s. #441 y #442 esperan CI; #440 espera el veredicto de QA. La promoción de
+  #436–#442 a prd queda para después, con el OK del dueño.
+
 ### 🙋 Waiting on you (not code)
 
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner
   `VERTEX_EXTRACTION_MODEL=gemini-3.8-flash` o borrar la línea.
+- **Póliza cambiada a mitad de caso.** Decidir si el agente avisa cuando la persona corrige el
+  número de póliza y si AC24 se afloja para valores que escribió ella misma. El arreglo está
+  mapeado en «DNI o CUIT, y tres decisiones de auth».
+- **Actions hasta el 1/11.** El presupuesto del mes se agotó: #440, #441 y #442 esperan CI, y
+  la promoción a prd espera tu OK.
 
 - **App propia del cliente: antes de prenderla.** (1) W6, el ensayo manual en dev con un
   portfolio de prueba nuevo y el chip de repuesto; cierra las incógnitas I1 a I42 de la

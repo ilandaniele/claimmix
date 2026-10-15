@@ -13,12 +13,13 @@
 
 import "server-only";
 
-import { and, count, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import {
   ESTADOS_CERRADOS,
   ESTADOS_COMPLETADO_SIN_PERSONA,
   ESTADOS_ESCALADO,
   FSM_TRANSITIONS,
+  type CaseStatus,
 } from "@/core/case/fsm";
 
 import { diaArgentino, medianocheHaceDias, ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
@@ -36,7 +37,7 @@ import {
   type ClienteDatos,
   type TenantContext,
 } from "@/data/scope";
-import { aiUsageMensual, authUsers, cases, users } from "@/lib/db/schema";
+import { aiUsageMensual, authUsers, cases, outboundMessages, users } from "@/lib/db/schema";
 import { CANALES_REALES, ClaimTypeSchema } from "@/lib/schemas/cases";
 import { completadoConfirmado } from "@/server/cases/listo-confirmado";
 import { consultaDeCiclo, consultaDeCuellos } from "@/server/metrics/trayecto";
@@ -134,13 +135,20 @@ function normalizeUsage(row?: {
   };
 }
 
-/** Las cuatro sumas del acumulador `ai_usage_mensual` (0046). `float8` para que vuelvan como número, no como texto. */
-const usoSumado = () => ({
-  calls: sql<number>`coalesce(sum(${aiUsageMensual.calls}), 0)::float8`,
-  prompt_tokens: sql<number>`coalesce(sum(${aiUsageMensual.prompt_tokens}), 0)::float8`,
-  completion_tokens: sql<number>`coalesce(sum(${aiUsageMensual.completion_tokens}), 0)::float8`,
-  cost_usd: sql<number>`coalesce(sum(${aiUsageMensual.cost_usd}), 0)::float8`,
-});
+/**
+ * Las cuatro sumas del acumulador `ai_usage_mensual` (0046), de las filas que
+ * cumplan `filtro` si lo hay. `float8` para que vuelvan como número, no como texto.
+ */
+const usoSumado = (filtro?: SQL) => {
+  const de = (columna: AnyColumn) =>
+    sql<number>`coalesce(sum(${columna})${filtro ? sql` filter (where ${filtro})` : sql.empty()}, 0)::float8`;
+  return {
+    calls: de(aiUsageMensual.calls),
+    prompt_tokens: de(aiUsageMensual.prompt_tokens),
+    completion_tokens: de(aiUsageMensual.completion_tokens),
+    cost_usd: de(aiUsageMensual.cost_usd),
+  };
+};
 
 /**
  * Reclamos abiertos, WhatsApps y mails atendidos por período, desde `desde`.
@@ -238,20 +246,14 @@ export async function getTenantKpis(
   };
 
   const [
-    [resumenMes],
-    byStatusRows,
-    byTypeRows,
-    [escalatedRow],
+    porEstadoRows,
     topAnalystsRows,
-    [usageMonthRow],
-    [usageAllTimeRow],
-    usageByUserRows,
-    usageByModelRows,
+    usoRows,
     [cicloRow],
     cuellosRows,
     ...opcionales
   /*
-   * Once consultas —hasta trece con la serie y ayer— en UN viaje, no en once.
+   * Cinco consultas —hasta siete con la serie y ayer— en UN viaje, no en cinco.
    *
    * Estaba en `Promise.all([enTenant(...), enTenant(...), ...])`, que las pone
    * en paralelo pero NO las junta: cada `enTenant` abre su propio `batch()` con
@@ -260,22 +262,35 @@ export async function getTenantKpis(
    *
    * `enTenantVarias` las manda en un solo lote. La ejecucion de estas consultas
    * se mide en milisegundos; lo que se paga es la distancia, y ahora se paga
-   * una vez.
+   * una vez. Dentro del lote cada sentencia también cuesta su ida y vuelta
+   * hasta la base, y con veinte analistas a la vez eso pesa: por eso eran trece
+   * y son siete.
    *
    * Las formas van escritas porque `enTenantVarias` no las puede inferir del
    * armador: sin la tupla, todo vuelve como `unknown`.
    */
   ] = await enTenantVarias<
     [
-      [{ total: number; listo: number; respondidos: number; minutos: number }],
-      Array<{ status: string; n: number }>,
-      Array<{ claim_type: string | null; n: number }>,
-      [{ n: number }],
+      Array<{
+        por_tipo: number;
+        status: CaseStatus | null;
+        claim_type: string | null;
+        n: number;
+        reclamos: number;
+        listo: number;
+        respondidos: number;
+        minutos: number;
+      }>,
       Array<{ assigned_to: string | null; full_name: string | null; n: number }>,
-      [Usos],
-      [Usos],
-      Array<Usos & { user_id: string | null; full_name: string | null; email: string | null }>,
-      Array<Usos & { model: string }>,
+      Array<{
+        grupo: number;
+        user_id: string | null;
+        full_name: string | null;
+        email: string | null;
+        model: string | null;
+        mes: Usos;
+        total: Usos;
+      }>,
       [FilaDeCiclo],
       Array<FilaDeCuello>,
       ...Array<PuntoSerie[] | ResumenDeAyer[]>,
@@ -287,15 +302,24 @@ export async function getTenantKpis(
      * cuánto tardaba el agente en abrir el caso, que es instantáneo — el
      * número que importa es cuánto tarda alguien en contestarle al
      * denunciante.
+     *
+     * Lateral y no subconsulta en el SELECT: la leen dos agregados, y escrita
+     * dos veces Postgres la corría dos veces por caso.
      */
-    const primera = sql`(select min(om.created_at) from outbound_messages om where om.case_id = ${cases.id} and om.tenant_id = ${cases.tenant_id} and om.status = 'sent')`;
+    const primera = db
+      .select({ en: sql<string>`min(${outboundMessages.created_at})`.as("en") })
+      .from(outboundMessages)
+      .where(and(eq(outboundMessages.case_id, cases.id), eq(outboundMessages.status, "sent")))
+      .as("primera");
     return [
       /*
-       * Los tres números del mes en una fila, en vez de traer los casos.
+       * Todo lo que sale de los casos del período, agrupado por estado y por
+       * tipo en la misma pasada: la distribución, y sumando los grupos de
+       * estado, el total, los escalados, lo completado y la primera respuesta.
+       * `por_tipo` dice de qué agrupación es cada fila.
        *
-       * Esto devolvía una fila por caso del mes —455 en producción— para
-       * contarlas en JS. La suma y el promedio los sabe hacer la base, y lo
-       * que viaja pasa de cientos de filas a una.
+       * Antes eran cuatro consultas sobre las mismas filas, y antes todavía
+       * una fila por caso —455 en producción— para contarlas en JS.
        *
        * `sum` y `count` por separado y la división en JS a propósito: así el
        * redondeo es exactamente el mismo `Math.round(total / n)` de antes, y
@@ -303,47 +327,23 @@ export async function getTenantKpis(
        */
       db
           .select({
-            total: sql<number>`count(*)::int`,
+            por_tipo: sql<number>`grouping(${cases.status})::int`,
+            status: cases.status,
+            claim_type: cases.claim_type,
+            n: sql<number>`count(*)::int`,
+            // `is_claim is true` saca de la distribución por tipo a los
+            // `no_relevante`, que traen un `claim_type` del intento previo.
+            reclamos: sql<number>`count(*) filter (where ${cases.is_claim} is true)::int`,
             // Completado por una persona, o ya enviado al Core — nunca el
             // `listo` legado, que no dice que alguien lo haya mirado.
             listo: sql<number>`count(*) filter (where ${completadoConfirmado})::int`,
-            respondidos: sql<number>`count(${primera})::int`,
-            minutos: sql<number>`coalesce(sum(extract(epoch from (${primera} - ${cases.created_at})) / 60), 0)::float8`,
+            respondidos: sql<number>`count(${primera.en})::int`,
+            minutos: sql<number>`coalesce(sum(extract(epoch from (${primera.en} - ${cases.created_at})) / 60), 0)::float8`,
           })
           .from(cases)
-          .where(and(
-            gte(cases.created_at, desde),
-            lt(cases.created_at, hasta),
-          )),
-      // Agrupado en la base: traía las 458 filas de `cases` para contarlas.
-      db
-          .select({ status: cases.status, n: sql<number>`count(*)::int` })
-          .from(cases)
+          .leftJoinLateral(primera, sql`true`)
           .where(and(gte(cases.created_at, desde), lt(cases.created_at, hasta)))
-          .groupBy(cases.status),
-      // Idem, y el `is not null` reemplaza al `if (row.claim_type)` que
-      // descartaba esas filas después de haberlas traído. `is_claim is true`
-      // saca los `no_relevante`, que traen un `claim_type` del intento previo
-      // y antes se contaban como si fueran reclamos.
-      db
-          .select({ claim_type: cases.claim_type, n: sql<number>`count(*)::int` })
-          .from(cases)
-          .where(and(
-            isNotNull(cases.claim_type),
-            sql`${cases.is_claim} is true`,
-            gte(cases.created_at, desde),
-            lt(cases.created_at, hasta),
-          ))
-          .groupBy(cases.claim_type),
-      db
-          .select({ n: count() })
-          .from(cases)
-          .where(and(
-            // Idem: el canal real escribe `requiere_especialista`.
-            inArray(cases.status, [...ESTADOS_ESCALADO]),
-            gte(cases.created_at, desde),
-            lt(cases.created_at, hasta),
-          )),
+          .groupBy(sql`grouping sets ((${cases.status}), (${cases.claim_type}))`),
       /*
        * Los cinco de arriba, contados y ordenados por la base.
        *
@@ -369,32 +369,27 @@ export async function getTenantKpis(
           .groupBy(cases.assigned_to, users.full_name)
           .orderBy(sql`count(*) desc, ${users.full_name} asc`)
           .limit(5),
-      db
-          .select(usoSumado())
-          .from(aiUsageMensual)
-          .where(eq(aiUsageMensual.mes, mesIa)),
-      db
-          .select(usoSumado())
-          .from(aiUsageMensual),
+      /*
+       * El uso de IA en una pasada por el acumulador: por persona y por modelo
+       * del mes, y el mes y el total histórico. `grupo` dice de qué
+       * agrupación es cada fila (1 persona, 2 modelo, 3 los totales); sin él,
+       * el `user_id` nulo de los procesos automáticos no se distingue del
+       * nulo de una fila que no agrupa por persona.
+       */
       db
           .select({
+            grupo: sql<number>`grouping(${aiUsageMensual.user_id}, ${aiUsageMensual.model})::int`,
             user_id: aiUsageMensual.user_id,
             full_name: users.full_name,
             email: authUsers.email,
-            ...usoSumado(),
+            model: aiUsageMensual.model,
+            mes: usoSumado(eq(aiUsageMensual.mes, mesIa)),
+            total: usoSumado(),
           })
           .from(aiUsageMensual)
           .leftJoin(users, eq(users.id, aiUsageMensual.user_id))
           .leftJoin(authUsers, eq(authUsers.id, aiUsageMensual.user_id))
-          .where(eq(aiUsageMensual.mes, mesIa))
-          .groupBy(aiUsageMensual.user_id, users.full_name, authUsers.email)
-          .having(sql`sum(${aiUsageMensual.calls}) > 0`),
-      db
-          .select({ model: aiUsageMensual.model, ...usoSumado() })
-          .from(aiUsageMensual)
-          .where(eq(aiUsageMensual.mes, mesIa))
-          .groupBy(aiUsageMensual.model)
-          .having(sql`sum(${aiUsageMensual.calls}) > 0`),
+          .groupBy(sql`grouping sets ((${aiUsageMensual.user_id}, ${users.full_name}, ${authUsers.email}), (${aiUsageMensual.model}), ())`),
       consultaDeCiclo(db, desde, hasta),
       consultaDeCuellos(db, desde, hasta),
       ...(opts?.serie
@@ -409,25 +404,34 @@ export async function getTenantKpis(
   const serieFilas = opts?.serie ? (opcionales.shift() as PuntoSerie[] | undefined) : undefined;
   const ayerFilas = opts?.ayer ? (opcionales.shift() as ResumenDeAyer[] | undefined) : undefined;
 
-  const totalCasesMonth = resumenMes?.total ?? 0;
+  const byStatus: Record<string, number> = {};
+  let totalCasesMonth = 0;
+  let listoCount = 0;
+  let respondidos = 0;
+  let minutos = 0;
+  let escalados = 0;
+  const byType: Record<string, number> = {};
+  for (const row of porEstadoRows) {
+    if (row.por_tipo) {
+      if (row.claim_type && row.reclamos > 0) byType[row.claim_type] = row.reclamos;
+      continue;
+    }
+    if (!row.status) continue;
+    byStatus[row.status] = row.n;
+    totalCasesMonth += row.n;
+    listoCount += row.listo;
+    respondidos += row.respondidos;
+    minutos += row.minutos;
+    if (ESTADOS_ESCALADO.has(row.status)) escalados += row.n;
+  }
 
   // El mismo Math.round(total / n) de antes, con la suma hecha por la base.
   const avgFirstResponseMinutes: number | null =
-    resumenMes && resumenMes.respondidos > 0
-      ? Math.round(resumenMes.minutos / resumenMes.respondidos)
-      : null;
+    respondidos > 0 ? Math.round(minutos / respondidos) : null;
 
-  const listoCount = resumenMes?.listo ?? 0;
   const completadoConfirmadoRate =
     totalCasesMonth > 0 ? Math.round((listoCount / totalCasesMonth) * 100) : 0;
 
-  const byStatus: Record<string, number> = {};
-  for (const row of byStatusRows) byStatus[row.status] = row.n;
-
-  const byType: Record<string, number> = {};
-  for (const row of byTypeRows) {
-    if (row.claim_type) byType[row.claim_type] = row.n;
-  }
   // Los nueve tipos del esquema, no los cuatro de cuando esto se escribió.
   // Sembrar sólo cuatro dejaba a cristales, RC, robo de contenido,
   // accidente personal y `other` fuera del gráfico salvo que hubiera casos,
@@ -446,20 +450,24 @@ export async function getTenantKpis(
     closed_count: row.n,
   }));
 
-  const usageByUser: AiUsageByUser[] = usageByUserRows
+  // Por persona y por modelo, sólo quien usó IA este mes.
+  const delMes = (grupo: number) => usoRows.filter((row) => row.grupo === grupo && row.mes.calls > 0);
+  const usageRow = usoRows.find((row) => row.grupo === 3);
+
+  const usageByUser: AiUsageByUser[] = delMes(1)
     .map((row) => ({
       user_id: row.user_id,
       full_name: row.full_name ?? "Sistema",
       email: row.email ?? (row.user_id ? "" : "Procesos automáticos"),
-      ...normalizeUsage(row),
+      ...normalizeUsage(row.mes),
     }))
     .sort((a, b) => b.total_tokens - a.total_tokens)
     .slice(0, 8);
 
-  const usageByModel: AiUsageByModel[] = usageByModelRows
+  const usageByModel: AiUsageByModel[] = delMes(2)
     .map((row) => ({
-      model: row.model,
-      ...normalizeUsage(row),
+      model: row.model ?? "",
+      ...normalizeUsage(row.mes),
     }))
     .sort((a, b) => b.total_tokens - a.total_tokens);
 
@@ -468,7 +476,7 @@ export async function getTenantKpis(
       total_cases_month: totalCasesMonth,
       avg_first_response_minutes: avgFirstResponseMinutes,
       completado_confirmado_rate: completadoConfirmadoRate,
-      escalated_count: escalatedRow?.n ?? 0,
+      escalated_count: escalados,
       sin_intervencion_rate: porcentaje(cicloRow?.sin_intervencion ?? 0, cicloRow?.reclamos ?? 0),
       mensajes_por_caso: unDecimal(cicloRow?.mensajes_por_caso),
       ciclo: {
@@ -483,8 +491,8 @@ export async function getTenantKpis(
     by_type: byType,
     top_analysts: topAnalysts,
     ai_usage: {
-      month: normalizeUsage(usageMonthRow),
-      all_time: normalizeUsage(usageAllTimeRow),
+      month: normalizeUsage(usageRow?.mes),
+      all_time: normalizeUsage(usageRow?.total),
       by_user: usageByUser,
       by_model: usageByModel,
     },

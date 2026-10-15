@@ -513,10 +513,11 @@ describe("consultaTablero", () => {
   }
   const veces = (texto: string, parte: string) => texto.split(parte).length - 1;
 
-  it("las seis ramas correlacionan sus subconsultas con el caso de afuera, calificado", async () => {
+  it("las subconsultas correlacionadas van una sola vez, afuera de las ramas, calificadas", async () => {
     const { sql } = (await tablero())!;
     expect(sql).not.toMatch(/\b(ef|om)\.(case_id|tenant_id) = "(id|tenant_id)"/);
-    expect(veces(sql, 'om.case_id = "cases"."id"')).toBe(6);
+    expect(veces(sql, 'om.case_id = "cases"."id"')).toBe(1);
+    expect(veces(sql, '(select "id" from "cases" where ')).toBe(6);
   });
 
   it("una rama por columna, unidas con union all y cada una con su propio límite", async () => {
@@ -525,9 +526,9 @@ describe("consultaTablero", () => {
     expect(veces(sql, " limit ")).toBe(6);
     expect(params.filter((p) => p === TARJETAS_POR_COLUMNA)).toHaveLength(6);
     // Cada lado entre paréntesis: sin eso el ORDER BY y el LIMIT de la primera rama serían de toda la unión.
-    expect(sql.startsWith("(")).toBe(true);
     expect(veces(sql, ") union all (select ")).toBe(5);
-    expect(veces(sql, "order by")).toBe(6);
+    // Seis adentro y uno afuera, que deja cada columna en el orden de la bandeja.
+    expect(veces(sql, "order by")).toBe(7);
   });
 
   it("cada rama pide los estados de su columna y de ninguna otra", async () => {
@@ -576,10 +577,10 @@ describe("consultaTablero", () => {
     expect(await tablero({ status: ["no_relevante"] })).toBeUndefined();
   });
 
-  it("«Mi cola» conserva su orden en cada rama", async () => {
+  it("«Mi cola» conserva su orden en cada rama y afuera", async () => {
     const { sql } = (await tablero({ cola: "mia" }))!;
     expect(veces(sql, '"cases"."updated_at" asc, "cases"."id" asc limit ')).toBe(6);
-    expect(veces(sql, 'case "cases"."severity" when')).toBe(6);
+    expect(veces(sql, 'case "cases"."severity" when')).toBe(7);
   });
 
   it("los demás filtros viajan en cada rama", async () => {
@@ -608,6 +609,16 @@ describe("consultaConteoPorEstado", () => {
     const sql = await conteo({ ...baseQuery, status: ["escalado"] } as never);
     expect(sql).toContain('"cases"."status" in (');
   });
+
+  it("en la misma pasada cuenta las pestañas, que sólo miran la búsqueda y el período", async () => {
+    const sql = await conteo({ ...baseQuery, q: "juan", status: ["escalado"] } as never);
+    const [conteos, where] = sql.split(' from "cases" where ');
+    // El estado sólo filtra el total de las columnas, no el de las pestañas.
+    expect(conteos).toMatch(/^select "status", count\(\*\) filter \(where "cases"\."status" in \(\$1, \$2\)\)::int, count\(\*\)::int$/);
+    // La búsqueda va una sola vez, en el WHERE.
+    expect(where).toContain("ilike");
+    expect(where.split(" group by ")[0]).not.toContain('"cases"."status"');
+  });
 });
 
 describe("listarTablero", () => {
@@ -623,14 +634,21 @@ describe("listarTablero", () => {
     ];
     vi.mocked(enTenantVarias).mockResolvedValue([
       [
-        { status: "procesando", n: 30 },
-        { status: "requiere_especialista", n: 2 },
-        { status: "no_relevante", n: 9 },
+        { status: "procesando", n: 30, pestana: 31 },
+        { status: "requiere_especialista", n: 2, pestana: 2 },
+        { status: "no_relevante", n: 9, pestana: 9 },
       ],
       tarjetas,
     ] as never);
 
     const resultado = await listarTablero(CTX, baseQuery as never, "yo-1");
+
+    // Los contadores de las pestañas viajan en el mismo conteo.
+    expect(resultado.pestanas).toEqual([
+      { status: "procesando", n: 31 },
+      { status: "requiere_especialista", n: 2 },
+      { status: "no_relevante", n: 9 },
+    ]);
 
     expect(resultado.data).toEqual(tarjetas);
     expect(resultado.totales.procesando).toBe(30);

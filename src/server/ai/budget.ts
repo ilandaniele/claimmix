@@ -66,7 +66,10 @@ const MODEL_COSTS: Record<string, { input: number; output: number; audio?: numbe
   // decorativo; para conciliar plata está la consola de Google.
   //
   // El audio de entrada se cobra más caro que el texto: una nota de voz
-  // cobrada como texto dejaría el tope corto por un factor de tres.
+  // cobrada como texto dejaría el tope corto por un factor de tres. En
+  // Gemini 3 cuesta lo mismo que el texto. Precios fuera de `global`.
+  "gemini-3.5-flash":      { input: 0.00000165, output: 0.0000099 },
+  "gemini-3.8-flash":      { input: 0.00000165, output: 0.00000825 },
   "gemini-2.5-flash":      { input: 0.0000003,  output: 0.0000025, audio: 0.000001 },
   "gemini-2.5-flash-lite": { input: 0.0000001,  output: 0.0000004, audio: 0.0000003 },
   "gemini-2.5-pro":        { input: 0.00000125, output: 0.00001 },
@@ -86,7 +89,7 @@ function ratesFor(model?: string): { input: number; output: number; audio?: numb
     if (key.startsWith("gemini") && name.includes(key)) return rates;
   }
   if (name.includes("gemini") || name.startsWith("projects/")) {
-    return MODEL_COSTS["gemini-2.5-flash"]!;
+    return MODEL_COSTS["gemini-3.8-flash"]!;
   }
   return MODEL_COSTS["gpt-4o-mini"]!;
 }

@@ -129,8 +129,6 @@ on:
         required: false
       GOOGLE_CLOUD_LOCATION:
         required: false
-      VERTEX_EXTRACTION_MODEL:
-        required: false
       R2_ACCOUNT_ID:
         required: false
       R2_ACCESS_KEY_ID:
@@ -419,7 +417,6 @@ jobs:
           GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
-          VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
           # El cupo diario de tokens del tenant.
           #
           # El ensayo corre acá, en el runner, no adentro del deploy — así que
@@ -861,7 +858,6 @@ jobs:
           GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
-          VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
           AI_TENANT_DAILY_TOKEN_CAP: ${{ vars.AI_TENANT_DAILY_TOKEN_CAP || '20000000' }}
           AI_ANONIMO_DAILY_TOKEN_CAP: ${{ vars.AI_ANONIMO_DAILY_TOKEN_CAP }}
 

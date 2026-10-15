@@ -13,7 +13,7 @@
  *   GOOGLE_CLOUD_PROJECT       - GCP project ID
  *   GOOGLE_CLOUD_LOCATION      - e.g. "us-central1"
  *   GOOGLE_APPLICATION_CREDENTIALS - path to service account JSON (or use ADC)
- *   VERTEX_AI_GEMINI_BASE_MODEL    - e.g. "gemini-2.5-flash"
+ *   VERTEX_AI_GEMINI_BASE_MODEL    - e.g. "gemini-3.8-flash"
  *   VERTEX_AI_BUCKET_NAME          - GCS bucket for dataset uploads
  *   VERTEX_AI_MIN_EXAMPLES         - minimum approved examples (default 10)
  */
@@ -764,7 +764,7 @@ export async function rollbackVertexAiModel(tenantId: string, userId: string) {
     current?.previous_model ||
     current?.gemini_model ||
     process.env.VERTEX_AI_GEMINI_BASE_MODEL ||
-    "gemini-2.5-flash";
+    "gemini-3.8-flash";
 
   const now = new Date().toISOString();
 

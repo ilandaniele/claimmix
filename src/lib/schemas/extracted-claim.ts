@@ -89,7 +89,7 @@ export const CLAIM_FIELD_KEYS = Object.keys(ClaimFieldsSchema.shape) as Array<
  * This is an advisory hint, not authoritative.
  */
 export const PossibleCustomerMatchSchema = z.object({
-  customer_id: z.string().uuid(),
+  customer_id: z.guid(),
   match_score: z.number().min(0).max(1),
   match_reason: z.enum(["email", "dni", "phone", "name"]),
 });
@@ -100,7 +100,7 @@ export type PossibleCustomerMatch = z.infer<typeof PossibleCustomerMatchSchema>;
  * A possible policy match returned by the AI extractor.
  */
 export const PossiblePolicyMatchSchema = z.object({
-  policy_id: z.string().uuid(),
+  policy_id: z.guid(),
   policy_number: z.string(),
   match_score: z.number().min(0).max(1),
 });

@@ -29,7 +29,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 
 /** Strip anything that is not [a-zA-Z0-9-] — belt and suspenders for the filename. */
 function sanitizeForFilename(value: string): string {

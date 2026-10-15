@@ -13,7 +13,7 @@ import { decryptRefreshToken } from "@/server/email/gmail/accounts";
 import { setupGmailWatch, stopGmailWatch } from "@/server/email/gmail/watch";
 
 const UpdateGmailAccountSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   enabled: z.boolean(),
 });
 
@@ -135,7 +135,7 @@ export async function DELETE(request: NextRequest) {
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
     // Este contexto es lo único que le dice de quién son los datos.
     const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
-    const parsedId = z.string().uuid().safeParse(new URL(request.url).searchParams.get("id"));
+    const parsedId = z.guid().safeParse(new URL(request.url).searchParams.get("id"));
     if (!parsedId.success) throw new AppError("NOT_FOUND");
     const id = parsedId.data;
 

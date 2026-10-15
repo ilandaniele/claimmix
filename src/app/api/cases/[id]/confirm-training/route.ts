@@ -34,10 +34,10 @@ import {
   RATE_LIMIT_CONFIGS,
 } from "@/lib/rate-limit/index";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 
 const BodySchema = z.object({
-  agent_run_id: z.string().uuid().optional(),
+  agent_run_id: z.guid().optional(),
 });
 
 export async function POST(

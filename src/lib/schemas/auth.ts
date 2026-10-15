@@ -9,16 +9,19 @@ import { z } from "zod";
 
 import { ALL_ROLES } from "@/lib/auth/roles";
 
+/** El mensaje propio sólo cuando el campo no vino; un valor de tipo equivocado conserva el de Zod. */
+const requerido = (mensaje: string) => (i: { input?: unknown }) => (i.input === undefined ? mensaje : undefined);
+
 /** POST /api/auth/sign-in request body */
 export const SignInSchema = z.object({
   email: z
-    .string({ required_error: "El correo electrónico es requerido." })
+    .string({ error: requerido("El correo electrónico es requerido.") })
     .trim()
     .toLowerCase()
     .max(254, "El correo electrónico es demasiado largo.")
     .email("El correo electrónico no es válido."),
   password: z
-    .string({ required_error: "La contraseña es requerida." })
+    .string({ error: requerido("La contraseña es requerida.") })
     .min(1, "La contraseña es requerida.")
     .max(128, "La contraseña es demasiado larga."),
 });
@@ -33,12 +36,12 @@ export type SignInInput = z.infer<typeof SignInSchema>;
  */
 export const SignUpSchema = z.object({
   full_name: z
-    .string({ required_error: "El nombre es requerido." })
+    .string({ error: requerido("El nombre es requerido.") })
     .trim()
     .min(2, "El nombre es demasiado corto.")
     .max(100, "El nombre es demasiado largo."),
   email: z
-    .string({ required_error: "El correo electrónico es requerido." })
+    .string({ error: requerido("El correo electrónico es requerido.") })
     .trim()
     .toLowerCase()
     .max(254, "El correo electrónico es demasiado largo.")
@@ -49,11 +52,11 @@ export type SignUpInput = z.infer<typeof SignUpSchema>;
 
 /** GET /api/auth/me response shape */
 export const MeResponseSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   email: z.string().email(),
   full_name: z.string(),
   role: z.enum(ALL_ROLES),
-  tenant_id: z.string().uuid(),
+  tenant_id: z.guid(),
 });
 
 export type MeResponse = z.infer<typeof MeResponseSchema>;

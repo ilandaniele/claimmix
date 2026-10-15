@@ -11,7 +11,7 @@
 
 import "server-only";
 
-import type { ZodType, ZodTypeDef } from "zod";
+import type { ZodType } from "zod";
 
 import type { MotivoSinLeer } from "@/core/ai/sin-leer";
 import { errorCode } from "@/lib/observability/error-code";
@@ -55,7 +55,7 @@ export async function leerDocumento<T>({
   sistema: string;
   usuario: string;
   media: InlineMedia[];
-  schema: ZodType<T, ZodTypeDef, unknown>;
+  schema: ZodType<T, unknown>;
   limpiar?: (dato: T) => T;
 }): Promise<Lectura<T>> {
   try {

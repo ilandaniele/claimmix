@@ -258,7 +258,7 @@ export function AiProviderPanel() {
           value={geminiModel}
           onChange={(e) => setGeminiModel(e.target.value)}
           className="rounded-md border border-slate-200 px-3 py-2 font-mono text-xs text-slate-800"
-          placeholder="gemini-2.5-flash"
+          placeholder="gemini-flash-latest"
         />
         <button
           type="button"

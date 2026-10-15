@@ -15,7 +15,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 const PatchSchema = z.object({
   /*
    * "sync" y "approve" se fueron con OpenAI. Con un solo proveedor, "sync"

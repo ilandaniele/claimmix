@@ -89,7 +89,7 @@ export const RangoDeMontoSchema = z
   .strict()
   .refine((r) => r.minimo <= r.maximo, { message: "minimo > maximo" });
 
-export const RangosDeMontoSchema = z.record(ClaimTypeSchema, z.record(SeveritySchema, RangoDeMontoSchema));
+export const RangosDeMontoSchema = z.partialRecord(ClaimTypeSchema, z.partialRecord(SeveritySchema, RangoDeMontoSchema));
 
 /** El rango de un tipo y una gravedad: el de la aseguradora, o el de la tabla. */
 export function rangoPara(tipo: string | null, gravedad: string | null, rangosDelTenant: unknown): RangoDeMonto | null {

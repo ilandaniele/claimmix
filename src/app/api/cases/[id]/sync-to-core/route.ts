@@ -57,7 +57,7 @@ function sinConfigurar(caseId: string, modo: ModoDeCoreSync) {
 }
 
 const ParamsSchema = z.object({
-  id: z.string().uuid("ID de caso inválido."),
+  id: z.guid("ID de caso inválido."),
 });
 
 export async function POST(

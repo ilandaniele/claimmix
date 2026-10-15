@@ -35,7 +35,7 @@ export const maxDuration = 60;
 // Vercel corta el cuerpo en 4,5 MB: más que esto no llega entero.
 const TOPE_BYTES = 4 * 1024 * 1024;
 
-const ParamsSchema = z.object({ id: z.string().uuid("ID de póliza inválido.") });
+const ParamsSchema = z.object({ id: z.guid("ID de póliza inválido.") });
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }): Promise<Response> {
   try {

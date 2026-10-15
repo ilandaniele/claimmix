@@ -978,6 +978,15 @@ existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el
 post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo
 incluido.
 
+**Contra dev, el ensayo no se repite si QA ya pasó ese árbol.** El ensayo corre en el
+runner, no contra la URL: el mismo código, el mismo modelo y los mismos escenarios, y sólo
+cambia la base. Una promoción de `qa` a `main` arma el mismo árbol que QA acaba de ensayar,
+así que repetirlo eran de 25 a 37 minutos de Actions para probar lo mismo. Cuando el
+veredicto de QA sale verde, `qa_veredicto` deja el artefacto `ensayo-verde-<árbol>`; el job
+`ensayo_previo` lo busca y, si está, `Producción` corre todo menos el ensayo y lo anota en
+el resumen. Ante cualquier duda (sin marca, error de la API, disparo a mano) ensaya. Contra
+la base de dev lo vuelve a correr el `pnpm check` completo de después de cada deploy.
+
 **Contra prd corre todavía menos, a propósito.** `claimmix-prd` es el proyecto de Vercel
 con los clientes de verdad, y el job `PRD` de `post-deploy.yml` (se dispara con el
 entorno `Production` de ese proyecto, igual que el de QA) no escribe nada: corre
@@ -993,7 +1002,7 @@ ataca, el timbre deposita un mail y manda un payload firmado, y la carga llena l
 dev eso se tolera, con casos que aparecen y desaparecen en el tablero; en prd hay clientes
 que miran el suyo, y con una base por cliente el ensayo necesitaría además un inquilino y
 una base propios. Lo que llega a prd es un commit que ya pasó por QA y por `main`, donde el
-ensayo de las veintiséis conversaciones sí corrió; lo único que prd puede romper solo es su
+ensayo de las veintiséis conversaciones sí corrió (en QA siempre, y en dev con el `pnpm check`); lo único que prd puede romper solo es su
 entorno (variables, base, dominio, bases desfasadas), y eso lo miran el smoke y la salud. El
 resto lo frenan los vetos de `scripts/lib/hosts-vetados.mjs` (también por CLI, `--veto
 <url>`): `vetadoWeb` cubre los alias de dev y de prd y el host de `PRD_URL`;

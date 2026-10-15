@@ -18,7 +18,7 @@ import { customers, policies } from "@/lib/db/schema";
 import { camposDePagina } from "@/lib/schemas/paginacion";
 
 export const PolicyQuerySchema = z.object({
-  customer_id: z.string().uuid().optional(),
+  customer_id: z.guid().optional(),
   policy_number: z.string().max(100).optional(),
   status: z.enum(["active", "expired", "cancelled"]).optional(),
   ...camposDePagina,

@@ -16,7 +16,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 
 export const dynamic = "force-dynamic";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 const PatchSchema = z.object({ status: z.enum(["approved", "rejected"]) });
 
 export async function PATCH(

@@ -313,7 +313,11 @@ por el equipo, siempre en plural —«necesitamos», «te pedimos», «entendemo
 Devolvé JSON: {"message": "<el texto del mensaje>"}`;
 }
 
-const NUCLEO: Readonly<Record<string, RegExp>> = { hay_heridos: /lastim|herid|lesion/ };
+// A un consorcio se le pide el CUIT: nombrarlo sin decir «DNI» también pide el dato.
+const NUCLEO: Readonly<Record<string, RegExp>> = {
+  hay_heridos: /lastim|herid|lesion/,
+  dni: /\bdni\b|\bcuit\b/,
+};
 
 // Sólo la derivación: el orquestador marca `heridos` en la de gravedad, nunca en
 // la de póliza vencida sin gravedad ni en la del titular ajeno.

@@ -376,6 +376,13 @@ describe("composeReply — what it refuses to send", () => {
     expect(await composeReply(base({ fields: ["email_or_phone", "dni"] }))).not.toBe(FALLBACK);
   });
 
+  // consorcio-por-mail: el titular es el consorcio, que no tiene DNI.
+  it("toma el CUIT como pedido del DNI", async () => {
+    replies("Para seguir necesitamos el CUIT del consorcio.");
+
+    expect(await composeReply(base({ fields: ["dni"] }))).not.toBe(FALLBACK);
+  });
+
   // choque-completo, 25/09: el gap-analysis pidió 2 cosas y el mensaje salió
   // con 11, inventando datos de terceros que nadie mencionó. Contar renglones
   // alcanza: no hace falta saber qué inventó cada uno.

@@ -46,7 +46,7 @@ describe("las fuentes de globals.css", () => {
   });
 
   it("el body toma --font-sans en vez de repetir la pila", () => {
-    const m = /(?<![.\w-])body\s*\{[^}]*?font-family:\s*([^;]+);/s.exec(CSS);
+    const m = /(?<![.\w-])body\s*\{[^}]*?font-family:\s*([^;]+);/.exec(CSS);
     expect(m, "no encontré font-family en el body").not.toBeNull();
     expect(m![1].trim()).toBe("var(--font-sans)");
   });

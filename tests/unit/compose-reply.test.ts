@@ -24,6 +24,7 @@ import { composeReply, type ComposeReplyInput } from "@/server/ai/compose-reply"
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 
 const mockCall = callGemini as unknown as ReturnType<typeof vi.fn>;
@@ -663,6 +664,19 @@ describe("composeReply — the brief it hands the model", () => {
     expect(prompt).not.toContain("28400900");
   });
 
+  it("una póliza corta tampoco llega al prompt, y la patente sí", async () => {
+    // Ensayo `devolver-al-agente`, 15/10: volvió «la póliza es la POL-4471-A».
+    replies("Gracias. Para seguir necesitamos las fotos de los daños.");
+
+    await composeReply(
+      base({ fields: ["fotos_danos"], lastMessage: "la correcta es la POL-4471-A, patente ABC-321" })
+    );
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).not.toContain("4471");
+    expect(prompt).toContain("ABC-321");
+  });
+
   it("says whether this is a first contact or a conversation already underway", async () => {
     replies(`Ya tenemos todo lo necesario. ${AVISO_DE_TRASPASO}`);
     await composeReply(base({ intent: "closing", isFollowUp: true }));
@@ -807,6 +821,109 @@ describe("composeReply — quien escribe no es el titular", () => {
     replies(`${DICE_LA_DIFERENCIA} ¿Cuál es el correcto?`);
 
     expect(await composeReply(ajeno({ titularAjeno: false }))).not.toBe(FALLBACK);
+  });
+});
+
+describe("composeReply — la póliza cambió a mitad de la charla", () => {
+  /*
+   * Dio POL-4471-A y después escribió «póliza 4455». AC24: el pedido no repite
+   * ninguno de los dos, y el input no los trae: lo único que puede filtrarse es
+   * lo que el modelo lee del último mensaje o se inventa.
+   */
+  const cambiada = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({
+      intent: "conflict",
+      polizaCambiada: true,
+      lastMessage: "Es un gol blanco, patente AB123CD, póliza 4455",
+      ...over,
+    });
+
+  const BUENO = `Gracias por avisarnos. ${POLIZA_CAMBIADA}`;
+
+  it("el prompt no lleva ningún número de lo que escribió", async () => {
+    replies(BUENO);
+
+    await composeReply(cambiada({ question: "¿Pueden revisar la póliza 4455?" }));
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).not.toContain("4455");
+    expect(prompt).not.toContain("123");
+    expect(prompt).toContain("no coincide con el que teníamos para su caso");
+    expect(prompt).toContain("Escribir cualquier número de póliza, ni el nuevo ni el anterior");
+  });
+
+  it("sin polizaCambiada el prompt queda como estaba", async () => {
+    replies("Notamos una diferencia en el DNI. ¿Cuál es el correcto?");
+
+    await composeReply(cambiada({ polizaCambiada: false }));
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("4455");
+    expect(prompt).toContain("Señalar la diferencia entre los dos valores");
+    expect(prompt).not.toContain("no coincide con el que teníamos para su caso");
+    expect(prompt).not.toContain("Escribir cualquier número de póliza");
+  });
+
+  it("con conflictos del padrón agrega la póliza a lo de siempre", async () => {
+    replies(BUENO);
+
+    await composeReply(
+      cambiada({ conflicts: [{ fieldKey: "dni", proposed: "****0140", stored: "****7663" }] })
+    );
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("Señalar la diferencia entre los dos valores");
+    expect(prompt).toContain("no coincide con el que teníamos para su caso");
+  });
+
+  it("un texto bueno pasa al primer intento", async () => {
+    responde(BUENO);
+
+    expect(await composeReply(cambiada())).toBe(BUENO);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("devuelve el piso si repite el número dos veces, y lo dice en el reintento", async () => {
+    replies("Nos pasaste la póliza 4455 y no coincide con la 4455 del caso. ¿Nos escribís la correcta?");
+
+    expect(await composeReply(cambiada())).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("escribiste un número");
+  });
+
+  it.each([
+    ["no dice que no coincide", "Gracias por avisarnos. ¿Nos pasás de nuevo el número de póliza correcto?"],
+    ["no nombra la póliza", "El número que nos pasaste ahora no coincide con el del caso. ¿Nos escribís el correcto?"],
+  ])("devuelve el piso si %s", async (_caso, mensaje) => {
+    replies(mensaje);
+
+    expect(await composeReply(cambiada())).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("no dijiste que el número de póliza no coincide");
+  });
+
+  it("deja pasar los números de un conflicto del padrón", async () => {
+    const mensaje =
+      "Nos pasaste un DNI ****0140 y teníamos ****7663. " + POLIZA_CAMBIADA;
+    replies(mensaje);
+
+    const out = await composeReply(
+      cambiada({ conflicts: [{ fieldKey: "dni", proposed: "****0140", stored: "****7663" }] })
+    );
+
+    expect(out).toBe(mensaje);
+  });
+
+  it("sin polizaCambiada no exige nada de la póliza", async () => {
+    const mensaje = "Nos pasaste el DNI ****0140 y teníamos ****7663. ¿Cuál es el correcto?";
+    replies(mensaje);
+
+    const out = await composeReply(
+      cambiada({
+        polizaCambiada: false,
+        conflicts: [{ fieldKey: "dni", proposed: "****0140", stored: "****7663" }],
+      })
+    );
+
+    expect(out).toBe(mensaje);
   });
 });
 

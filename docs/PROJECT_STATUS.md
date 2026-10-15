@@ -3937,7 +3937,8 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
 - Observaciones que quedan sin construir, riesgo bajo: en el ensayo de
   «Devolver al agente» el cliente dio la póliza POL-4471-A y, tras la
   devolución, escribió «póliza 4455», y el agente aceptó el número nuevo sin
-  señalar la contradicción; y el título del commit `fe7d15a` quedó cortado
+  señalar la contradicción (resuelto el 15/10: ver «Póliza cambiada a mitad
+  de la charla»); y el título del commit `fe7d15a` quedó cortado
   (le falta «auditadas»), sin corregir para no reescribir la historia.
 - 28/09: el primer intento del script de la plantilla leyó mal `.env.local`
   (la línea del token de WhatsApp termina en un comentario) y Graph devolvió
@@ -4930,15 +4931,9 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
   empresas, el prompt de extracción acepta el CUIT en `dni`, y el control de campos caídos de
   `compose-reply.ts` toma «CUIT» como pedido del dato. Ensayo verde con 2.5-flash y con
   3.8-flash; unit tests y `pnpm check --local --fast` verdes. Espera CI (ver abajo).
-- **Póliza cambiada a mitad de caso: decisión del dueño, sin código.** Si la persona corrige el
-  número de póliza (4455 → 4471), el valor nuevo pisa `extracted_fields` antes del análisis de
-  faltantes (`extract.ts`) y `detectConflicts` sólo compara nombre, mail y DNI, así que el agente
-  no lo menciona. El arreglo está mapeado (un `poliza-cambiada.ts` en `src/core/case`, el
-  worker pasa la póliza anterior, el orquestador arma un conflicto con `conflictWithValue`),
-  pero choca con AC24: `maskPolicyNumber` tapa el número entero y `template-render.test.ts`
-  exige que no aparezca. Ya figura como decisión abierta en `docs/AUDITORIA-2026-09.md` (LOW).
-  Falta decidir si el agente avisa el cambio y si AC24 se afloja para valores que escribió la
-  propia persona.
+- **Póliza cambiada a mitad de caso.** Al escribir esta sección quedaba como decisión del
+  dueño, porque el aviso parecía chocar con AC24. Lo resolvió #443 sin aflojarlo: el agente
+  pregunta cuál vale sin repetir ningún número (ver la sección siguiente).
 - **Prefetch fuera del proxy: descartado.** Sacar del matcher los pedidos con
   `next-router-prefetch` ahorraría invocaciones, pero ese header lo pone el cliente: cualquiera
   se saltearía la redirección a `/login` y el CSP con nonce.
@@ -4952,6 +4947,35 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
 - **CI parado hasta el 1/11.** El presupuesto de Actions del mes se agotó y todos los jobs
   fallan a los 2–3 s. #441 y #442 esperan CI; #440 espera el veredicto de QA. La promoción de
   #436–#442 a prd queda para después, con el OK del dueño.
+
+### Póliza cambiada a mitad de la charla (2026-10-15, #443 a qa, espera CI hasta el 1/11)
+
+Cierra la observación del ensayo `devolver-al-agente` (#338, `AUDITORIA-2026-09.md`): la
+persona daba `POL-4471-A` y después escribía «póliza 4455», y el agente tomaba el número nuevo
+sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
+
+- **Detección.** `src/core/case/poliza-cambiada.ts` compara las dos sin dejarse engañar: «4471»
+  es `POL-4471-A` dicha a medias y «4455» no es `2914455123`. El orquestador mira lo que leyó el
+  extractor y, además, lo que el texto da como póliza («póliza 4455»): el extractor relee toda la
+  charla y a veces se queda con la primera.
+- **Pregunta sin números (AC24).** Con otra póliza, la rama D manda `POLIZA_CAMBIADA` («no
+  coincide con el que teníamos… ¿nos escribís el número correcto?»), sin repetir ninguna de las
+  dos. La plantilla, el mensaje de WhatsApp y el redactor la llevan; el redactor no ve los
+  dígitos del último mensaje y dos guardas rechazan un texto que la omita o cite un número.
+- **Resolución.** `cases.policy_number` sigue con la primera mientras la fila queda pendiente
+  con las dos. La respuesta la cierra un paso propio con `polizaElegida`; si eligió la nueva,
+  se actualiza el caso. «No sé» o «la primera» dejan la fila pendiente y se vuelve a preguntar.
+- **Pólizas cortas en el prompt del redactor.** `sinNumerosEnteros` pedía seis dígitos y
+  `POL-4471-A` llegaba entera: el ensayo devolvió «entendemos que la póliza es la POL-4471-A».
+  Ahora una póliza con prefijo y cuatro o cinco dígitos entra como `POL-****`; la patente no se
+  toca. El prefijo queda a propósito: con `****` solo, el modelo escribió «la patente es la ****».
+- **Verificado.** Tests unitarios, `tsc` y ESLint verdes. `pnpm rehearse devolver-al-agente` con
+  `gemini-3.8-flash` (el de los entornos desplegados): verde, el turno 5 pregunta sin números y
+  ninguna respuesta cita 4471 ni 4455. Con 2.5 local el turno 6 salió rojo dos de cuatro veces
+  por el desboque conocido del extractor (8192 tokens, el corte de 30 s lo vuelve TIMEOUT sin
+  reintento); con `GEMINI_TIMEOUT_MS=0` reintenta con la corrección de MAX_TOKENS y queda verde.
+  `pnpm check --local` con 3.8 verde: las 26 conversaciones sin diferencias (26,6 min). La
+  primera corrida encontró dos mocks de `gap-analyzer` sin `MEDIUM_CONFIDENCE_LOW`.
 
 ### 🙋 Waiting on you (not code)
 

@@ -23,6 +23,7 @@ import {
 } from "@/core/mensajes/traspaso";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
@@ -295,6 +296,27 @@ describe("renderTemplate — data_confirmation_request", () => {
     });
     expect(result.html).not.toContain(rawPolicy);
     expect(result.html).toContain("****5678");
+  });
+
+  it("póliza cambiada: pregunta sin repetir ninguno de los dos números (AC24)", () => {
+    // `maskPolicyNumber("4455")` devuelve `****4455`, el número entero: la
+    // pregunta no lleva valores y la plantilla no cae al campo suelto.
+    const result = renderTemplate("data_confirmation_request", {
+      caseId: "case-pc",
+      fields: [],
+      polizaCambiada: true,
+      fieldKey: "policy_number",
+      proposedValue: "4455",
+      conflictWithValue: "POL-4471-A",
+    });
+    for (const cuerpo of [result.text, result.html, result.cuerpo]) {
+      expect(cuerpo).toContain(POLIZA_CAMBIADA);
+      expect(cuerpo).not.toContain("4455");
+      expect(cuerpo).not.toContain("4471");
+    }
+    expect(result.text).toContain("Respondé este correo con el dato");
+    expect(result.text).not.toContain("Confirmo");
+    expect(result.subject).toContain("Nos falta un dato");
   });
 
   it("asks outright when the extracted value says nothing", () => {

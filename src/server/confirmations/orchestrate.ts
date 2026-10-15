@@ -9,7 +9,8 @@
  *   B. High/critical severity → specialist_escalation, and nothing else: no
  *      gap request, no confirmation, no other status. A person is taking over
  *   C. fields_pending_confirmation → insert claim_field_confirmations rows + data_confirmation_request
- *   D. Conflict in customer matches → claim_field_confirmations conflict rows + data_confirmation_request
+ *   D. Conflict in customer matches, or a policy number that changed mid-chat
+ *      → claim_field_confirmations conflict rows + data_confirmation_request
  *   E. Gap analysis → missing_information_request (info_faltante) OR update status
  *   F. confirmation_received — only when no other branch already wrote (AC12)
  *
@@ -30,6 +31,12 @@ import "server-only";
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
+import {
+  nombraLaPoliza,
+  polizaCambiada,
+  polizaElegida,
+  polizasNombradas,
+} from "@/core/case/poliza-cambiada";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
@@ -54,7 +61,11 @@ import type { CaseRow } from "@/lib/db/types";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
-import { analyzeEmailClaimGaps, MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
+import {
+  analyzeEmailClaimGaps,
+  MEDIUM_CONFIDENCE_HIGH,
+  MEDIUM_CONFIDENCE_LOW,
+} from "@/server/cases/gap-analyzer";
 import {
   ajusteDeVencimiento,
   efectosDeTransicion,
@@ -143,6 +154,12 @@ export interface ExtractedClaimOutput {
    * cierra lo que la persona vio con valor.
    */
   propuestos?: Record<string, string>;
+  /**
+   * `cases.policy_number` como estaba antes de esta vuelta: es first-write-wins,
+   * así que es el número que la persona (o el padrón) ya había dejado. Con el
+   * que dio ahora, decide si hay que preguntar cuál es el correcto.
+   */
+  polizaAnterior?: string | null;
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -389,6 +406,70 @@ export async function orchestratePostExtraction(
   // la mirada.
   await reconcileAttachments(caseId, tenantId, labelForClaimType(claimTypeValue), vuelveALaCola);
 
+  /*
+   * ¿Dio otra póliza a mitad de la charla?
+   *
+   * Se calcula acá, antes de que el cierre escriba, y por el mismo motivo que
+   * el resolvedor de abajo: la retoma tiene que encontrar la señal intacta.
+   *
+   * Sólo cuenta si el mensaje de esta vuelta nombra el número: una lectura vieja
+   * del extractor, que relee toda la conversación, o una foto no preguntan nada,
+   * y un tercer número reabre el conflicto. La lectura del extractor es lo que
+   * entiende la negación («no es la 4455»). Y como también puede quedarse con la
+   * primera póliza aunque el mensaje diga otra, vale además lo que el texto da
+   * como póliza («póliza 4455»).
+   */
+  const leida = extractedClaim.fields.find(
+    (f) => canonicalFieldKey(f.field_key) === "policy_number" && f.confidence >= MEDIUM_CONFIDENCE_LOW
+  );
+  const polizaAnterior = extractedOutput.polizaAnterior ?? null;
+  const disputada = extractedOutput.propuestos?.policy_number ?? null;
+  const enDisputa = polizaCambiada(polizaAnterior, disputada);
+  const textoDeLaVuelta = soloAcuse ? undefined : latestMessageText;
+  const eleccion = enDisputa
+    ? polizaElegida(textoDeLaVuelta, polizaAnterior!, disputada!, leida?.field_value)
+    : null;
+  const polizaNueva =
+    eleccion !== null
+      ? null
+      : [
+          ...(leida && nombraLaPoliza(textoDeLaVuelta, leida.field_value) ? [leida.field_value] : []),
+          ...polizasNombradas(textoDeLaVuelta),
+        ].find((n) => polizaCambiada(polizaAnterior, n)) ?? null;
+  const conflictoDePoliza = polizaNueva !== null;
+  const preguntaPoliza = conflictoDePoliza || (enDisputa && eleccion === null);
+  // Mientras la póliza está en disputa no la cierra ni el resolvedor genérico ni
+  // la rama C: confirmarían el número nuevo sin que nadie lo haya elegido.
+  const fueraDeLaPoliza = (k: string) =>
+    !(enDisputa || conflictoDePoliza) || canonicalFieldKey(k) !== "policy_number";
+
+  // La persona eligió: la fila se cierra con el elegido, y si fue el nuevo, el caso lo toma.
+  if (eleccion !== null) {
+    const elegida = eleccion === "nueva" ? disputada! : polizaAnterior!;
+    await guardarConfirmaciones(caseId, tenantId, [
+      {
+        fieldKey: "policy_number",
+        proposedValue: elegida,
+        conflictWithValue: eleccion === "nueva" ? polizaAnterior! : disputada!,
+        confidence: leida?.confidence ?? MEDIUM_CONFIDENCE_HIGH,
+        estado: "confirmed",
+      },
+    ]);
+
+    if (eleccion === "nueva") {
+      try {
+        await enTenant({ tenantId }, (db) =>
+          db
+            .update(cases)
+            .set({ policy_number: elegida.trim().slice(0, 100) })
+            .where(eq(cases.id, caseId))
+        );
+      } catch (err) {
+        logger.error({ code: errorCode(err), case_id: caseId }, "orchestrate.poliza_elegida");
+      }
+    }
+  }
+
   // A field the claimant has now answered is no longer pending. Runs BEFORE
   // the gap analysis, which reads those rows straight back out.
   //
@@ -398,9 +479,9 @@ export async function orchestratePostExtraction(
   const confirmacionesContestadas = await resolveAnsweredConfirmations(
     caseId,
     tenantId,
-    extractedClaim.fields,
-    soloAcuse ? undefined : latestMessageText,
-    lastAsked,
+    extractedClaim.fields.filter((f) => fueraDeLaPoliza(f.field_key)),
+    textoDeLaVuelta,
+    lastAsked.filter(fueraDeLaPoliza),
     extractedOutput.propuestos
   );
 
@@ -427,7 +508,7 @@ export async function orchestratePostExtraction(
       .filter((f) => esValorVago(f.field_key, f.field_value))
       .map((f) => f.field_key),
     ...dudasDelAnalizador.map((f) => f.fieldName),
-  ].filter((k) => !resueltos.has(canonicalFieldKey(k)));
+  ].filter((k) => !resueltos.has(canonicalFieldKey(k)) && fueraDeLaPoliza(k));
 
   const confirmables = collectConfirmableFields(
     uncertainKeys,
@@ -531,7 +612,10 @@ export async function orchestratePostExtraction(
   // cuenta: la rama C lo confirma sin pasar por los resolutores.
   const nosContestoElPedido =
     !soloAcuse &&
-    (documentosDeclinados.length > 0 || confirmacionesContestadas.length > 0 || dichos.length > 0);
+    (documentosDeclinados.length > 0 ||
+      confirmacionesContestadas.length > 0 ||
+      dichos.length > 0 ||
+      eleccion !== null);
 
   // ── D. Customer conflict → confirmation rows — AC9 ────────────────────────
   //
@@ -590,8 +674,35 @@ export async function orchestratePostExtraction(
     }
   }
 
-  if (conflictos.length > 0) {
-    await guardarConfirmaciones(caseId, tenantId, conflictos);
+  /*
+   * La póliza que cambió a mitad de la charla viaja en este mismo pedido, pero
+   * sin su valor: AC24 prohíbe repetir números en la pregunta, y el valor de un
+   * número corto se ve entero aun enmascarado. Va sólo `polizaCambiada`, y la
+   * fila con los dos números queda para el analista.
+   */
+  if (conflictos.length > 0 || preguntaPoliza) {
+    const filas = [
+      ...conflictos,
+      ...(polizaNueva !== null
+        ? [
+            {
+              fieldKey: "policy_number",
+              proposedValue: polizaNueva.trim(),
+              conflictWithValue: polizaAnterior,
+              confidence: leida?.confidence ?? MEDIUM_CONFIDENCE_HIGH,
+              reabrir: true,
+            },
+          ]
+        : []),
+    ];
+    // Sólo se vuelve a preguntar, sin nada nuevo que anotar: la fila ya está pendiente.
+    const deUnAnalista = filas.length > 0 ? await guardarConfirmaciones(caseId, tenantId, filas) : [];
+    // El valor del analista manda: si ya cerró la póliza no se vuelve a preguntar.
+    // Y quien escribe sin ser el titular se deriva, no se le pregunta nada.
+    const pidePoliza =
+      preguntaPoliza &&
+      !deUnAnalista.includes("policy_number") &&
+      extractedOutput.titularAjeno !== true;
 
     /*
      * Un caso escalado se queda con su estado y con su único mensaje.
@@ -601,7 +712,7 @@ export async function orchestratePostExtraction(
      * pidió nada. Era así antes de este cambio y se mantiene: agregarle ahora
      * un evento de auditoría que nunca emitió sería inventar historia.
      */
-    if (!derivaSola) {
+    if (!derivaSola && (conflictos.length > 0 || pidePoliza)) {
       if (!(await setStatus(caseId, tenantId, "confirmacion_pendiente"))) {
         // Otra mano ya movió el caso: el pedido llegaría a un estado que ya no
         // es el que lo generó, y el analista vería un mail sin sentido.
@@ -623,6 +734,8 @@ export async function orchestratePostExtraction(
             })),
             // Se deriva abajo en esta misma vuelta: el pedido no pregunta nada.
             titularAjeno: extractedOutput.titularAjeno === true,
+            // Sin los números: ni `fields` ni nada de acá lleva la póliza.
+            polizaCambiada: pidePoliza,
             // Es el único mensaje de la vuelta: la deliberación corre después y
             // los envíos de abajo se cortan por `confirmationEmailDispatched`.
             question: laPreguntaDelMensaje(latestMessageText),
@@ -639,7 +752,10 @@ export async function orchestratePostExtraction(
           target_id: caseId,
           // Sólo las claves: el valor es dato de una persona, y el que teníamos
           // guardado también.
-          payload: { field_keys: conflictos.map((c) => c.fieldKey), reason: "conflict" },
+          payload: {
+            field_keys: [...conflictos.map((c) => c.fieldKey), ...(pidePoliza ? ["policy_number"] : [])],
+            reason: "conflict",
+          },
         });
       }
     }
@@ -2070,20 +2186,28 @@ async function guardarConfirmaciones(
     conflictWithValue?: string | null;
     /** `confirmed` para lo que la persona escribió recién. Ver la rama C. */
     estado?: "pending" | "confirmed";
+    /**
+     * Reabre la fila aunque el agente ya la haya cerrado. La que cerró un
+     * analista (`confirmed_by`) no se toca nunca. Ver la póliza de la rama D.
+     */
+    reabrir?: boolean;
   }>
-): Promise<void> {
+): Promise<string[]> {
   const tenantCtx: TenantContext = { tenantId };
   const ahora = new Date().toISOString();
 
   try {
     const claves = campos.map((c) => c.fieldKey);
-    const existentes = await enTenant<Array<{ id: string; field_name: string }>>(
+    const existentes = await enTenant<
+      Array<{ id: string; field_name: string; confirmed_by: string | null }>
+    >(
       tenantCtx,
       (db) =>
         db
           .select({
             id: claimFieldConfirmations.id,
             field_name: claimFieldConfirmations.field_name,
+            confirmed_by: claimFieldConfirmations.confirmed_by,
           })
           .from(claimFieldConfirmations)
           .where(
@@ -2095,8 +2219,10 @@ async function guardarConfirmaciones(
     );
 
     const porClave = new Map(existentes.map((e) => [e.field_name, e.id]));
+    const deUnAnalista = new Set(existentes.filter((e) => e.confirmed_by).map((e) => e.field_name));
     const nuevos = campos.filter((c) => !porClave.has(c.fieldKey));
     const aPisar = campos.filter((c) => porClave.has(c.fieldKey));
+    const noEscritas: string[] = [];
 
     if (nuevos.length > 0) {
       await enTenant(tenantCtx, (db) =>
@@ -2124,6 +2250,11 @@ async function guardarConfirmaciones(
      * todavía no contestó y cuyo valor no cambió.
      */
     for (const c of aPisar) {
+      if (c.reabrir && deUnAnalista.has(c.fieldKey)) {
+        noEscritas.push(c.fieldKey);
+        continue;
+      }
+
       await enTenant(tenantCtx, (db) =>
         db
           .update(claimFieldConfirmations)
@@ -2142,17 +2273,27 @@ async function guardarConfirmaciones(
            * el UPDATE la devolvia a `pending` y el pedido salia de nuevo, asi
            * que a la persona se le preguntaba dos veces por un dato que ya
            * habia dado y que alguien ya habia validado.
+           *
+           * Con `reabrir` la que cerró el agente sí se reabre —el número que
+           * dio la persona cambió después de que la diera por buena—, y la que
+           * cerró un analista no: eso lo marca `confirmed_by`, que el agente
+           * nunca setea.
            */
           .where(
             and(
               eq(claimFieldConfirmations.id, porClave.get(c.fieldKey)!),
-              eq(claimFieldConfirmations.status, "pending")
+              c.reabrir
+                ? isNull(claimFieldConfirmations.confirmed_by)
+                : eq(claimFieldConfirmations.status, "pending")
             )
           )
       );
     }
+
+    return noEscritas;
   } catch (err) {
     logger.error({ code: errorCode(err), case_id: caseId }, "orchestrate.guardarconfirmaciones");
+    return [];
   }
 }
 

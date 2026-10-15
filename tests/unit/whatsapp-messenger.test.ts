@@ -91,6 +91,7 @@ import { leerSalud } from "@/server/whatsapp/app-del-cliente";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { CUIDADO, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
@@ -563,6 +564,54 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toContain(AVISO_DE_TRASPASO);
     expect(body).not.toMatch(/respondé/i);
     expect(pideAlgo(body.toLowerCase())).toBe(false);
+  });
+});
+
+/**
+ * La póliza que cambió a mitad de la charla.
+ *
+ * La pregunta no lleva ningún valor, ni el de antes ni el de ahora, y el
+ * orquestador tampoco los pone en `data.fields`: con redactor apagado lo que
+ * sale es el piso, así que el piso tiene que ser la pregunta entera.
+ */
+describe("whatsappMessenger — la póliza cambió", () => {
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  it("sin otros conflictos manda la pregunta sola, sin ningún número", async () => {
+    await whatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "data_confirmation_request",
+      lastMessage: "póliza 4455",
+      data: { fields: [], polizaCambiada: true },
+    });
+
+    const body = sentBody();
+    expect(body).toBe(POLIZA_CAMBIADA);
+    expect(body).not.toContain("4455");
+    expect(body).not.toContain("4471");
+  });
+
+  it("con un conflicto de DNI, la línea enmascarada y después la pregunta", async () => {
+    await send("data_confirmation_request", {
+      caseId: CASE,
+      polizaCambiada: true,
+      fields: [{ fieldKey: "dni", proposedValue: "30123456", conflictWithValue: "30987654" }],
+    });
+
+    const body = sentBody();
+    expect(body).toContain("****7654");
+    expect(body).not.toContain("30987654");
+    expect(body.endsWith(`\n\n${POLIZA_CAMBIADA}`)).toBe(true);
   });
 });
 

@@ -232,6 +232,7 @@ export function renderTemplate(
           : undefined,
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
         titularAjeno: data.titularAjeno === true,
+        polizaCambiada: data.polizaCambiada === true,
         question: data.question != null ? String(data.question) : null,
       });
 

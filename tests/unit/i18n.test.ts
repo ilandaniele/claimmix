@@ -63,10 +63,7 @@ describe("multilanguage support", () => {
   });
 
   it("en-US has all the same keys as es-AR", () => {
-    const esKeys = Object.keys(esAR);
-    const enKeys = Object.keys(enUS);
-    expect(enKeys).toEqual(expect.arrayContaining(esKeys));
-    expect(esKeys).toEqual(expect.arrayContaining(enKeys));
+    expect(Object.keys(enUS).sort()).toEqual(Object.keys(esAR).sort());
   });
 
   it("en-US has no empty string values", () => {

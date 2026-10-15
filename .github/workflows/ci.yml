@@ -582,10 +582,13 @@ jobs:
       #
       # De ahí no sacamos nada: Playwright se baja su propio chromium. Lo único
       # que necesitamos de apt son las bibliotecas del sistema, que están en
-      # Ubuntu. La fuente se va antes de mirar.
+      # Ubuntu. La fuente se va antes de mirar. Ubuntu 26 (`ubuntu-latest` desde
+      # el 19/10) puede no traer `sources.list`, y con `bash -e` el `sed` cortaría el paso.
       - name: Sacar el repo de Chrome que no usamos
         run: |
-          sudo sed -i '/dl\.google\.com/d' /etc/apt/sources.list
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i '/dl\.google\.com/d' /etc/apt/sources.list
+          fi
           sudo grep -rl 'dl\.google\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -v
           if grep -rn 'dl\.google\.com' /etc/apt/ 2>/dev/null; then
             echo '::error::queda una fuente de apt apuntando a dl.google.com'

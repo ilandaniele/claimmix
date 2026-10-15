@@ -17,6 +17,18 @@ import { AUDIO_PERMITIDO, MAX_ATTACHMENT_SIZE_BYTES, normalizarMime } from "@/co
 
 export { MAX_ATTACHMENT_SIZE_BYTES };
 
+/**
+ * Largo máximo del nombre saneado, sin el prefijo aleatorio.
+ *
+ * La clave en R2 es tenant/caso/mensaje/prefijo-nombre y admite 1024 bytes: con
+ * tres UUID y el prefijo quedan unos 750, y el nombre lo elige el remitente. El
+ * saneado deja sólo ASCII, así que un carácter es un byte.
+ */
+const MAX_FILENAME_LENGTH = 120;
+
+/** Una extensión más larga que esto no es una extensión: se corta como el resto. */
+const MAX_EXTENSION_LENGTH = 16;
+
 /** Per-email aggregate maximum: 25 MB */
 export const MAX_AGGREGATE_SIZE_BYTES = 25 * 1024 * 1024;
 
@@ -141,7 +153,8 @@ export function validateSize(sizeBytes: number): { allowed: boolean; reason?: st
  * Steps:
  *  1. Strip directory components — keep only the basename (after last / or \).
  *  2. Replace any character outside [A-Za-z0-9._-] with underscore.
- *  3. Prepend a random 8-byte hex prefix to prevent collisions and path traversal.
+ *  3. Cap the length at MAX_FILENAME_LENGTH, keeping the extension.
+ *  4. Prepend a random 8-byte hex prefix to prevent collisions and path traversal.
  *
  * Example: "../../evil file!.pdf" → "a3f9c01b7e2d4f56-evil_file_.pdf"
  */
@@ -152,10 +165,19 @@ export function sanitizeFilename(name: string): string {
   // 2. Replace disallowed characters.
   const sanitized = basename.replace(/[^A-Za-z0-9._-]/g, "_");
 
-  // 3. Prepend 8-byte (16 hex char) random prefix.
+  // 3. Acotar el largo sin perder la extensión.
+  let acotado = sanitized;
+  if (sanitized.length > MAX_FILENAME_LENGTH) {
+    const punto = sanitized.lastIndexOf(".");
+    const extension =
+      punto > 0 && sanitized.length - punto <= MAX_EXTENSION_LENGTH ? sanitized.slice(punto) : "";
+    acotado = sanitized.slice(0, MAX_FILENAME_LENGTH - extension.length) + extension;
+  }
+
+  // 4. Prepend 8-byte (16 hex char) random prefix.
   const prefix = randomBytes(8).toString("hex");
 
-  return `${prefix}-${sanitized}`;
+  return `${prefix}-${acotado}`;
 }
 
 /**

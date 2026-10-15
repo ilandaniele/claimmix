@@ -47,6 +47,38 @@ describe("sentry.server.config", () => {
     expect(opciones.beforeSendTransaction).toBeTypeOf("function");
   });
 
+  describe("entorno y release", () => {
+    const VERCEL_ENV = process.env.VERCEL_ENV;
+    const SHA = process.env.VERCEL_GIT_COMMIT_SHA;
+
+    afterEach(() => {
+      if (VERCEL_ENV === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = VERCEL_ENV;
+      if (SHA === undefined) delete process.env.VERCEL_GIT_COMMIT_SHA;
+      else process.env.VERCEL_GIT_COMMIT_SHA = SHA;
+    });
+
+    it("en Vercel usa VERCEL_ENV (NODE_ENV vale production también en los previews) y el commit", async () => {
+      process.env.SENTRY_DSN = "https://abc@o1.ingest.sentry.io/1";
+      process.env.VERCEL_ENV = "preview";
+      process.env.VERCEL_GIT_COMMIT_SHA = "da7e428f0000000000000000000000000000abcd";
+      await import("../../sentry.server.config");
+
+      expect(init.mock.calls[0][0].environment).toBe("preview");
+      expect(init.mock.calls[0][0].release).toBe("da7e428f0000000000000000000000000000abcd");
+    });
+
+    it("fuera de Vercel cae a NODE_ENV y no inventa un release", async () => {
+      process.env.SENTRY_DSN = "https://abc@o1.ingest.sentry.io/1";
+      delete process.env.VERCEL_ENV;
+      delete process.env.VERCEL_GIT_COMMIT_SHA;
+      await import("../../sentry.server.config");
+
+      expect(init.mock.calls[0][0].environment).toBe(process.env.NODE_ENV);
+      expect(init.mock.calls[0][0].release).toBeUndefined();
+    });
+  });
+
   it("sin DSN no inicializa", async () => {
     delete process.env.SENTRY_DSN;
     await import("../../sentry.server.config");

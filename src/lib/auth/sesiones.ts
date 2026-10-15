@@ -1,10 +1,9 @@
 /**
  * Cerrar las sesiones de un usuario.
  *
- * La usan el restablecimiento de contraseña y el panel de admin. Tira ante un
- * error a propósito: la ruta de admin no puede auditar «0 sesiones cerradas»
- * como un éxito. Quien necesite seguir pase lo que pase (el restablecimiento)
- * envuelve la llamada en su propio try/catch.
+ * La usa el panel de admin; el restablecimiento de contraseña las cierra Better
+ * Auth solo (`revokeSessionsOnPasswordReset`). Tira ante un error a propósito:
+ * la ruta de admin no puede auditar «0 sesiones cerradas» como un éxito.
  *
  * No invalida el caché de cookie de Better Auth (`cookieCache`, 60 s): es de la
  * librería y vence solo, así que una sesión borrada puede seguir valiendo hasta

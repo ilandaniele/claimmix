@@ -9,7 +9,33 @@
  * el pedido que espera.
  */
 
+import type { Instrumentation } from "next";
+
 export async function register() {
+  /*
+   * Sentry SÓLO si hay a dónde mandar los errores.
+   *
+   * Antes se importaba siempre. `sentry.server.config.ts` arranca con
+   * `import * as Sentry from "@sentry/nextjs"` —veintidós paquetes, 43 MB en
+   * disco, 260 ms de import medidos acá— y adentro tiene un `if
+   * (process.env.SENTRY_DSN)` que no se cumple: la variable no está puesta ni
+   * en producción, ni en la CI, ni en `.env.local`.
+   *
+   * O sea que cada arranque en frío pagaba un cuarto de segundo por inicializar
+   * nada. En Vercel Hobby, donde la función se congela seguido, eso lo paga
+   * alguien que acaba de chocar y está esperando la respuesta.
+   *
+   * La condición sube acá: sin DSN el módulo no se carga, y el día que haya uno
+   * se carga igual que antes.
+   *
+   * Va primero, antes de `@/lib/auth`, porque Sentry instrumenta los módulos
+   * que se importan después de que él arranca: cargado al final, no envolvía
+   * nada de lo que ya estaba en memoria.
+   */
+  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.SENTRY_DSN) {
+    await import("./sentry.server.config");
+  }
+
   /*
    * Sin secreto de sesión, esta instancia no atiende nada.
    *
@@ -28,24 +54,18 @@ export async function register() {
     const { exigirSecretoDeSesion } = await import("@/lib/auth");
     exigirSecretoDeSesion();
   }
-
-  /*
-   * Sentry SÓLO si hay a dónde mandar los errores.
-   *
-   * Antes se importaba siempre. `sentry.server.config.ts` arranca con
-   * `import * as Sentry from "@sentry/nextjs"` —veintidós paquetes, 43 MB en
-   * disco, 260 ms de import medidos acá— y adentro tiene un `if
-   * (process.env.SENTRY_DSN)` que no se cumple: la variable no está puesta ni
-   * en producción, ni en la CI, ni en `.env.local`.
-   *
-   * O sea que cada arranque en frío pagaba un cuarto de segundo por inicializar
-   * nada. En Vercel Hobby, donde la función se congela seguido, eso lo paga
-   * alguien que acaba de chocar y está esperando la respuesta.
-   *
-   * La condición sube acá: sin DSN el módulo no se carga, y el día que haya uno
-   * se carga igual que antes.
-   */
-  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.SENTRY_DSN) {
-    await import("./sentry.server.config");
-  }
 }
+
+/*
+ * Los errores de Server Components, route handlers y server actions no pasan
+ * por el `init` de Sentry: Next los atrapa y los entrega acá. Sin este gancho
+ * el día que se prenda el DSN sólo llegarían los que revienten fuera de Next.
+ *
+ * Mismo criterio que `register()`: sin DSN no se importa el paquete, así que
+ * un error sin Sentry no paga los 260 ms de cargarlo para tirarlo.
+ */
+export const onRequestError: Instrumentation.onRequestError = async (...args) => {
+  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.SENTRY_DSN) {
+    (await import("@sentry/nextjs")).captureRequestError(...args);
+  }
+};

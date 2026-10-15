@@ -17,10 +17,16 @@ const h = vi.hoisted(() => ({
   perfiles: [] as unknown[],
   enviar: vi.fn(),
   alRestablecer: vi.fn(),
+  after: vi.fn(),
   log: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+// `after()` de Next tira fuera de un pedido; acá se mira qué recibe.
+vi.mock("next/server", async (original) => ({
+  ...(await original<typeof import("next/server")>()),
+  after: h.after,
+}));
 vi.mock("better-auth/adapters/drizzle", async () => {
   const { memoryAdapter } = await import("better-auth/adapters/memory");
   return { drizzleAdapter: () => memoryAdapter(h.store) };
@@ -127,16 +133,34 @@ describe("el alta no abre sesión", () => {
   });
 });
 
+const pedirEnlace = () =>
+  auth.api.requestPasswordReset({
+    body: { email: "ana@example.com", redirectTo: "/restablecer" },
+    headers: new Headers(),
+  });
+
+/** El envío ya no se espera para contestar: el token sale del mail cuando el mail sale. */
+async function tokenDelEnlace(): Promise<string> {
+  await vi.waitFor(() => expect(h.enviar).toHaveBeenCalledTimes(1));
+  return new URL(h.enviar.mock.calls[0]![0].url).pathname.split("/").at(-1)!;
+}
+
+const sesionDe = (userId: string, id: string) => ({
+  id,
+  userId,
+  token: `fake-token-${id}`,
+  expiresAt: new Date(Date.now() + 86_400_000),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+});
+
 describe("el enlace de restablecimiento de un alta nueva", () => {
   it("llega al envío con el id de la cuenta, su correo y un enlace con token", async () => {
     const { user } = await altaDe("ana@example.com");
 
-    await auth.api.requestPasswordReset({
-      body: { email: "ana@example.com", redirectTo: "/restablecer" },
-      headers: new Headers(),
-    });
+    await pedirEnlace();
 
-    expect(h.enviar).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(h.enviar).toHaveBeenCalledTimes(1));
     expect(h.enviar.mock.calls[0]![0]).toMatchObject({
       userId: user.id,
       email: "ana@example.com",
@@ -145,14 +169,40 @@ describe("el enlace de restablecimiento de un alta nueva", () => {
     });
   });
 
+  /*
+   * Pedir el enlace contestaba después de mandar el mail, y mandarlo lleva lo
+   * que tarde Gmail. Con una dirección sin cuenta no hay mail: la diferencia
+   * de reloj decía quién tiene cuenta y quién no.
+   */
+  it("el envío queda en vuelo con `after()` y no demora la respuesta", async () => {
+    await altaDe("ana@example.com");
+    let liberar!: () => void;
+    h.enviar.mockReturnValueOnce(new Promise<void>((r) => (liberar = r)));
+
+    // Si la respuesta esperara el envío, esto no vuelve: el mail queda colgado a propósito.
+    await pedirEnlace();
+
+    expect(h.after).toHaveBeenCalledTimes(1);
+    expect(h.after.mock.calls[0]![0]).toBeInstanceOf(Promise);
+    await vi.waitFor(() => expect(h.enviar).toHaveBeenCalledTimes(1));
+    liberar();
+  });
+
+  it("fuera de un pedido de Next, `after()` tira y el envío sale igual", async () => {
+    await altaDe("ana@example.com");
+    h.after.mockImplementationOnce(() => {
+      throw new Error("`after` was called outside a request scope.");
+    });
+
+    await expect(pedirEnlace()).resolves.toMatchObject({ status: true });
+
+    await vi.waitFor(() => expect(h.enviar).toHaveBeenCalledTimes(1));
+  });
+
   it("al restablecer, el gancho recibe el usuario entero (id, correo y nombre)", async () => {
     const { user } = await altaDe("ana@example.com");
-    await auth.api.requestPasswordReset({
-      body: { email: "ana@example.com", redirectTo: "/restablecer" },
-      headers: new Headers(),
-    });
-    const url = new URL(h.enviar.mock.calls[0]![0].url);
-    const token = url.pathname.split("/").at(-1)!;
+    await pedirEnlace();
+    const token = await tokenDelEnlace();
 
     await auth.api.resetPassword({
       body: { newPassword: "fake-otra-contraseña-1234", token },
@@ -164,6 +214,51 @@ describe("el enlace de restablecimiento de un alta nueva", () => {
       id: user.id,
       email: "ana@example.com",
       name: "Ana Pérez",
+    });
+  });
+});
+
+/*
+ * Quien restablece cree que le entraron: las sesiones abiertas tienen que
+ * desaparecer. Antes las borraba el gancho a mano y se tragaba el error; ahora
+ * lo hace Better Auth antes de guardar la contraseña, y si no puede, no la guarda.
+ */
+describe("restablecer cierra las sesiones abiertas", () => {
+  it("la opción de Better Auth está prendida", () => {
+    expect(auth.options.emailAndPassword?.revokeSessionsOnPasswordReset).toBe(true);
+  });
+
+  it("borra las de esa cuenta, antes de avisarle al gancho, y deja las ajenas", async () => {
+    const { user } = await altaDe("ana@example.com");
+    h.store.session.push(sesionDe(user.id, "s-1"), sesionDe(user.id, "s-2"), sesionDe("otra-persona", "s-3"));
+    let abiertasAlAvisar = -1;
+    h.alRestablecer.mockImplementationOnce(async () => {
+      abiertasAlAvisar = h.store.session.filter((s) => s.userId === user.id).length;
+    });
+    await pedirEnlace();
+    const token = await tokenDelEnlace();
+
+    await auth.api.resetPassword({
+      body: { newPassword: "fake-otra-contraseña-1234", token },
+      headers: new Headers(),
+    });
+
+    expect(abiertasAlAvisar).toBe(0);
+    expect(h.store.session.map((s) => s.id)).toEqual(["s-3"]);
+  });
+});
+
+/*
+ * Better Auth cuenta en memoria por instancia: en serverless cada instancia
+ * lleva su cuenta y el techo no es uno. Lo que consume un secreto tiene su cupo
+ * en Postgres en la ruta de /api/auth y acá se apaga para no contarlo dos veces.
+ */
+describe("el limitador interno de Better Auth", () => {
+  it("se apaga en lo que ya tiene techo en la ruta", () => {
+    expect(auth.options.rateLimit?.customRules).toEqual({
+      "/sign-in/*": false,
+      "/request-password-reset": false,
+      "/reset-password": false,
     });
   });
 });

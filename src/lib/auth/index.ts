@@ -3,6 +3,7 @@ import "server-only";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { after } from "next/server";
 
 import { db } from "@/lib/db";
 import { accounts, authUsers, sessions, verifications } from "@/lib/db/schema";
@@ -73,6 +74,28 @@ export const auth = betterAuth({
     // audit_log.actor_id, ...). Better Auth's default 32-char ids would break
     // them, so generate proper UUIDs.
     database: { generateId: () => crypto.randomUUID() },
+
+    /*
+     * Lo que Better Auth manda a segundo plano —hoy, el mail con el enlace de
+     * recuperación— corre después de contestar.
+     *
+     * Esperarlo adentro del pedido hacía que `/request-password-reset` tardara
+     * lo que tarda Gmail sólo cuando la dirección existe: la respuesta fija
+     * («si ese correo existe, te llega un enlace») no confirmaba nada y el
+     * reloj sí. `after()` lo deja en vuelo y Vercel espera a que termine antes
+     * de congelar la función. Fuera de un pedido de Next (tests, scripts)
+     * `after()` tira: la promesa ya está en marcha y Better Auth le colgó su
+     * propio catch, así que alcanza con dejarla.
+     */
+    backgroundTasks: {
+      handler: (tarea) => {
+        try {
+          after(tarea);
+        } catch {
+          // Fuera de un pedido: la tarea ya está en vuelo.
+        }
+      },
+    },
   },
   emailAndPassword: {
     enabled: true,
@@ -101,7 +124,23 @@ export const auth = betterAuth({
     resetPasswordTokenExpiresIn: RESET_DURA_SEGUNDOS,
 
     /*
-     * El mail sale por la casilla de la aseguradora de esa persona.
+     * Restablecer echa a quien estuviera adentro.
+     *
+     * Es el motivo por el que alguien restablece: cree que le entraron. Better
+     * Auth borra todas las sesiones del usuario antes de guardar la contraseña
+     * nueva, y si no puede borrarlas el restablecimiento falla, en vez de
+     * seguir con el intruso vivo. Antes lo hacía `onPasswordReset` a mano,
+     * después de guardar, y se tragaba el error.
+     *
+     * Se puede borrar TODO sin dejar a nadie afuera de su propia cuenta: este
+     * flujo no loguea después de restablecer, `/restablecer` manda a entrar
+     * con la contraseña nueva.
+     */
+    revokeSessionsOnPasswordReset: true,
+
+    /*
+     * El mail sale por la casilla de la aseguradora de esa persona, después de
+     * contestar (ver `advanced.backgroundTasks`).
      *
      * Nunca lanza y nunca registra el enlace: ver src/server/notify/password-reset.ts.
      */
@@ -120,18 +159,11 @@ export const auth = betterAuth({
     },
 
     /*
-     * Que quede asentado que la contraseña cambió por este camino.
-     *
-     * Sin esto, en el registro no se distingue una recuperación de un cambio
-     * hecho por un admin, y son cosas distintas cuando alguien pregunta qué
-     * pasó con una cuenta.
-     */
-    /*
-     * Cierra todas las sesiones abiertas y deja asentado el cambio.
-     *
-     * Vive en su propio módulo para poder probarlo: lo que hace —echar al que
-     * hubiera entrado, anotar cuántas sesiones cerró, no romperse si algo de
-     * eso falla— es exactamente lo que hay que poder ejercer.
+     * Lo que `revokeSessionsOnPasswordReset` no cubre: marcar el correo como
+     * verificado y dejar asentado que la contraseña cambió por este camino,
+     * que no es lo mismo que un cambio hecho por un admin cuando alguien
+     * pregunta qué pasó con una cuenta. Vive en su propio módulo para poder
+     * probarlo; corre después de que las sesiones ya se borraron.
      */
     onPasswordReset: async ({ user }) => {
       const { onPasswordReset } = await import("@/lib/auth/on-password-reset");
@@ -209,6 +241,23 @@ export const auth = betterAuth({
      * camino no es este número: es invalidar el caché al revocar.
      */
     cookieCache: { enabled: true, maxAge: 60 },
+  },
+  /*
+   * El limitador propio de Better Auth cuenta en memoria, por instancia: en
+   * serverless cada instancia lleva su cuenta y el techo no es uno. Lo que
+   * gasta un secreto o manda un mail —entrar, pedir el enlace, usarlo— tiene
+   * su techo en Postgres en `src/app/api/auth/[...all]/route.ts`, y acá se le
+   * pide a la librería que no lo cuente dos veces. El resto de sus rutas sigue
+   * con sus reglas por omisión, en memoria: llevarlas a Postgres sumaba una
+   * escritura por cada pedido a `/api/auth/*`, con la ruta elegida por quien
+   * llama.
+   */
+  rateLimit: {
+    customRules: {
+      "/sign-in/*": false,
+      "/request-password-reset": false,
+      "/reset-password": false,
+    },
   },
   databaseHooks: {
     user: {

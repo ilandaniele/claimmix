@@ -3166,7 +3166,15 @@ sobre el 429 que esperaban. Una línea por arreglo:
   instante: lo retoma el barrido, así un cupo agotado no quema los tres intentos
   en segundos. *Ampliado 2026-09-23:* un 429 o un TIMEOUT del reconocedor de
   negativas entra por la misma puerta y con el mismo tope. Ver «El parte que un
-  429 daba por no rechazado».
+  429 daba por no rechazado». *Enmendado 2026-10-15:* el barrido sólo corría
+  con tráfico de otro caso o con el cron diario, y en WhatsApp un caso cortado
+  por un TIMEOUT de Gemini 3.8 esperó 5 minutos y otro quedó sin respuesta. Al
+  soltar la reserva, el worker encola ahora el flujo durable
+  `src/workflows/retomar-tras-corte.ts`, que espera 45 s y retoma ese caso con
+  los mismos predicados del barrido (`retomarExtraccionesPendientes` con
+  `caseId`, sin los dos minutos de espera). Sin reintentos del SDK, y el tope de
+  tres intentos no cambia. Si el flujo no se puede encolar, se anota
+  `retomar_pendientes.retoma_no_programada` y queda el barrido de siempre.
 - **Un 429 en la deliberación queda a la vista.** `deliberate.ts` sigue
   cayendo a la plantilla, pero escribe `agent.deliberation_failed` en la
   auditoría con el estado y el código del proveedor. *Enmendado 2026-09-22:*

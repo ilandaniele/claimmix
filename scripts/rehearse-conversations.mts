@@ -1274,10 +1274,12 @@ async function deliverEmail(
 /**
  * Si el worker dejó el caso pendiente por un timeout del modelo.
  *
- * En producción lo levanta `retomarExtraccionesPendientes` dos minutos después,
- * con el mismo `runIntakeAgent` que usa acá el ensayo. El ensayo no tiene dos
- * minutos: retoma el caso una vez, en el acto, y sólo cuando el turno esperaba
- * respuesta y no hubo ninguna. Un silencio que el escenario pide no se toca.
+ * En producción lo retoma el flujo `retomarTrasCorte` unos 45 s después, con el
+ * mismo `runIntakeAgent` que usa acá el ensayo. Bajo `tsx` ese flujo no se
+ * puede encolar (la función no pasó por el compilador del SDK) y el worker sólo
+ * lo anota en el log, así que el ensayo retoma el caso una vez, en el acto, y
+ * sólo cuando el turno esperaba respuesta y no hubo ninguna. Un silencio que el
+ * escenario pide no se toca.
  */
 async function extraccionPendiente(caseId: string): Promise<boolean> {
   const [row] = await db

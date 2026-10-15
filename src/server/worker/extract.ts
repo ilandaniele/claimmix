@@ -1534,6 +1534,7 @@ export async function runEmailExtractionWorker(
           sePuedeRetomar: puedeArrancar(newStatus),
           preguntadas,
           propuestos: pedido.propuestos,
+          polizaAnterior: caseRow.policy_number,
         },
         customerMatches,
         messengerFor(caseRow.channel),

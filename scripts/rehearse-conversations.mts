@@ -982,10 +982,18 @@ const SCENARIOS: Scenario[] = [
       { say: "sigo acá", expect: { replies: 0, paraResponder: true } },
       { accion: "devolver_al_agente", expect: { status: "info_faltante", paraResponder: false } },
       {
-        // Devuelto, el agente vuelve a contestar.
+        // Devuelto, el agente vuelve a contestar: otra póliza, y pregunta cuál sin repetir ninguna.
         say: "es un gol blanco patente AB123CD, póliza 4455",
-        expect: { replies: 1, paraResponder: false },
+        expect: {
+          replies: 1,
+          paraResponder: false,
+          status: "confirmacion_pendiente",
+          mentions: ["coincid"],
+          avoids: ["4455", "4471"],
+        },
       },
+      // Elige la anterior escribiéndola: la póliza ya no se vuelve a pedir.
+      { say: "la correcta es la POL-4471-A", expect: { replies: 1, noAsked: ["policy_number"] } },
     ],
   },
 ];

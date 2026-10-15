@@ -106,6 +106,15 @@ export interface ComposeReplyInput {
    */
   titularAjeno?: boolean;
   /**
+   * La persona nombró otra póliza que la del caso, y hay que pedirle que escriba
+   * la correcta.
+   *
+   * Sin valores en el input: ni el nuevo ni el anterior (AC24), y
+   * `maskPolicyNumber("4455")` devuelve el número entero. Por eso el prompt
+   * tapa los números de lo que escribió y la guarda rechaza cualquiera.
+   */
+  polizaCambiada?: boolean;
+  /**
    * Alguien se lastimó: la derivación abre con la frase de cuidado.
    *
    * El booleano del orquestador y no el texto del piso: el de WhatsApp trae el
@@ -207,6 +216,17 @@ function sinNumerosEnteros(texto: string): string {
   );
 }
 
+/**
+ * Una póliza corta, POL-4471-A: `sinNumerosEnteros` pide seis dígitos para no
+ * tapar una patente, y ésta pasaba entera. En el ensayo `devolver-al-agente`
+ * (15/10) volvió tal cual: «entendemos que la póliza es la POL-4471-A». La
+ * patente no llega, ABC-321 tiene tres dígitos. El prefijo queda: con «****»
+ * solo, el modelo escribió «entendemos que la patente es la ****».
+ */
+function sinPolizasCortas(texto: string): string {
+  return texto.replace(/\b([A-Za-z]{2,4})-\d{4,5}(?:-[A-Za-z0-9]+)?\b/g, "$1-****");
+}
+
 /*
  * El ensayo del 23/09 abría «necesitamos que nos mandes:» y seguía con
  * «• Decinos si alguien resultó lastimado.» o «• ¿Tu nombre completo es…?»: el
@@ -229,7 +249,19 @@ const TRASPASO =
   "con esto se cierra la carga de datos por este medio y una persona del equipo le va a " +
   `escribir, puede ser desde otro número o desde otra dirección de correo (por ejemplo: «${AVISO_DE_TRASPASO}»)`;
 
+const DIFERENCIA = "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.";
+
+const POLIZA_NO_COINCIDE =
+  "Decir que el número de póliza que pasó ahora no coincide con el que teníamos para su caso, " +
+  "y pedirle que escriba el correcto.";
+
 function buildPrompt(input: ComposeReplyInput): string {
+  // Con póliza cambiada «4455» llegaba entero: `sinNumerosEnteros` sólo tapa de 7 a 10 dígitos.
+  const sinNumeros = (texto: string): string =>
+    input.polizaCambiada ? texto.replace(/\d{3,}/g, "***") : texto;
+  const paraElPrompt = (texto: string): string =>
+    sinCentinelas(sinNumeros(sinPolizasCortas(sinNumerosEnteros(sinEnlaces(texto)))));
+
   const items = (input.fields ?? []).map((key) => {
     const { label, kind } = labelForField(key);
     const known = input.knownValues?.[key];
@@ -242,6 +274,13 @@ function buildPrompt(input: ComposeReplyInput): string {
     const { label } = labelForField(c.fieldKey);
     return `- ${label}: la persona dice "${sinCentinelas(c.proposed)}" y nosotros tenemos "${sinCentinelas(c.stored)}"`;
   });
+
+  // Sin conflictos del padrón no hay «dos valores» que señalar: la póliza no entra al prompt.
+  const diferencia = !input.polizaCambiada
+    ? DIFERENCIA
+    : conflictos.length > 0
+      ? `${DIFERENCIA} ${POLIZA_NO_COINCIDE}`
+      : POLIZA_NO_COINCIDE;
 
   const intentBrief: Record<ReplyIntent, string> = {
     ask: "Pedir los datos listados. No pidas nada que no esté en la lista.",
@@ -258,7 +297,7 @@ function buildPrompt(input: ComposeReplyInput): string {
         "especialista va a revisar el caso y se va a comunicar (decí «un especialista», nunca " +
         "«él» ni «ella»). NO preguntes ni pidas nada: el caso ya lo tiene un especialista. " +
         `Avisá también que ${TRASPASO}.`
-      : "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.",
+      : diferencia,
     // Es la única intención donde la lista de campos se pasa para que NO se
     // use: el redactor la necesita para no volver a pedir eso mismo con
     // otras palabras, que es como se rompería la regla sin darse cuenta.
@@ -285,14 +324,14 @@ denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y 
 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}${llevaCuidado(input) ? ` Abrí (después del saludo, si saludás) con una sola frase breve de cuidado: «${CUIDADO}». No repitas ni comentes lo que contó de las heridas, la internación o la salud de nadie, no diagnostiques, no prometas nada.` : ""}
-${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${sinCentinelas(sinNumerosEnteros(sinEnlaces(input.question)))}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${paraElPrompt(input.question)}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
 
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}\n\n${COMO_VA_LA_LISTA}` : ""}
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}
-${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${sinCentinelas(sinNumerosEnteros(sinEnlaces(input.lastMessage))).slice(0, 600)}"""` : ""}
+${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${paraElPrompt(input.lastMessage).slice(0, 600)}"""` : ""}
 
 ${channelBrief}
 
@@ -301,7 +340,7 @@ PROHIBIDO, sin excepción:
 - Decir que algo está aprobado, cubierto o rechazado.
 - Inventar datos, números de caso, nombres o fechas que no estén acá arriba.
 - Afirmar un dato que está en DATOS A PEDIR y no dice «ya entendimos»: no lo sabemos, así que se pide, no se deduce del último mensaje. Una calle no dice la provincia.
-- Pedir algo que no esté en la lista de datos.
+- Pedir algo que no esté en la lista de datos${input.polizaCambiada ? ", salvo el número de póliza correcto" : ""}.${input.polizaCambiada ? "\n- Escribir cualquier número de póliza, ni el nuevo ni el anterior, ni una parte." : ""}
 - Disculpas largas, floreo, o tono de robot.
 
 TONO: si lo que contó es grave —fuego, heridos, robo— sé sobrio y breve. Si es un
@@ -457,6 +496,19 @@ function violation(text: string, input: ComposeReplyInput): string | null {
         return `dropped_conflict:${c.fieldKey}`;
       }
     }
+
+    // La póliza del cambio no entra al input, así que no hay valor que se pueda
+    // citar: cualquier número que no sea de un conflicto del padrón es de ella.
+    if (input.polizaCambiada) {
+      if (!/p[oó]liza/i.test(trimmed) || !/coincid/i.test(trimmed)) return "dropped_poliza";
+      const citables = [
+        input.fallback,
+        ...(input.conflicts ?? []).flatMap((c) => [c.proposed, c.stored]),
+      ].join("\n");
+      if ((trimmed.match(/\d{3,}/g) ?? []).some((n) => !citables.includes(n))) {
+        return "poliza_con_numero";
+      }
+    }
   }
 
   // El titular ajeno ya se derivó en esta vuelta: lo que conteste no lo lee el
@@ -576,6 +628,12 @@ function explain(problem: string): string {
   }
   if (problem === "afirma_la_provincia") {
     return "nombraste una provincia que la persona no dijo, y la provincia es justo lo que estamos pidiendo: una calle no la dice. No la afirmes ni la supongas; pedila.";
+  }
+  if (problem === "poliza_con_numero") {
+    return "escribiste un número. El de la póliza no se repite, ni el nuevo ni el anterior: decí que no coincide y pedile que escriba el correcto.";
+  }
+  if (problem === "dropped_poliza") {
+    return "no dijiste que el número de póliza no coincide. Hay que decirlo y pedirle que escriba el correcto.";
   }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";

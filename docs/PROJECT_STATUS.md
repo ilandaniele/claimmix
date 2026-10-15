@@ -4896,7 +4896,7 @@ pen test verdes) y por #439 a main (`080eb325`); Dependabot cerró #434 solo.
   `pnpm check` completo dio verde en 14,4 min: 14 497 tests, flujos 3/3, 26 conversaciones y
   smoke sobre `080eb32`.
 
-### Actions sin cuota hasta el 1/11, y CI que saltea lo que es sólo documentación (2026-10-15, rama `ci/solo-docs`)
+### Actions sin cuota hasta el 1/11, y CI que saltea lo que es sólo documentación (2026-10-15, #441)
 
 El presupuesto de US$ 50 por mes de GitHub Actions de la cuenta se gastó entero el 15/10:
 octubre suma US$ 64,08 brutos, de los que claimmix son 42,44 y uns-study 20,40 (propflow
@@ -4913,7 +4913,7 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
   CI de push 795, CodeQL de PR 414, Secretos de PR 197, barrido 170, CodeQL de push 134 y
   Carga 101. Un PR que sólo tocaba documentación costaba unos 60 minutos (CI 30, CodeQL 5,
   Secretos 1 y QA de 22 a 25).
-- **Sólo docs** (rama `ci/solo-docs`). Un commit que sólo cambia archivos `.md` (salvo
+- **Sólo docs** (#441). Un commit que sólo cambia archivos `.md` (salvo
   `docs/PROMOCION.md`, que leen los tests) sobre un árbol que ya pasó hereda su marca: `arbol`
   saltea los jobs de código, CodeQL no analiza y el Post-deploy de QA corre todo menos el
   ensayo, con el veredicto en verde y la marca `ensayo-verde-<árbol>`, así que dev tampoco
@@ -4926,7 +4926,7 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
 
 - **Actions sin cuota hasta el 1/11.** Sin planes pagos, las opciones son esperar, un runner
   propio en tu máquina (con tu OK) o un cron externo gratis para el barrido de trabados, que
-  configurás vos. Sin CI no hay promoción a prd: la próxima lleva #436–#440 y `ci/solo-docs`.
+  configurás vos. Sin CI no hay promoción a prd: la próxima lleva #436–#441.
 
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner

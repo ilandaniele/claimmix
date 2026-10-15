@@ -223,7 +223,7 @@ describe("renderTemplate — missing_information_request", () => {
     expect(result.html).toContain("Número de póliza");
     expect(result.html).toContain("Fecha del siniestro");
     // Should NOT mention fields not in the list.
-    expect(result.html).not.toContain("DNI del titular");
+    expect(result.html).not.toContain("DNI o CUIT del titular");
   });
 
   it("includes case ID in subject and body", () => {

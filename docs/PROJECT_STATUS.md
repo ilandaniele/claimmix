@@ -4879,6 +4879,23 @@ y `/api/health?deep=1` sin desfase de bases.
   dev dio 389 ms al primer intento (antes oscilaba entre 477 y 576).
 - **Pen test** (#424): el asistente reintenta una vez si el modelo no contesta.
 
+### workflow 5 y ESLint 10 (2026-10-15, #438/#439, en main; a prd con la próxima promoción)
+
+Los majors que Dependabot juntó en #434, menos TypeScript 7. Entraron por #438 a qa (ensayo y
+pen test verdes) y por #439 a main (`080eb325`); Dependabot cerró #434 solo.
+
+- **workflow 5.2.0 y `@workflow/vitest` 5.0.3.** El código sólo usa `start()` y las directivas
+  `"use workflow"`/`"use step"`, que no cambian. Los runs nuevos quedan en la región de la
+  función (gru1, antes iad1); los de 4.x terminan en su deployment, sin migrar nada.
+- **ESLint 10.12.** `eslint-config-next` 16.4 lo soporta; los avisos de peer de
+  `eslint-plugin-import`, `jsx-a11y` y `react` son esperables.
+- **TypeScript 7 afuera.** Compila el proyecto, pero typescript-eslint 8.71 no lo soporta y el
+  lint no arranca. `dependabot.yml` ignora el major de `typescript` hasta que
+  typescript-eslint/typescript-eslint#10940 lo resuelva.
+- **Verificado.** Dev salteó el ensayo que QA ya había pasado, Carga 434 ms (peor caso), y el
+  `pnpm check` completo dio verde en 14,4 min: 14 497 tests, flujos 3/3, 26 conversaciones y
+  smoke sobre `080eb32`.
+
 ### 🙋 Waiting on you (not code)
 
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su

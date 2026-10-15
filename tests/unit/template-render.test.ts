@@ -67,8 +67,12 @@ describe("maskPolicyNumber", () => {
     expect(maskPolicyNumber("ABC")).toBe("****");
   });
 
-  it("masks POL-1234 to POL-****1234", () => {
-    expect(maskPolicyNumber("POL-1234")).toBe("POL-****1234");
+  it("masks a policy with fewer than 6 trailing digits entirely (AC24)", () => {
+    // Los últimos 4 de un número de 4 o 5 dígitos son casi todo el número.
+    expect(maskPolicyNumber("POL-1234")).toBe("****");
+    expect(maskPolicyNumber("4455")).toBe("****");
+    expect(maskPolicyNumber("12345")).toBe("****");
+    expect(maskPolicyNumber("123456")).toBe("****3456");
   });
 });
 
@@ -95,6 +99,14 @@ describe("renderTemplate — confirmation_received", () => {
     // Must contain the masked version.
     expect(result.html).toContain("POL-****5678");
     expect(result.text).toContain("POL-****5678");
+  });
+
+  it("AC24: a short policy number never comes out whole", () => {
+    const result = renderTemplate("confirmation_received", { caseId: "abc-123", policyNumber: "4455" });
+    for (const out of [result.html, result.text, result.cuerpo]) {
+      expect(out).not.toContain("4455");
+      expect(out).not.toContain("Póliza asociada");
+    }
   });
 
   it("AC24: body does not contain raw DNI when DNI is passed in data", () => {
@@ -299,8 +311,7 @@ describe("renderTemplate — data_confirmation_request", () => {
   });
 
   it("póliza cambiada: pregunta sin repetir ninguno de los dos números (AC24)", () => {
-    // `maskPolicyNumber("4455")` devuelve `****4455`, el número entero: la
-    // pregunta no lleva valores y la plantilla no cae al campo suelto.
+    // AC24: la pregunta no lleva valores y la plantilla no cae al campo suelto.
     const result = renderTemplate("data_confirmation_request", {
       caseId: "case-pc",
       fields: [],

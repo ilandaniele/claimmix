@@ -236,6 +236,10 @@ function setupDbMocks({
    * las lee `guardarConfirmaciones`: `confirmed_by` dice si la cerró un analista.
    */
   confirmacionesExistentes = [] as Array<{ id: string; field_name: string; confirmed_by: string | null }>,
+  /** `cases.policy_number`, como lo lee el cierre. Un UPDATE de la póliza lo pisa, como en la base. */
+  polizaDelCaso = null as string | null,
+  /** La lectura de la póliza del caso tira. */
+  polizaIlegible = false,
 } = {}) {
   const mockDbTyped = db as unknown as MockDb;
 
@@ -350,6 +354,17 @@ function setupDbMocks({
         return { where: () => filas };
       }
 
+      if (tableName === "cases" && Object.keys(proj ?? {}).join() === "policy_number") {
+        return {
+          where: () => ({
+            limit: () =>
+              polizaIlegible
+                ? Promise.reject(new Error("connection lost"))
+                : Promise.resolve([{ policy_number: polizaDelCaso }]),
+          }),
+        };
+      }
+
       // Any other table — return empty so upsert inserts.
       //
       // `where()` tiene que ser esperable ADEMÁS de tener `.limit()`:
@@ -387,6 +402,9 @@ function setupDbMocks({
         if (getTableName(table) === "missing_docs" && ("declined_at" in data || "satisfied_at" in data)) {
           const cerrados = valoresDe(cond);
           missingDocsRows = missingDocsRows.filter((r) => !cerrados.includes(r.doc_key));
+        }
+        if (getTableName(table) === "cases" && "policy_number" in data) {
+          polizaDelCaso = data.policy_number as string | null;
         }
         return {
           // `cases` usa el `RETURNING` como guarda atómica (E2): por omisión
@@ -1836,6 +1854,40 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
     // DNI must NOT appear in the data object passed to the dispatcher
     const dataStr = JSON.stringify(confirmationCall?.[0].data ?? {});
     expect(dataStr).not.toMatch(/\b\d{7,8}\b/); // no raw DNI
+  });
+
+  it("cita la póliza del caso, no la que leyó el extractor en esta vuelta", async () => {
+    // El extractor del mock lee POL-1234; el caso tiene otra.
+    setupDbMocks({ polizaDelCaso: "POL-87654321" });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const cierre = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(cierre?.[0].data?.policyNumber).toBe("POL-87654321");
+  });
+
+  it("si no se puede leer la póliza del caso, el cierre sale igual y sin póliza", async () => {
+    setupDbMocks({ polizaDelCaso: "POL-87654321", polizaIlegible: true });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const cierre = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(cierre).toBeDefined();
+    expect(cierre?.[0].data?.policyNumber).toBeNull();
   });
 });
 
@@ -5934,9 +5986,12 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
     grave?: boolean;
     existentes?: FilaExistente[];
   }) {
+    const polizaAnterior = opts.polizaAnterior === undefined ? ANTERIOR : opts.polizaAnterior;
     const spies = setupDbMocks({
       confirmacionesExistentes: opts.existentes,
       lastAskRows: opts.pedidoEnPie ? [{ asked_keys: opts.pedidoEnPie }] : [],
+      // El worker escribe la póliza antes de orquestar y la primera gana.
+      polizaDelCaso: polizaAnterior ?? opts.leida ?? null,
     });
     const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
     const sinPoliza = extractEmailClaimMock().fields.filter((f) => f.field_key !== "policy_number");
@@ -5956,7 +6011,7 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
         }),
         senderEmail: SENDER_EMAIL,
         latestMessageText: opts.texto,
-        polizaAnterior: opts.polizaAnterior === undefined ? ANTERIOR : opts.polizaAnterior,
+        polizaAnterior,
         propuestos: opts.propuestos,
         preguntadas: opts.preguntadas,
         titularAjeno: opts.titularAjeno,
@@ -5973,6 +6028,7 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
       ...spies,
       enviados,
       pedidos,
+      cierre: enviados.find((m) => m.template === "confirmation_received"),
       /** Los pedidos que preguntan por la póliza. */
       pedidosDePoliza: pedidos.filter((m) => m.data.polizaCambiada === true),
       /** Las filas de póliza que se insertaron. */
@@ -6080,6 +6136,7 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
       ]);
       expect(r.escrituras.some((d) => "policy_number" in d)).toBe(false);
       expect(r.pedidos).toHaveLength(0);
+      expect(r.cierre?.data.policyNumber).toBe(ANTERIOR);
     });
 
     it("elige la nueva: la fila se cierra con ella y el caso la toma", async () => {
@@ -6094,6 +6151,14 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
       ]);
       expect(r.updateSpy).toHaveBeenCalledWith({ policy_number: NUEVA });
       expect(r.pedidos).toHaveLength(0);
+      expect(r.cierre?.data.policyNumber).toBe(NUEVA);
+    });
+
+    it("eligió la anterior y el extractor sigue leyendo la nueva: el cierre cita la del caso", async () => {
+      const r = await vuelta({ texto: "gracias", leida: NUEVA });
+
+      expect(r.pedidosDePoliza).toHaveLength(0);
+      expect(r.cierre?.data.policyNumber).toBe(ANTERIOR);
     });
 
     it("una respuesta sin número deja la disputa abierta y vuelve a preguntar", async () => {

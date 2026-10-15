@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-09. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-15. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -38,7 +38,8 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 - **URLs:** prd en https://claimmix.vercel.app (proyecto `claimmix-prd`, desde el move
   del 2026-10-09) y dev en https://claimmix-dev.vercel.app (proyecto `claimmix`, con la
   base `ep-proud-resonance` y sus datos reales); ver «Ambiente prd» más abajo
-- **AI:** Gemini `gemini-2.5-flash` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`),
+- **AI:** Gemini `gemini-3.8-flash` en la multirregión `us` **via Vertex AI** (`GEMINI_TRANSPORT=vertex`;
+  desde 2026-10-15, porque Google retira 2.5 el 20/10),
   `MOCK_AI=true` para local. **No hay fallback de OpenAI**: el extractor se borró
   y `OPENAI_API_KEY` no se lee en ningún archivo. El selector real es
   `resolverAiMode` (`MOCK_AI`, `AI_MOCK`, o Gemini sin configurar). En modo
@@ -4850,7 +4851,39 @@ prende hasta que un abogado revise). Receta, runbook del operador y secretos en 
 - **Riesgo.** Pedir credenciales al cliente es zona gris en las Platform Terms de Meta (§6.a.iv);
   se sostiene sólo como proveedor de servicios con acuerdo previo (§5.a).
 
+### Gemini 3.8, buenas prácticas y CI más barato (2026-10-14/15, promoción #435)
+
+Todo llegó a prd en una sola promoción (#435, `8088fdb7`), con el Post-deploy de PRD verde
+y `/api/health?deep=1` sin desfase de bases.
+
+- **Gemini 3.8-flash** (#427, en `us`). La extracción cuesta unas 5 veces más que con 2.5.
+  `VERTEX_EXTRACTION_MODEL` ya no existe en Vercel ni en GitHub: manda el default del código.
+  3.8 escribe el número de póliza o `""` en `possible_*_matches[].policy_id`; desde #431 esas
+  pistas caen a `[]` en vez de tirar la extracción.
+- **Latencia de 3.8** (ensayo de QA): extracciones de 5–8 s, con un tramo de 7 minutos a
+  14–25 s y 8 cortes a 30 s que la retoma cubrió. Antes de tocar `GEMINI_TIMEOUT_MS`, medir
+  en prd `ai.email_extraction.attempt1` (`latency_ms`) y `ai.transport_timeout`.
+- **Buenas prácticas** (#432): pantallas de error y de no encontrado, fuentes del sistema,
+  `lock_timeout` en `scripts/migrate.mjs`, techo y `AbortSignal` en R2, `onRequestError` y
+  release en Sentry. En auth, con tres refutadores: sesiones cerradas al restablecer la
+  contraseña, mails después de la respuesta (`after()`), techo en `/reset-password` y en el
+  Server Action de `/restablecer`.
+- **Dependencias** (#428): Zod 4, Vitest 5, `@vercel/oidc` 4, minors y patches al día, Node 24
+  en CI. Quedan afuera workflow 5, ESLint 10 y TypeScript 7 (Dependabot #434): trabajo propio.
+- **CI más barato** (#417, #421, #429): un marcador de árbol saltea lo que ya pasó, CodeQL y
+  Secretos sin `push`, `timeout-minutes` en todos los jobs, Dependabot separa los majors y el
+  Post-deploy de dev no repite el ensayo que QA pasó sobre el mismo árbol. CI por PR bajó de
+  51 a 19 minutos por corrida y CI por push de 54 a 3. Medir la semana siguiente contra los
+  3288 minutos del 07–14/10.
+- **Carga** (#425): el tablero de métricas y la bandeja mandan menos sentencias por lote. En
+  dev dio 389 ms al primer intento (antes oscilaba entre 477 y 576).
+- **Pen test** (#424): el asistente reintenta una vez si el modelo no contesta.
+
 ### 🙋 Waiting on you (not code)
+
+- **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
+  check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner
+  `VERTEX_EXTRACTION_MODEL=gemini-3.8-flash` o borrar la línea.
 
 - **App propia del cliente: antes de prenderla.** (1) W6, el ensayo manual en dev con un
   portfolio de prueba nuevo y el chip de repuesto; cierra las incógnitas I1 a I42 de la

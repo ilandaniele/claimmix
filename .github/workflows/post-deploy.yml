@@ -168,9 +168,57 @@ jobs:
             *) echo "::error::Este disparo sólo admite claimmix-dev.vercel.app, no ${HOST}"; exit 1 ;;
           esac
 
+  # ── El ensayo de un árbol que QA ya ensayó no se repite ─────────────────────
+  #
+  # El ensayo son tres cuartos de los minutos de esta corrida, y corre en el
+  # runner, no contra la URL: el mismo código, el mismo modelo y los mismos
+  # escenarios; cambia sólo la base. Una promoción de `qa` a `main` arma el
+  # mismo árbol que QA acaba de ensayar, así que repetirlo acá eran de 25 a 37
+  # minutos para probar otra vez lo mismo.
+  #
+  # Cuando `qa_veredicto` publica verde deja un artefacto con el hash del
+  # árbol, como `marcar` en ci.yml. Si este deploy arma ese árbol,
+  # `produccion` corre todo menos el ensayo; contra esta base lo vuelve a
+  # correr el `pnpm check` completo de después de cada deploy. Cualquier error
+  # cae del lado seguro: ensaya. El disparo a mano ensaya siempre, porque este
+  # job no corre y su salida queda vacía.
+  ensayo_previo:
+    name: ¿QA ya ensayó este árbol?
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      !endsWith(github.event.deployment.environment, '-qa') &&
+      !endsWith(github.event.deployment.environment, '-prd')
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      correr: ${{ steps.buscar.outputs.correr }}
+    steps:
+      - name: Buscar la marca de QA
+        id: buscar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          correr=true
+          arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq .tree.sha 2>/dev/null || true)
+          if [ -n "$arbol" ]; then
+            # Sólo cuenta una marca de este repo, como en ci.yml.
+            hay=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ensayo-verde-$arbol&per_page=20" \
+              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)] | length" 2>/dev/null || echo 0)
+            if [ "$hay" -gt 0 ] 2>/dev/null; then correr=false; fi
+          fi
+          echo "correr=$correr" >> "$GITHUB_OUTPUT"
+          if [ "$correr" = false ]; then
+            echo "QA ya ensayó el árbol \`$arbol\` y pasó: el ensayo no se repite contra esta base." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   produccion:
     name: Producción
-    needs: [validar_url]
+    needs: [validar_url, ensayo_previo]
     # El proyecto, no sólo el entorno: el deploy del proyecto de QA también
     # llega con un entorno que empieza con `Production` —así se llama SU
     # entorno de producción, en SU proyecto— y sin distinguirlo esto correría
@@ -192,7 +240,7 @@ jobs:
     # resumen del run por el job `alcance` de deploy-checks.yml.
     #
     # `validar_url` sólo corre en el disparo a mano, así que por
-    # deployment_status queda `skipped`: `!cancelled()` deja pasar eso y
+    # deployment_status queda `skipped` (y `ensayo_previo`, al revés): `!cancelled()` deja pasar eso y
     # `!= 'failure'` frena una URL rechazada. Sin la función de estado, un
     # `needs` salteado saltearía este job también.
     if: >
@@ -215,6 +263,7 @@ jobs:
       url: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
       entorno: Production
       medir_carga: true
+      correr_ensayo: ${{ needs.ensayo_previo.outputs.correr != 'false' }}
     secrets: inherit
   # ── QA: primero, que los secretos de QA sean de QA ──────────────────────────
   #
@@ -422,7 +471,8 @@ jobs:
   # Y el paso sale 1 cuando publica rojo, para que su propio check run no quede
   # verde junto a un estado rojo.
   #
-  # Mismo piso de permisos que el resto: sólo puede escribir estados.
+  # Mismo piso de permisos que el resto: escribir estados y leer el commit
+  # para la marca del árbol.
   qa_veredicto:
     name: Veredicto de QA
     needs: [qa_secretos, qa]
@@ -434,6 +484,7 @@ jobs:
     runs-on: ubuntu-slim
     timeout-minutes: 3
     permissions:
+      contents: read
       statuses: write
     steps:
       - name: Publicar el veredicto sobre el commit
@@ -463,6 +514,25 @@ jobs:
             -f description="$descripcion" \
             -f target_url="$RUN_URL"
           [ "$estado" = "success" ] || exit 1
+
+      # La marca que lee `ensayo_previo`. Sólo llega acá con el veredicto
+      # verde, que exige el ensayo corrido y pasado.
+      - name: Hash del árbol ensayado
+        id: arbol
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          echo "$SHA" > marca.txt
+          echo "arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq .tree.sha 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+
+      - if: steps.arbol.outputs.arbol != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ensayo-verde-${{ steps.arbol.outputs.arbol }}
+          path: marca.txt
+          retention-days: 7
+          overwrite: true
 
   # ── PRD: que esté sano y que las bases no se hayan desfasado ────────────────
   #

@@ -33,6 +33,10 @@ updates:
       # el major sube junto con ese, no solo.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # typescript-eslint no soporta TypeScript 7 y con él el lint ni arranca
+      # (#434). Sacar cuando lo soporte: typescript-eslint/typescript-eslint#10940.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

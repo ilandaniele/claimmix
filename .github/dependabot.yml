@@ -1,18 +1,47 @@
 version: 2
 updates:
+  # Un solo PR por semana y por ecosistema: los sueltos no pasan la CI (no
+  # tienen secretos) y igual se mergean en lote desde una rama propia.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+    open-pull-requests-limit: 2
+    # Los majors van en un PR aparte: mezclados rompían el build del lote
+    # entero (#420: zod 4, TypeScript 7, ESLint 10 y Vitest 5 juntos).
     groups:
-      sentry:
+      npm:
         patterns:
-          - "@sentry/*"
+          - "*"
+        update-types:
+          - minor
+          - patch
+      npm-mayores:
+        patterns:
+          - "*"
+        update-types:
+          - major
+    ignore:
+      # 1.2.0 subió el p95 del tablero con 20 analistas de ~220 a ~300 ms en
+      # local y dejó roja la Carga de dev (558 y 576 ms) el 14/10.
+      - dependency-name: "@neondatabase/serverless"
+        versions: ["1.2.x"]
+      # Los tipos siguen al Node que corre Vercel (`engines.node`, hoy 24.x):
+      # el major sube junto con ese, no solo.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 5
+    groups:
+      actions:
+        patterns:
+          - "*"

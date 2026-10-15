@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * `esCasoReal` reconoce como reales los mismos canales que el resto del
  * sistema (`CANALES_REALES`): un canal nuevo que se sume ahí no puede quedar

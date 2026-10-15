@@ -480,6 +480,9 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "error.rateLimited": "Too many requests. Please wait a moment.",
   "error.serverError": "Internal server error.",
   "error.notImplemented": "This feature is not available in this version.",
+  "error.pantalla.titulo": "Something went wrong",
+  "error.pantalla.reintentar": "Try again",
+  "error.pantalla.codigo": "Code for support: {codigo}",
 
   // ── Pagination ─────────────────────────────────────────────────────────────
   "pagination.previous": "Previous",

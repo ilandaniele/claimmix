@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La reserva heredada no se pierde por una marca puesta de más.
  *

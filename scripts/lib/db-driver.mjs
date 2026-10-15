@@ -25,6 +25,28 @@ import { splitSqlStatements } from "./split-sql.mjs";
 export const LEDGER_INSERT =
   "insert into schema_migrations (version, filename, checksum, applied_by) values ($1,$2,$3,$4)";
 
+/*
+ * Un ALTER TABLE pide ACCESS EXCLUSIVE, y si hay una transacción larga abierta
+ * sobre esa tabla el pedido se encola. Todo lo que llegue después —lecturas
+ * incluidas— se encola detrás de él, así que el ALTER esperando frena la
+ * aplicación entera aunque todavía no haya tocado nada. Con el tope, la
+ * migración se rinde a los 5 s en vez de colgar la base; es pasajero, se
+ * reintenta. `SET LOCAL` vale sólo hasta el commit o el rollback.
+ */
+export const LOCK_TIMEOUT = "set local lock_timeout = '5s'";
+
+// 55P03 = lock_not_available. Lo demás se propaga como vino.
+function reintentable(e) {
+  if (e?.code !== "55P03") return e;
+  const err = new Error(
+    "otra transacción tiene tomada la tabla y no la soltó en 5 s (lock_timeout). " +
+      "Es pasajero: esperá a que termine y volvé a correr.",
+    { cause: e },
+  );
+  err.reintentable = true;
+  return err;
+}
+
 export async function connect(connectionString) {
   const client = new pg.Client({ connectionString });
   try {
@@ -46,12 +68,13 @@ function tcpDriver(client) {
     async applyMigration(m, appliedBy) {
       try {
         await client.query("begin");
+        await client.query(LOCK_TIMEOUT);
         await client.query(m.sql);
         await client.query(LEDGER_INSERT, [m.version, m.filename, m.checksum, appliedBy]);
         await client.query("commit");
       } catch (e) {
         await client.query("rollback");
-        throw e;
+        throw reintentable(e);
       }
     },
     end: () => client.end(),
@@ -70,10 +93,15 @@ function httpDriver(connectionString) {
       if (statements.length === 0) {
         throw new Error(m.filename + " no tiene ninguna sentencia ejecutable");
       }
-      await sql.transaction([
-        ...statements.map((statement) => sql.query(statement)),
-        sql.query(LEDGER_INSERT, [m.version, m.filename, m.checksum, appliedBy]),
-      ]);
+      try {
+        await sql.transaction([
+          sql.query(LOCK_TIMEOUT),
+          ...statements.map((statement) => sql.query(statement)),
+          sql.query(LEDGER_INSERT, [m.version, m.filename, m.checksum, appliedBy]),
+        ]);
+      } catch (e) {
+        throw reintentable(e);
+      }
     },
     end: async () => {},
   };

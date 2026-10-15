@@ -3,7 +3,7 @@
  *
  * Es la única métrica que recorre la auditoría de todo el año, y quien la pide
  * (la vista `?vista=historial` y el CSV) no dibuja nada del resto del tablero:
- * por eso no viaja dentro de `getTenantKpis`, que arrastraría once consultas
+ * por eso no viaja dentro de `getTenantKpis`, que arrastraría cinco consultas
  * para descartarlas. Una sola consulta, un solo viaje.
  */
 

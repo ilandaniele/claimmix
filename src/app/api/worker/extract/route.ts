@@ -26,8 +26,8 @@ import { logger } from "@/lib/observability/logger";
 export const maxDuration = 300;
 
 const WorkerBodySchema = z.object({
-  caseId: z.string().uuid("caseId must be a valid UUID."),
-  tenantId: z.string().uuid("tenantId must be a valid UUID."),
+  caseId: z.guid("caseId must be a valid UUID."),
+  tenantId: z.guid("tenantId must be a valid UUID."),
 });
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

@@ -73,8 +73,9 @@ const PUBLIC_PREFIXES = [
   "/favicon.ico",
 ];
 
+/** La ruta exacta y lo que cuelga de ella: `/demo` no vuelve pública a `/demostracion`. */
 function isPublic(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+  return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : `${p}/`));
 }
 
 /** Get the Better Auth session user from request headers. */

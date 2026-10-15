@@ -129,8 +129,6 @@ on:
         required: false
       GOOGLE_CLOUD_LOCATION:
         required: false
-      VERTEX_EXTRACTION_MODEL:
-        required: false
       R2_ACCOUNT_ID:
         required: false
       R2_ACCESS_KEY_ID:
@@ -202,6 +200,7 @@ jobs:
   smoke:
     name: Smoke del deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Sin guarda de entorno acá: la decide quien llama. Por workflow_call es
     # el job `produccion` de post-deploy.yml (o, mañana, el de QA); por
     # workflow_dispatch directo sobre este archivo, dispararlo a mano ya es
@@ -252,9 +251,9 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -328,6 +327,7 @@ jobs:
   rehearse:
     name: Ensayo de conversaciones
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     needs: [smoke]
     # Lo apaga el caller que no lo puede correr. El job `alcance`, al final, lo
     # nombra: apagado y dicho no es lo mismo que apagado y callado.
@@ -348,9 +348,9 @@ jobs:
           workload_identity_provider: projects/1032332436198/locations/global/workloadIdentityPools/vercel/providers/github
           service_account: claimmix-extractor@claimmix-506321.iam.gserviceaccount.com
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -385,7 +385,11 @@ jobs:
       # del primer intento se contaban en el turno 1 del segundo. Un proceso
       # nuevo lo resuelve sin tocar nada.
       #
-      # Cuesta una corrida más, y sólo cuando algo difirió.
+      # La segunda corrida repite sólo los escenarios que difirieron: la
+      # intersección no puede tener nada de los otros, y repetir los veintiséis
+      # costaba diez minutos de runner por cada variación del modelo. Si la
+      # primera no llegó a escribir su reporte, no se sabe cuáles fueron y se
+      # repite entera.
       #
       # El secreto de sesión se genera acá y no va a GITHUB_ENV: lo usa este
       # paso solo. El ensayo habla con la base y con el modelo, no con las
@@ -398,8 +402,10 @@ jobs:
           if pnpm rehearse --reporte primera.json; then
             exit 0
           fi
-          echo "::notice title=Se repite el ensayo::Difirió algo. Segunda corrida para separar variación de regresión."
-          pnpm rehearse --reporte segunda.json || true
+          ESCENARIOS=$(node -e 'try { const f = require("./primera.json"); console.log([...new Set(f.map((d) => d.scenario))].join(" ")) } catch {}')
+          echo "::notice title=Se repite el ensayo::Difirió algo. Segunda corrida para separar variación de regresión: ${ESCENARIOS:-todos}."
+          # shellcheck disable=SC2086 # los nombres van sueltos, uno por argumento
+          pnpm rehearse $ESCENARIOS --reporte segunda.json || true
           node scripts/comparar-ensayos.mjs primera.json segunda.json
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -411,7 +417,6 @@ jobs:
           GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
-          VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
           # El cupo diario de tokens del tenant.
           #
           # El ensayo corre acá, en el runner, no adentro del deploy — así que
@@ -464,6 +469,7 @@ jobs:
   timbre:
     name: Canales de entrada
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [smoke]
     # QA no tiene ni casilla ni WhatsApp: no hay timbre que tocar. Lo apaga su
     # caller y el job `alcance` lo nombra como no verificado.
@@ -471,9 +477,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -595,14 +601,15 @@ jobs:
   carga:
     name: Carga de lectura
     runs-on: ubuntu-latest
-    needs: [smoke, rehearse, timbre, pentest, listas-parejas, permisos]
+    timeout-minutes: 20
+    needs: [smoke, rehearse, timbre, pentest, permisos]
     if: always() && needs.smoke.result == 'success' && inputs.medir_carga
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -627,7 +634,7 @@ jobs:
 
       # `always()`: el reporte del deploy que FALLÓ es justamente el que hay que
       # poder mirar.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: carga
@@ -679,33 +686,36 @@ jobs:
   # rechaza. En QA sí (`atacar_agente`), con su cupo y su base. Contra
   # producción se corren a mano al tocar el agente o los prompts, con
   # `pnpm pentest --agent`.
-  # ── Migraciones al día ───────────────────────────────────────────────────────
+  # ── Migraciones y permisos del rol ───────────────────────────────────────────
   #
-  # Una migración del repo sin fila en `schema_migrations` de ESTA base: el
-  # código nuevo ya la espera y el síntoma sería un 42703 a mitad de un pedido.
+  # Tres preguntas a la base, en un solo runner: las tres instalan lo mismo y
+  # tardan menos que la instalación. Cada paso corre aunque el anterior falle,
+  # así el rojo dice cuál de las tres no se cumple.
   #
-  # Antes este job también comparaba `required_docs_config` con el código. Desde
-  # 0044 los documentos de cada tipo salen del código (los nativos) o de
-  # `tenant_claim_types` (los propios de cada aseguradora), y la tabla dejó de
-  # leerse: no hay dos listas que comparar. El id del job sigue siendo
-  # `listas-parejas` para no romper los `needs` de los callers.
+  # Migraciones: una del repo sin fila en `schema_migrations` de ESTA base es
+  # código nuevo que ya la espera, y el síntoma sería un 42703 a mitad de un
+  # pedido. `pnpm esquemas` —archivos de migración contra esquema— NO está acá:
+  # necesita `STAGING_DATABASE_URL`, y sin staging al día se pondría rojo por
+  # drift de staging, no de producción. Se corre a mano.
   #
-  # `pnpm esquemas` —la comparación entre los archivos de migración y el
-  # esquema que corre— NO está acá: necesita `STAGING_DATABASE_URL`, y sin
-  # staging al día se pondría rojo por drift de staging, no de producción. Se
-  # corre a mano.
+  # Permisos: la aplicación ya no consulta con el rol dueño de las tablas: usa
+  # `claimmix_app`, que obedece RLS. Un GRANT que falte no se ve como un error
+  # visible — casi todas las escrituras están adentro de un `try/catch` que
+  # traga el fallo a propósito, así que el síntoma es una aplicación que anda y
+  # no guarda nada.
   #
   # Sólo lee.
-  listas-parejas:
-    name: Migraciones al día
+  permisos:
+    name: Migraciones y permisos del rol
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [smoke]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -713,43 +723,19 @@ jobs:
         id: deps
         run: pnpm install --frozen-lockfile
 
-      # Una migración del repo sin fila en schema_migrations de ESTA base: el
-      # código nuevo ya la espera y el síntoma sería un 42703 a mitad de un
-      # pedido. `secrets.DATABASE_URL` ya es la base de cada caller (producción
-      # por `inherit`, QA por `QA_DATABASE_URL` en post-deploy.yml). El nombre
-      # no es `DATABASE_URL` por lo mismo que en ci.yml: `migrate.mjs` no pasa
-      # por `enTenant`. Con `--exigir-al-dia` sólo lee.
+      # `secrets.DATABASE_URL` ya es la base de cada caller (producción por
+      # `inherit`, QA por `QA_DATABASE_URL` en post-deploy.yml). El nombre no es
+      # `DATABASE_URL` por lo mismo que en ci.yml: `migrate.mjs` no pasa por
+      # `enTenant`. Con `--exigir-al-dia` sólo lee.
       - name: Migraciones aplicadas
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: node scripts/migrate.mjs --url "$BASE_A_MIRAR" --exigir-al-dia
         env:
           BASE_A_MIRAR: ${{ secrets.DATABASE_URL }}
 
-  # ── Permisos del rol de la aplicación ────────────────────────────────────────
-  #
-  # La aplicación ya no consulta con el rol dueño de las tablas: usa
-  # `claimmix_app`, que obedece RLS. Un GRANT que falte no se ve como un error
-  # visible — casi todas las escrituras están adentro de un `try/catch` que
-  # traga el fallo a propósito, así que el síntoma es una aplicación que anda y
-  # no guarda nada. Se pregunta al catálogo después de cada deploy.
-  #
-  # Sólo lee.
-  permisos:
-    name: Permisos del rol
-    runs-on: ubuntu-latest
-    needs: [smoke]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Instalar dependencias
-        run: pnpm install --frozen-lockfile
-
       - name: Preguntarle al catálogo qué puede hacer el rol
+        id: rol
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: pnpm permisos
         env:
           DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
@@ -759,13 +745,15 @@ jobs:
       # no lo vería nadie. `permisos` mira los GRANT; esto mira que el rol siga
       # obedeciendo RLS. Sólo lee.
       - name: Preguntarle a la base si separa a las aseguradoras
+        id: tenancy
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: pnpm tenancy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
 
       - name: Qué significa que esto falle
-        if: failure()
+        if: failure() && (steps.rol.outcome == 'failure' || steps.tenancy.outcome == 'failure')
         run: |
           echo "::error::El rol de la aplicación no tiene lo que la capa de datos le pide."
           echo ""
@@ -790,6 +778,7 @@ jobs:
   pentest:
     name: Pen test del deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Después del ensayo: el ataque al agente deja casos en el bloque reservado
     # de teléfonos, y el ensayo barre ese bloque al arrancar.
     needs: [smoke, rehearse]
@@ -833,9 +822,9 @@ jobs:
           workload_identity_provider: projects/1032332436198/locations/global/workloadIdentityPools/vercel/providers/github
           service_account: claimmix-extractor@claimmix-506321.iam.gserviceaccount.com
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -869,7 +858,6 @@ jobs:
           GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
-          VERTEX_EXTRACTION_MODEL: ${{ secrets.VERTEX_EXTRACTION_MODEL }}
           AI_TENANT_DAILY_TOKEN_CAP: ${{ vars.AI_TENANT_DAILY_TOKEN_CAP || '20000000' }}
           AI_ANONIMO_DAILY_TOKEN_CAP: ${{ vars.AI_ANONIMO_DAILY_TOKEN_CAP }}
 
@@ -904,8 +892,9 @@ jobs:
   # tampoco lo tapa.
   alcance:
     name: Resumen de chequeos
-    runs-on: ubuntu-latest
-    needs: [smoke, rehearse, timbre, carga, listas-parejas, permisos, pentest]
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    needs: [smoke, rehearse, timbre, carga, permisos, pentest]
     if: always()
     steps:
       - name: Escribir el alcance en el resumen
@@ -917,8 +906,6 @@ jobs:
           ENSAYO: ${{ needs.rehearse.result }}
           TIMBRE: ${{ needs.timbre.result }}
           CARGA: ${{ needs.carga.result }}
-          # Un nombre con guión no se puede desreferenciar con punto.
-          LISTAS: ${{ needs['listas-parejas'].result }}
           PERMISOS: ${{ needs.permisos.result }}
           PENTEST: ${{ needs.pentest.result }}
           PROFUNDO: ${{ inputs.smoke_profundo }}
@@ -962,8 +949,7 @@ jobs:
           else
             fila "Ataques al agente (pen test)" "skipped" "atacar_agente"
           fi
-          fila "Migraciones al día" "$LISTAS" "-"
-          fila "Permisos del rol" "$PERMISOS" "-"
+          fila "Migraciones y permisos del rol" "$PERMISOS" "-"
           fila "Carga de lectura" "$CARGA" "medir_carga"
           {
             echo ""

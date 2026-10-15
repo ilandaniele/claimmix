@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Lo que /conectar-whatsapp hace en el navegador con el SDK y el popup de Meta
  * (`meta-sdk.ts`): a qué `message` se le hace caso, cómo se junta el código con el

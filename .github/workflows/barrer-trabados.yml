@@ -46,8 +46,9 @@
 # vence, el aviso de push de Gmail se cae al reconectar la casilla, el
 # presupuesto de IA se acaba.
 #
-# Va como job aparte y no como paso del barrido para que el rojo diga cual de
-# las dos cosas fallo.
+# Va como paso del mismo job, antes del barrido: un runner menos por corrida, y
+# el paso en rojo dice cuál de las dos cosas falló. Corre primero para que un
+# barrido colgado no se la lleve puesta.
 
 name: Barrer trabados
 
@@ -93,10 +94,10 @@ concurrency:
 
 jobs:
   barrer:
-    name: Escalar casos trabados
+    name: Escalar casos trabados y mirar la salud
     if: github.event.schedule != '23 */2 * * *'
     runs-on: ubuntu-latest
-    timeout-minutes: 17
+    timeout-minutes: 22
     permissions:
       contents: read
     steps:
@@ -109,6 +110,7 @@ jobs:
       # viaje a uno de los dos alias: una vista previa no entra, porque su
       # `CRON_SECRET` no es el de producción.
       - name: ¿A dónde apunta esto?
+        id: host
         env:
           URL: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
         run: |
@@ -130,7 +132,26 @@ jobs:
             *) echo "::error::Este disparo sólo admite dev o QA, no ${HOST}"; exit 1 ;;
           esac
 
+      # Sin `pnpm install`: el guion usa solo `fetch` y modulos nativos, como
+      # `comparar-ensayos.mjs`. Instalar dependencias noventa y seis veces por
+      # dia para pegarle a una URL seria el gasto mas tonto del repositorio.
+      - name: Preguntarle al deploy que alcanza a ver
+        id: salud
+        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
+        env:
+          # El dispatch puede apuntar a QA, y el secreto de producción no
+          # abre esa puerta: cada proyecto de Vercel tiene el suyo y
+          # `/api/cron/reap-stuck` compara contra el del deploy al que se le
+          # pega. Barrer QA con el de producción devuelve 401 tres veces.
+          # El respaldo `'__falta__'` está por lo mismo que en el barrido de abajo.
+          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix-dev.vercel.app', '-qa.vercel.app') && (secrets.QA_CRON_SECRET || '__falta__') || (secrets.CRON_SECRET || '__falta__') }}
+          URL: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
+        run: |
+          [ "${CRON_SECRET}" != '__falta__' ] || { echo '::error::Falta el CRON_SECRET de este host (QA_CRON_SECRET para claimmix-qa, CRON_SECRET para producción).'; exit 1; }
+          node scripts/mirar-salud.mjs
+
       - name: Pedirle al barredor que pase
+        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
         env:
           # El dispatch puede apuntar a QA, y el secreto de producción no
           # abre esa puerta: cada proyecto de Vercel tiene el suyo y
@@ -192,65 +213,8 @@ jobs:
           cat respuesta.json 2>/dev/null || true
           exit 1
 
-  salud:
-    name: Salud del deploy
-    if: github.event.schedule != '23 */2 * * *'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # El `if:` de más abajo y la elección del secreto miran el SUFIJO de la
-      # URL (`endsWith(..., '-qa.vercel.app')`), no si el host es de verdad uno
-      # de los nuestros. Este paso es lo que hace que el `CRON_SECRET` sólo
-      # viaje a uno de los dos alias: una vista previa no entra, porque su
-      # `CRON_SECRET` no es el de producción.
-      - name: ¿A dónde apunta esto?
-        env:
-          URL: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
-        run: |
-          set -u
-          case "$URL" in
-            https://*) ;;
-            *) echo "::error::La URL tiene que empezar con https://"; exit 1 ;;
-          esac
-          HOST="${URL#https://}"
-          case "$HOST" in
-            *[/?#@:]*) echo "::error::La URL no puede llevar ruta, puerto, credenciales ni fragmento: ${HOST}"; exit 1 ;;
-          esac
-          node scripts/lib/hosts-vetados.mjs --conocido "$URL" ||
-            { echo "::error::Host fuera de la lista: ${HOST}"; exit 1; }
-          # El CRON_SECRET de este job es el de dev o el de QA: prd tiene el suyo y su
-          # propio job, acá abajo.
-          case "$HOST" in
-            claimmix-dev.vercel.app|claimmix-qa.vercel.app) ;;
-            *) echo "::error::Este disparo sólo admite dev o QA, no ${HOST}"; exit 1 ;;
-          esac
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-
-      # Sin `pnpm install`: el guion usa solo `fetch` y modulos nativos, como
-      # `comparar-ensayos.mjs`. Instalar dependencias noventa y seis veces por
-      # dia para pegarle a una URL seria el gasto mas tonto del repositorio.
-      - name: Preguntarle al deploy que alcanza a ver
-        env:
-          # El dispatch puede apuntar a QA, y el secreto de producción no
-          # abre esa puerta: cada proyecto de Vercel tiene el suyo y
-          # `/api/cron/reap-stuck` compara contra el del deploy al que se le
-          # pega. Barrer QA con el de producción devuelve 401 tres veces.
-          # El respaldo `'__falta__'` está por lo mismo que en el barrido de arriba.
-          CRON_SECRET: ${{ endsWith(github.event.inputs.url || 'https://claimmix-dev.vercel.app', '-qa.vercel.app') && (secrets.QA_CRON_SECRET || '__falta__') || (secrets.CRON_SECRET || '__falta__') }}
-          URL: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
-        run: |
-          [ "${CRON_SECRET}" != '__falta__' ] || { echo '::error::Falta el CRON_SECRET de este host (QA_CRON_SECRET para claimmix-qa, CRON_SECRET para producción).'; exit 1; }
-          node scripts/mirar-salud.mjs
-
       - name: Que significa que esto falle
-        if: failure()
+        if: ${{ failure() && steps.salud.outcome == 'failure' }}
         run: |
           echo "::error::Produccion no esta sana, y no hubo ningun deploy que lo causara."
           echo ""
@@ -277,10 +241,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
 
       - name: ¿A dónde apunta esto?
         env:

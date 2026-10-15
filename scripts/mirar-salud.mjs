@@ -11,7 +11,7 @@
  * jueves. Mientras tanto el webhook contesta 200, el agente decide qué
  * responder, y cada envío falla.
  *
- * Corre en el job `salud` de `barrer-trabados.yml`, que ya pasa seguido y ya
+ * Corre en el job `barrer` de `barrer-trabados.yml`, que ya pasa seguido y ya
  * tiene la llave. Sin `?deep=1`: la versión de fondo sube un archivo a R2 y le
  * habla al modelo, y hacer eso noventa y seis veces por día se comería el mismo
  * presupuesto que el chequeo vigila.

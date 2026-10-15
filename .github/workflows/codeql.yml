@@ -1,8 +1,8 @@
 name: CodeQL
 
+# Sin `push` a `main`: ese árbol ya se analizó en el PR de `qa` a `main`, y el
+# lunes vuelve a analizarse con las consultas del día.
 on:
-  push:
-    branches: [main]
   pull_request:
     # Sin `prd` a propósito: tests/unit/ci-prd.test.ts lo fija.
     branches: [main, qa]
@@ -22,7 +22,10 @@ permissions:
 jobs:
   analyze:
     name: Análisis CodeQL
+    # Un PR suelto de Dependabot no se mergea (ver `lote` en ci.yml).
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       # Required for CodeQL to upload results
       security-events: write
@@ -41,7 +44,7 @@ jobs:
         run: echo "private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" >> "$GITHUB_OUTPUT"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           # `actions` analiza los workflows: inyección de `${{ }}` en `run`,
           # permisos de más, `pull_request_target`. No necesita build. Va en el
@@ -49,12 +52,17 @@ jobs:
           languages: javascript-typescript,actions
           # CodeQL queries: security-extended covers OWASP Top 10
           queries: security-extended
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+          # JavaScript no se compila: `none` es el único modo, y lo que antes
+          # hacía `autobuild` era nada.
+          build-mode: none
+          # Los tests y la documentación no llegan a producción.
+          config: |
+            paths-ignore:
+              - tests
+              - docs
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           # Un repo privado sin Advanced Security rechaza el SARIF. El análisis
           # corre igual y el paso siguiente lo lee acá. Sólo la subida depende

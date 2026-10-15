@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * POST /api/cases/:id/export-to-core: el JSON que el analista baja a mano.
  *

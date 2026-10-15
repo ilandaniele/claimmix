@@ -44,8 +44,8 @@ export const maxDuration = 60;
 const MAX_FOTOS = 3;
 
 const ParamsSchema = z.object({
-  id: z.string().uuid("ID de caso inválido."),
-  attachmentId: z.string().uuid("ID de adjunto inválido."),
+  id: z.guid("ID de caso inválido."),
+  attachmentId: z.guid("ID de adjunto inválido."),
 });
 
 const sinDescarte = sql`coalesce(${claimAttachments.metadatos}->>'descarte', '') = ''`;

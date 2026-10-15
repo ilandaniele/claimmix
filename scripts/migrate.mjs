@@ -339,7 +339,11 @@ try {
       console.error(`\n✖ ${m.filename} falló y se revirtió por completo:`);
       console.error(`  ${e.message}`);
       console.error("\n  Las migraciones anteriores de esta corrida quedaron aplicadas.");
-      console.error("  Arreglá el SQL y volvé a correr: sigue desde ésta.");
+      console.error(
+        e.reintentable
+          ? "  El SQL no tiene la culpa: volvé a correr, sigue desde ésta."
+          : "  Arreglá el SQL y volvé a correr: sigue desde ésta.",
+      );
       process.exit(1);
     }
   }

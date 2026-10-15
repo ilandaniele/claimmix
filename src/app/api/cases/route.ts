@@ -27,7 +27,7 @@ import { logger } from "@/lib/observability/logger";
 
 /** Hasta cien, que es el tope de la página: más no lo puede pedir la pantalla. */
 const BorradoSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1).max(100),
+  ids: z.array(z.guid()).min(1).max(100),
 });
 import {
   RATE_LIMIT_CONFIGS,

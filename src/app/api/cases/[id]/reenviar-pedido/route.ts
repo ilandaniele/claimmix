@@ -23,7 +23,7 @@ import { reenviarPedido } from "@/server/confirmations/reenvio";
 
 export const maxDuration = 60;
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 const CuerpoSchema = z.object({ reabrir: z.literal(true).optional() });
 
 export async function POST(

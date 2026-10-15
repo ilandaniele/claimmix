@@ -25,8 +25,8 @@ export const dynamic = "force-dynamic";
 
 const PostSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("draft") }),
-  z.object({ action: z.literal("start"), jobId: z.string().uuid() }),
-  z.object({ action: z.literal("sync"), jobId: z.string().uuid() }),
+  z.object({ action: z.literal("start"), jobId: z.guid() }),
+  z.object({ action: z.literal("sync"), jobId: z.guid() }),
 ]);
 
 export async function GET() {

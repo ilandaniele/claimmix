@@ -15,7 +15,7 @@ import { dominioExigeSsoEnAlgunInquilino } from "@/server/sso/usuarios";
 
 export type CaminoDeAlta = "sso" | "correo" | "invitacion" | "google";
 
-export const CODIGO_REGISTRO_CERRADO = "registro_cerrado";
+const CODIGO_REGISTRO_CERRADO ="registro_cerrado";
 
 /** Lo que el gancho de better-auth le pasa a `before`: la ruta del pedido y sus cookies. */
 type ContextoDelPedido =

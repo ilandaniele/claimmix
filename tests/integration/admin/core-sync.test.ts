@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * /api/admin/core-sync: dónde y cómo se entrega el caso al sistema de la
  * aseguradora (B5). La fila de `core_sync_settings` vive en una base de

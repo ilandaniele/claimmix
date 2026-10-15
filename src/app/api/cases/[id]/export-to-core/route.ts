@@ -19,7 +19,7 @@ import { AppError } from "@/lib/errors";
 import { consultasDelCaso, type DelCaso } from "@/server/core-sync/lectura";
 
 const ParamsSchema = z.object({
-  id: z.string().uuid("ID de caso inválido."),
+  id: z.guid("ID de caso inválido."),
 });
 
 export async function POST(

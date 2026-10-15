@@ -80,7 +80,6 @@ Optional seed data lives in `neon/seed.sql`.
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | no | Observability |
 | `RETENCION_MODO` / `RETENCION_ANIOS` | no | Retention of closed cases. Off by default (`apagado`); `simular` only counts, `borrar` deletes cases closed more than `RETENCION_ANIOS` years ago (1 to 30, default 5). Runs in the `reap-stuck` cron, 04 UTC window only |
 | `PURGA_ADJUNTOS_MODO` / `PURGA_GRACIA_DIAS` | no | Deferred deletion of R2 attachments of deleted cases. Off by default; `PURGA_GRACIA_DIAS` is the grace period (7 to 365, default 30) |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | no | Rate limiting backend when `RATE_LIMIT_PROVIDER=upstash`; default backend is Postgres |
 
 ## Agent Console
 

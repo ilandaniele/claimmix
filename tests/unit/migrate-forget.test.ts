@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * `migrate.mjs --forget NNNN` saca una versión del registro sin tocar el
  * esquema — la contracara de --baseline, para cuando el ledger dice que la

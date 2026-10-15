@@ -13,7 +13,6 @@ vi.mock("@/server/ai/provider", () => ({
 import {
   extractJsonObjectTexts,
   parseEmailResponse,
-  parseResponse,
 } from "@/server/ai/model-response";
 
 function validExtraction() {
@@ -67,15 +66,6 @@ describe("model JSON parser", () => {
     expect(parsed?.extraction_model).toBe("gemini-2.5-flash");
   });
 
-  it("parses simulate output when JSON has leading text", () => {
-    const parsed = parseResponse(
-      `Aqui esta:\n${JSON.stringify(validExtraction())}`,
-      "choque",
-      "gemini-2.5-flash"
-    );
-    expect(parsed?.extracted_fields?.claim_type).toBe("choque");
-  });
-
   it("skips invalid leading JSON and parses the final email extraction", () => {
     const content = `${JSON.stringify({ thinking: "not the schema" })}\n${JSON.stringify(validExtraction())}`;
     const parsed = parseEmailResponse(content, "gemini-2.5-flash");
@@ -83,9 +73,15 @@ describe("model JSON parser", () => {
     expect(parsed?.extraction_model).toBe("gemini-2.5-flash");
   });
 
-  it("skips invalid leading JSON and parses the final simulate extraction", () => {
-    const content = `${JSON.stringify({ reasoning: { likely_claim: true } })}\n${JSON.stringify(validExtraction())}`;
-    const parsed = parseResponse(content, "choque", "gemini-2.5-flash");
-    expect(parsed?.extracted_fields?.claim_type).toBe("choque");
+  it("una pista de póliza con el número en vez del id no tira la extracción (Gemini 3.8)", () => {
+    const content = JSON.stringify({
+      ...validExtraction(),
+      possible_policy_matches: [{ policy_id: "POL-9982-C", policy_number: "POL-9982-C", match_score: 0.9 }],
+      possible_customer_matches: [{ customer_id: "", match_score: 1, match_reason: "name" }],
+    });
+    const parsed = parseEmailResponse(content, "gemini-3.8-flash");
+    expect(parsed?.is_claim).toBe(true);
+    expect(parsed?.possible_policy_matches).toEqual([]);
+    expect(parsed?.possible_customer_matches).toEqual([]);
   });
 });

@@ -46,7 +46,7 @@ const CODIGOS = new Set<string>([...ERRORES_DE_FILA, ...ERRORES_MANUALES]);
 /** Un campo obligatorio: `faltante` si no viene o viene vacío, `invalido` si no sirve. */
 const requerido = <T>(invalido: string, convertir: (s: string) => T | null, faltante = invalido) =>
   z
-    .string({ required_error: faltante, invalid_type_error: invalido })
+    .string({ error: (i) => (i.input === undefined ? faltante : invalido) })
     .trim()
     .min(1, faltante)
     .pipe(campo(invalido, convertir));
@@ -77,7 +77,7 @@ export const ClienteCambioSchema = z
 
 export const PolizaNuevaSchema = z
   .object({
-    customer_id: z.string({ required_error: "cliente_invalido", invalid_type_error: "cliente_invalido" }).uuid("cliente_invalido"),
+    customer_id: z.guid("cliente_invalido"),
     numero: requerido("poliza_invalida", aNumeroPoliza),
     ramo: opcional(campo("ramo_invalido", aRamo)),
     estado: opcional(campo("estado_invalido", aEstado)),

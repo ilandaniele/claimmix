@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Casillas de Gmail, formulario, SSO y la membresía del panel de sesiones viven
  * en la base de control: van por `enControl`, no por `enTenant`.

@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * El panel del operador y el espejo a la base del cliente.
  *

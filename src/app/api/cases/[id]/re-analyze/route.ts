@@ -39,7 +39,7 @@ import {
 export const maxDuration = 300;
 
 const ParamsSchema = z.object({
-  id: z.string().uuid("ID de caso inválido."),
+  id: z.guid("ID de caso inválido."),
 });
 
 // «Marcar como relevante» es un re-análisis de un descartado que además fija `is_claim`.

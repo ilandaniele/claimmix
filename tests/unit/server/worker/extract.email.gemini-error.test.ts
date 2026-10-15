@@ -54,7 +54,6 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/server/ai/gemini-extractor", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/ai/gemini-extractor")>()),
   extractEmailClaimGemini: mockExtractEmailClaimGemini,
-  runGeminiExtractor: vi.fn(),
 }));
 
 vi.mock("@/server/ai/openai-extractor", () => ({
@@ -69,7 +68,6 @@ vi.mock("@/server/ai/openai-extractor", () => ({
 
 vi.mock("@/server/ai/mock-extractor", () => ({
   extractEmailClaimMock: vi.fn(),
-  runMockExtractor: vi.fn(),
 }));
 
 vi.mock("@/server/ai/provider", () => ({

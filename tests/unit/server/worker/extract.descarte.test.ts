@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * El descarte del clasificador (`is_claim=false`).
  *
@@ -62,7 +61,6 @@ async function correr({ motivo, casoMovido = false }: { motivo?: string; casoMov
       suggested_reply: "",
     });
     return {
-      runMockExtractor: vi.fn(),
       extractEmailClaimMock: claimSimulado,
       denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
     };

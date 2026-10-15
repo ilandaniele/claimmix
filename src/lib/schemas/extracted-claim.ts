@@ -89,7 +89,7 @@ export const CLAIM_FIELD_KEYS = Object.keys(ClaimFieldsSchema.shape) as Array<
  * This is an advisory hint, not authoritative.
  */
 export const PossibleCustomerMatchSchema = z.object({
-  customer_id: z.string().uuid(),
+  customer_id: z.guid(),
   match_score: z.number().min(0).max(1),
   match_reason: z.enum(["email", "dni", "phone", "name"]),
 });
@@ -100,7 +100,7 @@ export type PossibleCustomerMatch = z.infer<typeof PossibleCustomerMatchSchema>;
  * A possible policy match returned by the AI extractor.
  */
 export const PossiblePolicyMatchSchema = z.object({
-  policy_id: z.string().uuid(),
+  policy_id: z.guid(),
   policy_number: z.string(),
   match_score: z.number().min(0).max(1),
 });
@@ -226,13 +226,17 @@ export const ExtractedClaimSchema = z.object({
   /**
    * Advisory customer match hints from the extractor.
    * Server-side customer-matcher module runs the authoritative match.
+   *
+   * El modelo no conoce ningún id: Gemini 3.8 pone el número de póliza en
+   * `policy_id` y eso tiraba la extracción entera. Una pista mal escrita queda
+   * vacía, como `adjuntos`.
    */
-  possible_customer_matches: z.array(PossibleCustomerMatchSchema).default([]),
+  possible_customer_matches: z.array(PossibleCustomerMatchSchema).default([]).catch([]),
 
   /**
    * Advisory policy match hints from the extractor.
    */
-  possible_policy_matches: z.array(PossiblePolicyMatchSchema).default([]),
+  possible_policy_matches: z.array(PossiblePolicyMatchSchema).default([]).catch([]),
 
   /**
    * Severity level determined by the severity classifier.

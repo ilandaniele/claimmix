@@ -48,15 +48,24 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-control: var(--control-border);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+}
+
+/*
+ * Pilas del sistema, sin fuentes web: la CSP es estricta y cada fuente suma
+ * peso. `font-mono` apuntaba a una variable que nadie definía y caía en la
+ * pila del body, así que los códigos y montos no salían monoespaciados.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .dark {

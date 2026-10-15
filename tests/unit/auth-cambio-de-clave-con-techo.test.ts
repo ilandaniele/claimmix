@@ -135,12 +135,73 @@ describe("POST /api/auth/sign-in/email", () => {
   it("sigue yendo por IP y dirección: 429 sin leer la sesión", async () => {
     mockRateLimit.mockResolvedValue(SIN_CUPO());
     mockTopePorIp.mockResolvedValue(CON_CUPO());
-    const { POST } = await cargarRuta();
+    const { POST, RATE_LIMIT_CONFIGS } = await cargarRuta();
 
     const res = await POST(pedido("sign-in/email", { email: "a@b.com", password: "fake-pass" }));
 
     expect(res.status).toBe(429);
     expect(handlerPost).not.toHaveBeenCalled();
     expect(mockGetSession).not.toHaveBeenCalled();
+    expect(mockRateLimit).toHaveBeenCalledWith("auth:in:1.2.3.4:a@b.com", RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
+    expect(mockTopePorIp).toHaveBeenCalledWith("1.2.3.4");
+  });
+});
+
+describe("POST /api/auth/request-password-reset", () => {
+  it("sigue yendo por IP y dirección, con el cupo de restablecer", async () => {
+    mockRateLimit.mockResolvedValue(SIN_CUPO());
+    mockTopePorIp.mockResolvedValue(CON_CUPO());
+    const { POST, RATE_LIMIT_CONFIGS } = await cargarRuta();
+
+    const res = await POST(pedido("request-password-reset", { email: "a@b.com", redirectTo: "/restablecer" }));
+
+    expect(res.status).toBe(429);
+    expect(handlerPost).not.toHaveBeenCalled();
+    expect(mockRateLimit).toHaveBeenCalledWith("auth:reset:1.2.3.4:a@b.com", RATE_LIMIT_CONFIGS.AUTH_RESET);
+  });
+});
+
+/*
+ * El token del enlace es la credencial mientras dura, y Better Auth lo cuenta
+ * en memoria por instancia: sin techo en Postgres, adivinarlo no tiene freno
+ * determinista. El cuerpo no trae dirección: cuenta por IP sola.
+ */
+describe("POST /api/auth/reset-password", () => {
+  it("sin cupo: 429 con Retry-After, sin tocar Better Auth ni la sesión", async () => {
+    mockRateLimit.mockResolvedValue(SIN_CUPO());
+    mockTopePorIp.mockResolvedValue(CON_CUPO());
+    const { POST, RATE_LIMIT_CONFIGS } = await cargarRuta();
+
+    const res = await POST(pedido("reset-password", { newPassword: "fake-new-pass", token: "fake-token" }));
+
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(handlerPost).not.toHaveBeenCalled();
+    expect(mockGetSession).not.toHaveBeenCalled();
+    expect(mockRateLimit).toHaveBeenCalledWith("auth:reset:1.2.3.4", RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
+    expect(mockTopePorIp).toHaveBeenCalledWith("1.2.3.4");
+  });
+
+  it("con cupo por clave pero sin cupo por IP: también 429", async () => {
+    mockRateLimit.mockResolvedValue(CON_CUPO());
+    mockTopePorIp.mockResolvedValue(SIN_CUPO());
+    const { POST } = await cargarRuta();
+
+    const res = await POST(pedido("reset-password", { newPassword: "fake-new-pass", token: "fake-token" }));
+
+    expect(res.status).toBe(429);
+    expect(handlerPost).not.toHaveBeenCalled();
+  });
+
+  it("con cupo: pasa a Better Auth y devuelve lo que éste conteste", async () => {
+    mockRateLimit.mockResolvedValue(CON_CUPO());
+    mockTopePorIp.mockResolvedValue(CON_CUPO());
+    handlerPost.mockResolvedValue(new Response("restablecida", { status: 200 }));
+    const { POST } = await cargarRuta();
+
+    const res = await POST(pedido("reset-password", { newPassword: "fake-new-pass", token: "fake-token" }));
+
+    expect(handlerPost).toHaveBeenCalledTimes(1);
+    expect(await res.text()).toBe("restablecida");
   });
 });

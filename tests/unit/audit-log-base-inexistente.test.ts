@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * `writeAuditLog` con una base de cliente que no existe (3D000).
  *

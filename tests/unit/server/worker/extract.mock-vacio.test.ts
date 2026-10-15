@@ -6,9 +6,6 @@
  * usan los demás archivos de esta carpeta. Acá se pisa esa mock de nuevo,
  * DESPUÉS de `registrarMocks`, con el módulo real: es la única manera de
  * probar `denunciaSimuladaVacia()` de verdad y no una versión que la reemplaza.
- *
- * `runMockExtractor` (el camino de `runClaimTextAgent`, que no interviene acá)
- * queda mockeado igual: no lo usa este flujo.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -36,10 +33,9 @@ describe("runEmailExtractionWorker en modo mock — sin denuncia inventada", () 
 
     // Se pisa DESPUÉS de registrarMocks: el módulo real, no la denuncia fija
     // que arma esa función para los demás tests de esta carpeta.
-    vi.doMock("@/server/ai/mock-extractor", async (importOriginal) => {
-      const real = await importOriginal<typeof import("@/server/ai/mock-extractor")>();
-      return { ...real, runMockExtractor: vi.fn() };
-    });
+    vi.doMock("@/server/ai/mock-extractor", (importOriginal) =>
+      importOriginal<typeof import("@/server/ai/mock-extractor")>()
+    );
 
     const { runEmailExtractionWorker } = await import("@/server/worker/extract");
     await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);

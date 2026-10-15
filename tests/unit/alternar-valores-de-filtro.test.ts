@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Los filtros de la bandeja pasaron de un valor por grupo a varios.
  *

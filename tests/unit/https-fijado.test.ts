@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * El pedido HTTPS que comparten el webhook al Core y el SSO. `node:https` se
  * reemplaza por el mismo pedido en claro a un servidor local y el DNS por una

@@ -20,7 +20,7 @@ import { logger } from "@/lib/observability/logger";
 import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 
 const UpdateRuleSchema = z
   .object({

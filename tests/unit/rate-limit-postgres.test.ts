@@ -209,7 +209,7 @@ describe("resolveProvider", () => {
 
   it("se puede forzar", () => {
     (process.env as Record<string, string | undefined>).NODE_ENV = "test";
-    process.env.RATE_LIMIT_PROVIDER = "upstash";
-    expect(resolveProvider()).toBe("upstash");
+    process.env.RATE_LIMIT_PROVIDER = "postgres";
+    expect(resolveProvider()).toBe("postgres");
   });
 });

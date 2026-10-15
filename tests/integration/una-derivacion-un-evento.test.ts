@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Una derivación, un evento, un mensaje: contra la base de verdad.
  *

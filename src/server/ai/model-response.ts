@@ -3,7 +3,6 @@
 import "server-only";
 import { ExtractedClaimSchema } from "@/lib/schemas/extracted-claim";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
-import type { ClaimType } from "@/lib/schemas/cases";
 import type { MemoryHint, KnownPattern, PromptLearningContext } from "./prompt";
 import { getDefaultGeminiModel } from "./provider";
 import { logger } from "@/lib/observability/logger";
@@ -114,33 +113,6 @@ function withEmailDefaults(
   return raw;
 }
 
-/**
- * Parse and validate the model response content as an ExtractedClaim.
- * Returns null if parsing or validation fails.
- * Exported for reuse by other providers (gemini-extractor).
- */
-export function parseResponse(content: string | null, claimType: ClaimType, model?: string): ExtractedClaim | null {
-  if (!content) return null;
-  try {
-    const candidates = parseModelJsonCandidates(content);
-    let issueCount = 0;
-    for (const rawCandidate of candidates) {
-      const raw = { ...rawCandidate };
-      if (!raw.extraction_model) raw.extraction_model = model ?? getDefaultGeminiModel();
-      const parsed = ExtractedClaimSchema.safeParse(raw);
-      if (parsed.success) return parsed.data;
-      issueCount += parsed.error.issues.length;
-    }
-
-    if (candidates.length > 0) {
-      logger.error({ issues: issueCount, candidatos: candidates.length }, "model_response.schema_validation_failed");
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 
 // ── El payload del extractor de email ────────────────────────────────────────
 
@@ -179,18 +151,18 @@ export function parseEmailResponse(content: string | null, model?: string): Extr
   if (!content) return null;
   try {
     const candidates = parseModelJsonCandidates(content);
-    let issueCount = 0;
+    const rutas: string[] = [];
     for (const rawCandidate of candidates) {
       if (!looksLikeExtractionCandidate(rawCandidate)) continue;
       const parsed = ExtractedClaimSchema.safeParse(
         withEmailDefaults(rawCandidate, model)
       );
       if (parsed.success) return parsed.data;
-      issueCount += parsed.error.issues.length;
+      rutas.push(...parsed.error.issues.map((i) => i.path.join(".")));
     }
 
     if (candidates.length > 0) {
-      logger.error({ issues: issueCount, candidatos: candidates.length }, "model_response.email_schema_validation_failed");
+      logger.error({ issues: rutas.length, rutas: rutas.slice(0, 10), candidatos: candidates.length }, "model_response.email_schema_validation_failed");
     }
     return null;
   } catch {

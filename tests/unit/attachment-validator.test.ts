@@ -302,6 +302,28 @@ describe("sanitizeFilename", () => {
     const sanitized = sanitizeFilename("!!!");
     expect(sanitized).toMatch(/^[0-9a-f]{16}-___$/);
   });
+
+  it("acota un nombre de 2000 caracteres y conserva la extensión", () => {
+    const sanitized = sanitizeFilename(`${"a".repeat(2000)}.pdf`);
+    expect(sanitized).toMatch(/^[0-9a-f]{16}-a+.pdf$/);
+    // prefijo (16) + guion + nombre acotado (120)
+    expect(sanitized).toHaveLength(16 + 1 + 120);
+  });
+
+  it("acota un nombre largo sin extensión", () => {
+    const sanitized = sanitizeFilename("b".repeat(2000));
+    expect(sanitized).toBe(`${sanitized.slice(0, 16)}-${"b".repeat(120)}`);
+  });
+
+  it("no trata como extensión un sufijo larguísimo después del último punto", () => {
+    const sanitized = sanitizeFilename(`a.${"c".repeat(2000)}`);
+    expect(sanitized).toHaveLength(16 + 1 + 120);
+  });
+
+  it("deja intacto un nombre que entra justo en el tope", () => {
+    const nombre = `${"d".repeat(116)}.pdf`;
+    expect(sanitizeFilename(nombre).slice(17)).toBe(nombre);
+  });
 });
 
 // ── Constants exported correctly ───────────────────────────────────────────────

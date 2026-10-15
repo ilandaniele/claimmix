@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * Tope por mensaje y plazo por bajada en gmail-attachment-adapter.ts: un mensaje
  * con árbol MIME hostil no puede gastar el presupuesto del poller ni hacer que

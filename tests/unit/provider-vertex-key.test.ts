@@ -34,6 +34,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// Sin esto `enTenant` abría una conexión de verdad contra la base de mentira.
+vi.mock("@/data/scope", () => ({
+  enTenant: (_ctx: unknown, fn: (db: unknown) => unknown) =>
+    fn({ select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }) }),
+}));
+
 vi.mock("@/lib/db/helpers", () => ({
   firstRow: (rows: unknown[]) => rows[0] ?? null,
 }));

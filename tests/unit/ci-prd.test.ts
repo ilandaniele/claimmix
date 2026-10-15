@@ -1,7 +1,7 @@
-// @vitest-environment node
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Mismo criterio que `ci-secreto-de-sesion.test.ts`: sin comentarios, porque los
@@ -99,6 +99,7 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
   // [job, dev, qa, prd, vista previa]
   it.each([
     ["produccion", true, false, false, false],
+    ["ensayo_previo", true, false, false, false],
     ["qa_secretos", false, true, false, false],
     ["qa", false, true, false, false],
     ["qa_veredicto", false, true, false, false],
@@ -113,7 +114,7 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
 
   it("un disparo a mano sólo entra a `produccion`, el de dev", () => {
     expect(evaluar(condicion("produccion"), "", "workflow_dispatch")).toBe(true);
-    for (const id of ["qa_secretos", "qa", "prd"]) {
+    for (const id of ["ensayo_previo", "qa_secretos", "qa", "prd"]) {
       expect(evaluar(condicion(id), "", "workflow_dispatch")).toBe(false);
     }
   });
@@ -143,6 +144,68 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
   it("las URLs por defecto son las de dev", () => {
     expect(yml).not.toContain("https://claimmix.vercel.app");
     expect(yml.match(/https:\/\/claimmix-dev\.vercel\.app/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("post-deploy.yml: producción no repite el ensayo que QA ya pasó", () => {
+  const yml = sinComentarios("post-deploy.yml");
+  const previo = cuerpoDe(yml, "ensayo_previo");
+  const veredicto = cuerpoDe(yml, "qa_veredicto");
+
+  it("`produccion` ensaya salvo que la marca diga lo contrario", () => {
+    const produccion = cuerpoDe(yml, "produccion");
+    expect(produccion).toContain("needs: [validar_url, ensayo_previo]");
+    expect(produccion).toContain("correr_ensayo: ${{ needs.ensayo_previo.outputs.correr != 'false' }}");
+    expect(produccion).not.toMatch(/needs\.ensayo_previo\.result/);
+  });
+
+  it("la marca la deja el veredicto verde de QA, después de publicarlo", () => {
+    const publicar = veredicto.indexOf("- name: Publicar el veredicto sobre el commit");
+    const marca = veredicto.indexOf("name: ensayo-verde-${{ steps.arbol.outputs.arbol }}");
+    expect(publicar).toBeGreaterThan(-1);
+    expect(marca).toBeGreaterThan(publicar);
+    expect(veredicto.slice(publicar)).not.toMatch(/if: .*(always|failure)\(\)/);
+  });
+
+  it("busca el mismo nombre que deja QA, y sólo de este repo", () => {
+    expect(previo).toContain("actions/artifacts?name=ensayo-verde-$arbol");
+    expect(previo).toContain(".workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID");
+  });
+
+  const script = scriptDe(pasoDe(previo, "Buscar la marca de QA"));
+  it.skipIf(!hayBash).each([
+    ["arbol-falso", "1", 0, "false"],
+    ["arbol-falso", "0", 0, "true"],
+    ["", "1", 1, "true"],
+    ["arbol-falso", "basura", 0, "true"],
+  ])("árbol %j, marcas %j, gh sale con %i: correr=%s", (arbol, hay, salida, esperado) => {
+    const dir = mkdtempSync(join(tmpdir(), "gh-falso-"));
+    const gh = join(dir, "gh");
+    writeFileSync(
+      gh,
+      '#!/bin/sh\ncase "$*" in\n  *git/commits*) echo "$FALSO_ARBOL" ;;\n  *actions/artifacts*) echo "$FALSO_HAY" ;;\nesac\nexit "$FALSO_SALIDA"\n',
+    );
+    chmodSync(gh, 0o755);
+    const salidaGh = join(dir, "salida");
+    writeFileSync(salidaGh, "");
+    const r = spawnSync("bash", ["-c", script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${dir}${delimiter}${process.env.PATH}`,
+        FALSO_ARBOL: arbol,
+        FALSO_HAY: hay,
+        FALSO_SALIDA: String(salida),
+        GITHUB_OUTPUT: salidaGh,
+        GITHUB_STEP_SUMMARY: join(dir, "resumen"),
+        GITHUB_REPOSITORY: "fake/repo",
+        GITHUB_REPOSITORY_ID: "1",
+        SHA: "fake-sha",
+      },
+    });
+    expect(r.status).toBe(0);
+    expect(readFileSync(salidaGh, "utf8")).toBe(`correr=${esperado}\n`);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -197,10 +260,16 @@ describe("barrer-trabados.yml: prd tiene su cron, su cola y su secreto", () => {
     expect(yml).toMatch(/concurrency:\n {2}group: .*'barrer-trabados-prd'.*'barrer-trabados'/);
   });
 
-  it("los jobs de dev no corren con el cron de prd", () => {
-    for (const id of ["barrer", "salud"]) {
-      expect(cuerpoDe(yml, id)).toContain(`if: github.event.schedule != '${CRON_PRD}'`);
-    }
+  it("el job de dev no corre con el cron de prd", () => {
+    expect(cuerpoDe(yml, "barrer")).toContain(`if: github.event.schedule != '${CRON_PRD}'`);
+  });
+
+  it("el secreto de dev sólo viaja después de mirar el host", () => {
+    const barrer = cuerpoDe(yml, "barrer");
+    const pasos = barrer.split("\n      - ").filter((p) => p.includes("CRON_SECRET:"));
+    expect(pasos).toHaveLength(2);
+    for (const p of pasos) expect(p).toContain("if: ${{ !cancelled() && steps.host.outcome == 'success' }}");
+    expect(barrer).toMatch(/- name: ¿A dónde apunta esto\?\n {8}id: host\n/);
   });
 
   it("el job de prd corre sólo con su cron y sólo si hay vars.PRD_URL", () => {
@@ -212,10 +281,8 @@ describe("barrer-trabados.yml: prd tiene su cron, su cola y su secreto", () => {
     expect(prd).not.toMatch(/secrets\.(CRON_SECRET|QA_CRON_SECRET)/);
   });
 
-  it("los jobs de dev no tocan el secreto ni la URL de prd", () => {
-    for (const id of ["barrer", "salud"]) {
-      expect(cuerpoDe(yml, id)).not.toMatch(/PRD_/);
-    }
+  it("el job de dev no toca el secreto ni la URL de prd", () => {
+    expect(cuerpoDe(yml, "barrer")).not.toMatch(/PRD_/);
   });
 });
 

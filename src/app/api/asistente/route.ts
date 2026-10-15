@@ -26,10 +26,10 @@ import { responderPregunta } from "@/server/asistente/responder";
 export const maxDuration = 60;
 
 const PreguntaSchema = z
-  .object({ pregunta: z.string().trim().min(3).max(500), caseId: z.string().uuid().optional() })
+  .object({ pregunta: z.string().trim().min(3).max(500), caseId: z.guid().optional() })
   .strict();
 
-const HiloSchema = z.object({ caseId: z.string().uuid() });
+const HiloSchema = z.object({ caseId: z.guid() });
 
 export async function GET(request: Request): Promise<Response> {
   let ctx: RoleContext;

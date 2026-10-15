@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * La sesión vence a los treinta días del ingreso y no se renueva con el uso.
  *

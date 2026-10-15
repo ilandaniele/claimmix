@@ -6,9 +6,8 @@
  *
  * El modelo por defecto depende del camino: AI Studio usa
  * `gemini-flash-latest` (getDefaultGeminiModel, con GEMINI_MODEL para
- * pisarlo) y Vertex usa `gemini-2.5-flash` (VERTEX_EXTRACTION_MODEL para
- * pisarlo). Aca decia «defaults to gemini-2.5-flash» a secas, que es cierto
- * para uno de los dos. El costo se estima
+ * pisarlo) y Vertex usa `gemini-3.8-flash` (VERTEX_EXTRACTION_MODEL para
+ * pisarlo). El costo se estima
  * con el precio de lista: registrarlo en 0 fue correcto mientras corría por el
  * tier gratis de AI Studio, y dejó de serlo al pasar a Vertex postpago. Un tope
  * mensual en dólares contra una suma que siempre da cero no salta nunca.
@@ -292,6 +291,7 @@ interface GeminiUsage {
 type UsageMetadata = {
   promptTokenCount?: number;
   candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
   cachedContentTokenCount?: number;
   promptTokensDetails?: Array<{ modality?: string; tokenCount?: number }>;
 };
@@ -303,7 +303,8 @@ function usoDe(meta: UsageMetadata | undefined): GeminiUsage {
   const cacheados = meta?.cachedContentTokenCount ?? 0;
   return {
     promptTokens: meta?.promptTokenCount ?? 0,
-    completionTokens: meta?.candidatesTokenCount ?? 0,
+    // El razonamiento se cobra como salida y no viene en candidatesTokenCount.
+    completionTokens: (meta?.candidatesTokenCount ?? 0) + (meta?.thoughtsTokenCount ?? 0),
     ...(audio > 0 ? { audioTokens: audio } : {}),
     ...(cacheados > 0 ? { cachedTokens: cacheados } : {}),
   };
@@ -317,9 +318,7 @@ function usoDe(meta: UsageMetadata | undefined): GeminiUsage {
 // Why Vertex matters: in some regions (e.g. Argentina) the AI Studio Gemini API
 // is PREPAY-ONLY — no usable free tier, and calls 429 with "prepayment credits
 // are depleted" until you top up. Vertex bills POSTPAY (ON_DEMAND) against the
-// project's existing billing account, so there is no prepay wall. Vertex also
-// still serves the pinned gemini-2.5-* models that AI Studio now 404s for
-// newly-created keys.
+// project's existing billing account, so there is no prepay wall.
 //
 // Enable with GEMINI_TRANSPORT=vertex (needs GOOGLE_CLOUD_PROJECT +
 // GOOGLE_APPLICATION_CREDENTIALS, the same SA already used for fine-tuning).
@@ -329,7 +328,11 @@ function isVertexTransport(): boolean {
 
 /**
  * Vertex model names differ from AI Studio's: there are no `*-latest` aliases
- * (they 404), and the pinned gemini-2.5-* names ARE available.
+ * (they 404).
+ *
+ * Gemini 2.5 se retira de Vertex el 20/10/2026. Medido el 14/10 con el mismo
+ * mail: 3.8-flash en LOW tarda ~5 s y gasta ~650 tokens de salida; 3.5-flash
+ * en MINIMAL, ~11 s y ~1.300. 3.8 además vive hasta septiembre de 2027.
  *
  * Default is flash, NOT flash-lite. Lite is ~3x cheaper but cannot reliably
  * emit the full extraction schema for complex claims: measured 0/3 on
@@ -339,7 +342,25 @@ function isVertexTransport(): boolean {
  * ~$0.001 per extraction is a bad trade.
  */
 function getVertexModel(): string {
-  return process.env.VERTEX_EXTRACTION_MODEL?.trim() || "gemini-2.5-flash";
+  return process.env.VERTEX_EXTRACTION_MODEL?.trim() || "gemini-3.8-flash";
+}
+
+/**
+ * Gemini 3 no se sirve en us-central1: sólo en `global` y en las multirregiones
+ * `us`/`eu`, que tienen su propio host. `us` deja el dato en EE. UU. Un 2.5 que
+ * siga cargado en una variable vieja sale por donde salía (en `us` da 404) hasta
+ * que se retire.
+ */
+function getVertexLocation(model: string): string {
+  const pedida = process.env.VERTEX_EXTRACTION_LOCATION?.trim();
+  if (pedida) return pedida;
+  return model.startsWith("gemini-2.5") ? process.env.GOOGLE_CLOUD_LOCATION?.trim() || "us-central1" : "us";
+}
+
+function hostVertex(location: string): string {
+  if (location === "global") return "aiplatform.googleapis.com";
+  if (location === "us" || location === "eu") return `aiplatform.${location}.rep.googleapis.com`;
+  return `${location}-aiplatform.googleapis.com`;
 }
 
 async function getVertexToken(): Promise<string> {
@@ -377,14 +398,14 @@ async function destinoGemini(
 
   if (vertex) {
     const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
-    const location = process.env.GOOGLE_CLOUD_LOCATION?.trim() || "us-central1";
+    const location = getVertexLocation(model);
     if (!project) {
       throw new GeminiExtractionError(
         "GEMINI_TRANSPORT=vertex requires GOOGLE_CLOUD_PROJECT to be set."
       );
     }
     return {
-      endpoint: `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:${metodo}`,
+      endpoint: `https://${hostVertex(location)}/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:${metodo}`,
       authHeaders: { Authorization: `Bearer ${await getVertexToken()}` },
       model,
     };
@@ -424,6 +445,22 @@ export async function contarTokens(
   }
 }
 
+/**
+ * El razonamiento se cobra como salida (a menudo 10-50× la respuesta visible) y
+ * suma demora: un default con razonamiento prendido costó ~US$0,78 por llamada.
+ * 2.5 lo apaga con thinkingBudget 0. Gemini 3 no deja apagarlo, sólo bajarlo
+ * con thinkingLevel, responde 400 si llegan los dos campos, y Google pide no
+ * tocarle la temperatura: más baja que 1 puede dejarlo en bucle.
+ */
+const RAZONAMIENTO_MINIMO: Record<string, string> = { "gemini-3.5-flash": "MINIMAL" };
+
+function configDeGeneracion(model: string, generacion?: { temperature?: number }): Record<string, unknown> {
+  if (model.startsWith("gemini-2.5")) {
+    return { temperature: generacion?.temperature ?? 0, thinkingConfig: { thinkingBudget: 0 } };
+  }
+  return { thinkingConfig: { thinkingLevel: RAZONAMIENTO_MINIMO[model] ?? "LOW" } };
+}
+
 export async function callGemini(
   systemPrompt: string,
   userMessage: string,
@@ -435,13 +472,6 @@ export async function callGemini(
 ): Promise<{ text: string | null; usage: GeminiUsage; model: string }> {
   const { endpoint, authHeaders, model } = await destinoGemini("generateContent", apiKey, modelOverride);
 
-  // Modern Gemini models (2.5+, 3.x, and the *-latest aliases) THINK by default.
-  // Thinking tokens are billed (often 10-50× the visible output) and add latency
-  // — pure waste for deterministic JSON extraction. Disable it for every
-  // thinking-capable model, not just gemini-2.5* (a gemini-flash-latest default
-  // with thinking ON burned ~$0.78/call and drained a $10 prepay in 16 calls).
-  // Legacy non-thinking models (gemini-2.0*, deprecated) are the only exception.
-  const isThinkingModel = !model.startsWith("gemini-2.0");
   const body: Record<string, unknown> = {
     systemInstruction: { parts: [{ text: systemPrompt }] },
     contents: [
@@ -461,10 +491,9 @@ export async function callGemini(
       },
     ],
     generationConfig: {
-      temperature: generacion?.temperature ?? 0,
+      ...configDeGeneracion(model, generacion),
       maxOutputTokens: 8192,
       responseMimeType: "application/json",
-      ...(isThinkingModel ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
     },
   };
 
@@ -598,7 +627,7 @@ const SE_CONCISO =
  * Para un caso que ya tuvo una extracción sin terminar (plazo, 429 o red; el
  * contador no distingue cuál ni se reinicia): el mismo prompt a temperatura 0
  * repite la misma secuencia, y si se desbocó la primera vez se desboca igual.
- * Las extracciones siguientes del caso salen concisas y a 0,3.
+ * Las extracciones siguientes del caso salen concisas y, con 2.5, a 0,3.
  */
 export const CORRECCION_TRAS_CORTE =
   "\n\nIMPORTANT: A previous attempt to answer this same message did not finish in time. " + SE_CONCISO;
@@ -608,7 +637,7 @@ export const TEMPERATURA_TRAS_CORTE = 0.3;
 
 /**
  * El extractor de emails entrantes — mismo payload, misma validación,
- * same safe-default containment. cost_usd is always 0 (free tier).
+ * same safe-default containment.
  */
 export async function extractEmailClaimGemini(
   payload: EmailClaimPayload,

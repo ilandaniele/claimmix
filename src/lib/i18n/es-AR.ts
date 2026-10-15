@@ -497,6 +497,9 @@ export const esAR = {
   "error.rateLimited": "Demasiadas solicitudes. Esperá un momento.",
   "error.serverError": "Error interno del servidor.",
   "error.notImplemented": "Esta función no está disponible en esta versión.",
+  "error.pantalla.titulo": "Algo salió mal",
+  "error.pantalla.reintentar": "Reintentar",
+  "error.pantalla.codigo": "Código para soporte: {codigo}",
 
   // ── Pagination ─────────────────────────────────────────────────────────────
   "pagination.previous": "Anterior",

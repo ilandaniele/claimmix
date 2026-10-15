@@ -64,11 +64,25 @@ export type RehostResult =
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
-/** Reject after `ms` milliseconds — used in Promise.race for budget enforcement. */
-function timeoutPromise(ms: number): Promise<never> {
-  return new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("rehost_timeout")), ms)
-  );
+/**
+ * Un plazo para una subida: rechaza a los `ms` Y aborta la señal.
+ *
+ * Con sólo el rechazo (Promise.race) el PutObject sigue su camino: la fila queda
+ * como `rehost_timeout` sin `storage_path`, pero el objeto puede aparecer en R2
+ * más tarde sin nada que lo apunte, y el barrido de retención borra por
+ * `storage_path`. `cancelar` apaga el timer cuando la subida termina antes.
+ */
+function plazoDeSubida(ms: number) {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const vencido = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // Primero el rechazo: abortar puede resolver la subida con `error` en el acto.
+      reject(new Error("rehost_timeout"));
+      controller.abort();
+    }, ms);
+  });
+  return { signal: controller.signal, vencido, cancelar: () => clearTimeout(timer) };
 }
 
 /**
@@ -130,7 +144,8 @@ export interface RehostAttachmentsOpts {
  *   - Before each attachment, remaining budget is checked; if ≤ 0, the attachment
  *     is immediately marked { stored: false, reason: 'rehost_timeout' }.
  *   - For the upload step, Promise.race([upload, timeout(remaining)]) caps the
- *     individual upload within the global remaining budget.
+ *     individual upload within the global remaining budget, and the timeout
+ *     aborts the in-flight PutObject (AbortSignal) so it cannot land late.
  */
 export async function rehostAttachments(
   opts: RehostAttachmentsOpts
@@ -238,6 +253,7 @@ export async function rehostAttachments(
     }
 
     let uploadResult: { storagePath: string } | { error: string };
+    const plazo = plazoDeSubida(remainingAfterDedupe);
     try {
       uploadResult = await Promise.race([
         uploadAttachment({
@@ -247,13 +263,16 @@ export async function rehostAttachments(
           filename: attachment.Name,
           contentType: attachment.ContentType,
           data,
+          abortSignal: plazo.signal,
         }),
-        timeoutPromise(remainingAfterDedupe),
+        plazo.vencido,
       ]);
     } catch {
       // Promise.race rejected — timeout fired.
       results.push({ stored: false, reason: "rehost_timeout" });
       continue;
+    } finally {
+      plazo.cancelar();
     }
 
     if ("error" in uploadResult) {

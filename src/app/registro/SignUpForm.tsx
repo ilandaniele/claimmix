@@ -1,5 +1,6 @@
 /**
- * SignUpForm — el formulario de /registro, de servidor y sin JavaScript propio.
+ * SignUpForm — el formulario de /registro, de servidor. El único JavaScript
+ * propio es el del desafío (`DesafioTurnstile`).
  *
  * Un solo paso con dos botones que mandan a acciones distintas: «Continuar con
  * Google» (empezarAltaConGoogle) y «Crear cuenta con mi correo» (signUp). La
@@ -19,6 +20,7 @@ import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { wabaPropia } from "@/server/alta/waba-propia-activa";
 
 import { empezarAltaConGoogle, signUp } from "./actions";
+import { DesafioTurnstile } from "./DesafioTurnstile";
 
 const CLASE_DEL_CAMPO =
   "w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/15 dark:border-slate-600 dark:placeholder-slate-500";
@@ -140,17 +142,7 @@ export function SignUpForm({
             </p>
           </div>
 
-          {claveDeTurnstile && (
-            <>
-              <div className="cf-turnstile" data-sitekey={claveDeTurnstile} />
-              <script
-                src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-                async
-                defer
-                nonce={nonce}
-              />
-            </>
-          )}
+          {claveDeTurnstile && <DesafioTurnstile clave={claveDeTurnstile} nonce={nonce} />}
 
           <button
             type="submit"

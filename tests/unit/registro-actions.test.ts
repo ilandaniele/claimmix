@@ -509,6 +509,40 @@ describe("Turnstile", () => {
     expect(h.enviar).not.toHaveBeenCalled();
   });
 
+  it("un desafío rechazado se registra como aviso, con el motivo y sin la IP ni la respuesta", async () => {
+    claves();
+    cloudflare({ success: false, "error-codes": ["timeout-or-duplicate"] });
+
+    expect(await pedir(CAMPOS)).toBe(AVISO);
+
+    expect(h.warn).toHaveBeenCalledWith(
+      { motivo: "rechazada", codigos: ["timeout-or-duplicate"] },
+      "registro.turnstile_no_paso"
+    );
+    expect(h.error).not.toHaveBeenCalled();
+    const registrado = JSON.stringify(h.warn.mock.calls);
+    expect(registrado).not.toContain(IP);
+    expect(registrado).not.toContain("fake-respuesta-del-desafio");
+    expect(registrado).not.toContain(BUENOS.email);
+  });
+
+  it.each(["invalid-input-secret", "missing-input-secret"])(
+    "con el código %s la clave está mal cargada: se registra como error",
+    async (codigo) => {
+      claves();
+      cloudflare({ success: false, "error-codes": [codigo] }, 400);
+
+      expect(await pedir(CAMPOS)).toBe(AVISO);
+
+      expect(h.error).toHaveBeenCalledWith(
+        { motivo: "cloudflare_error", codigos: [codigo] },
+        "registro.turnstile_no_paso"
+      );
+      expect(h.warn).not.toHaveBeenCalled();
+      expect(h.enviar).not.toHaveBeenCalled();
+    }
+  );
+
   it("con las dos claves y sin respuesta del desafío: el mismo aviso, sin llamar a Cloudflare", async () => {
     claves();
 

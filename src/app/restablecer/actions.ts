@@ -12,6 +12,13 @@ import { headers } from "next/headers";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import {
+  RATE_LIMIT_CONFIGS,
+  clientIpFromHeaders,
+  rateLimit,
+  topePorIp,
+} from "@/lib/rate-limit/index";
+import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { getT } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 
@@ -73,10 +80,24 @@ export async function restablecer(
     return { fieldErrors };
   }
 
+  /*
+   * El mismo techo que `/api/auth/reset-password`, y en el mismo balde: el
+   * formulario entra por acá y `auth.api.*` no pasa por el limitador de la ruta
+   * HTTP. Ver recuperar/actions.ts.
+   */
+  const headerStore = await headers();
+  const ip = clientIpFromHeaders(headerStore);
+  const rl = await rateLimit(claveDeCupo("auth:reset", ip), RATE_LIMIT_CONFIGS.AUTH_SIGN_IN);
+  const porIp = await topePorIp(ip);
+  if (!rl.allowed || !porIp.allowed) {
+    const espera = (!porIp.allowed ? porIp : rl).retryAfterSeconds ?? 60;
+    return { error: `Demasiados intentos. Probá de nuevo en ${espera} segundos.` };
+  }
+
   try {
     await auth.api.resetPassword({
       body: { newPassword: parsed.data.password, token: parsed.data.token },
-      headers: await headers(),
+      headers: headerStore,
     });
   } catch {
     /*

@@ -14,8 +14,8 @@
  * un test de integración que lo comprobaba. Nadie lo notó porque ese test
  * llevaba meses salteado en CI.
  *
- * **Qué se limita y qué no.** Sólo lo que consume un secreto: entrar y pedir el
- * enlace de restablecimiento. Leer la sesión pasa en cada carga de página y
+ * **Qué se limita y qué no.** Sólo lo que consume un secreto: entrar, pedir el
+ * enlace de restablecimiento y usarlo. Leer la sesión pasa en cada carga de página y
  * ponerle techo sería romper la aplicación para el que la usa bien. Cambiar la
  * contraseña también gasta un secreto (la actual) y va por usuario;
  * `/verify-password` y `/sign-up/email` no existen para esta app.
@@ -31,11 +31,12 @@ import { err } from "@/lib/api/respond";
 import { auth } from "@/lib/auth";
 import {
   RATE_LIMIT_CONFIGS,
+  type ConfigDeCupo,
   getClientIp,
   rateLimit,
   topePorIp,
 } from "@/lib/rate-limit/index";
-import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { claveDeCupo, type AmbitoDeCupo } from "@/lib/rate-limit/clave";
 
 const handler = toNextJsHandler(auth);
 
@@ -44,9 +45,15 @@ const handler = toNextJsHandler(auth);
  *
  * `sign-in` gasta un secreto. `request-password-reset` gasta algo distinto y
  * igual de real: manda un mail a una direccion que elige quien llama, desde una
- * casilla en la que esa persona confia.
+ * casilla en la que esa persona confia. `reset-password` gasta el token del
+ * enlace, que es la credencial mientras dura; su cuerpo no trae dirección, así
+ * que cuenta por IP sola, con el mismo cupo que entrar.
  */
-const CON_TECHO = ["/sign-in", "/request-password-reset"];
+const CON_TECHO: { ruta: string; ambito: AmbitoDeCupo; config: ConfigDeCupo; porDireccion: boolean }[] = [
+  { ruta: "/sign-in", ambito: "auth:in", config: RATE_LIMIT_CONFIGS.AUTH_SIGN_IN, porDireccion: true },
+  { ruta: "/request-password-reset", ambito: "auth:reset", config: RATE_LIMIT_CONFIGS.AUTH_RESET, porDireccion: true },
+  { ruta: "/reset-password", ambito: "auth:reset", config: RATE_LIMIT_CONFIGS.AUTH_SIGN_IN, porDireccion: false },
+];
 
 /*
  * Lo que la app no usa por HTTP.
@@ -147,12 +154,12 @@ export async function POST(req: NextRequest) {
     return handler.POST(req);
   }
 
-  if (CON_TECHO.some((p) => ruta.includes(p))) {
+  const techo = CON_TECHO.find((t) => ruta.includes(t.ruta));
+  if (techo) {
     const ip = getClientIp(req);
-    const direccion = await direccionDelCuerpo(req);
-    const reset = ruta.includes("request-password-reset");
-    const clave = claveDeCupo(reset ? "auth:reset" : "auth:in", ip, direccion);
-    const config = reset ? RATE_LIMIT_CONFIGS.AUTH_RESET : RATE_LIMIT_CONFIGS.AUTH_SIGN_IN;
+    const clave = techo.porDireccion
+      ? claveDeCupo(techo.ambito, ip, await direccionDelCuerpo(req))
+      : claveDeCupo(techo.ambito, ip);
 
     /*
      * Dos cupos, porque son dos ataques distintos.
@@ -171,7 +178,7 @@ export async function POST(req: NextRequest) {
     // formas de escribir `auth:ip:…` serían dos cupos distintos.
     const porIp = await topePorIp(ip);
 
-    const permitido = await rateLimit(clave, config);
+    const permitido = await rateLimit(clave, techo.config);
     if (!permitido.allowed || !porIp.allowed) {
       return sinCupo((!porIp.allowed ? porIp : permitido).resetAt);
     }

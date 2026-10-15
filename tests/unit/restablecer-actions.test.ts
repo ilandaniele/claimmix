@@ -11,11 +11,17 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ resetPassword: vi.fn(), locale: vi.fn() }));
+const h = vi.hoisted(() => ({ resetPassword: vi.fn(), locale: vi.fn(), rateLimit: vi.fn(), topePorIp: vi.fn() }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { resetPassword: h.resetPassword } } }));
 vi.mock("@/lib/i18n/locale", () => ({ getServerLocale: h.locale }));
+vi.mock("@/lib/rate-limit/index", () => ({
+  RATE_LIMIT_CONFIGS: { AUTH_SIGN_IN: { limit: 5, windowMs: 10_000 } },
+  clientIpFromHeaders: () => "203.0.113.7",
+  rateLimit: h.rateLimit,
+  topePorIp: h.topePorIp,
+}));
 
 import { restablecer } from "@/app/restablecer/actions";
 
@@ -31,6 +37,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.locale.mockResolvedValue("es-AR");
   h.resetPassword.mockResolvedValue({ status: true });
+  h.rateLimit.mockResolvedValue({ allowed: true });
+  h.topePorIp.mockResolvedValue({ allowed: true });
 });
 
 describe("restablecer: el largo de la contraseña", () => {
@@ -95,5 +103,24 @@ describe("restablecer: el resto del formulario", () => {
 
     expect(r.error).toMatch(/ya no sirve/);
     expect(r.fieldErrors).toBeUndefined();
+  });
+});
+
+describe("restablecer: el techo de intentos", () => {
+  it("sin cupo no llama a Better Auth y dice cuánto esperar", async () => {
+    h.rateLimit.mockResolvedValue({ allowed: false, retryAfterSeconds: 9 });
+
+    const r = await restablecer({}, formulario("clave-nueva-larga"));
+
+    expect(r.error).toBe("Demasiados intentos. Probá de nuevo en 9 segundos.");
+    expect(h.resetPassword).not.toHaveBeenCalled();
+  });
+
+  it("cuenta por IP sola en el balde de /api/auth/reset-password", async () => {
+    await restablecer({}, formulario("clave-nueva-larga"));
+
+    expect(h.rateLimit).toHaveBeenCalledWith("auth:reset:203.0.113.7", { limit: 5, windowMs: 10_000 });
+    expect(h.topePorIp).toHaveBeenCalledWith("203.0.113.7");
+    expect(h.resetPassword).toHaveBeenCalledOnce();
   });
 });

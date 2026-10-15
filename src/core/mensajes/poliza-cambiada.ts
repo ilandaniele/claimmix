@@ -2,8 +2,7 @@
  * El pedido cuando la persona nos dio otra póliza a mitad de la charla.
  *
  * No lleva ningún valor, ni el de antes ni el de ahora: AC24 prohíbe repetir
- * números en la pregunta, y `maskPolicyNumber("4455")` devuelve `****4455`, es
- * decir, el número entero. Tampoco dice «que nos diste antes»: el padrón también
+ * números en la pregunta. Tampoco dice «que nos diste antes»: el padrón también
  * llena la póliza cuando la persona no la dio. Y pide que la escriba, en vez de
  * «¿cuál es el correcto?», porque eso invita a contestar «la primera», que no se
  * puede resolver sin repetir los valores.

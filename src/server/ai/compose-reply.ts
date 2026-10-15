@@ -109,9 +109,8 @@ export interface ComposeReplyInput {
    * La persona nombró otra póliza que la del caso, y hay que pedirle que escriba
    * la correcta.
    *
-   * Sin valores en el input: ni el nuevo ni el anterior (AC24), y
-   * `maskPolicyNumber("4455")` devuelve el número entero. Por eso el prompt
-   * tapa los números de lo que escribió y la guarda rechaza cualquiera.
+   * Sin valores en el input: ni el nuevo ni el anterior (AC24). Por eso el
+   * prompt tapa los números de lo que escribió y la guarda rechaza cualquiera.
    */
   polizaCambiada?: boolean;
   /**

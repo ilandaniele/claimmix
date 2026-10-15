@@ -80,15 +80,18 @@ export function maskDni(dni: string): string {
  * Mask a policy number — show only the last 4 characters of the numeric suffix.
  * Input: "POL-12345678" → "POL-****5678"
  * Input: "12345678"     → "****5678"
- * Input: "POL-1234"     → "POL-****1234"
+ * Input: "POL-1234"     → "****"
  *
  * Preserves any non-digit prefix (e.g. "POL-") to maintain recognizability.
+ *
+ * Con menos de 6 dígitos al final se tapa todo: los últimos 4 de «4455» son el
+ * número entero, y AC24 pide que la póliza no salga entera en ningún mensaje.
  */
 export function maskPolicyNumber(policyNumber: string): string {
   // Split into prefix (non-digits) and suffix (digits at the end).
-  const match = policyNumber.match(/^(.*?)(\d{4,})$/);
+  const match = policyNumber.match(/^(.*?)(\d{6,})$/);
   if (!match) {
-    // If it's entirely non-numeric or < 4 digits, mask all.
+    // If it's entirely non-numeric or < 6 digits, mask all.
     return "****";
   }
   const [, prefix, digits] = match;

@@ -1235,9 +1235,8 @@ export async function orchestratePostExtraction(
     // touch two rounds after they did.
     const isFollowUp = await hasPriorOutbound(caseId, tenantId);
 
-    // Extract claim_type and policy_number from fields for the email template.
     const claimTypeField = extractedClaim.fields.find((f) => f.field_key === "claim_type");
-    const policyField = extractedClaim.fields.find((f) => f.field_key === "policy_number");
+    const policyNumber = await polizaDelCaso(caseId, tenantId);
 
     await messenger.send({
       caseId,
@@ -1249,7 +1248,7 @@ export async function orchestratePostExtraction(
         caseId,
         claimType: claimTypeField?.field_value ?? null,
         // policyNumber passed through; template masks it (AC24).
-        policyNumber: policyField?.field_value ?? null,
+        policyNumber,
         isFollowUp,
         claimantName,
         question: pregunta,
@@ -2588,6 +2587,26 @@ async function checkConfirmationAlreadySent(
   } catch (err) {
     logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_outbound_messages");
     return false;
+  }
+}
+
+/**
+ * La póliza que cita el cierre: la del caso, no la que leyó el extractor en
+ * esta vuelta. Si la persona eligió la anterior y el extractor sigue leyendo la
+ * nueva, el cierre citaba la que no eligió. La columna ya tiene lo que escribió
+ * el worker antes de orquestar y lo que eligió la persona más arriba.
+ */
+async function polizaDelCaso(caseId: string, tenantId: string): Promise<string | null> {
+  try {
+    const caso = firstRow(
+      await enTenant({ tenantId }, (db) =>
+        db.select({ policy_number: cases.policy_number }).from(cases).where(eq(cases.id, caseId)).limit(1)
+      )
+    );
+    return caso?.policy_number ?? null;
+  } catch (err) {
+    logger.error({ code: errorCode(err), case_id: caseId }, "orchestrate.poliza_del_caso");
+    return null;
   }
 }
 

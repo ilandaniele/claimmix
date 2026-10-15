@@ -149,9 +149,9 @@ export const campo = <T>(codigo: string, convertir: Convertidor<T>) =>
 const esVacio = (v: unknown) => v === undefined || v === null || (typeof v === "string" && v.trim() === "");
 
 /** Vacío es «no vino»: en el alta se omite y en una importación deja el dato como está. */
-export const opcional = <T>(c: z.ZodType<T, z.ZodTypeDef, string>) =>
+export const opcional = <T>(c: z.ZodType<T, string>) =>
   z.preprocess((v) => (esVacio(v) ? undefined : v), c.optional());
 
 /** Vacío es «borrar»: en una edición a mano, `null` limpia el campo y omitirlo lo deja igual. */
-export const anulable = <T>(c: z.ZodType<T, z.ZodTypeDef, string>) =>
+export const anulable = <T>(c: z.ZodType<T, string>) =>
   z.preprocess((v) => (v === undefined ? undefined : esVacio(v) ? null : v), c.nullable().optional());

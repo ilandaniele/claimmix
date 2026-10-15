@@ -55,9 +55,9 @@ const BatchSimulateSchema = z.object({
  * la persona ya fue autorizada cuando pidió el lote.
  */
 const ContinuationSchema = z.object({
-  continue_case_ids: z.array(z.string().uuid()).min(1).max(50),
-  tenant_id: z.string().uuid(),
-  user_id: z.string().uuid().nullable().optional(),
+  continue_case_ids: z.array(z.guid()).min(1).max(50),
+  tenant_id: z.guid(),
+  user_id: z.guid().nullable().optional(),
   delay_ms: z.number().int().min(0).max(5_000).default(1_500),
   chain: z.number().int().min(1).max(MAX_CHAIN),
 });

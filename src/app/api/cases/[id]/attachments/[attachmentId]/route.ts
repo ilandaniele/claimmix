@@ -29,7 +29,7 @@ import { abrirAdjunto } from "@/server/storage/claim-attachments-bucket";
 
 export const dynamic = "force-dynamic";
 
-const Params = z.object({ id: z.string().uuid(), attachmentId: z.string().uuid() });
+const Params = z.object({ id: z.guid(), attachmentId: z.guid() });
 
 /** Tipos que el navegador puede mostrar sin bajarlos. */
 const INLINE = new Set([

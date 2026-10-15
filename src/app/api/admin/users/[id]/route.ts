@@ -19,7 +19,7 @@ import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 
 export const dynamic = "force-dynamic";
 
-const ParamsSchema = z.object({ id: z.string().uuid() });
+const ParamsSchema = z.object({ id: z.guid() });
 const RoleSchema = z.enum(ALL_ROLES);
 const PatchUserSchema = z.object({
   role: RoleSchema,

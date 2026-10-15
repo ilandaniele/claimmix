@@ -59,7 +59,7 @@ function serializeCase(row: CaseRow, role: string) {
 // ── Route params schema ───────────────────────────────────────────────────────
 
 const ParamsSchema = z.object({
-  id: z.string().uuid("ID de caso inválido."),
+  id: z.guid("ID de caso inválido."),
 });
 
 // ── GET /api/cases/:id ────────────────────────────────────────────────────────

@@ -4923,6 +4923,8 @@ sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
   ninguna respuesta cita 4471 ni 4455. Con 2.5 local el turno 6 salió rojo dos de cuatro veces
   por el desboque conocido del extractor (8192 tokens, el corte de 30 s lo vuelve TIMEOUT sin
   reintento); con `GEMINI_TIMEOUT_MS=0` reintenta con la corrección de MAX_TOKENS y queda verde.
+  `pnpm check --local` con 3.8 verde: las 26 conversaciones sin diferencias (26,6 min). La
+  primera corrida encontró dos mocks de `gap-analyzer` sin `MEDIUM_CONFIDENCE_LOW`.
 
 ### 🙋 Waiting on you (not code)
 

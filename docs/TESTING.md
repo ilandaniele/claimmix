@@ -845,7 +845,8 @@ o con `--escribe`, y nunca contra `ep-proud-resonance`: ahí el chequeo falla.
 
 ### 9. `pnpm bases:probar` — una base por cliente, de punta a punta
 
-Sólo importa con `BASE_POR_CLIENTE=1`, que hoy no está prendida en ningún ambiente. Da de
+Sólo importa con `BASE_POR_CLIENTE=1`, que está prendida en prd desde el 09/10 y en 0 en
+dev, QA y staging (`docs/PROMOCION.md`). Da de
 alta dos inquilinos con la función de verdad (`crearInquilino`), les prepara su base
 `t_<hex>` con el mismo `prepararBase` que corre el workflow y comprueba lo que la
 migración a una base por cliente promete:

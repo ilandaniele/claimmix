@@ -805,10 +805,10 @@ que faltan columnas, y la ve el post-deploy: `bases.desfase`.
 2. Meta permite 2 números en la WABA hasta verificar el negocio.
 3. La pantalla de consentimiento de Google tiene que estar publicada, y sus scopes de Gmail
    sin verificar tienen un tope de 100 usuarios que comparten dev y prd.
-4. Hay que confirmar que Vercel acepta mover un `*.vercel.app` entre proyectos.
+4. Hecho el 09/10: Vercel aceptó mover `claimmix.vercel.app` a `claimmix-prd`.
 5. Los términos de Vercel Hobby son de uso no comercial, y prd con clientes que pagan choca
    con eso. El dueño decidió no usar planes pagos; queda señalado.
-6. `HOST_DE_BASE_PRD` sigue en `null` hasta crear el proyecto de Neon.
+6. Hecho: `HOST_DE_BASE_PRD` es `ep-sweet-salad` (`scripts/lib/hosts-vetados.mjs`).
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 

@@ -5064,6 +5064,10 @@ Decisiones del dueño (16/10):
 
 ### 🙋 Waiting on you (not code)
 
+- **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
+  QA (cuenta de Gonzalo) y prd (cliente ficticio) completos e iguales, con quién hace cada
+  paso, las decisiones D1 a D15 y el plan para que el alta sea automática, está en
+  `docs/PUESTA_EN_MARCHA.md`. Empieza por A1, las decisiones que traban algo.
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner
   `VERTEX_EXTRACTION_MODEL=gemini-3.8-flash` o borrar la línea.

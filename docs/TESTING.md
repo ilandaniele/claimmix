@@ -202,7 +202,7 @@ Viven en la máquina de quien corre el ensayo, en `tests/fixtures/`:
 
 | Archivo | Qué es | Para qué |
 |---|---|---|
-| `danos.jpg` | Un auto chocado | Que lo reconozca como las fotos de los daños |
+| `danos.jpg` | Un solo auto visto de afuera con daño moderado (abolladuras, una luz rota), sin techo hundido, fuego ni personas, sin patente ni caras legibles, JPEG sin GPS. La de referencia es «2007 Chevrolet HHR involved in crash» de Wikimedia Commons (CC0) | Que lo reconozca como las fotos de los daños. Con una foto de destrucción total, Gemini 3.8 califica el choque como grave y `choque-completo` deriva |
 | `licencia.jpg` | Una licencia de conducir | El caso difícil: dos documentos de papel pendientes, tiene que elegir el correcto |
 | `irrelevante.jpg` | Cualquier foto que no sea un documento | El caso negativo: no tiene que cerrar ningún pedido |
 | `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo |

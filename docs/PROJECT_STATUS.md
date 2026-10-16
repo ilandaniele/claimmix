@@ -5033,6 +5033,15 @@ Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha
 - **Checks obligatorios.** El ruleset 25217107 todavía no los exige y espera a este renombre: serían los diez de `ci.yml`, `codeql.yml` y `secrets.yml` (con `Tipos y lint` en lugar de `Tipos` y `Lint`) más el estado `Post-deploy QA`. Exigirlos necesita el OK del dueño.
 - **Al llegar a qa y a main**, mirar la primera corrida de DEV, de QA y de PRD: título, nombres de los checks, si el ensayo corrió o se salteó (y, si se salteó, que el resumen nombre el árbol de QA) y el estado `Post-deploy QA`. Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambian de nombre.
 
+### Un audio mudo no inventa una denuncia (2026-10-16, #453)
+
+El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso se derivaba a un especialista en el turno de la nota de voz y el PDF siguiente no se leía. Sin fixtures, la nota es `tests/fixtures/placeholder.ogg`, 2 s de Opus en silencio, y gemini-3.8-flash le inventó voz en 3 de 6 llamadas de una sonda (un robo con la ventana rota, una piedra en el parabrisas). La transcripción falsa reemplazaba al marcador y la deliberación derivaba por hechos que nadie contó. En producción pasaba lo mismo con un audio con ruido.
+
+- **Tope de palabras.** `transcribir.ts` descarta una transcripción con más de cuatro palabras por segundo de audio, más cuatro de gracia (`metadatos.segundos`, medido al recibir; sin duración no se juzga). Log `email_worker.transcripcion_inverosimil`, sólo con las cuentas.
+- **El marcador solo no cuenta hechos.** Un mensaje que es sólo `[Mensaje de audio adjunto]` no se delibera ni sube la gravedad del caso (`gravedadSinHechosNuevos`).
+- Tres corridas de `nota-de-voz-y-pdf` sin fixtures, verdes; en una, la guarda descartó 21 palabras para 2 s de audio. La temperatura no se tocó: Google desaconseja bajarla en Gemini 3.
+- Entra a qa junto con `ci/por-ambiente` (#452) en `integra/ci-y-audio`, para un solo Post-deploy de QA.
+
 ### 🙋 Waiting on you (not code)
 
 - **Promoción a prd.** Con #446 en qa y main en verde, la próxima promoción lleva

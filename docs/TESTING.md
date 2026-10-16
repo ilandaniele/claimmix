@@ -49,6 +49,14 @@ de pólizas y la pantalla de métricas. La capa ahora también lo rechaza en
 caliente con un mensaje que dice con qué reemplazarlo, pero eso avisa recién
 cuando alguien abre la pantalla.
 
+#### La base del agente y los prompts dorados
+
+La política del agente vive en `entrenamiento/base/`, y lo que ve el modelo lo arma el código con ella. Dos guardas dentro de `pnpm verify` y del CI lo vigilan:
+
+- **Los prompts dorados.** `tests/unit/prompts-del-agente.test.ts` arma ocho prompts (la extracción por mail y por WhatsApp con reglas, las dos pasadas de `deliberate` y cuatro del redactor) y los compara, byte a byte, con los archivos de `tests/unit/__prompts__/`. Son la prueba de que mover la política de `prompt.ts`, `deliberate.ts` y `compose-reply.ts` a Markdown no cambió una letra, y siguen siendo la prueba de que editar un `.md` de la base sí la cambia. Los datos de ejemplo son de nadie (`example.com`, nombres genéricos) y los revisa `check-personal-data`.
+- **Nunca `vitest -u` sin leer el diff.** Un cambio de prompt es un cambio de comportamiento. Actualizar el archivo dorado después de mover o editar texto borra la prueba: el test pasa a comparar el prompt con sí mismo. Con un cambio aprobado se corre `-u` sólo sobre ese archivo, se lee el diff entero (`git diff tests/unit/__prompts__`) y se vuelve a ensayar con `pnpm check --local`, leyendo el transcripto.
+- **`node scripts/empaquetar-entrenamiento.mjs --comprobar`** sale con 1 si `src/core/agente/entrenamiento-base.generated.ts` no coincide con los `.md`, y sólo lee. Lo corre `tests/unit/entrenamiento-base.test.ts`, así que un `.md` editado sin `pnpm entrenamiento:empaquetar` deja rojo el CI: el agente seguiría con la política vieja. Se arregla empaquetando y commiteando el módulo.
+
 Lo que **no** puede ver: cómo se comporta el agente cuando extracción, análisis
 de huecos, orquestador y redactor corren juntos. Ahí vivió cada error de la
 última semana.
@@ -190,6 +198,29 @@ pnpm rehearse --keep           # deja los casos en la base para inspeccionarlos
 
 Los casos de ensayo se borran al terminar. Si sembró una póliza de prueba,
 también se borra.
+
+#### La sombra: las líneas ◐ y el resumen
+
+Después de cada vuelta, el ensayo imprime una línea `   ◐ sombra: …` por cada corrida nueva del caso en `agent_runs`: lee `confidence_payload->'sombra'` por `case_id` y recuerda los id ya impresos, sin reloj, así que una retoma que deja dos filas imprime las dos. Al final suma todo en una línea de resumen. **Nada de esto cuenta para el veredicto**: no entra a la lista de fallas, ni al JSON de diferencias (`--reporte`), ni al código de salida. Es un instrumento, no una guarda; las guardas son las comprobaciones de arriba.
+
+Cada línea junta, separados por « · », los tramos de las decisiones que se anotaron en esa vuelta (`gravedad`, `derivar`, `pedir`, `responder`):
+
+| Tramo | Qué dice |
+|---|---|
+| `gravedad =` | el modelo y el código dijeron lo mismo |
+| `responder ≠ (agente: contestar · código: pedir)` | no coinciden; entre paréntesis, lo que dijo cada uno |
+| `derivar ?` | no se puede comparar: falta una de las dos opiniones (sin plan de `deliberate` porque estaba apagado, el caso era grave, el audio no se transcribió, no había presupuesto o falló), o el código dijo `avisar` (un archivo no entró), que el agente no tiene |
+| `[rechazo: invented]` | en `responder`, `validate` tiró el plan del agente; sólo la categoría, nunca las claves |
+| `BAJA EL PISO` | heridos o gravedad crítica y el agente dijo que no derivaba. Se lee siempre, con la conversación entera |
+| `◐ sombra: sin datos` | la lectura de la sombra falló; no dice nada del agente |
+
+El resumen sale como `Sombra (no cuenta para el resultado): gravedad iguales/total (porcentaje %) · derivar … · pedir … · responder … · sin opinión: N · baja el piso: N · umbral 95 % con 100 comparaciones`. Para leerlo:
+
+- **El denominador manda.** `iguales/total` cuenta sólo las vueltas con opinión de los dos lados; un porcentaje sobre pocas vueltas no dice nada, y el umbral pide al menos 100.
+- **Coincidencia no es acierto.** Que el modelo y el código digan lo mismo no prueba que los dos tengan razón. Una diferencia puede ser el modelo equivocado o el código.
+- **`baja el piso` distinto de cero no rompe el ensayo, pero bloquea cualquier pase de una decisión al modelo.** Se lee esa vuelta antes de seguir.
+- **`responder` sólo se mide en el ensayo**, no en `pnpm sombra:evaluar`, y su lado del código es una aproximación: la decisión del árbol sin plan, sin mirar si la confirmación ya salió.
+- **Con la bandera apagada el ensayo no ejerce las reglas del cliente en la conversación (`decidir` y `redactar`).** Para ver cómo suena el agente con ellas hay que correr con `AGENTE_APRENDIDO_EN_CONVERSACION=1` en el entorno de esa corrida y leer el transcripto.
 
 ### Las fotos
 
@@ -814,7 +845,8 @@ o con `--escribe`, y nunca contra `ep-proud-resonance`: ahí el chequeo falla.
 
 ### 9. `pnpm bases:probar` — una base por cliente, de punta a punta
 
-Sólo importa con `BASE_POR_CLIENTE=1`, que hoy no está prendida en ningún ambiente. Da de
+Sólo importa con `BASE_POR_CLIENTE=1`, que está prendida en prd desde el 09/10 y en 0 en
+dev, QA y staging (`docs/PROMOCION.md`). Da de
 alta dos inquilinos con la función de verdad (`crearInquilino`), les prepara su base
 `t_<hex>` con el mismo `prepararBase` que corre el workflow y comprueba lo que la
 migración a una base por cliente promete:
@@ -851,6 +883,26 @@ corta, porque un check que se saltea en silencio no prueba nada.
 Localmente: `PRD_ENSAYO_DATABASE_URL` y `PRD_ENSAYO_DATABASE_URL_APP` en `.env.local`
 y `pnpm bases:probar`. Sin ellas, no hay forma de probarlo.
 
+### 10. `pnpm sombra:evaluar` — cuánto coincide el modelo con el código, aparte de `pnpm check`
+
+Mide `gravedad`, `derivar` y `pedir` sin pasar por el ensayo de conversaciones: corre la extracción de cada escenario sintético de `src/server/intake/scenarios.ts` (163 hoy), calcula con la misma regla del worker lo que decide el código y compara. Es el primer mensaje de cada caso, así que no hay historial. Mide coincidencia, no acierto, y no mide `responder`: eso sale del ensayo. Los escenarios con fotos o audio se evalúan sin ellos, así que la extracción difiere de la del ensayo. No está en `pnpm check`: gasta tokens y se corre a propósito.
+
+```bash
+pnpm sombra:evaluar --seco                   # imprime la selección y cuántas llamadas haría; no llama a nadie ni lee .env.local
+pnpm sombra:evaluar                          # diez escenarios, repartidos parejo por la lista
+pnpm sombra:evaluar --limite 20              # tope de escenarios
+pnpm sombra:evaluar --escenarios a,b         # por id, separados por coma
+pnpm sombra:evaluar --todos                  # todos
+pnpm sombra:evaluar --sin-sombra             # línea de base: la misma extracción sin el texto de sombra
+pnpm sombra:evaluar --reporte ruta.json      # ids, claves, enums, conteo, versión de la base y modelo; sin texto
+```
+
+- **Corré siempre `--seco` primero.** Dice cuántos escenarios y cuántas llamadas, una extracción por escenario (más un reintento si el JSON viene inválido).
+- **Cuesta de verdad y no se ve.** `--todos` son unas 163 extracciones con `gemini-3.8-flash`; con `--sin-sombra` para tener la comparación, el doble. La corrida no lleva inquilino, así que no pasa por el tope de gasto, no aparece en `/metricas` y no escribe en ninguna base. Por eso el límite por omisión es 10, y `--todos` o `--escenarios` sólo se recortan si se pasa `--limite`.
+- **Qué recibe el modelo.** Como `agentTraining`, las secciones de sombra de la base para esas tres decisiones (`textoDeSombra`), que entran en el tope de 8000 caracteres de `agent_training`. Con `--sin-sombra`, nada. Para comparar las dos hay que correr el script dos veces.
+- **Qué imprime.** Una línea por escenario con los mismos tramos que las `◐` del ensayo (ver arriba), `sin sombra (no es denuncia)` si el modelo no lo tomó como denuncia, y el mismo resumen al final. Los errores técnicos se cuentan aparte; sale con 0 salvo que alguna extracción falle (1) o los argumentos sean inválidos (2).
+- **Qué no lee.** Sólo escenarios sintéticos: ni las corridas reales de `agent_runs` ni la capa de base. Un test lo vigila (`tests/unit/eval-sombra.test.ts`).
+
 ---
 
 ## Cuándo correr qué
@@ -866,6 +918,8 @@ y `pnpm bases:probar`. Sin ellas, no hay forma de probarlo.
 | Dudás de si el bot puede mandar mensajes | `pnpm prove --whatsapp <número>` |
 | Antes de un piloto con volumen real | `pnpm load --forma todas` y `pnpm load --write --claimants 100` |
 | Después de tocar el agente o los prompts | `pnpm pentest --agent` |
+| Después de editar un `.md` de `entrenamiento/base/` | `pnpm entrenamiento:empaquetar`, y después `pnpm check --local` leyendo el transcripto |
+| Para medir cuánto coincide el modelo con el código | `pnpm sombra:evaluar --seco`, y recién después con `--limite` (gasta tokens) |
 | Después de cambiar la casilla, el número o sus credenciales | `pnpm knock` |
 | **Antes de desplegar la capa de datos** | `pnpm listo` |
 | Después de agregar una tabla con `tenant_id` | `pnpm permisos` |
@@ -1137,6 +1191,10 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   `orchestrate-post-extraction`, `extract.email.gemini-error`,
   `un-timeout-no-es-una-escalada` y `el-modelo-tiene-un-plazo`.
 
+- **Lo que hace el modelo con las reglas del cliente.** `indicaciones-del-equipo`, `piso-del-agente` y
+  `deliberate` prueban qué texto llega a cada paso y que el piso se sostiene con una regla que pide justo
+  lo contrario, pero con el modelo mockeado: no prueban que el modelo las siga ni que no choquen con la
+  base. Eso sólo se ve en un ensayo con `AGENTE_APRENDIDO_EN_CONVERSACION=1`, leyendo el transcripto.
 - **La sincronización con el core del asegurador**, que nunca se ejercitó contra
   un sistema real.
 - **La entrega en sí.** `pnpm prove` confirma que el proveedor aceptó el

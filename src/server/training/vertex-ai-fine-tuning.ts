@@ -629,8 +629,9 @@ export async function approveVertexAiTuningJob(
 }
 
 /**
- * After the tuning job succeeds and an admin approves the evaluation, activates
- * the tuned model by updating tenantAiSettings to use the new endpoint.
+ * Con el trabajo aprobado, guarda el id del modelo ajustado en
+ * tenantAiSettings.active_model (upsert). Hoy ningún camino de extracción lo
+ * sirve: es sólo el registro de cuál quedó activado.
  */
 export async function activateVertexAiModel(
   tenantId: string,

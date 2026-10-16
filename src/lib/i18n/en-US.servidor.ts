@@ -529,6 +529,23 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "ramos.guardado": "Saved.",
   "ramos.error": "Could not save. Check the data.",
   "ramos.tope": "You reached the maximum of {n} own types.",
+  // ── Agent base, read-only ──────────────────────────────────────────────────
+  "base.titulo": "Agent base",
+  "base.explicacion":
+    "The policy the agent starts from. A person writes it in entrenamiento/base/, it ships with the code and it is the same in every environment: here it is read-only, and it changes through a PR. Sections in prompt mode are the text the model receives; sections in shadow mode describe a rule in the code and only serve to measure the agent, they never enter a prompt.",
+  "base.version": "Base version: {version}",
+  "base.paso.extraccion": "Extraction",
+  "base.paso.decidir": "Deciding",
+  "base.paso.redactar": "Writing",
+  "base.modo.prompt": "Prompt",
+  "base.modo.sombra": "Shadow",
+  "base.reglas.titulo": "Team rules and the steps that read them",
+  "base.reglas.tipo": "Rule type",
+  "base.reglas.pasos": "Steps that read it",
+  "base.reglas.bandera_apagada": "Learning from the conversation is off: rules only reach extraction, and deciding and writing do not read them.",
+  "base.reglas.bandera_prendida": "Learning from the conversation is on: rules also reach deciding and writing, according to their type.",
+  "base.propuesta.boton": "Download proposal for the base",
+  "base.propuesta.aviso": "The repo is public. ID numbers, policy numbers, links, emails and phone numbers are masked; names are not. Read it all before copying anything to entrenamiento/base/.",
   // ── Public web form (B17) ──────────────────────────────────────────────────
   "formulario.titulo": "Claims web form",
   "formulario.ayuda":

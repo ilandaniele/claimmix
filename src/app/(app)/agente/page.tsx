@@ -11,6 +11,7 @@ import { codigoPg } from "@/server/core-sync/config";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { consultaFormularioWeb, type FormularioDelInquilino } from "@/server/web/formulario-del-inquilino";
 import { AgentConsoleClient } from "./AgentConsoleClient";
+import { EntrenamientoBasePanel } from "./EntrenamientoBasePanel";
 import { FormularioWebPanel } from "./FormularioWebPanel";
 import { RamosPanel } from "./RamosPanel";
 
@@ -63,6 +64,7 @@ export default async function AgentConsolePage() {
         role={role}
         ramos={<RamosPanel t={t} idioma={idioma} ramos={ramos} pendiente={pendiente0044} />}
         formulario={<FormularioWebPanel t={t} formulario={formulario} pendiente={pendiente0044} />}
+        base={<EntrenamientoBasePanel t={t} idioma={idioma} />}
       />
     </div>
   );

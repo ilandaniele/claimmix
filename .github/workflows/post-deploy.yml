@@ -455,7 +455,10 @@ jobs:
               if [ "$origen" = ".github/workflows/post-deploy.yml deployment_status success" ]; then hay=1; break; fi
             done
             if [ "$hay" = 1 ]; then
-              otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md") and . != "docs/PROMOCION.md") | not)] | length end' 2>/dev/null || echo 1)
+              otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md")
+                    and . != "docs/PROMOCION.md"
+                    and (startswith("entrenamiento/") | not)
+                    ) | not)] | length end' 2>/dev/null || echo 1)
               if [ "$otros" = 0 ]; then solo_docs=true; fi
             fi
           fi

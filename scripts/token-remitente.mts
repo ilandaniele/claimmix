@@ -2,10 +2,11 @@
  * Saca el refresh token del remitente del sistema.
  *
  * El remitente de los mails de autenticación (`src/server/notify/remitente-sistema.ts`)
- * es una casilla Gmail propia de la plataforma. Su refresh token se pide una
- * vez, desde la máquina del dueño, y se pega en Vercel como
- * `ALTA_REMITENTE_REFRESH_TOKEN`. Nunca va a la base: la casilla no es una fila
- * de `gmail_accounts`, y por eso el poller no la lee.
+ * es una casilla Gmail propia de la plataforma, una sola para todos los
+ * clientes. Su refresh token se pide una vez por ambiente, desde la máquina del
+ * dueño, y queda en Vercel como `ALTA_REMITENTE_REFRESH_TOKEN`. Nunca va a la
+ * base: la casilla no es una fila de `gmail_accounts`, y por eso el poller no la
+ * lee.
  *
  * **El token tiene que salir del mismo cliente OAuth con el que se usa.** El
  * envío refresca con `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET`, y un refresh
@@ -13,20 +14,29 @@
  * mismas variables y no pide otras.
  *
  * Un cliente de tipo «Escritorio» acepta cualquier puerto de loopback. Uno de
- * tipo «Aplicación web» exige la dirección exacta: registrá
- * `http://127.0.0.1:<puerto>/` entre las URI de redireccionamiento y pasá ese
- * puerto con `--puerto`.
+ * tipo «Aplicación web» exige la dirección exacta: el puerto por omisión,
+ * 53682, es el que está registrado como `http://127.0.0.1:53682/`; para otro,
+ * registralo y pasalo con `--puerto`.
  *
- * Uso:  pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts [--puerto N] [--correo casilla@example.com]
+ * Uso:  pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts [--puerto N] [--correo casilla@example.com] [--vercel proyecto]
+ *
+ * Con `--vercel` el token no se imprime: va directo a ese proyecto, en
+ * producción, como variable sensible, junto con `ALTA_REMITENTE_CORREO` (por eso
+ * pide `--correo`). Viaja por la entrada estándar de la CLI de Vercel, no por la
+ * línea de comandos. Pide `vercel` en el PATH con sesión iniciada, y lo prueba
+ * antes del consentimiento. claimmix-prd no se carga así: su cliente OAuth sale
+ * de su propio archivo, no de `.env.local`. Sin `--vercel`, el token se imprime.
  *
  * Sólo pide el permiso de enviar (`gmail.send`): esta casilla no lee ni borra
- * nada. El flujo es el de loopback con PKCE; el token se imprime y no se
- * escribe en ningún archivo. Esto no habla con ninguna base.
+ * nada. El flujo es el de loopback con PKCE; el token no se escribe en ningún
+ * archivo. Esto no habla con ninguna base.
  */
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
+import { execSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { parseArgs } from "node:util";
@@ -36,14 +46,46 @@ const ESPERA_MAXIMA_MS = 5 * 60_000;
 
 const { values } = parseArgs({
   options: {
-    puerto: { type: "string", default: "0" },
+    puerto: { type: "string", default: "53682" },
     correo: { type: "string" },
+    vercel: { type: "string" },
   },
 });
 
 const puerto = Number(values.puerto);
 if (!Number.isInteger(puerto) || puerto < 0 || puerto > 65535) {
   console.error("--puerto tiene que ser un número entre 0 y 65535 (0 = uno libre).");
+  process.exit(2);
+}
+
+const proyecto = values.vercel;
+if (proyecto !== undefined) {
+  if (!/^[a-z0-9-]+$/.test(proyecto)) {
+    console.error(`--vercel ${proyecto}: el nombre no es válido.`);
+    process.exit(2);
+  }
+  if (proyecto === "claimmix-prd") {
+    console.error("claimmix-prd no se carga desde .env.local: corré sin --vercel y pegalo a mano.");
+    process.exit(2);
+  }
+  if (!values.correo) {
+    console.error("--vercel pide --correo: es la casilla que queda como ALTA_REMITENTE_CORREO.");
+    process.exit(2);
+  }
+}
+
+// Se lee antes del consentimiento: si después la carga no puede salir, el token canjeado se pierde.
+const orgId = proyecto === undefined ? "" : leerOrgId();
+function leerOrgId(): string {
+  let id: string | undefined;
+  try {
+    id = (JSON.parse(readFileSync(".vercel/repo.json", "utf8")) as { projects?: { orgId?: string }[] }).projects?.[0]
+      ?.orgId;
+  } catch {
+    id = undefined;
+  }
+  if (id && /^[\w-]+$/.test(id)) return id;
+  console.error("No pude leer el orgId de .vercel/repo.json: corré `vercel link --repo` primero.");
   process.exit(2);
 }
 
@@ -141,11 +183,53 @@ async function canjear(codigo: string, redirectUri: string): Promise<string> {
   return cuerpo.refresh_token;
 }
 
+/** Llama a la API de Vercel con la CLI; el cuerpo va por stdin y la respuesta no se muestra. */
+function vercelApi(ruta: string, motivo: string, cuerpo?: object): string {
+  const separador = ruta.includes("?") ? "&" : "?";
+  try {
+    return execSync(
+      `vercel api "${ruta}${separador}teamId=${orgId}"${cuerpo ? " -X POST --input -" : ""} --raw`,
+      { input: cuerpo ? JSON.stringify(cuerpo) : "", stdio: ["pipe", "pipe", "pipe"] },
+    ).toString();
+  } catch (err) {
+    // La CLI no repite el cuerpo del pedido en el error, así que su línea de error se puede mostrar.
+    const lineas = (err as { stderr?: Buffer }).stderr?.toString().split("\n").map((l) => l.trim()).filter(Boolean);
+    const linea = lineas?.find((l) => l.startsWith("Error")) ?? lineas?.at(-1);
+    throw new Error(`${motivo}: ${linea?.slice(0, 200) ?? "la CLI de Vercel falló"}`);
+  }
+}
+
+/** Crea o reemplaza una variable de producción del proyecto. */
+function cargarEnVercel(destino: string, key: string, value: string, type: "encrypted" | "sensitive") {
+  const salida = vercelApi(`/v10/projects/${destino}/env?upsert=true`, `Vercel no cargó ${key}`, {
+    key,
+    value,
+    type,
+    target: ["production"],
+  });
+  let respuesta: { error?: { code?: string; message?: string } };
+  try {
+    respuesta = JSON.parse(salida);
+  } catch {
+    // El mensaje de JSON.parse cita un pedazo de la respuesta, y la respuesta no se muestra.
+    throw new Error(`Vercel devolvió algo que no es JSON al cargar ${key}.`);
+  }
+  if (respuesta.error) throw new Error(`Vercel rechazó ${key}: ${respuesta.error.code ?? respuesta.error.message}`);
+}
+
 try {
+  // La CLI, la sesión y el nombre del proyecto se prueban antes de pedir el consentimiento.
+  if (proyecto) vercelApi(`/v9/projects/${proyecto}`, `No pude ver el proyecto ${proyecto} en Vercel`);
   const { codigo, redirectUri } = await esperarCodigo();
   const token = await canjear(codigo, redirectUri);
-  console.error("\nPegalo en Vercel como ALTA_REMITENTE_REFRESH_TOKEN, junto con ALTA_REMITENTE_CORREO (la casilla con la que entraste):\n");
-  console.log(token);
+  if (proyecto && values.correo) {
+    cargarEnVercel(proyecto, "ALTA_REMITENTE_CORREO", values.correo, "encrypted");
+    cargarEnVercel(proyecto, "ALTA_REMITENTE_REFRESH_TOKEN", token, "sensitive");
+    console.error(`\n✓ ALTA_REMITENTE_CORREO y ALTA_REMITENTE_REFRESH_TOKEN cargadas en ${proyecto} (production). Las toma el próximo deploy.`);
+  } else {
+    console.error("\nPegalo en Vercel como ALTA_REMITENTE_REFRESH_TOKEN, junto con ALTA_REMITENTE_CORREO (la casilla con la que entraste):\n");
+    console.log(token);
+  }
 } catch (err) {
   console.error(`✗ ${err instanceof Error ? err.message : "Error desconocido"}`);
   process.exit(1);

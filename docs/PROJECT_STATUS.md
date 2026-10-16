@@ -5019,7 +5019,7 @@ reescribió. #451 los saca del árbol actual con datos sintéticos.
 - Se relanzaron CI, CodeQL y Secretos de #446 y #448–#451. #448–#451 entran a qa juntos
   con #446, en `integra/lote-1-11`.
 
-### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, rama `ci/por-ambiente`)
+### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, #452, en main por #455)
 
 Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha>` o `PRD · deploy <sha>`, y sus checks llevan el entorno adelante (`DEV / Smoke del deploy`, `QA / Ensayo de conversaciones`, `PRD · Smoke y salud de las bases`). Los siete workflows siguen, con un nombre que dice cuándo corren (`PR y main · Chequeos del código`, `Post-deploy · DEV, QA y PRD`, `Programado · Barrer trabados en DEV y PRD`). No se saca ningún check: `Tipos` y `Lint` pasan a ser un solo job, `Tipos y lint`.
 
@@ -5031,7 +5031,8 @@ Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha
 - **k6.** QA tiene su propia cola (`carga-qa`) y cada proyecto la suya para las vistas previas (`carga-preview-<environment>`): antes una vista previa podía cancelar la carga de QA. Contra PRD no corre nunca, ni por un deploy ni por una vista previa del proyecto de prd ni a mano.
 - **Invariantes.** La 12 rechaza un grupo de `concurrency` armado con `github.ref`, y la 15 también lee el `run-name`.
 - **Checks obligatorios.** El ruleset 25217107 todavía no los exige y espera a este renombre: serían los diez de `ci.yml`, `codeql.yml` y `secrets.yml` (con `Tipos y lint` en lugar de `Tipos` y `Lint`) más el estado `Post-deploy QA`. Exigirlos necesita el OK del dueño.
-- **Al llegar a qa y a main**, mirar la primera corrida de DEV, de QA y de PRD: título, nombres de los checks, si el ensayo corrió o se salteó (y, si se salteó, que el resumen nombre el árbol de QA) y el estado `Post-deploy QA`. Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambian de nombre.
+- **Primeras corridas.** QA sobre `2cfb8b42` (#454): `QA · deploy <sha>`, verde entero al primer intento, ensayo en 13 min y pen test en 3. DEV sobre `251b799d` (#455): `DEV · deploy <sha>`, el ensayo se salteó por la marca del árbol de QA y la Carga dio p95 de 434 ms en el peor caso. `pnpm check` completo sobre `251b799d`: verde en 14,5 min (26 conversaciones). Falta mirar la primera de PRD, que llega con la próxima promoción.
+- Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambiaron de nombre.
 
 ### Un audio mudo no inventa una denuncia (2026-10-16, #453)
 
@@ -5040,12 +5041,14 @@ El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso s
 - **Tope de palabras.** `transcribir.ts` descarta una transcripción con más de cuatro palabras por segundo de audio, más cuatro de gracia (`metadatos.segundos`, medido al recibir; sin duración no se juzga). Log `email_worker.transcripcion_inverosimil`, sólo con las cuentas.
 - **El marcador solo no cuenta hechos.** Un mensaje que es sólo `[Mensaje de audio adjunto]` no se delibera ni sube la gravedad del caso (`gravedadSinHechosNuevos`).
 - Tres corridas de `nota-de-voz-y-pdf` sin fixtures, verdes; en una, la guarda descartó 21 palabras para 2 s de audio. La temperatura no se tocó: Google desaconseja bajarla en Gemini 3.
-- Entra a qa junto con `ci/por-ambiente` (#452) en `integra/ci-y-audio`, para un solo Post-deploy de QA.
+- Entró a qa junto con #452 por #454 (`2cfb8b42`) y a main por #455 (`251b799d`). En QA, sin fixtures, el ensayo de conversaciones pasó al primer intento.
 
 ### 🙋 Waiting on you (not code)
 
-- **Promoción a prd.** Con #446 en qa y main en verde, la próxima promoción lleva
-  #436–#451 y espera tu OK.
+- **Promoción a prd.** Main está en verde en `251b799d` (QA, DEV y `pnpm check` completo).
+  La próxima promoción lleva #436–#455 y espera tu OK.
+- **Checks obligatorios.** Ruleset nuevo sólo para main y qa con los checks de `ci.yml`,
+  menos `Vulnerabilidades` (alertas nuevas lo ponen rojo sin cambio de código). Espera tu OK.
 
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner

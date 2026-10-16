@@ -318,7 +318,7 @@ dice.
 | `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | prd 5, 30 y 350 según el plan (`docs/PROMOCION.md:727-728`); dev y QA desconocido | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
-| `MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:297`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). Con 0 o sin valor, `/api/health` lo muestra como 200 (`src/app/api/health/route.ts:584`), y `/configuracion` siempre muestra 200 (`src/app/(app)/configuracion/page.tsx:164`); el tope que corta es el de `budget.ts:171-175`, que respeta el 0 | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:608`) |
+| `MONTHLY_BUDGET_USD` (`src/server/ai/tope-mensual.ts:23`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:616`) y con 0 |
 | `AI_TENANT_DAILY_TOKEN_CAP` (`.env.example:159`) | valor | excepción en dev y QA (D7); en esos dos, igual a la variable del repo (`.github/workflows/deploy-checks.yml:383`) | QA 20 M; dev y prd desconocido | Vercel y Settings > Variables del repo |
 | `ALTA_NUMEROS_MAXIMOS_WABA`, `ALTA_TOPE_NUMEROS_DIA` y los cupos de códigos (`.env.example:246-256`) | valor | igual; se sube recién con Veltra verificada | sin cargar (2, 2, 3, 5, 10, 5) | Vercel |
 | `ALTA_TOPE_IP_DIA` (`src/server/alta/cupo-por-ip.ts:20`), `ALTA_TOPE_CORREO_POR_IP_DIA`, `ALTA_TOPE_CORREOS_DIA`, `ALTA_TOPE_POR_DESTINATARIO_DIA`, `ALTA_TOPE_INVITACIONES_DIA` (`.env.example:232-237`), `ALTA_TOPE_PLANTILLAS_PRUEBA_DIA` (`src/server/whatsapp/cloud-api.ts:783`) | valor | igual | sin cargar (valores por omisión) | Vercel |
@@ -383,12 +383,12 @@ plataforma y cae en otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID
     …», y el de `gmail` no está en rojo.
   - **Si falla:** «sin configurar» quiere decir que faltan `WHATSAPP_ACCESS_TOKEN` o
     `WHATSAPP_PHONE_NUMBER_ID` (ver el paso 6). En cualquier otro caso, Claude lee los logs y
-    le dice al dueño qué variable falta. Ojo con el presupuesto: `/api/health` muestra 200
-    cuando `MONTHLY_BUDGET_USD` es 0 o falta, y `/configuracion` siempre muestra 200. El tope
-    que corta es el de `budget.ts`. No es un error de esta guía: figura como ítem 6 del plan.
+    le dice al dueño qué variable falta. Ojo con el presupuesto: `/api/health` y `/configuracion`
+    muestran el tope que corta, el mismo que lee `budget.ts`. Con `MONTHLY_BUDGET_USD` en 0 dicen
+    «IA frenada» y el chequeo queda amarillo: la IA de los clientes está apagada a propósito.
   - **Fuentes:** `package.json:23`; `docs/TESTING.md:1068`;
-    `src/app/api/health/route.ts:410-413`, `:422`, `:584`, `:608`;
-    `src/server/ai/budget.ts:171-175`; `src/app/(app)/configuracion/page.tsx:164`.
+    `src/app/api/health/route.ts:411-414`, `:423`, `:589`, `:608`;
+    `src/server/ai/tope-mensual.ts:23`; `src/app/(app)/configuracion/page.tsx:165-166`.
 - [ ] **3. Alta.**
   - **Quién:** [Dueño].
   - **Dónde:** una ventana privada, `https://claimmix-dev.vercel.app/registro`.
@@ -531,10 +531,10 @@ plataforma y cae en otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID
   - **Qué hacer:** anotar el gasto de cada espacio y los casos de los pasos 9 y 10.
   - **Salió bien si:** el caso de WhatsApp suma en el espacio de la plataforma y el de correo
     en el de autoalta.
-  - **Si falla:** si un caso no suma en ninguno, avisar a Claude. No tomar como dato el «USD
-    200» de `/configuracion`: está fijo en el código.
+  - **Si falla:** si un caso no suma en ninguno, avisar a Claude. `/configuracion` muestra el tope
+    del proyecto entero (`MONTHLY_BUDGET_USD`), no lo que gastó cada espacio.
   - **Fuentes:** `src/app/(app)/metricas`; `src/app/(app)/admin/facturacion`;
-    `src/app/(app)/admin/cartera`; `src/app/(app)/configuracion/page.tsx:164`.
+    `src/app/(app)/admin/cartera`; `src/app/(app)/configuracion/page.tsx:165-166`.
 - [ ] **13. El ensayo, después de cada deploy de dev.** Es el paso E1 de «Ensayo del
   prompt».
 
@@ -1019,8 +1019,8 @@ alta. Recomendación: no instalarlo (D14).
 - `/api/admin/provider-usage` (`src/app/api/admin/provider-usage`): llamadas y latencia, sin
   dólares.
 - `/api/health` con `CRON_SECRET`: pasa a degraded al 80 % del presupuesto mensual y a down al
-  100 %, y el barrido de Actions lo muestra amarillo o rojo. Con `MONTHLY_BUDGET_USD` en 0 o
-  sin valor, muestra 200 (ítem 6 del plan).
+  100 %, y el barrido de Actions lo muestra amarillo o rojo. Con `MONTHLY_BUDGET_USD` en 0
+  dice «IA frenada» y queda en degraded, no en down, para no tumbar el deploy.
 - Fuera de ClaimMix: la consola de Google Cloud (Facturación) para el gasto real de Vertex, la
   consola de Neon para los MB de cada proyecto, el panel de Vercel para el uso, y Actions para
   los minutos.
@@ -1028,10 +1028,9 @@ alta. Recomendación: no instalarlo (D14).
   consola de Google y la anota al lado de cada cuenta de prueba (ítem 8 del plan).
 
 **Topes, en el orden en que cortan.** Prueba vencida; presupuesto mensual del proyecto
-(`MONTHLY_BUDGET_USD`, 200 por omisión, de todos los espacios menos la demo; `.env.example:166`
-dice «por inquilino» y está mal); tope diario por espacio (`AI_TENANT_DAILY_TOKEN_CAP`, 5 M por
+(`MONTHLY_BUDGET_USD`, 200 por omisión, de todos los espacios menos la demo; `.env.example:193`); tope diario por espacio (`AI_TENANT_DAILY_TOKEN_CAP`, 5 M por
 omisión); tope de lo anónimo (`AI_ANONIMO_DAILY_TOKEN_CAP`, 60 % del anterior); tope por usuario
-(`AI_USER_DAILY_TOKEN_CAP`, 2 M en el código; `.env.example:157` dice 100000 y está desfasado); y,
+(`AI_USER_DAILY_TOKEN_CAP`, 2 M en el código; `.env.example:184` trae 100000 de ejemplo); y,
 en prueba, el dólar por espacio, el pozo de US$ 30 entre todas las pruebas y los 500.000 tokens
 diarios del plan piloto (unas 39 llamadas al p95 de 12.730 tokens, `src/lib/billing/plans.ts:163-180`).
 
@@ -1078,26 +1077,26 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Ninguno de estos ítems existe todavía. Los nombres de archivos, funciones y textos son
-propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
+Los ítems 1, 5, 6 y 12 entraron por #461. El resto no existe todavía: sus nombres de
+archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre
 que tenía en la versión anterior de esta guía.
 
 | # | Ítem | Qué gana el dueño | Qué cambia para el cliente | Hecho cuando | Tamaño | Depende de |
 |---|---|---|---|---|---|---|
-| 1 | Enlace a `/admin/altas` en el menú del operador (P12) | No tiene que tipear la URL | Nada | El operador ve el enlace en el menú lateral y un admin de un cliente no lo ve | chico | nada |
+| 1 | Enlace a `/admin/altas` en el menú del operador (P12) | No tiene que tipear la URL | Nada | El operador ve el enlace en el menú lateral y un admin de un cliente no lo ve. **Hecho en #461** | chico | nada |
 | 2 | Gmail: mismo origen en el connect y el callback, casilla vencida visible en el panel, `--solo` en `sync-vercel-env.mjs` y una URI de redirección por host en PROMOCION (P10) | Deja de ver «conectada» con un token revocado; sincroniza una variable sin copiar la casilla de dev | Ve que su casilla venció y la reconecta | Una casilla con el permiso revocado aparece vencida en `/configuracion`, y un test fija el origen | mediano | nada |
 | 3 | Banderas del alta en `/api/health`, detrás de `CRON_SECRET`: sólo booleanos, números y nombres de modo (P1) | Sabe qué está prendido en cada ambiente sin abrir Vercel | Nada | `/api/health` de los tres lista las banderas, y la revisión de seguridad (Fable u Opus) la aprueba | mediano | nada |
 | 4 | El número conectado a mano desde `/admin/altas` también fija su webhook, y el panel muestra los lugares libres de la WABA (P9) | Conectar un número a mano deja de depender de la Callback URL de la app de Meta | Su número recibe mensajes en el ambiente correcto | Un número conectado a mano recibe un mensaje en su espacio, y el panel muestra los lugares libres; revisión de seguridad aprobada | mediano | nada |
-| 5 | Tiempos del alta en `/admin/altas`: mediana y p95 de 30 días, desde `tenant_bases` (P6) | Ve cuánto tarda la base sin pedir SQL | Nada | `/admin/altas` de prd muestra los dos números | chico | nada |
-| 6 | `/configuracion` y `/api/health` muestran el tope real de `MONTHLY_BUDGET_USD` (nuevo) | El semáforo y la pantalla dicen la cifra que corta | Ve su tope real | Con `MONTHLY_BUDGET_USD` en 50, las dos muestran 50; con 0, dicen «sin tope» | chico | nada |
+| 5 | Tiempos del alta en `/admin/altas`: mediana y p95 de 30 días, desde `tenant_bases` (P6) | Ve cuánto tarda la base sin pedir SQL | Nada | `/admin/altas` de prd muestra los dos números. **Hecho en #461** | chico | nada |
+| 6 | `/configuracion` y `/api/health` muestran el tope real de `MONTHLY_BUDGET_USD` (nuevo) | El semáforo y la pantalla dicen la cifra que corta | Ve su tope real | Con `MONTHLY_BUDGET_USD` en 50, las dos muestran 50; con 0, dicen «IA frenada», porque el guardia frena. **Hecho en #461.** Que 0 quiera decir «sin tope» lo decide el dueño | chico | nada |
 | 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
 | 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador recibe un mail al llegar a 80 usuarios y cuando la WABA se llena | mediano | 4 y 7 |
 | 9 | Prueba automática del alta de punta a punta, a partir de `pnpm onboard` (`package.json:39`), que hoy sólo prueba la creación del espacio (nuevo) | Cada deploy de QA prueba `/registro`, el correo, la base y Gmail sin una persona | Menos altas rotas | La prueba corre en el Post-deploy de QA y queda roja si el alta se rompe | grande | 3 |
 | 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones | mediano | 3. Decisión: qué puede quedar distinto y si bloquea o sólo avisa (supuesto: avisa la primera semana) |
 | 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio | mediano | nada |
-| 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example` | chico | nada |
+| 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |
 | 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
 | 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions | chico | Decisión: la cadencia (supuesto: cada 2 h, como prd) |
 | 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso | grande | Decisión: si vale una migración en todas las bases (receta de pausa para migrar) |

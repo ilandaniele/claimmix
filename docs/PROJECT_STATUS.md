@@ -5052,7 +5052,7 @@ Con el OK del dueño, #458 llevó main a prd (`98a30dcb`). Entraron la pregunta 
 
 Lo que todavía no es igual (leído en `/registro` de cada ambiente el 16/10): prd muestra el desafío de Turnstile, la opción de alta con correo y el aviso del número por código; dev muestra Turnstile y el correo pero no el número por código (`ALTA_NUMERO_AUTOMATICO`); QA no muestra ninguno de los tres (faltan las claves de Turnstile, el remitente o `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`, y la bandera). Igualarlos son variables de Vercel. Prender el número por código en dev o en QA ocupa el mismo lugar libre de la WABA de Veltra que usa prd, así que espera la decisión del dueño.
 
-### El agente aprende de la consola (2026-10-16, rama `agente/aprende-de-lo-confirmado`)
+### El agente aprende de la consola (2026-10-16, PR #461, que suma #460)
 
 Revisión del 16/10, leída en el código y en las bases: el agente no actúa según un modelo entrenado. Cada caso lo atiende `gemini-3.8-flash` sin ajustar, siguiendo instrucciones escritas a mano. Las decisiones críticas las toma el código: gravedad y derivación (`severity-classifier.ts`, `extract.ts`), qué pedir (`required-fields.ts`, `required-docs.ts`), contestar o callar (`reply-decision.ts`), orquestación y estados (`orchestrate.ts`, `fsm.ts`). Lo único aprendido es contexto pegado al prompt de extracción (hasta 3 ejemplos aprobados, reglas del admin, memoria por remitente), y no llega a `deliberate` ni a `compose-reply`. Activar un modelo ajustado no tenía efecto: el transporte de Vertex ignora `active_model`, y `activateFineTunedModel` lo dejaba en nulo. En dev el tenant de prueba tiene 19 reglas y 207 ejemplos; en prd no hay ninguno.
 
@@ -5119,6 +5119,16 @@ La política con la que arranca el agente salió de tres archivos de código y p
     - B9: los agregados de la sombra en la consola.
     - B10: filtrar las claves inventadas que el extractor devuelve por culpa de una regla.
 14. **Propuestas para un PR en un repo público.** Se tapan DNI, pólizas, enlaces, mails y teléfonos, pero no los nombres: el dueño las lee antes de abrir el PR.
+
+### Alta automática, lote 1 (2026-10-16, PR #461)
+
+Los cuatro ítems chicos del «Plan para que el alta sea automática» (`docs/PUESTA_EN_MARCHA.md`) que no esperaban una decisión del dueño. Sin migración ni variables nuevas. Entran en el mismo PR que el Lote A del agente, para gastar un solo deploy.
+
+- **Ítem 1.** El menú lateral del operador muestra «Altas», con enlace a `/admin/altas`. Un admin de un cliente no lo ve.
+- **Ítem 5.** `/admin/altas` muestra la mediana y el p95 de lo que tardó un espacio en quedar listo en los últimos 30 días, desde `tenant_bases` (`src/server/alta/panel-operador.ts`; el formato sale de `src/core/fecha/duracion.ts`).
+- **Ítem 6.** El guardia, `/configuracion` y `/api/health` leen el tope con la misma función, `topeMensualDelProyecto()` en `src/server/ai/tope-mensual.ts`. Antes health leía el 0 como 200 y la pantalla mostraba siempre 200. Con `MONTHLY_BUDGET_USD=0` el guardia frena la IA de los clientes (la demo sigue con su tope, `DEMO_MONTHLY_BUDGET_USD`), la pantalla dice «IA frenada» y health queda en `degraded` con HTTP 200: un `down` daría 503 y tumbaría el smoke, el `curl -fsS` del Post-deploy y el barrido. Que 0 quiera decir «sin tope» (opción B) lo decide el dueño.
+- **Ítem 12.** `.env.example` nombra todas las variables que lee el código, y `tests/unit/env-example-completo.test.ts` falla si aparece una nueva sin anotar.
+- **Verificación.** Suite entera en verde (14.319 tests) antes de sumar el Lote A. La revisión de Fable pidió un test que fije que el guardia frena con el tope en 0 y precisar que la demo tiene su propio tope; las dos cosas están. La auditoría #90 queda parcial: health todavía repite la suma del gasto del mes.
 
 ### 🙋 Waiting on you (not code)
 

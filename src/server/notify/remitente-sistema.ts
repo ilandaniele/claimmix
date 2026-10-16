@@ -86,11 +86,17 @@ const TIPOS_POR_IP: ReadonlySet<TipoDeCorreo> = new Set(["alta", "recuperacion"]
 /** Gmail entrega estos dominios en la misma bandeja, con o sin puntos en la parte local. */
 const DOMINIOS_DE_GMAIL: ReadonlySet<string> = new Set(["gmail.com", "googlemail.com"]);
 
-/** La casilla de la plataforma, o null si falta cualquiera de las dos variables. */
+/**
+ * La casilla de la plataforma, o null si falta el correo, el refresh token o el
+ * cliente OAuth. El token sólo lo canjea el cliente que lo emitió: sin
+ * `GMAIL_CLIENT_*` no sale nada, y quien pregunta no tiene que creer que hay remitente.
+ */
 export function remitenteDelSistema(): RemitenteDelSistema | null {
   const correo = process.env.ALTA_REMITENTE_CORREO?.trim();
   const refreshToken = process.env.ALTA_REMITENTE_REFRESH_TOKEN?.trim();
-  return correo && refreshToken ? { correo, refreshToken } : null;
+  const clienteId = process.env.GMAIL_CLIENT_ID?.trim();
+  const clienteSecreto = process.env.GMAIL_CLIENT_SECRET?.trim();
+  return correo && refreshToken && clienteId && clienteSecreto ? { correo, refreshToken } : null;
 }
 
 /**

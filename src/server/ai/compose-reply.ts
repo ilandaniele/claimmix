@@ -21,13 +21,14 @@ import "server-only";
 import { nombraCulpaOLey } from "@/core/ai/nombra-culpa";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
 import { provinciasNombradas } from "@/core/geo/provincias";
+import { paraElPrompt, sinNumerosEnteros } from "@/core/ai/para-el-prompt";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
+import { textoBase } from "@/core/agente/entrenamiento-base";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { instruccionDeCampo } from "@/lib/labels/instruccion-de-campo";
-import { EMAIL_RE } from "@/core/text/contacto";
+import { EMAIL_RE, ENLACE_RE } from "@/core/text/contacto";
 import { repiteDatoDelPadron, tokensDelPadron } from "@/core/text/dato-del-padron";
-import { sinEnlaces } from "@/core/mensajes/pregunta";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
 import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
@@ -180,52 +181,6 @@ function maxChars(input: ComposeReplyInput): number {
   return input.question ? Math.round(base * 1.4) : base;
 }
 
-/**
- * El mensaje de la persona, sin los números que no hay que repetir.
- *
- * `lastMessage` entra al prompt para dar tono, y es el correo que escribió
- * un asegurado: adentro viene su DNI entero, porque se lo pedimos nosotros.
- * Mientras el cuerpo lo armó la plantilla eso no salía a ningún lado — la
- * plantilla enmascara al renderizar. Desde que la prosa del modelo reemplaza
- * el cuerpo, lo que el modelo leyó puede terminar en el mail, y AC24 pasa a
- * depender de que al modelo no se le ocurra copiarlo.
- *
- * Siete a ocho dígitos seguidos es un DNI argentino; los puntos y espacios se
- * aceptan porque así lo escribe la gente. Un año o un monto no llegan a
- * siete, y una patente lleva letras.
- */
-function sinNumerosEnteros(texto: string): string {
-  const ultimosCuatro = (m: string): string => {
-    const digitos = m.replace(/\D/g, "");
-    return digitos.length >= 7 && digitos.length <= 10
-      ? "****" + digitos.slice(-4)
-      : m;
-  };
-
-  return (
-    texto
-      // Un DNI suelto, con o sin los puntos con que lo escribe la gente.
-      .replace(/\b\d[\d.\s]{5,}\d\b/g, ultimosCuatro)
-      // Una póliza, que lleva prefijo de letras: POL-2024-001. La patente
-      // no entra — ABC-321 no llega a seis dígitos.
-      .replace(/\b([A-Za-z]{2,4})-([\d.-]{6,})\b/g, (m, pre: string, resto: string) => {
-        const digitos = resto.replace(/\D/g, "");
-        return digitos.length >= 6 ? `${pre}-****${digitos.slice(-4)}` : m;
-      })
-  );
-}
-
-/**
- * Una póliza corta, POL-4471-A: `sinNumerosEnteros` pide seis dígitos para no
- * tapar una patente, y ésta pasaba entera. En el ensayo `devolver-al-agente`
- * (15/10) volvió tal cual: «entendemos que la póliza es la POL-4471-A». La
- * patente no llega, ABC-321 tiene tres dígitos. El prefijo queda: con «****»
- * solo, el modelo escribió «entendemos que la patente es la ****».
- */
-function sinPolizasCortas(texto: string): string {
-  return texto.replace(/\b([A-Za-z]{2,4})-\d{4,5}(?:-[A-Za-z0-9]+)?\b/g, "$1-****");
-}
-
 /*
  * El ensayo del 23/09 abría «necesitamos que nos mandes:» y seguía con
  * «• Decinos si alguien resultó lastimado.» o «• ¿Tu nombre completo es…?»: el
@@ -255,11 +210,8 @@ const POLIZA_NO_COINCIDE =
   "y pedirle que escriba el correcto.";
 
 function buildPrompt(input: ComposeReplyInput): string {
-  // Con póliza cambiada «4455» llegaba entero: `sinNumerosEnteros` sólo tapa de 7 a 10 dígitos.
-  const sinNumeros = (texto: string): string =>
-    input.polizaCambiada ? texto.replace(/\d{3,}/g, "***") : texto;
-  const paraElPrompt = (texto: string): string =>
-    sinCentinelas(sinNumeros(sinPolizasCortas(sinNumerosEnteros(sinEnlaces(texto)))));
+  const enmascarar = (texto: string): string =>
+    paraElPrompt(texto, { polizaCambiada: input.polizaCambiada });
 
   const items = (input.fields ?? []).map((key) => {
     const { label, kind } = labelForField(key);
@@ -282,7 +234,7 @@ function buildPrompt(input: ComposeReplyInput): string {
       : POLIZA_NO_COINCIDE;
 
   const intentBrief: Record<ReplyIntent, string> = {
-    ask: "Pedir los datos listados. No pidas nada que no esté en la lista.",
+    ask: textoBase("redactar.pedir"),
     escalation:
       "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad " +
       "(decí «un especialista», nunca «él» ni «ella»: no sabemos quién es), " +
@@ -304,33 +256,26 @@ function buildPrompt(input: ComposeReplyInput): string {
     // el bloque DATOS A PEDIR más abajo. Una lista en el prompt se lee como
     // una lista de cosas para pedir por más que la instrucción diga lo
     // contrario — pasó, y salió el mismo pedido con otras palabras.
-    acknowledgement:
-      "Decir que tomamos nota de lo que la persona acaba de contar, y que seguimos " +
-      "esperando lo que ya le pedimos. NO repitas la lista de datos: se la pedimos hace " +
-      "un momento y repetirla es hostigar. NO digas que está todo completo, porque no lo " +
-      "está. Dos oraciones como mucho.",
+    acknowledgement: textoBase("redactar.acuse"),
   };
 
   const channelBrief =
     input.channel === "whatsapp"
-      ? "Es un mensaje de WhatsApp: se lee en un teléfono, con una mano. Corto, sin encabezados, " +
-        "sin firma, sin asunto. Si hay lista, viñetas con •."
-      : "Es el cuerpo de un email: párrafos cortos. Sin saludo con nombre, sin firma, sin asunto. " +
-        "Si hay lista, una línea por ítem empezando con '- '.";
+      ? textoBase("redactar.canal_whatsapp")
+      : textoBase("redactar.canal_mail");
 
-  return `Sos quien redacta los mensajes de una aseguradora argentina a una persona que acaba de
-denunciar un siniestro. Escribís en castellano rioplatense, con voseo, claro y humano.
+  return `${textoBase("redactar.voz")}
 
 LO QUE HAY QUE DECIR (no lo cambies, no agregues ni saques temas):
 ${intentBrief[input.intent]}${llevaCuidado(input) ? ` Abrí (después del saludo, si saludás) con una sola frase breve de cuidado: «${CUIDADO}». No repitas ni comentes lo que contó de las heridas, la internación o la salud de nadie, no diagnostiques, no prometas nada.` : ""}
-${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${paraElPrompt(input.question)}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
+${input.question ? `\nLA PERSONA PREGUNTÓ ESTO Y HAY QUE CONTESTARLE:\n"${enmascarar(input.question)}"\nEmpezá el mensaje contestándola, antes de cualquier lista. Contestá con lo que sabemos de verdad: en qué estado está su denuncia. Si no lo sabemos — cuánto tarda, cuánto le van a pagar, si está cubierto — decilo con honestidad y sin inventar plazos ni montos. Nunca dejes la pregunta sin responder. Sin frases hechas como «entiendo tu preocupación», y la respuesta no nombra la documentación ni lo que falta: el pedido va una sola vez, en la lista.` : ""}
 
 ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${items.join("\n")}\n\n${COMO_VA_LA_LISTA}` : ""}
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}
-${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${paraElPrompt(input.lastMessage).slice(0, 600)}"""` : ""}
+${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${enmascarar(input.lastMessage).slice(0, 600)}"""` : ""}
 
 ${channelBrief}
 
@@ -342,11 +287,7 @@ PROHIBIDO, sin excepción:
 - Pedir algo que no esté en la lista de datos${input.polizaCambiada ? ", salvo el número de póliza correcto" : ""}.${input.polizaCambiada ? "\n- Escribir cualquier número de póliza, ni el nuevo ni el anterior, ni una parte." : ""}
 - Disculpas largas, floreo, o tono de robot.
 
-TONO: si lo que contó es grave —fuego, heridos, robo— sé sobrio y breve. Si es un
-choque menor, sé cordial y directo. Nunca dramatices ni minimices. Si pidió perdón o
-dijo que se equivocó, no se lo agradezcas: alcanza con un «no hay problema». Hablás
-por el equipo, siempre en plural —«necesitamos», «te pedimos», «entendemos»—, nunca
-«te pido» ni «entiendo».
+${textoBase("redactar.tono")}
 
 Devolvé JSON: {"message": "<el texto del mensaje>"}`;
 }
@@ -375,7 +316,7 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   }
   // El último mensaje lo escribe cualquiera: un enlace o un correo en lo que
   // sale por nuestro buzón es un phishing con nuestra firma. Sólo salen los que
-  // pasamos nosotros. `match` y no `test`: EMAIL_RE es global.
+  // pasamos nosotros. `match` y no `test`: ENLACE_RE y EMAIL_RE son globales.
   const permitido = [
     input.fallback,
     ...Object.values(input.knownValues ?? {}),
@@ -384,7 +325,7 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     .join("\n")
     .toLowerCase();
   const contactos = [
-    ...(trimmed.match(/(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\/\S*/gi) ?? []),
+    ...(trimmed.match(ENLACE_RE) ?? []),
     ...(trimmed.match(EMAIL_RE) ?? []),
   ];
   if (contactos.some((c) => !permitido.includes(c.toLowerCase()))) return "contacto_inventado";

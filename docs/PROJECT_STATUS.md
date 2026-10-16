@@ -51,7 +51,7 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 ## Cómo probar que todo anda
 
-`pnpm check` corre todo: tipos, lint, ~1960 tests, quince conversaciones
+`pnpm check` corre todo: tipos, lint, ~1960 tests, veintiséis conversaciones
 enteras por WhatsApp y por mail sobre los canales simulados, y un chequeo
 contra el deploy que está corriendo. **No le manda un mensaje a nadie.**
 
@@ -4711,11 +4711,12 @@ sola migración (la 0047).
 
 Un PR con dos partes que no se tocan.
 
-- **Número por código (apagado).** Desde Configuración, el owner o el admin de un
+- **Número por código (apagado al escribirse; prendido en prd desde el 09/10).** Desde Configuración, el owner o el admin de un
   espacio del alta automática pide el código por SMS o llamada, lo escribe, y Meta
   suma su número a la WABA de la plataforma (`src/server/alta/numero-automatico.ts`,
   cliente de Graph en `src/server/whatsapp/alta-de-numero.ts`). Sólo corre con
-  `ALTA_NUMERO_AUTOMATICO=1`, que no está en ningún ambiente: sin ella, o sin la
+  `ALTA_NUMERO_AUTOMATICO=1`, que cuando entró este PR no estaba en ningún ambiente (desde
+  el 09/10 está en prd, ver «Estado al 2026-10-09»): sin ella, o sin la
   0049, nada llama a Graph. Sólo móviles argentinos (`+549` y diez dígitos), y el
   nombre visible es el del número de la plataforma. Cualquier caso raro termina en
   «revisión» con un mail al operador; `/admin/altas` sigue de respaldo. El número de
@@ -4766,10 +4767,9 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
   `vars.PRD_URL` apunta al dominio nuevo. Vertex anda en prd por el pool WIF `vercel-prd`; el
   webhook de WhatsApp y el push de Gmail de dev apuntan a `claimmix-dev`, y prd tiene su
   propio tópico `gmail-push-prd`.
-- **Falta:** R2 de prd (lo configura el dueño; hasta entonces `/api/health` de prd da 503 y
-  el Post-deploy de PRD sale rojo sólo por eso), Turnstile con los hosts nuevos, la prueba
-  de punta a punta de un alta con el dueño, 24 h de logs y la verificación del negocio en
-  Meta.
+- **Falta:** la prueba de punta a punta de un alta con el dueño, 24 h de logs y la
+  verificación del negocio en Meta. R2 de prd quedó el 09/10 (#401) y Turnstile anda en dev y
+  en prd (leído en `/registro` el 16/10).
 - **El flag es de ida.** Con clientes vivos no se apaga `BASE_POR_CLIENTE`: la base de
   control no tiene sus datos de negocio. Para frenar se usa `ALTA_AUTOMATICA=0` y se arregla
   hacia adelante.
@@ -4955,9 +4955,9 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
   Hacerlo atómico pide pasar ese camino a un pool por WebSocket; no compensa el riesgo hoy.
 - **Latencia de 3.8 en prd: sin datos.** La base de prd tiene 0 casos y 0 eventos de
   proveedor; no hay tráfico que medir. En local, una extracción tardó 25 s.
-- **CI parado hasta el 1/11.** El presupuesto de Actions del mes se agotó y todos los jobs
-  fallan a los 2–3 s. #441 y #442 esperan CI; #440 espera el veredicto de QA. La promoción de
-  #436–#442 a prd queda para después, con el OK del dueño.
+- **CI parado hasta el 1/11 (resuelto el 16/10).** El presupuesto de Actions del mes se
+  agotó y todos los jobs fallaban a los 2–3 s. Con el repo público otra vez Actions corre sin
+  cuota, y #436–#453 llegaron a prd por #458.
 
 ### Póliza cambiada a mitad de la charla (2026-10-15, #443, en prd por #458)
 
@@ -5050,6 +5050,8 @@ El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso s
 
 Con el OK del dueño, #458 llevó main a prd (`98a30dcb`). Entraron la pregunta por la póliza cambiada y el cierre con la póliza del caso (#443, #444), la retoma sola tras un timeout de Gemini (#447), el tope de palabras del audio (#453), DNI o CUIT (#442), el remitente de QA y la caja de Turnstile (#448, #449), el repo público (#451), workflow 5 y ESLint 10 (#438) y la CI por entorno (#441, #445, #452). No había migraciones nuevas. El Post-deploy de PRD (`PRD · Smoke y salud de las bases`) dio verde al primer intento. Desde ese día el dueño pidió que dev, qa y prd estén siempre iguales hasta nuevo aviso: lo que entra a qa sigue el mismo día a main y a prd.
 
+Lo que todavía no es igual (leído en `/registro` de cada ambiente el 16/10): prd muestra el desafío de Turnstile, la opción de alta con correo y el aviso del número por código; dev muestra Turnstile y el correo pero no el número por código (`ALTA_NUMERO_AUTOMATICO`); QA no muestra ninguno de los tres (faltan las claves de Turnstile, el remitente o `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`, y la bandera). Igualarlos son variables de Vercel. Prender el número por código en dev o en QA ocupa el mismo lugar libre de la WABA de Veltra que usa prd, así que espera la decisión del dueño.
+
 ### El agente aprende de la consola (en curso desde el 16/10)
 
 Revisión del 16/10, leída en el código y en las bases: el agente no actúa según un modelo entrenado. Cada caso lo atiende `gemini-3.8-flash` sin ajustar, siguiendo instrucciones escritas a mano. Las decisiones críticas las toma el código: gravedad y derivación (`severity-classifier.ts`, `extract.ts`), qué pedir (`required-fields.ts`, `required-docs.ts`), contestar o callar (`reply-decision.ts`), orquestación y estados (`orchestrate.ts`, `fsm.ts`). Lo único aprendido es contexto pegado al prompt de extracción (hasta 3 ejemplos aprobados, reglas del admin, memoria por remitente), y no llega a `deliberate` ni a `compose-reply`. Activar un modelo ajustado no tenía efecto: el transporte de Vertex ignora `active_model`, y `activateFineTunedModel` lo dejaba en nulo. En dev el tenant de prueba tiene 19 reglas y 207 ejemplos; en prd no hay ninguno.
@@ -5090,10 +5092,8 @@ Decisiones del dueño (16/10):
   `user_id` de `debug_token` es el mismo que trae el `signed_request` del borrado. (9)
   Cambiar el texto de `src/app/privacy/page.tsx` con la sección `#meta` propuesta en la
   Parte G: ese archivo lo toca el dueño. (10) La app en modo Live y una sola promoción.
-- **Ambiente prd: lo que queda del dueño.** El bucket `claimmix-prd-attachments` de R2 y su
-  token cargados en `claimmix-prd` (después Claude redeploya y mira `/api/health?deep=1`);
-  los hostnames `claimmix-dev.vercel.app` y `claimmix-prd.vercel.app` en el widget de
-  Turnstile; un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
+- **Ambiente prd: lo que queda del dueño.** (R2 de prd y los hostnames de Turnstile ya
+  están.) Un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
   propios; la verificación del negocio en Meta para pasar de 2 números en la WABA; y avisar
   a los clientes de dev con SSO o API v1 del dominio nuevo. La política de privacidad
   todavía nombra el permiso `gmail.readonly`, que el alta corta ya no pide: ese texto lo

@@ -1,4 +1,11 @@
-name: Carga
+name: Post-deploy · Carga k6 de vistas previas y QA
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('A mano · {0} · {1}', inputs.escenario, inputs.base_url)
+  || github.event.deployment_status.state != 'success' && format('Sin carga · Vercel avisó {0}', github.event.deployment_status.state)
+  || endsWith(github.event.deployment.environment, '-prd') && format('Sin carga · {0}', github.event.deployment.environment)
+  || startsWith(github.event.deployment.environment, 'Production') && endsWith(github.event.deployment.environment, '-qa') && format('QA · k6 · {0}', github.event.deployment.sha)
+  || !startsWith(github.event.deployment.environment, 'Production') && format('Vista previa · k6 · {0}', github.event.deployment.sha)
+  || format('Sin carga · {0}', github.event.deployment.environment) }}
 
 # ── Qué corre solo y qué se pide a mano ─────────────────────────────────────
 #
@@ -52,9 +59,18 @@ on:
 permissions:
   contents: read
 
+# `github.ref` llega vacío en un deployment_status de Vercel: `carga-${{ github.ref }}`
+# era un grupo fijo, y una vista previa cancelaba el k6 de QA. Ahora QA tiene su
+# cola; las vistas previas, una por proyecto, donde la nueva corta a la vieja; y
+# lo de a mano espera en vez de cortar.
 concurrency:
-  group: carga-${{ github.ref }}
-  cancel-in-progress: true
+  group: >-
+    ${{ github.event_name == 'workflow_dispatch' && 'carga-a-mano'
+    || github.event.deployment_status.state != 'success' && format('carga-sin-cola-{0}', github.run_id)
+    || startsWith(github.event.deployment.environment, 'Production') && endsWith(github.event.deployment.environment, '-qa') && 'carga-qa'
+    || !startsWith(github.event.deployment.environment, 'Production') && format('carga-preview-{0}', github.event.deployment.environment)
+    || format('carga-sin-cola-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   # ── De quién es el commit ──────────────────────────────────────────────────
@@ -101,9 +117,13 @@ jobs:
     # dejaba de ser igual a `Production` y entraba acá: k6 midiendo carga contra
     # la base de los clientes. No llegó a pasar sólo porque falta el secreto de
     # Vercel y el job muere antes.
+    #
+    # `!endsWith(…, '-prd')` deja afuera el deploy y las vistas previas del
+    # proyecto de prd: contra PRD no corre carga.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
+       !endsWith(github.event.deployment.environment, '-prd') &&
        (!startsWith(github.event.deployment.environment, 'Production') ||
         endsWith(github.event.deployment.environment, '-qa')))
     steps:
@@ -132,12 +152,12 @@ jobs:
           fi
 
   carga:
-    name: Carga con k6
+    name: ${{ github.event_name == 'workflow_dispatch' && 'A mano' || startsWith(github.event.deployment.environment, 'Production') && endsWith(github.event.deployment.environment, '-qa') && 'QA' || 'Vista previa' }} · Carga k6
     needs: origen
     # Las condiciones de evento y entorno están en `origen`.
     if: needs.origen.outputs.propio == '1'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 180 || 15 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -146,11 +166,14 @@ jobs:
 
       - name: Elegir escenario
         id: plan
+        env:
+          EVENTO: ${{ github.event_name }}
+          ESCENARIO: ${{ inputs.escenario }}
         run: |
-          if [ "${{ github.event_name }}" = "deployment_status" ]; then
+          if [ "$EVENTO" = "deployment_status" ]; then
             echo "escenario=smoke" >> "$GITHUB_OUTPUT"
           else
-            echo "escenario=${{ inputs.escenario }}" >> "$GITHUB_OUTPUT"
+            echo "escenario=$ESCENARIO" >> "$GITHUB_OUTPUT"
           fi
 
       # ── A dónde se mandan las credenciales ─────────────────────────────────
@@ -209,6 +232,10 @@ jobs:
               echo "::error title=Destino no reconocido::$URL trae ruta, consulta, credenciales o puerto. Acá va sólo el origen de un despliegue de este proyecto. Se corta."
               exit 1 ;;
           esac
+
+          # PRD no se mide nunca. Mismo criterio que hosts-vetados.mjs: minúsculas y sin punto final.
+          host=$(printf '%s' "$HOST" | tr '[:upper:]' '[:lower:]' | sed 's/\.*$//')
+          case "$host" in claimmix.vercel.app|claimmix-prd.vercel.app|claimmix-prd-*) echo "::error title=Destino no reconocido::$URL es de PRD: contra PRD no corre carga. Se corta."; exit 1 ;; esac
 
           # Y recién ahí la lista blanca.
           #
@@ -306,8 +333,9 @@ jobs:
           || steps.plan.outputs.escenario == 'publico')
         run: |
           mkdir -p resultados
-          k6 run "tests/load/scenarios/${{ steps.plan.outputs.escenario }}.js"
+          k6 run "tests/load/scenarios/$ESCENARIO.js"
         env:
+          ESCENARIO: ${{ steps.plan.outputs.escenario }}
           BASE_URL: ${{ steps.destino.outputs.url }}
           # La vista previa no es localhost, así que un perfil pesado pide
           # permiso explícito. El smoke del deploy no lo necesita.

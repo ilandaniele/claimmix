@@ -107,6 +107,7 @@ vi.mock("@/server/cases/gap-analyzer", () => ({
   // Real value: the orchestrator resolves pending confirmations against the
   // same threshold the analyzer uses to create them.
   MEDIUM_CONFIDENCE_HIGH: 0.85,
+  MEDIUM_CONFIDENCE_LOW: 0.6,
   analyzeEmailClaimGaps: vi.fn().mockResolvedValue({
     missingRequiredFields: [],
     fieldsNeedingConfirmation: [],
@@ -230,6 +231,15 @@ function setupDbMocks({
   casoMovido = false,
   /** La lectura de «cuándo hablamos» (sólo `created_at`) tira, como en un hipo de la base. */
   hablamosIlegible = false,
+  /**
+   * Las filas de `claim_field_confirmations` que ya existen para el caso, como
+   * las lee `guardarConfirmaciones`: `confirmed_by` dice si la cerró un analista.
+   */
+  confirmacionesExistentes = [] as Array<{ id: string; field_name: string; confirmed_by: string | null }>,
+  /** `cases.policy_number`, como lo lee el cierre. Un UPDATE de la póliza lo pisa, como en la base. */
+  polizaDelCaso = null as string | null,
+  /** La lectura de la póliza del caso tira. */
+  polizaIlegible = false,
 } = {}) {
   const mockDbTyped = db as unknown as MockDb;
 
@@ -333,7 +343,29 @@ function setupDbMocks({
         };
       }
 
-      // claim_field_confirmations (or any other table) — return empty so upsert inserts.
+      // claim_field_confirmations: lo que ya hay, para que `guardarConfirmaciones` pise en vez de insertar.
+      if (tableName === "claim_field_confirmations") {
+        const filas = {
+          limit: () => Promise.resolve(confirmacionesExistentes),
+          orderBy: () => ({ limit: () => Promise.resolve([]) }),
+          then: (r: (v: unknown) => void, j?: (e: unknown) => void) =>
+            Promise.resolve(confirmacionesExistentes).then(r, j),
+        };
+        return { where: () => filas };
+      }
+
+      if (tableName === "cases" && Object.keys(proj ?? {}).join() === "policy_number") {
+        return {
+          where: () => ({
+            limit: () =>
+              polizaIlegible
+                ? Promise.reject(new Error("connection lost"))
+                : Promise.resolve([{ policy_number: polizaDelCaso }]),
+          }),
+        };
+      }
+
+      // Any other table — return empty so upsert inserts.
       //
       // `where()` tiene que ser esperable ADEMÁS de tener `.limit()`:
       // `guardarConfirmaciones` lee todas las claves de una con `inArray` y sin
@@ -364,12 +396,15 @@ function setupDbMocks({
     set: (data: Record<string, unknown>) => ({
       where: (cond: unknown) => {
         const escrito = updateSpy(data);
-        updateValoresSpy(data, valoresDe(cond));
+        updateValoresSpy(data, valoresDe(cond), cond);
         // Un documento cerrado o negado deja de estar pendiente, como en la
         // base: sin esto, un turno que lo niega se lo seguía ofreciendo al adjunto.
         if (getTableName(table) === "missing_docs" && ("declined_at" in data || "satisfied_at" in data)) {
           const cerrados = valoresDe(cond);
           missingDocsRows = missingDocsRows.filter((r) => !cerrados.includes(r.doc_key));
+        }
+        if (getTableName(table) === "cases" && "policy_number" in data) {
+          polizaDelCaso = data.policy_number as string | null;
         }
         return {
           // `cases` usa el `RETURNING` como guarda atómica (E2): por omisión
@@ -1819,6 +1854,40 @@ describe("orchestratePostExtraction — confirmation_received (AC12)", () => {
     // DNI must NOT appear in the data object passed to the dispatcher
     const dataStr = JSON.stringify(confirmationCall?.[0].data ?? {});
     expect(dataStr).not.toMatch(/\b\d{7,8}\b/); // no raw DNI
+  });
+
+  it("cita la póliza del caso, no la que leyó el extractor en esta vuelta", async () => {
+    // El extractor del mock lee POL-1234; el caso tiene otra.
+    setupDbMocks({ polizaDelCaso: "POL-87654321" });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const cierre = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(cierre?.[0].data?.policyNumber).toBe("POL-87654321");
+  });
+
+  it("si no se puede leer la póliza del caso, el cierre sale igual y sin póliza", async () => {
+    setupDbMocks({ polizaDelCaso: "POL-87654321", polizaIlegible: true });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const cierre = vi.mocked(dispatchOutboundEmail).mock.calls.find(
+      (call) => call[0].template === "confirmation_received"
+    );
+    expect(cierre).toBeDefined();
+    expect(cierre?.[0].data?.policyNumber).toBeNull();
   });
 });
 
@@ -5877,5 +5946,400 @@ describe("orchestratePostExtraction — el caso ya se movió (E2)", () => {
     expect(
       vi.mocked(writeAuditLog).mock.calls.some((c) => c[0].event_type === "claim.confirmation_requested")
     ).toBe(false);
+  });
+});
+
+// ── Test suite: la póliza cambió a mitad de la charla ────────────────────────
+
+/**
+ * La persona da `POL-4471-A` en el primer mensaje y después escribe «póliza
+ * 4455». Hay que preguntar cuál es el correcto sin repetir ninguno de los dos
+ * números (AC24), y resolver con lo que conteste. Ver `core/case/poliza-cambiada`.
+ */
+describe("orchestratePostExtraction — la póliza cambió a mitad de la charla", () => {
+  const ANTERIOR = "POL-4471-A";
+  const NUEVA = "4455";
+
+  const campo = (field_key: string, field_value: string, confidence = 0.9) => ({
+    field_key,
+    field_value,
+    confidence,
+    source: "ai" as const,
+  });
+
+  type FilaExistente = { id: string; field_name: string; confirmed_by: string | null };
+
+  async function vuelta(opts: {
+    texto: string;
+    /** Lo que el extractor leyó como `policy_number`; sin esto, no leyó ninguno. */
+    leida?: string;
+    confianza?: number;
+    /** `null` es un caso sin póliza; por omisión, `POL-4471-A`. */
+    polizaAnterior?: string | null;
+    propuestos?: Record<string, string>;
+    preguntadas?: string[];
+    /** Las claves que pedía el último mensaje que salió. */
+    pedidoEnPie?: string[];
+    campos?: ReturnType<typeof campo>[];
+    matches?: CustomerMatch[];
+    titularAjeno?: boolean;
+    grave?: boolean;
+    existentes?: FilaExistente[];
+  }) {
+    const polizaAnterior = opts.polizaAnterior === undefined ? ANTERIOR : opts.polizaAnterior;
+    const spies = setupDbMocks({
+      confirmacionesExistentes: opts.existentes,
+      lastAskRows: opts.pedidoEnPie ? [{ asked_keys: opts.pedidoEnPie }] : [],
+      // El worker escribe la póliza antes de orquestar y la primera gana.
+      polizaDelCaso: polizaAnterior ?? opts.leida ?? null,
+    });
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
+    const sinPoliza = extractEmailClaimMock().fields.filter((f) => f.field_key !== "policy_number");
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({
+          fields: [
+            ...sinPoliza,
+            ...(opts.campos ?? []),
+            ...(opts.leida ? [campo("policy_number", opts.leida, opts.confianza)] : []),
+          ],
+          fields_pending_confirmation: [],
+          ...(opts.grave ? { severity: "high" as const, requires_specialist: true } : {}),
+        }),
+        senderEmail: SENDER_EMAIL,
+        latestMessageText: opts.texto,
+        polizaAnterior,
+        propuestos: opts.propuestos,
+        preguntadas: opts.preguntadas,
+        titularAjeno: opts.titularAjeno,
+      },
+      opts.matches ?? NO_MATCHES,
+      messenger
+    );
+
+    const enviados = messenger.send.mock.calls.map((c) => c[0]);
+    const pedidos = enviados.filter((m) => m.template === "data_confirmation_request");
+    const escrituras = spies.updateSpy.mock.calls.map((c) => c[0] as Record<string, unknown>);
+
+    return {
+      ...spies,
+      enviados,
+      pedidos,
+      cierre: enviados.find((m) => m.template === "confirmation_received"),
+      /** Los pedidos que preguntan por la póliza. */
+      pedidosDePoliza: pedidos.filter((m) => m.data.polizaCambiada === true),
+      /** Las filas de póliza que se insertaron. */
+      filas: (spies.insertSpy.mock.calls.flatMap((c) => [c[0]].flat()) as Array<{
+        field_name?: string;
+        suggested_value: string;
+        conflict_with_value: string | null;
+        status: string;
+      }>).filter((f) => f.field_name === "policy_number"),
+      /** Los UPDATE sobre `cases` y sobre las filas de confirmación. */
+      escrituras,
+      /** Sólo los que pisan una fila de confirmación: son los únicos con `suggested_value`. */
+      escrituraDeFila: escrituras.filter((d) => "suggested_value" in d),
+      estados: escrituras.map((d) => d.status),
+      confirmadas: spies.updateValoresSpy.mock.calls
+        .filter((c) => (c[0] as { status?: string }).status === "confirmed")
+        .flatMap((c) => c[1] as unknown[]),
+      auditoriaDelPedido: vi
+        .mocked(writeAuditLog)
+        .mock.calls.filter((c) => c[0].event_type === "claim.confirmation_requested")
+        .map((c) => c[0].payload as { field_keys: string[]; reason?: string }),
+    };
+  }
+
+  const nombraLaNueva = "es un gol blanco patente AB123CD, póliza 4455";
+
+  describe("detección", () => {
+    it("la póliza nueva abre el conflicto: fila pendiente con las dos y un solo pedido sin números", async () => {
+      const r = await vuelta({ texto: nombraLaNueva, leida: NUEVA });
+
+      expect(r.filas).toEqual([
+        expect.objectContaining({
+          suggested_value: NUEVA,
+          conflict_with_value: ANTERIOR,
+          status: "pending",
+        }),
+      ]);
+      expect(r.estados).toContain("confirmacion_pendiente");
+
+      expect(r.enviados.map((m) => m.template)).toEqual(["data_confirmation_request"]);
+      const data = r.pedidos[0].data;
+      expect(data.polizaCambiada).toBe(true);
+      expect(data.fields).toEqual([]);
+      // AC24: ninguno de los dos números viaja.
+      expect(JSON.stringify(data)).not.toContain("4455");
+      expect(JSON.stringify(data)).not.toContain("4471");
+
+      expect(r.auditoriaDelPedido).toEqual([{ field_keys: ["policy_number"], reason: "conflict" }]);
+    });
+
+    it("abre el conflicto aunque el extractor se quede con la anterior, si el mensaje da otra póliza", async () => {
+      const r = await vuelta({ texto: nombraLaNueva, leida: ANTERIOR, confianza: 0.85 });
+
+      expect(r.filas).toEqual([
+        expect.objectContaining({
+          suggested_value: NUEVA,
+          conflict_with_value: ANTERIOR,
+          status: "pending",
+        }),
+      ]);
+      expect(r.pedidosDePoliza).toHaveLength(1);
+      expect(JSON.stringify(r.pedidos[0].data)).not.toContain("4455");
+    });
+
+    it("el mismo número en otro formato no es un cambio", async () => {
+      const r = await vuelta({ texto: "es la 4471", leida: "4471" });
+
+      expect(r.pedidosDePoliza).toHaveLength(0);
+      expect(r.filas).toEqual([]);
+      expect(r.escrituraDeFila).toEqual([]);
+    });
+
+    it("una lectura vieja del extractor, con un mensaje que no la nombra, no pregunta", async () => {
+      const r = await vuelta({ texto: "gracias", leida: NUEVA });
+
+      expect(r.pedidosDePoliza).toHaveLength(0);
+      expect(r.filas).toEqual([]);
+    });
+
+    it("sin póliza previa no hay nada que comparar", async () => {
+      const r = await vuelta({ texto: nombraLaNueva, leida: NUEVA, polizaAnterior: null });
+
+      expect(r.pedidosDePoliza).toHaveLength(0);
+      expect(r.filas).toEqual([]);
+    });
+  });
+
+  describe("la persona contesta", () => {
+    const propuestos = { policy_number: NUEVA };
+
+    it("elige la anterior: la fila se cierra con ella y el caso no cambia de número", async () => {
+      const r = await vuelta({
+        texto: "la correcta es la POL-4471-A",
+        leida: ANTERIOR,
+        confianza: 0.95,
+        propuestos,
+      });
+
+      expect(r.filas).toEqual([
+        expect.objectContaining({
+          suggested_value: ANTERIOR,
+          conflict_with_value: NUEVA,
+          status: "confirmed",
+        }),
+      ]);
+      expect(r.escrituras.some((d) => "policy_number" in d)).toBe(false);
+      expect(r.pedidos).toHaveLength(0);
+      expect(r.cierre?.data.policyNumber).toBe(ANTERIOR);
+    });
+
+    it("elige la nueva: la fila se cierra con ella y el caso la toma", async () => {
+      const r = await vuelta({ texto: "es la 4455", leida: NUEVA, confianza: 0.95, propuestos });
+
+      expect(r.filas).toEqual([
+        expect.objectContaining({
+          suggested_value: NUEVA,
+          conflict_with_value: ANTERIOR,
+          status: "confirmed",
+        }),
+      ]);
+      expect(r.updateSpy).toHaveBeenCalledWith({ policy_number: NUEVA });
+      expect(r.pedidos).toHaveLength(0);
+      expect(r.cierre?.data.policyNumber).toBe(NUEVA);
+    });
+
+    it("eligió la anterior y el extractor sigue leyendo la nueva: el cierre cita la del caso", async () => {
+      const r = await vuelta({ texto: "gracias", leida: NUEVA });
+
+      expect(r.pedidosDePoliza).toHaveLength(0);
+      expect(r.cierre?.data.policyNumber).toBe(ANTERIOR);
+    });
+
+    it("una respuesta sin número deja la disputa abierta y vuelve a preguntar", async () => {
+      const r = await vuelta({ texto: "no sé cuál es", leida: NUEVA, propuestos });
+
+      expect(r.confirmadas).not.toContain("policy_number");
+      expect(r.pedidosDePoliza).toHaveLength(1);
+      expect(r.estados).not.toContain("listo_para_core");
+      expect(JSON.stringify(r.pedidos[0].data)).not.toContain("4455");
+    });
+
+    it("«no es la 4455» no elige la nueva", async () => {
+      const r = await vuelta({ texto: "no es la 4455", leida: ANTERIOR, propuestos });
+
+      expect(r.updateSpy).not.toHaveBeenCalledWith({ policy_number: NUEVA });
+      expect(r.pedidosDePoliza).toHaveLength(1);
+    });
+
+    it("un «sí» a la pregunta no cierra la disputa", async () => {
+      const r = await vuelta({
+        texto: "sí",
+        leida: NUEVA,
+        propuestos,
+        preguntadas: ["policy_number"],
+      });
+
+      expect(r.confirmadas).not.toContain("policy_number");
+      expect(r.pedidosDePoliza).toHaveLength(1);
+    });
+
+    it("un tercer número reabre el conflicto con ése", async () => {
+      const r = await vuelta({
+        texto: "perdón, es la 7788",
+        leida: "7788",
+        propuestos,
+        existentes: [{ id: "fila-1", field_name: "policy_number", confirmed_by: null }],
+      });
+
+      expect(r.escrituraDeFila).toEqual([
+        expect.objectContaining({
+          suggested_value: "7788",
+          conflict_with_value: ANTERIOR,
+          status: "pending",
+        }),
+      ]);
+      expect(r.pedidosDePoliza).toHaveLength(1);
+      expect(JSON.stringify(r.pedidos[0].data)).not.toContain("7788");
+    });
+
+    it("elegir cuenta como contestar: el pedido que seguía en pie se vuelve a decir", async () => {
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["accident_date"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+
+      const r = await vuelta({
+        texto: "es la 4455",
+        leida: NUEVA,
+        confianza: 0.95,
+        propuestos,
+        pedidoEnPie: ["accident_date"],
+      });
+
+      expect(r.enviados.map((m) => m.template)).toEqual(["missing_information_request"]);
+    });
+
+    it("la rama C no pisa la fila en disputa con un valor sin conflicto", async () => {
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: [],
+        fieldsNeedingConfirmation: [
+          {
+            fieldName: "policy_number",
+            suggestedValue: NUEVA,
+            reason: "medium_confidence",
+            confidence: 0.7,
+          },
+        ],
+        isComplete: false,
+        status: "confirmacion_pendiente",
+      });
+
+      const r = await vuelta({
+        texto: "no sé cuál es",
+        leida: NUEVA,
+        confianza: 0.7,
+        propuestos,
+        existentes: [{ id: "fila-1", field_name: "policy_number", confirmed_by: null }],
+      });
+
+      expect(r.escrituraDeFila).toEqual([]);
+      expect(r.pedidosDePoliza).toHaveLength(1);
+    });
+  });
+
+  describe("quién cerró la fila", () => {
+    it("la que cerró un analista no se reabre ni se pregunta", async () => {
+      const r = await vuelta({
+        texto: nombraLaNueva,
+        leida: NUEVA,
+        existentes: [{ id: "fila-1", field_name: "policy_number", confirmed_by: "u1" }],
+      });
+
+      expect(r.escrituraDeFila).toEqual([]);
+      expect(r.pedidosDePoliza).toHaveLength(0);
+    });
+
+    it("la que cerró el agente se reabre, filtrando por confirmed_by y no por status", async () => {
+      const r = await vuelta({
+        texto: nombraLaNueva,
+        leida: NUEVA,
+        existentes: [{ id: "fila-1", field_name: "policy_number", confirmed_by: null }],
+      });
+
+      expect(r.escrituraDeFila).toEqual([
+        expect.objectContaining({ suggested_value: NUEVA, conflict_with_value: ANTERIOR, status: "pending" }),
+      ]);
+      const reapertura = r.updateValoresSpy.mock.calls.find((c) => "suggested_value" in (c[0] as object));
+      const columnas = columnasDe(reapertura?.[2]);
+      expect(columnas).toContain("confirmed_by");
+      expect(columnas).not.toContain("status");
+      expect(r.pedidosDePoliza).toHaveLength(1);
+    });
+  });
+
+  describe("con otras cosas en el mismo turno", () => {
+    const conflictoDeDni: CustomerMatch = {
+      customerId: "cust-poliza-1",
+      matchType: "policy_number",
+      storedValues: { dni: "25888101" },
+      confidence: 0.9,
+      customerName: "Juan Pérez",
+      conflictsWithExtracted: ["dni"],
+    };
+
+    it("con un conflicto del padrón sale un solo pedido que lleva los dos", async () => {
+      const r = await vuelta({
+        texto: nombraLaNueva,
+        leida: NUEVA,
+        campos: [campo("dni", "30111222")],
+        matches: [conflictoDeDni],
+      });
+
+      expect(r.pedidos).toHaveLength(1);
+      const data = r.pedidos[0].data as { fields: Array<{ fieldKey: string }>; polizaCambiada: boolean };
+      expect(data.polizaCambiada).toBe(true);
+      expect(data.fields.map((f) => f.fieldKey)).toEqual(["dni"]);
+      expect(JSON.stringify(data)).not.toContain("4455");
+      expect(JSON.stringify(data)).not.toContain("4471");
+      expect(r.auditoriaDelPedido).toEqual([{ field_keys: ["dni", "policy_number"], reason: "conflict" }]);
+    });
+
+    it("el titular ajeno se deriva: la fila se escribe y el pedido no pregunta la póliza", async () => {
+      const r = await vuelta({
+        texto: nombraLaNueva,
+        leida: NUEVA,
+        campos: [campo("dni", "30111222")],
+        matches: [conflictoDeDni],
+        titularAjeno: true,
+      });
+
+      expect(r.filas).toEqual([expect.objectContaining({ suggested_value: NUEVA, status: "pending" })]);
+      expect(r.pedidos).toHaveLength(1);
+      expect(r.pedidos[0].data.polizaCambiada).toBe(false);
+      expect(r.pedidos[0].data.titularAjeno).toBe(true);
+    });
+
+    it("el titular ajeno sin otro conflicto no recibe el pedido", async () => {
+      const r = await vuelta({ texto: nombraLaNueva, leida: NUEVA, titularAjeno: true });
+
+      expect(r.filas).toHaveLength(1);
+      expect(r.pedidos).toHaveLength(0);
+    });
+
+    it("un caso grave escribe la fila y no manda ningún pedido", async () => {
+      const r = await vuelta({ texto: nombraLaNueva, leida: NUEVA, grave: true });
+
+      expect(r.filas).toHaveLength(1);
+      expect(r.pedidos).toHaveLength(0);
+      expect(r.enviados.map((m) => m.template)).toEqual(["specialist_escalation"]);
+    });
   });
 });

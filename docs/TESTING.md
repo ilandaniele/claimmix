@@ -202,7 +202,7 @@ Viven en la máquina de quien corre el ensayo, en `tests/fixtures/`:
 
 | Archivo | Qué es | Para qué |
 |---|---|---|
-| `danos.jpg` | Un auto chocado | Que lo reconozca como las fotos de los daños |
+| `danos.jpg` | Un solo auto visto de afuera con daño moderado (abolladuras, una luz rota), sin techo hundido, fuego ni personas, sin patente ni caras legibles, JPEG sin GPS. La de referencia es «2007 Chevrolet HHR involved in crash» de Wikimedia Commons (CC0) | Que lo reconozca como las fotos de los daños. Con una foto de destrucción total, Gemini 3.8 califica el choque como grave y `choque-completo` deriva |
 | `licencia.jpg` | Una licencia de conducir | El caso difícil: dos documentos de papel pendientes, tiene que elegir el correcto |
 | `irrelevante.jpg` | Cualquier foto que no sea un documento | El caso negativo: no tiene que cerrar ningún pedido |
 | `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo |
@@ -978,6 +978,16 @@ existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el
 post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo
 incluido.
 
+**La Carga con k6 y los PRs de fork.** `load-tests.yml` corre por
+`deployment_status`, y para ese evento GitHub carga el workflow del commit
+desplegado, no el de `main`: quien despliega un commit también escribe los
+workflows que corren con él, y con los secretos del repo (vale igual para
+`post-deploy.yml` y `deploy-checks.yml`). El job `origen` (sólo sigue si el commit
+es la punta de una rama de este repo) frena la vista previa de un fork que no tocó
+workflows, cuyo servidor recibiría la cuenta admin, pero no a quien los edita. El
+control real es **no autorizar nunca en Vercel la vista previa de un PR de fork**:
+Git Fork Protection está prendida en los tres proyectos y así tiene que quedar.
+
 **Contra dev, el ensayo no se repite si QA ya pasó ese árbol.** El ensayo corre en el
 runner, no contra la URL: el mismo código, el mismo modelo y los mismos escenarios, y sólo
 cambia la base. Una promoción de `qa` a `main` arma el mismo árbol que QA acaba de ensayar,
@@ -986,6 +996,16 @@ veredicto de QA sale verde, `qa_veredicto` deja el artefacto `ensayo-verde-<árb
 `ensayo_previo` lo busca y, si está, `Producción` corre todo menos el ensayo y lo anota en
 el resumen. Ante cualquier duda (sin marca, error de la API, disparo a mano) ensaya. Contra
 la base de dev lo vuelve a correr el `pnpm check` completo de después de cada deploy.
+
+**Un cambio que sólo toca documentación no se ensaya.** Si el commit desplegado a QA difiere
+de su padre sólo en archivos `.md` (salvo `docs/PROMOCION.md`, que leen los tests) y el
+padre tiene la marca `ensayo-verde-<árbol>`, `qa_secretos` lo detecta y `QA` corre smoke,
+migraciones y pen test, pero no el ensayo. El veredicto sale verde con la descripción «sólo
+docs, el ensayo es el del árbol anterior» y deja la marca del árbol nuevo, así que dev
+tampoco lo repite. Con la misma comparación, `arbol` de `ci.yml` saltea los jobs de código y
+CodeQL no analiza. Ante cualquier duda (el padre sin marca, un renombre desde un archivo de
+código, 300 archivos o más, un error de la API) corre todo. `tests/unit/ci-solo-docs.test.ts`
+corre los scripts reales de los tres workflows con un `gh` falso.
 
 **Contra prd corre todavía menos, a propósito.** `claimmix-prd` es el proyecto de Vercel
 con los clientes de verdad, y el job `PRD` de `post-deploy.yml` (se dispara con el

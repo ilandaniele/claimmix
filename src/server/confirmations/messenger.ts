@@ -53,6 +53,7 @@ import {
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO, conArchivoQueNoEntro } from "@/core/mensajes/archivo-que-no-entro";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { CUIDADO } from "@/core/mensajes/derivacion";
 import {
@@ -282,13 +283,26 @@ function nombreDePila(nombre: unknown): string {
 }
 
 /**
+ * El conflicto, con la pregunta por la póliza cuando la persona dio otra.
+ *
+ * Sola, si no hay nada más que confirmar: un conflicto de póliza nunca es el
+ * primer mensaje, así que no abre con «Recibimos tu denuncia». La póliza no
+ * viaja en `data.fields`: la pregunta no lleva valores.
+ */
+function renderConflict(data: Record<string, unknown>): string {
+  if (data.polizaCambiada !== true) return renderConflictoDePadron(data);
+  if (camposDeConflicto(data).length === 0) return POLIZA_CAMBIADA;
+  return `${renderConflictoDePadron(data)}\n\n${POLIZA_CAMBIADA}`;
+}
+
+/**
  * El caso de conflicto: lo que nos dijeron no coincide con lo que tenemos.
  *
  * Acepta varios datos porque le llegan varios: cuando escribe un familiar del
  * titular no coincide el nombre, ni el mail, ni el documento. Antes salía un
  * mensaje de WhatsApp por cada uno.
  */
-function renderConflict(data: Record<string, unknown>): string {
+function renderConflictoDePadron(data: Record<string, unknown>): string {
   const campos = camposDeConflicto(data);
 
   const ajeno = data.titularAjeno === true;
@@ -548,6 +562,7 @@ async function writeReply(
         ? conflictosParaElRedactor(message.data)
         : undefined,
     titularAjeno: message.data.titularAjeno === true,
+    polizaCambiada: message.data.polizaCambiada === true,
     heridos: message.data.heridos === true,
     knownValues: (message.data.knownValues ?? undefined) as
       | Record<string, string>

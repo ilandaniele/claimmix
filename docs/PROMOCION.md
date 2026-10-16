@@ -62,6 +62,11 @@ CodeQL` corren igual, porque una alerta nueva no necesita que cambie el código.
 en el push a `main`: lo que llega ahí ya pasó por el PR. CodeQL vuelve a mirar
 todo los lunes y gitleaks el historial entero los domingos.
 
+Lo mismo vale para un commit que sólo cambia documentación sobre un árbol que ya
+pasó: `arbol` lo compara con su padre y, si todo lo que cambió son archivos
+`.md` (salvo este, que leen los tests), hereda la marca del padre y deja la del
+árbol nuevo. CodeQL hace la misma comparación y no analiza.
+
 Un PR suelto de Dependabot no corre la suite: el job `lote` lo pone en rojo, y
 los PRs se juntan en una rama desde `qa` que sí la corre entera.
 

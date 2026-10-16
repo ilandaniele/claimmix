@@ -15,6 +15,9 @@
  * Por eso la decisión vive en un módulo puro y se prueba acá, sin red.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { interpretarSalud } from "../../scripts/lib/salud.mjs";
@@ -97,5 +100,43 @@ describe("interpretarSalud", () => {
 
     expect(l.errores).toHaveLength(1);
     expect(l.errores[0]).toContain("no es el informe");
+  });
+});
+
+describe("interpretarSalud sin detalle (log público de Actions)", () => {
+  const cuerpo = {
+    status: "degraded",
+    checks: [
+      { name: "whatsapp", status: "ok", detail: "+54 9 11 5555-0000 operativo" },
+      { name: "gmail", status: "down", detail: "alguien@example.com: el token guardado no descifra" },
+      { name: "migraciones", status: "degraded", detail: "faltan: 0099_secreta" },
+    ],
+  };
+
+  it("deja el nombre y el estado de cada chequeo, y nada del detalle", () => {
+    const l = interpretarSalud(503, cuerpo, { sinDetalle: true });
+
+    expect(l.lineas).toEqual(["✓ whatsapp", "✗ gmail", "! migraciones"]);
+    expect(l.errores).toEqual(["gmail — down"]);
+    expect(l.avisos).toEqual(["migraciones — degraded"]);
+    expect(JSON.stringify(l)).not.toMatch(/5555|example.com|0099|descifra/);
+  });
+
+  it("el veredicto no cambia: mismo estado y mismos errores", () => {
+    const entero = interpretarSalud(503, cuerpo);
+    const corto = interpretarSalud(503, cuerpo, { sinDetalle: true });
+
+    expect(corto.estado).toBe(entero.estado);
+    expect(corto.errores).toHaveLength(entero.errores.length);
+    expect(corto.avisos).toHaveLength(entero.avisos.length);
+    expect(entero.lineas[0]).toContain("5555");
+  });
+});
+
+describe("barrer-trabados.yml no imprime la respuesta entera del barredor", () => {
+  const yml = readFileSync(resolve(process.cwd(), ".github/workflows/barrer-trabados.yml"), "utf8");
+
+  it("ningún paso hace `cat respuesta.json`: trae los caseIds", () => {
+    expect(yml).not.toMatch(/\bcat respuesta\.json/);
   });
 });

@@ -143,11 +143,12 @@ on:
         required: false
       DEMO_TENANT_ID:
         required: false
-  # Para poder ensayar este archivo en una rama antes de que tenga un caller:
-  # `deployment_status` corre siempre la versión de la rama default, y lo
-  # mismo vale para `workflow_call` — el archivo que define el job que llama
-  # (post-deploy.yml) se resuelve ahí. Sin este trigger propio no hay forma de
-  # probar un cambio acá sin mergearlo primero.
+  # Para poder ensayar este archivo en una rama antes de que tenga un caller.
+  # `deployment_status` corre el workflow del commit desplegado, no el de la
+  # rama default (por eso la compuerta `origen` de load-tests.yml es una alarma
+  # y no una barrera), y `workflow_call` resuelve el archivo llamado en el mismo
+  # commit que el caller. Sin este trigger propio no hay forma de lanzar a mano
+  # un cambio acá antes de mergearlo.
   workflow_dispatch:
     inputs:
       url:

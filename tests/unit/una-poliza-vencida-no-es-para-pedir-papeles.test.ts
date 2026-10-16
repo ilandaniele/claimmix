@@ -64,6 +64,7 @@ vi.mock("@/server/ai/deliberate", () => ({
 
 vi.mock("@/server/cases/gap-analyzer", () => ({
   MEDIUM_CONFIDENCE_HIGH: 0.85,
+  MEDIUM_CONFIDENCE_LOW: 0.6,
   analyzeEmailClaimGaps: vi.fn().mockResolvedValue({
     missingRequiredFields: [],
     fieldsNeedingConfirmation: [],

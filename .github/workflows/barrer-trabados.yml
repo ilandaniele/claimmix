@@ -168,6 +168,13 @@ jobs:
 
           [ "${CRON_SECRET}" != '__falta__' ] || { echo '::error::Falta el CRON_SECRET de este host (QA_CRON_SECRET para claimmix-qa, CRON_SECRET para producción).'; exit 1; }
 
+          # El log puede ser público: sólo contadores y estado, nunca los caseIds ni las listas.
+          # Lo que no es JSON (la página de error de Vercel) sale en corto.
+          resumen() {
+            jq -c '{ok, reaped, retomados, abandoned_closed, recordatorios_enviados, desvios_nuevos, desvios_fallidas: (.desvios_fallidas | if type == "array" then length else null end), error} | with_entries(select(.value != null))' respuesta.json 2>/dev/null ||
+              { head -c 300 respuesta.json 2>/dev/null; echo; }
+          }
+
           # Tres intentos: la red de un runner se corta sola de vez en cuando, y
           # un barrido que no salió no es una incidencia — lo es que no salga
           # ninguno. Sólo se falla si fallan los tres.
@@ -183,8 +190,7 @@ jobs:
 
             if [ "${codigo}" = "200" ]; then
               echo "HTTP 200 en el intento ${intento}"
-              cat respuesta.json
-              echo
+              resumen
 
               # Cuántos escaló, para que quede en el historial del workflow: si
               # esto empieza a devolver números todos los días, el problema no
@@ -210,7 +216,7 @@ jobs:
           done
 
           echo "::error::El barredor no contestó 200 en tres intentos (último: ${codigo})."
-          cat respuesta.json 2>/dev/null || true
+          resumen
           exit 1
 
       - name: Que significa que esto falle
@@ -218,7 +224,8 @@ jobs:
         run: |
           echo "::error::Produccion no esta sana, y no hubo ningun deploy que lo causara."
           echo ""
-          echo "  El detalle esta en la salida de arriba: cada chequeo con su nombre."
+          echo "  La salida de arriba trae cada chequeo con su nombre y su estado; el detalle"
+          echo "  no se imprime porque el log puede ser publico: correr scripts/mirar-salud.mjs a mano."
           echo "  Lo que este endpoint ve se rompe solo — token de WhatsApp vencido,"
           echo "  push de Gmail caido, R2 sin credenciales, presupuesto de IA agotado."
 
@@ -267,6 +274,13 @@ jobs:
 
           [ -n "${CRON_SECRET}" ] || { echo '::error::Falta PRD_CRON_SECRET.'; exit 1; }
 
+          # El log puede ser público: sólo contadores y estado, nunca los caseIds ni las listas.
+          # Lo que no es JSON (la página de error de Vercel) sale en corto.
+          resumen() {
+            jq -c '{ok, reaped, retomados, abandoned_closed, recordatorios_enviados, desvios_nuevos, desvios_fallidas: (.desvios_fallidas | if type == "array" then length else null end), error} | with_entries(select(.value != null))' respuesta.json 2>/dev/null ||
+              { head -c 300 respuesta.json 2>/dev/null; echo; }
+          }
+
           for intento in 1 2 3; do
             codigo=$(curl -sS -o respuesta.json -w '%{http_code}' \
               --max-time 320 \
@@ -275,8 +289,7 @@ jobs:
 
             if [ "${codigo}" = "200" ]; then
               echo "HTTP 200 en el intento ${intento}"
-              cat respuesta.json
-              echo
+              resumen
 
               reaped=$(grep -o '"reaped":[0-9]*' respuesta.json | head -1 | cut -d: -f2)
               if [ -n "${reaped:-}" ] && [ "${reaped}" != "0" ]; then
@@ -296,7 +309,7 @@ jobs:
           done
 
           echo "::error::El barredor no contestó 200 en tres intentos (último: ${codigo})."
-          cat respuesta.json 2>/dev/null || true
+          resumen
           exit 1
 
       - name: Preguntarle al deploy que alcanza a ver

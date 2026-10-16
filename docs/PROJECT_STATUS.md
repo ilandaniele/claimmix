@@ -4,8 +4,11 @@ _Last updated: 2026-10-16. This file is the single source of truth for "where th
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
-> through **Vertex AI** (postpay, no prepay wall), and the agent is trained on **206
-> approved examples** without needing fine-tuning. **WhatsApp runs on the real Argentine
+> through **Vertex AI** (postpay, no prepay wall), and the agent answers with the
+> base Gemini model (no fine-tuned model is active anywhere) plus context pasted into the
+> extraction prompt: up to 3 human-approved examples, admin rules and per-sender memory.
+> Code rules still make the critical decisions; moving them into console-editable training
+> is in progress (see "El agente aprende de la consola"). **WhatsApp runs on the real Argentine
 > number**, verified, WABA approved. Intake mail arrives at **veltra.claimmix@gmail.com**
 > and nothing else. 21–24 August went into hardening, then the commercial layer, then
 > the last metre of the wire: the app was attacked on purpose, load-tested at a hundred
@@ -4888,7 +4891,7 @@ y `/api/health?deep=1` sin desfase de bases.
   dev dio 389 ms al primer intento (antes oscilaba entre 477 y 576).
 - **Pen test** (#424): el asistente reintenta una vez si el modelo no contesta.
 
-### workflow 5 y ESLint 10 (2026-10-15, #438/#439, en main; a prd con la próxima promoción)
+### workflow 5 y ESLint 10 (2026-10-15, #438/#439, en prd por #458)
 
 Los majors que Dependabot juntó en #434, menos TypeScript 7. Entraron por #438 a qa (ensayo y
 pen test verdes) y por #439 a main (`080eb325`); Dependabot cerró #434 solo.
@@ -4956,7 +4959,7 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
   fallan a los 2–3 s. #441 y #442 esperan CI; #440 espera el veredicto de QA. La promoción de
   #436–#442 a prd queda para después, con el OK del dueño.
 
-### Póliza cambiada a mitad de la charla (2026-10-15, #443 a qa, espera CI hasta el 1/11)
+### Póliza cambiada a mitad de la charla (2026-10-15, #443, en prd por #458)
 
 Cierra la observación del ensayo `devolver-al-agente` (#338, `AUDITORIA-2026-09.md`): la
 persona daba `POL-4471-A` y después escribía «póliza 4455», y el agente tomaba el número nuevo
@@ -5019,7 +5022,7 @@ reescribió. #451 los saca del árbol actual con datos sintéticos.
 - Se relanzaron CI, CodeQL y Secretos de #446 y #448–#451. #448–#451 entran a qa juntos
   con #446, en `integra/lote-1-11`.
 
-### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, #452, en main por #455)
+### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, #452, en prd por #458)
 
 Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha>` o `PRD · deploy <sha>`, y sus checks llevan el entorno adelante (`DEV / Smoke del deploy`, `QA / Ensayo de conversaciones`, `PRD · Smoke y salud de las bases`). Los siete workflows siguen, con un nombre que dice cuándo corren (`PR y main · Chequeos del código`, `Post-deploy · DEV, QA y PRD`, `Programado · Barrer trabados en DEV y PRD`). No se saca ningún check: `Tipos` y `Lint` pasan a ser un solo job, `Tipos y lint`.
 
@@ -5031,7 +5034,7 @@ Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha
 - **k6.** QA tiene su propia cola (`carga-qa`) y cada proyecto la suya para las vistas previas (`carga-preview-<environment>`): antes una vista previa podía cancelar la carga de QA. Contra PRD no corre nunca, ni por un deploy ni por una vista previa del proyecto de prd ni a mano.
 - **Invariantes.** La 12 rechaza un grupo de `concurrency` armado con `github.ref`, y la 15 también lee el `run-name`.
 - **Checks obligatorios.** Con el OK del dueño, el 16/10 se creó el ruleset 25264579 «main y qa: checks del CI obligatorios», aparte del 25217107 y sin bypass. Exige diez checks de GitHub Actions: `Tipos y lint`, `Tests unitarios`, `Tests de integración`, `Build`, `Tests E2E`, `Aislamiento de tenants`, `Bases por cliente`, `Pen test local`, `Peso del bundle` y `Credenciales, datos personales y arquitectura`. Quedan afuera `Vulnerabilidades` (una alerta nueva lo pone rojo sin cambio de código) y el estado `Post-deploy QA`. Un job salteado por la marca de sólo-docs cuenta como pasado. Si se renombra uno de esos jobs, hay que editar el ruleset en el mismo PR o ningún PR se puede mergear.
-- **Primeras corridas.** QA sobre `2cfb8b42` (#454): `QA · deploy <sha>`, verde entero al primer intento, ensayo en 13 min y pen test en 3. DEV sobre `251b799d` (#455): `DEV · deploy <sha>`, el ensayo se salteó por la marca del árbol de QA y la Carga dio p95 de 434 ms en el peor caso. `pnpm check` completo sobre `251b799d`: verde en 14,5 min (26 conversaciones). Falta mirar la primera de PRD, que llega con la próxima promoción.
+- **Primeras corridas.** QA sobre `2cfb8b42` (#454): `QA · deploy <sha>`, verde entero al primer intento, ensayo en 13 min y pen test en 3. DEV sobre `251b799d` (#455): `DEV · deploy <sha>`, el ensayo se salteó por la marca del árbol de QA y la Carga dio p95 de 434 ms en el peor caso. `pnpm check` completo sobre `251b799d`: verde en 14,5 min (26 conversaciones). Con el sólo-docs #457 (`392681ad`), DEV volvió a saltear el ensayo y la Carga dio 492 ms. PRD sobre `98a30dcb` (#458): `PRD · deploy <sha>`, smoke y salud de las bases verdes al primer intento.
 - Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambiaron de nombre.
 
 ### Un audio mudo no inventa una denuncia (2026-10-16, #453)
@@ -5042,6 +5045,20 @@ El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso s
 - **El marcador solo no cuenta hechos.** Un mensaje que es sólo `[Mensaje de audio adjunto]` no se delibera ni sube la gravedad del caso (`gravedadSinHechosNuevos`).
 - Tres corridas de `nota-de-voz-y-pdf` sin fixtures, verdes; en una, la guarda descartó 21 palabras para 2 s de audio. La temperatura no se tocó: Google desaconseja bajarla en Gemini 3.
 - Entró a qa junto con #452 por #454 (`2cfb8b42`) y a main por #455 (`251b799d`). En QA, sin fixtures, el ensayo de conversaciones pasó al primer intento.
+
+### Promoción a prd del 16/10 (#458)
+
+Con el OK del dueño, #458 llevó main a prd (`98a30dcb`). Entraron la pregunta por la póliza cambiada y el cierre con la póliza del caso (#443, #444), la retoma sola tras un timeout de Gemini (#447), el tope de palabras del audio (#453), DNI o CUIT (#442), el remitente de QA y la caja de Turnstile (#448, #449), el repo público (#451), workflow 5 y ESLint 10 (#438) y la CI por entorno (#441, #445, #452). No había migraciones nuevas. El Post-deploy de PRD (`PRD · Smoke y salud de las bases`) dio verde al primer intento. Desde ese día el dueño pidió que dev, qa y prd estén siempre iguales hasta nuevo aviso: lo que entra a qa sigue el mismo día a main y a prd.
+
+### El agente aprende de la consola (en curso desde el 16/10)
+
+Revisión del 16/10, leída en el código y en las bases: el agente no actúa según un modelo entrenado. Cada caso lo atiende `gemini-3.8-flash` sin ajustar, siguiendo instrucciones escritas a mano. Las decisiones críticas las toma el código: gravedad y derivación (`severity-classifier.ts`, `extract.ts`), qué pedir (`required-fields.ts`, `required-docs.ts`), contestar o callar (`reply-decision.ts`), orquestación y estados (`orchestrate.ts`, `fsm.ts`). Lo único aprendido es contexto pegado al prompt de extracción (hasta 3 ejemplos aprobados, reglas del admin, memoria por remitente), y no llega a `deliberate` ni a `compose-reply`. Activar un modelo ajustado no tenía efecto: el transporte de Vertex ignora `active_model`, y `activateFineTunedModel` lo dejaba en nulo. En dev el tenant de prueba tiene 19 reglas y 207 ejemplos; en prd no hay ninguno.
+
+Decisiones del dueño (16/10):
+- El agente decide según el entrenamiento. En código queda sólo un piso que el entrenamiento no puede bajar: heridos o muerte pasan a una persona, se tapan los datos personales, no se promete cobertura ni montos, y se respeta el tope de gasto.
+- El entrenamiento base vive en el repo, así es igual en dev, qa y prd. La consola lo muestra y cada cliente suma o corrige lo suyo encima. Un cambio a la base se escribe en la consola y se pasa al repo.
+- Las reglas de código pasan al entrenamiento sin perder lo que anda: primero en modo sombra (el agente decide según el entrenamiento, el código sigue decidiendo y se registra cada diferencia), y una decisión pasa al entrenamiento sólo cuando el ensayo y el eval muestran que coincide.
+- Un fine-tuning pago en Vertex no se lanza sin OK del dueño, y antes tiene que pasar el eval.
 
 ### 🙋 Waiting on you (not code)
 

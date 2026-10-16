@@ -4923,7 +4923,7 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
   Carga 101. Un PR que sólo tocaba documentación costaba unos 60 minutos (CI 30, CodeQL 5,
   Secretos 1 y QA de 22 a 25).
 - **Sólo docs** (#441). Un commit que sólo cambia archivos `.md` (salvo
-  `docs/PROMOCION.md`, que leen los tests) sobre un árbol que ya pasó hereda su marca: `arbol`
+  `docs/PROMOCION.md`, que leen los tests, y todo `entrenamiento/`, que se empaqueta en código) sobre un árbol que ya pasó hereda su marca: `arbol`
   saltea los jobs de código, CodeQL no analiza y el Post-deploy de QA corre todo menos el
   ensayo, con el veredicto en verde y la marca `ensayo-verde-<árbol>`, así que dev tampoco
   ensaya. Un renombre desde un archivo de código, 300 archivos o más, o un error de la API

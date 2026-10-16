@@ -89,7 +89,7 @@ describe("faltantesRequeridos", () => {
 
   it("un teléfono con confianza alta quita email_or_phone", () => {
     expect(faltantesDe([])).toContain("email_or_phone");
-    expect(faltantesDe([campo("phone", "+5491155550000", 0.9)])).not.toContain("email_or_phone");
+    expect(faltantesDe([campo("phone", "+5491100000000", 0.9)])).not.toContain("email_or_phone");
   });
 
   it("un contacto firme pedido a la vez no vuelve a faltar", () => {

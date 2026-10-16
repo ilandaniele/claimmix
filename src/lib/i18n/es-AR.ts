@@ -38,6 +38,7 @@ export const esAR = {
   "nav.agenteBloqueado": "Solo administradores pueden abrir la consola del agente.",
   "nav.facturacion": "Facturación",
   "nav.cartera": "Cartera",
+  "nav.altas": "Altas",
   "nav.asistente": "Asistente",
 
   /*

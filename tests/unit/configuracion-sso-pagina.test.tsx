@@ -9,7 +9,7 @@
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   getSessionContext: vi.fn(),
@@ -83,6 +83,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.paraAdmin.mockResolvedValue({ alertas: [], migracionPendiente: false });
   m.ssoParaAdmin.mockResolvedValue(PANEL);
+});
+
+afterEach(() => {
+  delete process.env.MONTHLY_BUDGET_USD;
 });
 
 describe("/configuracion: sección de SSO", () => {
@@ -166,5 +170,39 @@ describe("/configuracion: sección de SSO", () => {
     await pintar();
 
     expect(m.ssoParaAdmin).toHaveBeenCalledExactlyOnceWith("20000000-0000-0000-0000-000000000002");
+  });
+});
+
+/**
+ * El tope mensual de IA que muestra la página es el que lee el guardia, no un
+ * 200 escrito a mano: con `MONTHLY_BUDGET_USD=0` la IA está frenada y la página
+ * no puede decir USD 200.
+ */
+describe("/configuracion: tope mensual de IA", () => {
+  it.each(["admin", "analyst"])("un %s ve el tope del proyecto, 200 si no está puesto", async (role) => {
+    conRol(role);
+
+    expect(await pintar()).toContain("USD 200");
+  });
+
+  it("con MONTHLY_BUDGET_USD puesto muestra ese número", async () => {
+    conRol("admin");
+    process.env.MONTHLY_BUDGET_USD = "49.5";
+
+    const html = await pintar();
+
+    expect(html).toContain("USD 49.5");
+    expect(html).not.toContain("USD 200");
+  });
+
+  it.each(["admin", "analyst"])("con el tope en 0, un %s ve que la IA está frenada y no USD 0 ni USD 200", async (role) => {
+    conRol(role);
+    process.env.MONTHLY_BUDGET_USD = "0";
+
+    const html = await pintar();
+
+    expect(html).toContain("IA frenada (tope en 0)");
+    expect(html).not.toContain("USD 0");
+    expect(html).not.toContain("USD 200");
   });
 });

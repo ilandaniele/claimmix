@@ -63,8 +63,9 @@ export default async function AppLayout({
   // locale — ver más abajo, donde la preferencia de la cuenta le gana a la
   // cookie del dispositivo.
   const role: string = userRow?.role ?? "analyst";
-  // Sólo para decidir si el enlace a la cartera aparece. La pantalla se
-  // defiende sola con requireOperator: esconder un enlace no es una guarda.
+  // Sólo para decidir si los enlaces del operador (cartera, altas) aparecen.
+  // Las pantallas se defienden solas con requireOperator: esconder un enlace
+  // no es una guarda.
   const isOperator = isOperatorEmail(user?.email);
   // Account preference wins over the device cookie (so the saved language
   // follows the user to any device); cookie/default covers the rest.

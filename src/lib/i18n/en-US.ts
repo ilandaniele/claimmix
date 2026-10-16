@@ -33,6 +33,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "nav.agenteBloqueado": "Only administrators can open the agent console.",
   "nav.facturacion": "Billing",
   "nav.cartera": "Portfolio",
+  "nav.altas": "Sign-ups",
 
   "age.now": "Now",
   "age.minutes": "{n}m ago",

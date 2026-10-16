@@ -8,7 +8,8 @@
  *   - Per-tenant: 5M tokens/day (AI_TENANT_DAILY_TOKEN_CAP env)
  *   - Sin usuario (mail, WhatsApp, formulario): 60 % del inquilino por omisión
  *     (AI_ANONIMO_DAILY_TOKEN_CAP env)
- *   - Monthly project cap: $200 (MONTHLY_BUDGET_USD env, default 200)
+ *   - Monthly project cap: $200 (MONTHLY_BUDGET_USD env, default 200; 0 frena la IA de los
+ *     clientes a propósito, la demo tiene su propio tope en DEMO_MONTHLY_BUDGET_USD)
  *   - Pruebas del alta automática: ver `checkBudget`. Un cupo diario de
  *     llamadas que se reserva antes de llamar, un techo mensual por prueba
  *     (AI_PRUEBA_MONTHLY_USD_POR_INQUILINO, 1) y un pozo compartido por todas
@@ -43,6 +44,7 @@ import { entero } from "@/lib/entero";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit, resolveProvider } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { readCap, topeMensualDelProyecto } from "./tope-mensual";
 import { inquilinoDeLaPlataforma } from "@/server/whatsapp/numeros";
 import { CENTINELA, basePorCliente } from "@/data/bases";
 import {
@@ -154,24 +156,6 @@ export interface BudgetCheckResult {
   motivo?: MotivoDelTope;
   /** Sólo una prueba que pasó: lo que quedó reservado de su cupo diario. */
   reserva?: ReservaDePrueba;
-}
-
-/**
- * Un tope leído del entorno, que cae al default si el valor no es un número.
- *
- * `parseInt("")` da NaN, y `total >= NaN` es false para cualquier total: una
- * variable vacía o mal escrita no relaja el tope, lo apaga entero y en
- * silencio. Es la misma forma que tenía el `cost_usd = 0` — un techo que no se
- * puede alcanzar nunca avisa de que no está.
- *
- * Un cero se respeta: apagar el gasto a propósito es una decisión válida. Lo
- * que no se acepta es basura, un negativo, o la variable vacía que deja un
- * workflow cuando el secreto que la llena no existe.
- */
-function readCap(raw: string | undefined, fallback: number): number {
-  const value = Number(raw);
-  if (!raw?.trim() || !Number.isFinite(value) || value < 0) return fallback;
-  return value;
 }
 
 /**
@@ -294,7 +278,7 @@ export async function checkBudget(
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   const llamadas = Math.max(0, Math.trunc(opciones.llamadas ?? 1));
-  const monthlyCapUsd = readCap(process.env.MONTHLY_BUDGET_USD, 200);
+  const monthlyCapUsd = topeMensualDelProyecto();
   const tenantDailyTokenCap = readCap(process.env.AI_TENANT_DAILY_TOKEN_CAP, 5_000_000);
   /*
    * Dos millones, y el número está medido, no elegido.

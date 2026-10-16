@@ -25,6 +25,7 @@ import { UserAiKeyPanel } from "./UserAiKeyPanel";
 import { AlertasPanel } from "./AlertasPanel";
 import { GoogleVinculo } from "./GoogleVinculo";
 import { getUserGeminiKey } from "@/server/ai/provider";
+import { topeMensualDelProyecto } from "@/server/ai/tope-mensual";
 import { getT } from "@/lib/i18n";
 import { ETIQUETA_DE_ROL } from "@/lib/i18n/etiqueta-de-rol";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
@@ -161,7 +162,8 @@ export default async function ConfiguracionPage({
   const confidenceThreshold = Number(
     process.env.CONFIDENCE_THRESHOLD ?? "0.70"
   );
-  const monthlyBudgetCap = 200; // $200/month — hardcoded default per spec
+  const topeMensual = topeMensualDelProyecto();
+  const capMensual = topeMensual === 0 ? t("configuracion.iaFrenada") : `USD ${topeMensual}`;
 
   // Qué camino le toca al número: la WABA propia, el código, o ninguno. La 0051 y la 0049 se piden de verdad: sin ellas, lo de siempre.
   const prueba = admin?.prueba;
@@ -309,14 +311,14 @@ export default async function ConfiguracionPage({
             <Field label={t("configuracion.capMensual")}>
               {esAdmin ? (
                 <span className="font-mono text-sm font-medium text-slate-800">
-                  USD {monthlyBudgetCap}
+                  {capMensual}
                   <span className="ml-2 text-xs text-slate-500">
                     {t("configuracion.capAyuda")}
                   </span>
                 </span>
               ) : (
                 <span className="font-mono text-sm text-slate-700">
-                  USD {monthlyBudgetCap}
+                  {capMensual}
                 </span>
               )}
             </Field>

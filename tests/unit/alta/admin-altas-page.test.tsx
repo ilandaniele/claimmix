@@ -96,7 +96,13 @@ const alta = (cambios: Partial<FilaDeAlta> = {}): FilaDeAlta => ({
   ...cambios,
 });
 
-const panel = (...altas: FilaDeAlta[]) => ({ migracionPendiente: false, altas, creadas24h: altas.length, tope: 20 });
+const panel = (...altas: FilaDeAlta[]) => ({
+  migracionPendiente: false,
+  altas,
+  creadas24h: altas.length,
+  tope: 20,
+  demoraDeAlta: { mediana: null, p95: null },
+});
 
 async function pintar(r?: string, locale: "es-AR" | "en-US" = "es-AR") {
   h.locale.mockResolvedValue(locale);
@@ -330,6 +336,35 @@ describe("el origen y los botones de cada WABA", () => {
 
     expect(screen.queryByRole("button", { name: es["altas.waba.reintentar"] })).toBeNull();
     expect(screen.getByRole("button", { name: es["altas.waba.desvincular"] })).toBeTruthy();
+  });
+});
+
+describe("la demora de las altas", () => {
+  const texto = (plantilla: string, mediana: string, p95: string) =>
+    plantilla.replace("{mediana}", mediana).replace("{p95}", p95);
+
+  it("muestra la mediana y el p95 de los últimos 30 días", async () => {
+    h.listar.mockResolvedValue({ ...panel(alta()), demoraDeAlta: { mediana: 150, p95: 600 } });
+
+    await pintar();
+
+    expect(screen.getByText(texto(es["altas.stat.demora"], "2,5 min", "10 min"))).toBeTruthy();
+    expect(screen.getByText(es["altas.stat.demora30d"])).toBeTruthy();
+  });
+
+  it("sin altas listas en la ventana muestra un guion, no un cero", async () => {
+    await pintar();
+
+    expect(screen.getByText(texto(es["altas.stat.demora"], "—", "—"))).toBeTruthy();
+  });
+
+  it("en inglés usa el punto decimal y su texto", async () => {
+    h.listar.mockResolvedValue({ ...panel(alta()), demoraDeAlta: { mediana: 150, p95: 600 } });
+
+    await pintar(undefined, "en-US");
+
+    expect(screen.getByText(texto(en["altas.stat.demora"], "2.5 min", "10 min"))).toBeTruthy();
+    expect(screen.getByText(en["altas.stat.demora30d"])).toBeTruthy();
   });
 });
 

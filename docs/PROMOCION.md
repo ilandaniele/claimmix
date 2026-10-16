@@ -34,7 +34,7 @@ Corren en cada PR, y estos son los que **impiden** mergear:
 
 | | qué mira |
 |---|---|
-| `Tipos`, `Lint`, `Build` | que compile y esté prolijo |
+| `Tipos y lint`, `Build` | que compile y esté prolijo (tipos y lint van en un mismo job; el lint corre aunque los tipos fallen) |
 | `Tests unitarios` | la suite entera con el piso de cobertura, más los flujos |
 | `Tests E2E` | la pantalla de verdad, contra su propia base |
 | `Vulnerabilidades` | `pnpm audit` de alto para arriba, semgrep y ninguna licencia contagiosa |
@@ -62,12 +62,18 @@ CodeQL` corren igual, porque una alerta nueva no necesita que cambie el código.
 en el push a `main`: lo que llega ahí ya pasó por el PR. CodeQL vuelve a mirar
 todo los lunes y gitleaks el historial entero los domingos.
 
+Lo mismo vale para un commit que sólo cambia documentación sobre un árbol que ya
+pasó: `arbol` lo compara con su padre y, si todo lo que cambió son archivos
+`.md` (salvo este, que leen los tests), hereda la marca del padre y deja la del
+árbol nuevo. CodeQL hace la misma comparación y no analiza.
+
 Un PR suelto de Dependabot no corre la suite: el job `lote` lo pone en rojo, y
 los PRs se juntan en una rama desde `qa` que sí la corre entera.
 
 El último, `Post-deploy QA`, no corre en el PR: es el estado que el job
-`qa_veredicto` de `post-deploy.yml` (que se llama «Veredicto de QA», para que
-sólo el estado lleve ese nombre) publica sobre el commit desplegado a QA
+`qa_veredicto` de `post-deploy.yml` (que se llama «QA · Veredicto sobre el
+commit», para que sólo el estado lleve ese nombre) publica sobre el commit
+desplegado a QA
 cuando terminan sus chequeos, con el pen test —la pared con un inquilino propio
 y los ataques al agente— incluido. Sólo cuenta con base `main`: el PR de `qa` a
 `main` tiene por cabeza ese mismo commit, y un QA rojo, o que no corrió, o que
@@ -79,30 +85,36 @@ de mergear.
 
 ### Después del deploy
 
-Los siete de `deploy-checks.yml`: smoke, ensayo de conversaciones, timbre, pen
-test de superficie, listas y parejas, permisos del rol y carga.
+Los seis chequeos de `deploy-checks.yml` —smoke, ensayo de conversaciones,
+entrada por WhatsApp y mail, pen test, migraciones y permisos de la base, y carga
+del tablero— más el resumen de lo que corrió. En la lista de chequeos de GitHub
+aparecen con el entorno adelante: `DEV / Smoke del deploy`, `QA / Ensayo de
+conversaciones`.
 
-Contra producción corren los seis. Contra QA corre lo que QA puede correr, que
-no es ni «ninguno» ni «todos»: `post-deploy.yml` tiene ahora un job `qa` que
-llama al mismo workflow con los secretos de QA mapeados uno por uno —nunca
-`secrets: inherit`, que apuntaría a la base de PRODUCCIÓN los trabajos que
-corren en el runner, tres de los cuales escriben— y con un interruptor por
-chequeo.
+Contra DEV corren los seis. Contra QA corre lo que QA puede correr, que no es ni
+«ninguno» ni «todos»: el job `qa` de `post-deploy.yml` llama al mismo workflow con
+los secretos de QA mapeados uno por uno —con los de DEV apuntaría a la base de
+DEV, que tiene datos reales, los trabajos que corren en el runner, tres de los
+cuales escriben— y con un interruptor por chequeo. El job `dev` también mapea
+sus catorce secretos uno por uno, con su mismo nombre: ningún caller usa
+`secrets: inherit`, y `tests/unit/ci-secretos-del-reusable.test.ts` frena un
+secreto declarado que no llegue. El disparo a mano del post-deploy corre sólo
+desde `main` y sólo contra el alias de dev.
 
-| Chequeo                             | Producción   | QA          | Por qué                                                                                                                                               |
-| ----------------------------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Smoke                               | sí, `--deep` | sí, liviano | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba                                                                               |
-| Ensayo                              | sí           | sí          | sube adjuntos de verdad, al balde propio de QA, no al de producción                                                                                   |
-| Canales de entrada                  | sí           | no          | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito                                                                                     |
-| Migraciones y permisos del rol      | sí           | sí          | sólo le pregunta al registro de migraciones y al catálogo: permisos, y que el rol no saltee RLS                                                       |
-| Pen test                            | sí           | sí          | en QA la pared se arma con un inquilino efímero y un caso propio (`--pared-propia`), que se borran al terminar; producción lo rechaza                 |
-| Ataques al agente (`--agent`)       | no           | sí          | gastan tokens del cupo del inquilino y escriben casos; contra producción se corren a mano al tocar el agente o los prompts                           |
-| Carga de lectura                    | sí           | no          | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
+| Chequeo                           | DEV          | QA          | Por qué                                                                                                                                               |
+| --------------------------------- | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Smoke                             | sí, `--deep` | sí, liviano | `--deep` sube un archivo y llama al modelo; no es lo que ese run prueba                                                                               |
+| Ensayo de conversaciones          | sí           | sí          | sube adjuntos de verdad, al balde propio de QA, no al de DEV                                                                                          |
+| Entrada por WhatsApp y mail       | sí           | no          | QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito                                                                                     |
+| Migraciones y permisos de la base | sí           | sí          | sólo le pregunta al registro de migraciones y al catálogo: permisos, y que el rol no saltee RLS                                                       |
+| Pen test                          | sí           | sí          | en QA la pared se arma con un inquilino efímero y un caso propio (`--pared-propia`), que se borran al terminar; DEV y PRD lo rechazan                 |
+| Ataques al agente (`--agent`)     | no           | sí          | gastan tokens del cupo del inquilino y escriben casos; contra DEV se corren a mano al tocar el agente o los prompts; contra PRD, nunca                |
+| Carga del tablero                 | sí           | no          | 400 casos contra cientos de miles no comparan con el mismo presupuesto; el k6 de `load-tests.yml` sí corre contra QA, aparte, contra su alias público |
 
 **Lo apagado no queda callado.** El job `alcance` corre al final, aun con todo
 rojo, y escribe en el resumen del run una fila por chequeo: corrió, corrió y
 falló, o NO corrió y por qué. De ahí venía el verde por ausencia — cuatro jobs
-verdes de los que tres ni arrancaron se leen igual que siete chequeos pasados.
+verdes de los que tres ni arrancaron se leen igual que seis chequeos pasados.
 
 El smoke de QA toleraba `almacenamiento` (input `smoke_tolera`) mientras QA no
 tenía balde; desde el 20/09 lo tiene y el chequeo liviano da verde solo, así que
@@ -319,7 +331,8 @@ El 2026-09-17, sin QA corriendo, devolvió `RESOURCE_EXHAUSTED` tres veces.
 
 ### 5. Dónde mide k6 — HECHO contra vistas previas
 
-El job *Carga con k6* de `load-tests.yml` mide de verdad. La corrida 35466095444, contra
+El job *Vista previa · Carga k6* de `load-tests.yml` (*QA · Carga k6* contra QA;
+contra PRD no corre) mide de verdad. La corrida 35466095444, contra
 una vista previa de `claimmix`, dio `smoke: p95 530 ms · 0% fallidos · 67
 pedidos`. Llegar ahí pidió tres cosas, y ninguna de las tres se ve desde el
 workflow.
@@ -830,13 +843,11 @@ Ninguna URL de QA empieza con `https://claimmix-qa`. No era teórico: la corrida
 QA— y su Smoke de producción falló contra el alias de producción, que ese
 deploy nunca tocó.
 
-Ese NOMBRE del entorno sí distingue, entonces: el guard de producción es
-`startsWith(…, 'Production') && !endsWith(…, '-qa')`, y el de QA es el mismo par
-con el `endsWith` sin negar. Van escritos cuatro veces —una en el grupo de
-`concurrency`, que además tiene su propia cola para QA, y una en el `if` de cada
-job (`produccion`, `qa_secretos`, `qa`)—, porque GitHub no deja compartir una
-condición entre jobs: `post-deploy.yml:115-120`, `:153-154`, `:200-201` y
-`:310-311`.
+Ese NOMBRE del entorno sí distingue, entonces: el guard de DEV es
+`startsWith(…, 'Production') && !endsWith(…, '-qa') && !endsWith(…, '-prd')`, y
+los de QA y PRD son el mismo par con su `endsWith` sin negar. Van escritos en el
+grupo de `concurrency`, en el `run-name` y en el `if` de cada job de
+`post-deploy.yml`, porque GitHub no deja compartir una condición entre jobs.
 
 La invariante 15 de `check-architecture.mjs` exigía mirar `environment_url`: era
 una premisa falsa, y estaba verde sobre un guard roto —las tres condiciones

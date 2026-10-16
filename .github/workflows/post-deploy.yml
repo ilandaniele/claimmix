@@ -1,11 +1,21 @@
-# Comprobar el deploy que acaba de salir.
+# Comprobar el deploy que acaba de salir, en el entorno donde salió.
 #
-# Qué pregunta cada uno de los siete chequeos, y por qué, vive en
-# deploy-checks.yml: es un workflow reusable, porque un segundo proyecto de
-# Vercel para QA lo llama contra su propia URL y su propia base. Este archivo
-# sólo decide CUÁNDO llamarlo, y contra cuál de los dos.
+# Un solo archivo para DEV (proyecto claimmix), QA (claimmix-qa) y PRD
+# (claimmix-prd): la llave de Vertex (WIF) confía en el nombre de este archivo,
+# así que no se parte ni se renombra. Cada job lleva el entorno adelante, y el
+# título de la corrida también.
+#
+# Qué pregunta cada uno de los seis chequeos, y por qué, vive en
+# deploy-checks.yml. Este archivo sólo decide CUÁNDO llamarlo, y contra cuál.
 
-name: Post-deploy
+name: Post-deploy · DEV, QA y PRD
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('DEV · a mano · {0}', github.sha)
+  || github.event.deployment_status.state != 'success' && format('Sin chequeos · Vercel avisó {0} · {1}', github.event.deployment_status.state, github.event.deployment.environment)
+  || !startsWith(github.event.deployment.environment, 'Production') && format('Vista previa · sin chequeos · {0}', github.event.deployment.sha)
+  || endsWith(github.event.deployment.environment, '-qa') && format('QA · deploy {0}', github.event.deployment.sha)
+  || endsWith(github.event.deployment.environment, '-prd') && format('PRD · deploy {0}', github.event.deployment.sha)
+  || format('DEV · deploy {0}', github.event.deployment.sha) }}
 
 on:
   deployment_status:
@@ -15,11 +25,15 @@ on:
         description: "URL a chequear"
         default: "https://claimmix-dev.vercel.app"
         required: false
+      ensayar:
+        description: "Correr el ensayo de conversaciones (25 a 37 minutos)"
+        type: boolean
+        default: true
 
 # Una corrida por vez, y sin cancelar la que está andando.
 #
 # Estos trabajos no corren contra un runner limpio: corren contra la base de
-# PRODUCCIÓN, y algunos crean casos y los borran al terminar. Dos corridas
+# DEV, con datos reales, y algunos crean casos y los borran al terminar. Dos corridas
 # superpuestas se pisan los casos entre sí, y el que pierde reporta que su
 # caso no se creó — un rojo que no dice nada sobre el deploy.
 #
@@ -32,7 +46,7 @@ on:
 # ── Pero la cola es sólo de producción, y esto costó una corrida ─────────────
 #
 # `deployment_status` llega también por cada preview y por cada estado
-# intermedio. Esas corridas saltean todo —el job `produccion` tiene la
+# intermedio. Esas corridas saltean todo —el job `dev` tiene la
 # guarda— y terminan en `skipped`. Parecen gratis. No lo son: **ya reservaron
 # el turno**.
 #
@@ -48,7 +62,7 @@ on:
 # que se lee como que alguien la cortó a propósito. Una corrida que no ejecuta
 # nada puede tapar la única comprobación que mira producción de verdad.
 #
-# Así que entra a la cola lo mismo que pasa la guarda de `produccion`. Todo lo
+# Así que entra a la cola lo mismo que pasa la guarda de `dev`. Todo lo
 # demás va a un grupo propio —uno por corrida— donde no espera ni echa a
 # nadie. La condición está repetida a propósito: son dos lugares distintos de
 # GitHub y no hay forma de compartirla.
@@ -119,15 +133,15 @@ concurrency:
     startsWith(github.event.deployment.environment, 'Production') &&
     !endsWith(github.event.deployment.environment, '-qa') &&
     !endsWith(github.event.deployment.environment, '-prd')))
-    && 'post-deploy-contra-produccion'
+    && 'post-deploy-dev'
     || (github.event.deployment_status.state == 'success' &&
     startsWith(github.event.deployment.environment, 'Production') &&
     endsWith(github.event.deployment.environment, '-qa'))
-    && 'post-deploy-contra-qa'
+    && 'post-deploy-qa'
     || (github.event.deployment_status.state == 'success' &&
     startsWith(github.event.deployment.environment, 'Production') &&
     endsWith(github.event.deployment.environment, '-prd'))
-    && 'post-deploy-contra-prd'
+    && 'post-deploy-prd'
     || format('post-deploy-sin-cola-{0}', github.run_id) }}
   cancel-in-progress: false
 
@@ -137,15 +151,17 @@ permissions:
 jobs:
   # ── Un disparo a mano no elige adónde van los secretos ──────────────────────
   #
-  # `produccion` llama a deploy-checks.yml con `secrets: inherit`, y la URL del
-  # disparo a mano llega hasta ahí. El reusable la vuelve a comprobar en su
-  # primer paso, pero este job corta antes de que nada reciba un secreto: sólo
-  # el alias de dev. El de QA ni el de prd tampoco entran: ese ensayo correría
-  # con la base y el CRON_SECRET de dev contra un deploy que no es el suyo (QA
-  # tiene su propio job, con sus secretos, y prd el suyo). Una vista previa no
-  # entra, ni un host ajeno. Por deployment_status la URL es fija y el job no corre.
+  # `dev` llama a deploy-checks.yml con los secretos de dev, uno por uno, y la
+  # URL del disparo a mano llega hasta ahí. El reusable la vuelve a comprobar en
+  # su primer paso, pero este job corta antes de que nada reciba un secreto:
+  # sólo el alias de dev. El de QA ni el de prd tampoco entran: ese ensayo
+  # correría con la base y el CRON_SECRET de dev contra un deploy que no es el
+  # suyo (QA tiene su propio job, con sus secretos, y prd el suyo). Una vista
+  # previa no entra, ni un host ajeno. Por deployment_status la URL es fija y el
+  # job no corre. El disparo a mano corre sólo desde main: desde una rama
+  # correría código sin revisar con los secretos de dev.
   validar_url:
-    name: ¿A dónde apunta esto?
+    name: DEV · ¿El disparo a mano apunta a dev?
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-slim
     timeout-minutes: 2
@@ -153,8 +169,10 @@ jobs:
       - name: ¿A dónde apunta esto?
         env:
           URL: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
+          REF: ${{ github.ref }}
         run: |
           set -u
+          if [ "$REF" != "refs/heads/main" ]; then echo "::error title=Disparo a mano::post-deploy.yml se dispara sólo desde main (--ref main): desde una rama correría código sin revisar con los secretos de dev"; exit 1; fi
           case "$URL" in
             https://*) ;;
             *) echo "::error::La URL tiene que empezar con https://"; exit 1 ;;
@@ -178,12 +196,12 @@ jobs:
   #
   # Cuando `qa_veredicto` publica verde deja un artefacto con el hash del
   # árbol, como `marcar` en ci.yml. Si este deploy arma ese árbol,
-  # `produccion` corre todo menos el ensayo; contra esta base lo vuelve a
+  # `dev` corre todo menos el ensayo; contra esta base lo vuelve a
   # correr el `pnpm check` completo de después de cada deploy. Cualquier error
-  # cae del lado seguro: ensaya. El disparo a mano ensaya siempre, porque este
-  # job no corre y su salida queda vacía.
+  # cae del lado seguro: ensaya. El disparo a mano no pasa por acá: ensaya salvo
+  # `ensayar=false`.
   ensayo_previo:
-    name: ¿QA ya ensayó este árbol?
+    name: DEV · ¿QA ya ensayó este árbol?
     if: >
       github.event.deployment_status.state == 'success' &&
       startsWith(github.event.deployment.environment, 'Production') &&
@@ -206,23 +224,29 @@ jobs:
           correr=true
           arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq .tree.sha 2>/dev/null || true)
           if [ -n "$arbol" ]; then
-            # Sólo cuenta una marca de este repo, como en ci.yml.
-            hay=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ensayo-verde-$arbol&per_page=20" \
-              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)] | length" 2>/dev/null || echo 0)
-            if [ "$hay" -gt 0 ] 2>/dev/null; then correr=false; fi
+            # Sólo cuenta una marca que dejó el post-deploy de un deploy de QA en verde:
+            # cualquier paso de cualquier corrida puede subir un artefacto con cualquier nombre.
+            ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ensayo-verde-$arbol&per_page=20" \
+              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID) | .workflow_run.id] | unique[]" 2>/dev/null || true)
+            for id in $ids; do
+              case "$id" in ''|*[!0-9]*) continue ;; esac
+              origen=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" \
+                --jq '[(.path | split("@")[0]), .event, .conclusion] | join(" ")' 2>/dev/null) || continue
+              if [ "$origen" = ".github/workflows/post-deploy.yml deployment_status success" ]; then correr=false; break; fi
+            done
           fi
           echo "correr=$correr" >> "$GITHUB_OUTPUT"
           if [ "$correr" = false ]; then
             echo "QA ya ensayó el árbol \`$arbol\` y pasó: el ensayo no se repite contra esta base." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  produccion:
-    name: Producción
+  dev:
+    name: DEV
     needs: [validar_url, ensayo_previo]
     # El proyecto, no sólo el entorno: el deploy del proyecto de QA también
     # llega con un entorno que empieza con `Production` —así se llama SU
     # entorno de producción, en SU proyecto— y sin distinguirlo esto correría
-    # el smoke de producción contra el alias de producción para un deploy que
+    # el smoke de DEV contra el alias de dev para un deploy que
     # nunca lo tocó. Pasó, y está contado arriba con el número de corrida, en
     # el comentario de `concurrency`: ahí también está por qué la distinción
     # es el NOMBRE del entorno y no `environment_url`. Es la misma condición
@@ -261,13 +285,32 @@ jobs:
       # El `url` del disparo a mano llega hasta acá: si no, sería un campo
       # que se puede llenar y no hace nada.
       url: ${{ github.event.inputs.url || 'https://claimmix-dev.vercel.app' }}
-      entorno: Production
+      entorno: DEV
       medir_carga: true
-      correr_ensayo: ${{ needs.ensayo_previo.outputs.correr != 'false' }}
-    secrets: inherit
+      # `github.event.inputs`, no `inputs`: en un deploy `inputs.ensayar` es
+      # null, y `null != false` da false — apagaría el ensayo de cada deploy.
+      correr_ensayo: ${{ needs.ensayo_previo.outputs.correr != 'false' && github.event.inputs.ensayar != 'false' }}
+    # Uno por uno, con su mismo nombre: con `inherit` también llegaban los de
+    # QA y PRD. tests/unit/ci-secretos-del-reusable.test.ts frena uno que falte.
+    secrets:
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
+      GMAIL_TENANT_ID: ${{ secrets.GMAIL_TENANT_ID }}
+      GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+      GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+      WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+      DEMO_TENANT_ID: ${{ secrets.DEMO_TENANT_ID }}
+
   # ── QA: primero, que los secretos de QA sean de QA ──────────────────────────
   #
-  # Seis de los siete chequeos corren acá, en el runner, y hablan con la base
+  # Cinco de los seis chequeos corren acá, en el runner, y hablan con la base
   # por `DATABASE_URL`. Tres de ellos ESCRIBEN. Por eso el job `qa` de abajo
   # mapea los secretos uno por uno en vez de heredarlos: heredando, una corrida
   # de QA crearía y borraría casos en la base de un cliente.
@@ -280,11 +323,12 @@ jobs:
   # sale roja, pero roja donde no se entiende: "falta DATABASE_URL" en un job
   # que sí la recibió, vacía.
   #
-  # Y segundo, compara la cadena de QA con la de producción sin imprimir
-  # ninguna de las dos. Si son la misma, alguien cargó la de producción en el
-  # secreto de QA, y la próxima corrida de QA escribe en la base de un cliente.
-  # Es el único error de esta familia que no se ve en ningún lado hasta que ya
-  # pasó.
+  # Y segundo, compara la cadena de QA con la de DEV sin que el runner reciba la
+  # de DEV: la comparación se hace en la expresión (`${{ secrets.QA_X ==
+  # secrets.X }}`) y al shell llega sólo `true` o `false`. Si son la misma,
+  # alguien cargó la de DEV en el secreto de QA, y la próxima corrida de QA
+  # escribe en la base de un cliente. Es el único error de esta familia que no
+  # se ve en ningún lado hasta que ya pasó.
   #
   # El cuarto es el inquilino de QA (`QA_GMAIL_TENANT_ID`): el pen test deja ahí
   # su caso señuelo para atacar la pared, y sin él no hay pared que probar.
@@ -295,7 +339,7 @@ jobs:
   # deploy-checks.yml lo nombra como no verificado y el veredicto de QA sale
   # rojo: un ensayo apagado no es un ensayo pasado.
   qa_secretos:
-    name: Secretos de QA
+    name: QA · Secretos propios
     runs-on: ubuntu-slim
     timeout-minutes: 2
     # Misma condición que el grupo de `concurrency`, con el sufijo al revés.
@@ -303,24 +347,26 @@ jobs:
       github.event.deployment_status.state == 'success' &&
       startsWith(github.event.deployment.environment, 'Production') &&
       endsWith(github.event.deployment.environment, '-qa')
+    permissions:
+      actions: read
+      contents: read
     outputs:
       ensayo: ${{ steps.mirar.outputs.ensayo }}
+      solo_docs: ${{ steps.docs.outputs.solo_docs }}
     steps:
-      - name: Que estén, y que no sean los de producción
+      - name: Que estén, y que no sean los de DEV
         id: mirar
         env:
           BASE: ${{ secrets.QA_DATABASE_URL }}
           BASE_APP: ${{ secrets.QA_DATABASE_URL_APP }}
           CRON: ${{ secrets.QA_CRON_SECRET }}
-          BASE_PROD: ${{ secrets.DATABASE_URL }}
-          BASE_APP_PROD: ${{ secrets.DATABASE_URL_APP }}
           INQUILINO: ${{ secrets.QA_GMAIL_TENANT_ID }}
           R2_CUENTA: ${{ secrets.QA_R2_ACCOUNT_ID }}
           R2_LLAVE: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
           R2_SECRETO: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
           R2_BALDE: ${{ secrets.QA_R2_BUCKET }}
-          R2_BALDE_PROD: ${{ secrets.R2_BUCKET }}
-          R2_LLAVE_PROD: ${{ secrets.R2_ACCESS_KEY_ID }}
+          MISMA_BASE: ${{ secrets.QA_DATABASE_URL == secrets.DATABASE_URL || secrets.QA_DATABASE_URL_APP == secrets.DATABASE_URL_APP }}
+          MISMO_R2: ${{ (secrets.R2_BUCKET != '' && secrets.QA_R2_BUCKET == secrets.R2_BUCKET) || (secrets.R2_ACCESS_KEY_ID != '' && secrets.QA_R2_ACCESS_KEY_ID == secrets.R2_ACCESS_KEY_ID) }}
         run: |
           faltan=""
           [ -n "$BASE" ] || faltan="$faltan QA_DATABASE_URL"
@@ -335,42 +381,41 @@ jobs:
               echo ""
               echo "Cargá cada uno en Settings, Secrets and variables, Actions."
               echo "Los dos primeros son la rama de Neon de QA, NO la base de"
-              echo "producción: el ensayo escribe y borra casos ahí adentro."
+              echo "DEV, que tiene datos reales: el ensayo escribe y borra casos ahí adentro."
               echo "El tercero es el CRON_SECRET del proyecto claimmix-qa."
               echo "El cuarto es el inquilino de QA: el pen test arma ahí su señuelo."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error title=QA sin secretos::Faltan$faltan - ver el resumen del run."
             exit 1
           fi
-          # Sin imprimir ninguna de las dos.
-          if [ "$BASE" = "$BASE_PROD" ] || [ "$BASE_APP" = "$BASE_APP_PROD" ]; then
+          # La comparación se hizo en la expresión: acá llega sólo true o false.
+          if [ "$MISMA_BASE" != "false" ]; then
             {
-              echo "### QA apunta a la base de PRODUCCIÓN"
+              echo "### QA apunta a la base de DEV, que tiene datos reales"
               echo ""
-              echo "QA_DATABASE_URL (o QA_DATABASE_URL_APP) tiene la misma cadena"
-              echo "que el secreto de producción. Si esto corriera, el ensayo"
+              echo "QA_DATABASE_URL (o QA_DATABASE_URL_APP) es la misma cadena"
+              echo "que el secreto de DEV. Si esto corriera, el ensayo"
               echo "escribiría y borraría casos en la base de un cliente."
               echo ""
               echo "Corregilo antes de volver a desplegar QA."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error title=QA apunta a producción::Los secretos de QA son los de producción."
+            echo "::error title=QA apunta a DEV::Los secretos de QA son los de DEV."
             exit 1
           fi
-          # Lo mismo para el almacenamiento: con el balde o la llave de
-          # producción, el ensayo sube y borra adjuntos de un cliente. La
-          # cuenta sí es la misma a propósito, así que no se compara.
-          if { [ -n "$R2_BALDE_PROD" ] && [ "$R2_BALDE" = "$R2_BALDE_PROD" ]; } ||
-             { [ -n "$R2_LLAVE_PROD" ] && [ "$R2_LLAVE" = "$R2_LLAVE_PROD" ]; }; then
+          # Lo mismo para el almacenamiento: con el balde o la llave de DEV,
+          # el ensayo sube y borra adjuntos de un cliente. La cuenta sí es la
+          # misma a propósito, así que no se compara.
+          if [ "$MISMO_R2" != "false" ]; then
             {
-              echo "### QA apunta al balde de PRODUCCIÓN"
+              echo "### QA apunta al balde de DEV, que tiene datos reales"
               echo ""
-              echo "QA_R2_BUCKET (o QA_R2_ACCESS_KEY_ID) es el de producción."
+              echo "QA_R2_BUCKET (o QA_R2_ACCESS_KEY_ID) es el de DEV."
               echo "Si esto corriera, el ensayo subiría y borraría adjuntos"
               echo "en el balde de un cliente."
               echo ""
               echo "QA tiene el suyo: claimmix-qa-attachments, con su token."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error title=QA apunta al balde de producción::Los secretos de R2 de QA son los de producción."
+            echo "::error title=QA apunta al balde de DEV::Los secretos de R2 de QA son los de DEV."
             exit 1
           fi
           # El ensayo sube adjuntos de verdad, y desde el 20/09 QA tiene balde
@@ -382,6 +427,41 @@ jobs:
           else
             echo "ensayo=0" >> "$GITHUB_OUTPUT"
             echo "::notice title=QA sin ensayo::Faltan los QA_R2_* - el ensayo no corre."
+          fi
+
+      # Un merge a `qa` que sólo trae `.md` arma el mismo código que el commit
+      # anterior. Si ese árbol ya tiene la marca de QA, el ensayo no se repite:
+      # corre todo lo demás, como `ensayo_previo` en dev, y el veredicto deja la
+      # marca para este árbol. Mismo filtro que `arbol` en ci.yml. Cualquier
+      # error cae del lado seguro: ensaya.
+      - name: ¿Sólo documentación sobre un árbol ensayado?
+        id: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          solo_docs=false
+          padre=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA" --jq '.parents[0].sha' 2>/dev/null || true)
+          arbol_padre=""
+          [ -z "$padre" ] || arbol_padre=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$padre" --jq .tree.sha 2>/dev/null || true)
+          if [ -n "$arbol_padre" ]; then
+            # Misma regla que «Buscar la marca de QA»: sólo la marca de un post-deploy de QA en verde.
+            hay=0
+            ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ensayo-verde-$arbol_padre&per_page=20" \
+              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID) | .workflow_run.id] | unique[]" 2>/dev/null || true)
+            for id in $ids; do
+              case "$id" in ''|*[!0-9]*) continue ;; esac
+              origen=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '[(.path | split("@")[0]), .event, .conclusion] | join(" ")' 2>/dev/null) || continue
+              if [ "$origen" = ".github/workflows/post-deploy.yml deployment_status success" ]; then hay=1; break; fi
+            done
+            if [ "$hay" = 1 ]; then
+              otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md") and . != "docs/PROMOCION.md") | not)] | length end' 2>/dev/null || echo 1)
+              if [ "$otros" = 0 ]; then solo_docs=true; fi
+            fi
+          fi
+          echo "solo_docs=$solo_docs" >> "$GITHUB_OUTPUT"
+          if [ "$solo_docs" = true ]; then
+            echo "Sólo cambió documentación sobre un árbol que QA ya ensayó: el ensayo no se repite." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # ── QA: lo que sí puede correr ──────────────────────────────────────────────
@@ -425,15 +505,16 @@ jobs:
       url: https://claimmix-qa.vercel.app
       entorno: QA
       smoke_profundo: false
-      correr_ensayo: ${{ needs.qa_secretos.outputs.ensayo == '1' }}
+      correr_ensayo: ${{ needs.qa_secretos.outputs.ensayo == '1' && needs.qa_secretos.outputs.solo_docs != 'true' }}
       correr_timbre: false
       correr_pentest: true
       pared_propia: true
       atacar_agente: true
       medir_carga: false
     # Uno por uno y con el nombre de QA de cada lado. `secrets: inherit` acá
-    # sería apuntar seis jobs a la base de producción; está contado arriba, en
-    # `qa_secretos`, y también en deploy-checks.yml donde se declaran.
+    # sería apuntar cinco chequeos a la base de DEV, que tiene datos reales;
+    # está contado arriba, en `qa_secretos`, y también en deploy-checks.yml
+    # donde se declaran.
     secrets:
       CRON_SECRET: ${{ secrets.QA_CRON_SECRET }}
       DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
@@ -443,9 +524,9 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.QA_R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ secrets.QA_R2_BUCKET }}
-      # El modelo no tiene versión de QA y no hace falta: el ensayo corre acá,
-      # en el runner, y llama a Vertex con el mismo proyecto de GCP. Lo que
-      # nunca se comparte es la base.
+      # GEMINI_TRANSPORT, GOOGLE_CLOUD_PROJECT y GOOGLE_CLOUD_LOCATION son
+      # configuración, no credenciales: la identidad viene de WIF. Son los únicos
+      # sin QA_, y tests/unit/ci-secretos-del-reusable.test.ts no deja sumar otro.
       GEMINI_TRANSPORT: ${{ secrets.GEMINI_TRANSPORT }}
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
       GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
@@ -473,7 +554,7 @@ jobs:
   # Mismo piso de permisos que el resto: escribir estados y leer el commit
   # para la marca del árbol.
   qa_veredicto:
-    name: Veredicto de QA
+    name: QA · Veredicto sobre el commit
     needs: [qa_secretos, qa]
     if: >
       always() &&
@@ -493,12 +574,16 @@ jobs:
           SECRETOS: ${{ needs.qa_secretos.result }}
           QA: ${{ needs.qa.result }}
           ENSAYO: ${{ needs.qa_secretos.outputs.ensayo }}
+          SOLO_DOCS: ${{ needs.qa_secretos.outputs.solo_docs }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$SECRETOS" = "success" ] && [ "$QA" = "success" ]; then
             if [ "$ENSAYO" = "1" ]; then
               estado=success
               descripcion="QA pasó todos sus chequeos"
+              if [ "$SOLO_DOCS" = "true" ]; then
+                descripcion="QA pasó; sólo docs, el ensayo es el del árbol anterior"
+              fi
             else
               estado=failure
               descripcion="QA sin ensayo (faltan QA_R2_*)"
@@ -515,7 +600,8 @@ jobs:
           [ "$estado" = "success" ] || exit 1
 
       # La marca que lee `ensayo_previo`. Sólo llega acá con el veredicto
-      # verde, que exige el ensayo corrido y pasado.
+      # verde, que exige el ensayo corrido y pasado, o heredado de un árbol que
+      # difiere sólo en documentación.
       - name: Hash del árbol ensayado
         id: arbol
         env:
@@ -546,7 +632,7 @@ jobs:
   # Sin `vars.PRD_URL` el job corta en voz alta: un deploy de prd que nadie
   # comprueba no puede quedar en verde.
   prd:
-    name: PRD
+    name: PRD · Smoke y salud de las bases
     if: >
       github.event.deployment_status.state == 'success' &&
       startsWith(github.event.deployment.environment, 'Production') &&
@@ -558,11 +644,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile

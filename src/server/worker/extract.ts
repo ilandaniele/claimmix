@@ -47,9 +47,9 @@ import { avisarPresupuestoAgotado } from "@/server/notify/specialist-alert";
 import { runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { resolveExtractionEngine } from "@/server/ai/provider";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
-import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
+import { FUNCION_MAS_CORTA_MS, RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { errMeta, esPasajero, GeminiExtractionError } from "@/server/ai/gemini-extractor";
-import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
+import { classifySeverity, gravedadSinHechosNuevos, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
 import { fusionarIndicadores } from "@/core/case/contradicciones";
 import { estimarMonto } from "@/core/case/monto-estimado";
@@ -135,6 +135,7 @@ import { esRamoAdmitido, type RamoDelInquilino } from "@/core/case/ramos";
 import { ClaveDeRamoSchema } from "@/lib/schemas/cases";
 import { cargarRamosDelInquilino, consultaRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { waitForEmailExtractionTurn } from "@/server/intake/simulation-throttle";
+import { programarRetoma } from "@/server/intake/programar-retoma";
 import { anclarPolizaAlTexto, mergeExtractedFields, parseEmailClaimFields, sanearContacto } from "@/lib/email/claim-parser";
 import type { KnownPattern } from "@/server/ai/prompt";
 import { stripQuotedReply, buildConversationBody } from "@/core/email/conversation";
@@ -197,13 +198,6 @@ const EXTRACTION_LEASE_MS = RESERVA_DE_EXTRACCION_MS;
  * a mitad de una escritura.
  */
 const PRESUPUESTO_DE_CORRIDA_MS = 40_000;
-
-/**
- * Cuánto dura la más corta de las funciones que corren esta extracción
- * (`/api/intake/simulate`, 180 s). Es el corte que se supone cuando quien llama
- * no dice cuál es el suyo: pasarse de ese número mata la invocación donde esté.
- */
-const FUNCION_MAS_CORTA_MS = 180_000;
 
 /**
  * Lo que la llamada al modelo necesita para siquiera intentar.
@@ -541,7 +535,7 @@ async function redispatchExtraction(
 const MAX_REINTENTOS_POR_TIMEOUT = 3;
 
 /**
- * Marca el caso para que lo retome el barrido, si le quedan intentos.
+ * Marca el caso para que lo retome `retomarTrasCorte` (o el barrido), si le quedan intentos.
  *
  * Devuelve `false` cuando se agotaron —o cuando no se pudo escribir— y ahí el
  * llamador escala, que es lo que hacía siempre.
@@ -615,8 +609,9 @@ export async function runEmailExtractionWorker(
   // ya haber contestado. El orquestador lo usa para no mandar lo mismo dos veces.
   let heredadaEn: string | undefined;
   // Salió sin contestar y vuelve a la cola. `sin_tiempo` se redespacha como
-  // siempre; `reintento` (TIMEOUT o 429) espera al barrido: redespacharlo en el
-  // acto gasta los tres intentos contra el mismo proveedor saturado.
+  // siempre; `reintento` (TIMEOUT o 429) vuelve por el flujo durable a los 45 s,
+  // no en el acto: redespacharlo ya gasta los tres intentos contra el mismo
+  // proveedor saturado.
   let diferida: "sin_tiempo" | "reintento" | null = null;
   // Los entrantes que esta corrida leyó. Lo que entre después no lo contesta.
   let leidos: string[] | null = null;
@@ -1016,7 +1011,7 @@ export async function runEmailExtractionWorker(
     // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
     const finalSeverity = classifySeverity(
       fullText,
-      extractedClaim.severity,
+      gravedadSinHechosNuevos(extractedClaim.severity, caseRow.severity, latestInboundText),
       knownPatterns
     );
     const needsSpecialist = requiresSpecialist(finalSeverity) || hayHeridos(extractedClaim);
@@ -1534,6 +1529,7 @@ export async function runEmailExtractionWorker(
           sePuedeRetomar: puedeArrancar(newStatus),
           preguntadas,
           propuestos: pedido.propuestos,
+          polizaAnterior: caseRow.policy_number,
         },
         customerMatches,
         messengerFor(caseRow.channel),
@@ -1605,8 +1601,9 @@ export async function runEmailExtractionWorker(
        * 4, «esperaba 1 respuesta(s), hubo 0», dos corridas seguidas. El
        * producto hizo lo que estaba escrito; lo que estaba mal era lo escrito.
        *
-       * Con la marca de pendiente lo levanta `retomarExtraccionesPendientes`
-       * dos minutos después.
+       * Con la marca de pendiente lo retoma `retomarTrasCorte` unos 45 s después
+       * de soltar la reserva; si no se pudo encolar, queda el barrido de
+       * `retomarExtraccionesPendientes`.
        *
        * Un 429 entra por la misma puerta: Vertex acá es pospago, sobre un
        * cupo compartido y dinámico entre todos los proyectos, así que un 429
@@ -1689,6 +1686,8 @@ export async function runEmailExtractionWorker(
         await redispatchExtraction(caseId, tenantId, tenantCtx, restanteMs());
       }
     }
+    // Después de soltar: la retoma tiene que encontrar la reserva libre.
+    if (diferida === "reintento") await programarRetoma(caseId, tenantId);
   }
 
   // Sólo se llega acá si la corrida terminó: no tira, y lo que falle no toca

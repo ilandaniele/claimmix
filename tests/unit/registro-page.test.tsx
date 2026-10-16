@@ -31,7 +31,7 @@ async function pintar(e?: string | string[]) {
 
 const conRemitente = () => h.remitente.mockReturnValue({ correo: "sistema@example.com" });
 
-// React 19 sube a <head> los scripts con `src` y `async`: se busca en todo el documento.
+// El desafío agrega el script a <head> al montarse: se busca en todo el documento.
 const scriptDeTurnstile = () => document.querySelector<HTMLScriptElement>('script[src^="https://challenges.cloudflare.com"]');
 
 const conClaves = () => {
@@ -62,6 +62,7 @@ afterEach(() => {
   delete process.env.TURNSTILE_SECRET_KEY;
   sinBanderas();
   scriptDeTurnstile()?.remove();
+  vi.unstubAllGlobals();
 });
 
 describe("/registro: los campos", () => {
@@ -234,8 +235,36 @@ describe("/registro: Turnstile", () => {
 
     expect(container.querySelector(".cf-turnstile")).toHaveAttribute("data-sitekey", "test-turnstile-site-key");
     const script = scriptDeTurnstile();
-    expect(script?.getAttribute("src")).toBe("https://challenges.cloudflare.com/turnstile/v0/api.js");
+    expect(script?.getAttribute("src")).toBe("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
     expect(script?.getAttribute("nonce") ?? script?.nonce).toBe("nonce-de-prueba");
+  });
+
+  it("la caja sale vacía del servidor y se llena cuando llega el script", async () => {
+    conRemitente();
+    conClaves();
+    const { container } = await pintar();
+    const caja = container.querySelector(".cf-turnstile");
+    expect(caja?.childElementCount).toBe(0);
+
+    const turnstile = { render: vi.fn(() => "widget-1"), remove: vi.fn() };
+    vi.stubGlobal("turnstile", turnstile);
+    scriptDeTurnstile()?.dispatchEvent(new Event("load"));
+
+    expect(turnstile.render).toHaveBeenCalledWith(caja, { sitekey: "test-turnstile-site-key" });
+  });
+
+  it("con el script ya cargado dibuja al montar, y al desmontar saca el desafío", async () => {
+    conRemitente();
+    conClaves();
+    const turnstile = { render: vi.fn(() => "widget-1"), remove: vi.fn() };
+    vi.stubGlobal("turnstile", turnstile);
+    const { container, unmount } = await pintar();
+
+    expect(turnstile.render).toHaveBeenCalledWith(container.querySelector(".cf-turnstile"), {
+      sitekey: "test-turnstile-site-key",
+    });
+    unmount();
+    expect(turnstile.remove).toHaveBeenCalledWith("widget-1");
   });
 
   it("la clave secreta no sale en el marcado", async () => {

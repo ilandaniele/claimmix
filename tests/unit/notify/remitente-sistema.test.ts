@@ -71,6 +71,8 @@ beforeEach(() => {
   );
   vi.stubEnv("ALTA_REMITENTE_CORREO", "sistema@example.com");
   vi.stubEnv("ALTA_REMITENTE_REFRESH_TOKEN", "test-refresh-key");
+  vi.stubEnv("GMAIL_CLIENT_ID", "fake-client-id");
+  vi.stubEnv("GMAIL_CLIENT_SECRET", "fake-client-secret");
   vi.stubEnv("ALTA_TOPE_CORREOS_DIA", "");
   vi.stubEnv("ALTA_TOPE_POR_DESTINATARIO_DIA", "");
   mockSend.mockResolvedValue({ providerMessageId: "sent-1" });
@@ -92,11 +94,22 @@ describe("remitenteDelSistema", () => {
   it.each([
     ["falta el correo", "ALTA_REMITENTE_CORREO"],
     ["falta el token", "ALTA_REMITENTE_REFRESH_TOKEN"],
+    ["falta GMAIL_CLIENT_ID", "GMAIL_CLIENT_ID"],
+    ["falta GMAIL_CLIENT_SECRET", "GMAIL_CLIENT_SECRET"],
   ])("es null si %s", (_caso, variable) => {
     vi.stubEnv(variable, "   ");
 
     expect(remitenteDelSistema()).toBeNull();
   });
+
+  it.each(["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET"])(
+    "con el correo y el token pero sin %s no hay remitente",
+    (variable) => {
+      vi.stubEnv(variable, undefined);
+
+      expect(remitenteDelSistema()).toBeNull();
+    }
+  );
 });
 
 describe("el envío", () => {
@@ -114,16 +127,19 @@ describe("el envío", () => {
     expect(enviado.textBody).toContain(TOKEN_DEL_ENLACE);
   });
 
-  it("sin remitente no manda nada, no cuenta cupo y deja el motivo", async () => {
-    vi.stubEnv("ALTA_REMITENTE_REFRESH_TOKEN", "");
+  it.each([["el refresh token", "ALTA_REMITENTE_REFRESH_TOKEN"], ["el cliente OAuth", "GMAIL_CLIENT_ID"]])(
+    "sin remitente (falta %s) no manda nada, no cuenta cupo y deja el motivo",
+    async (_caso, variable) => {
+      vi.stubEnv(variable, "");
 
-    const r = await enviar("ana@example.com");
+      const r = await enviar("ana@example.com");
 
-    expect(r).toEqual({ enviado: false, motivo: "sin_remitente" });
-    expect(mockSend).not.toHaveBeenCalled();
-    expect(vi.mocked(rateLimit)).not.toHaveBeenCalled();
-    expect(logs.join("\n")).toContain("correo_sistema.sin_remitente");
-  });
+      expect(r).toEqual({ enviado: false, motivo: "sin_remitente" });
+      expect(mockSend).not.toHaveBeenCalled();
+      expect(vi.mocked(rateLimit)).not.toHaveBeenCalled();
+      expect(logs.join("\n")).toContain("correo_sistema.sin_remitente");
+    }
+  );
 
   it.each([
     ["una lista", "ana@example.com, otra@example.com"],

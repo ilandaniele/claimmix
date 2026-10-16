@@ -23,6 +23,7 @@ import {
 } from "@/core/mensajes/traspaso";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
@@ -66,8 +67,12 @@ describe("maskPolicyNumber", () => {
     expect(maskPolicyNumber("ABC")).toBe("****");
   });
 
-  it("masks POL-1234 to POL-****1234", () => {
-    expect(maskPolicyNumber("POL-1234")).toBe("POL-****1234");
+  it("masks a policy with fewer than 6 trailing digits entirely (AC24)", () => {
+    // Los últimos 4 de un número de 4 o 5 dígitos son casi todo el número.
+    expect(maskPolicyNumber("POL-1234")).toBe("****");
+    expect(maskPolicyNumber("4455")).toBe("****");
+    expect(maskPolicyNumber("12345")).toBe("****");
+    expect(maskPolicyNumber("123456")).toBe("****3456");
   });
 });
 
@@ -94,6 +99,14 @@ describe("renderTemplate — confirmation_received", () => {
     // Must contain the masked version.
     expect(result.html).toContain("POL-****5678");
     expect(result.text).toContain("POL-****5678");
+  });
+
+  it("AC24: a short policy number never comes out whole", () => {
+    const result = renderTemplate("confirmation_received", { caseId: "abc-123", policyNumber: "4455" });
+    for (const out of [result.html, result.text, result.cuerpo]) {
+      expect(out).not.toContain("4455");
+      expect(out).not.toContain("Póliza asociada");
+    }
   });
 
   it("AC24: body does not contain raw DNI when DNI is passed in data", () => {
@@ -223,7 +236,7 @@ describe("renderTemplate — missing_information_request", () => {
     expect(result.html).toContain("Número de póliza");
     expect(result.html).toContain("Fecha del siniestro");
     // Should NOT mention fields not in the list.
-    expect(result.html).not.toContain("DNI del titular");
+    expect(result.html).not.toContain("DNI o CUIT del titular");
   });
 
   it("includes case ID in subject and body", () => {
@@ -295,6 +308,26 @@ describe("renderTemplate — data_confirmation_request", () => {
     });
     expect(result.html).not.toContain(rawPolicy);
     expect(result.html).toContain("****5678");
+  });
+
+  it("póliza cambiada: pregunta sin repetir ninguno de los dos números (AC24)", () => {
+    // AC24: la pregunta no lleva valores y la plantilla no cae al campo suelto.
+    const result = renderTemplate("data_confirmation_request", {
+      caseId: "case-pc",
+      fields: [],
+      polizaCambiada: true,
+      fieldKey: "policy_number",
+      proposedValue: "4455",
+      conflictWithValue: "POL-4471-A",
+    });
+    for (const cuerpo of [result.text, result.html, result.cuerpo]) {
+      expect(cuerpo).toContain(POLIZA_CAMBIADA);
+      expect(cuerpo).not.toContain("4455");
+      expect(cuerpo).not.toContain("4471");
+    }
+    expect(result.text).toContain("Respondé este correo con el dato");
+    expect(result.text).not.toContain("Confirmo");
+    expect(result.subject).toContain("Nos falta un dato");
   });
 
   it("asks outright when the extracted value says nothing", () => {

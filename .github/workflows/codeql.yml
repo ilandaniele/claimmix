@@ -1,4 +1,4 @@
-name: CodeQL
+name: PR y semanal · CodeQL
 
 # Sin `push` a `main`: ese árbol ya se analizó en el PR de `qa` a `main`, y el
 # lunes vuelve a analizarse con las consultas del día.
@@ -32,18 +32,39 @@ jobs:
       contents: read
       actions: read
     steps:
+      # Un PR que sólo toca `.md` no tiene nada que analizar: los pasos de abajo
+      # se saltean y el check queda verde en segundos, no en cinco minutos. Es
+      # el mismo filtro que `arbol` en ci.yml. Cualquier error cae del lado
+      # seguro: analiza.
+      - name: ¿Sólo documentación?
+        id: docs
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          padre=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha' 2>/dev/null || true)
+          otros=1
+          [ -z "$padre" ] || otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$GITHUB_SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md") and . != "docs/PROMOCION.md") | not)] | length end' 2>/dev/null || echo 1)
+          if [ "$otros" = 0 ]; then
+            echo "solo=true" >> "$GITHUB_OUTPUT"
+            echo "Sólo cambió documentación: CodeQL no analiza." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Checkout repository
+        if: steps.docs.outputs.solo != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # El evento `schedule` no documenta `repository` en su payload; la API
       # dice si el repo es privado para cualquier evento.
       - name: Visibilidad del repo
         id: repo
+        if: steps.docs.outputs.solo != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: echo "private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" >> "$GITHUB_OUTPUT"
 
       - name: Initialize CodeQL
+        if: steps.docs.outputs.solo != 'true'
         uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           # `actions` analiza los workflows: inyección de `${{ }}` en `run`,
@@ -62,6 +83,7 @@ jobs:
               - docs
 
       - name: Perform CodeQL Analysis
+        if: steps.docs.outputs.solo != 'true'
         uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           # Un repo privado sin Advanced Security rechaza el SARIF. El análisis
@@ -80,6 +102,7 @@ jobs:
       # pero las alertas no hacen fallar el job: un hallazgo grave dejaba el
       # check en verde.
       - name: Hallazgos graves
+        if: steps.docs.outputs.solo != 'true'
         run: |
           jq -r '
             .runs[] as $r

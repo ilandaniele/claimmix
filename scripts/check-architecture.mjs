@@ -673,11 +673,21 @@ console.log("\n▸ Ningún carácter de control invisible");
   }
 }
 
+// Una clave de la raíz (`concurrency`, `run-name`) y lo que cuelga de ella,
+// hasta la próxima clave sin sangrar.
+const bloqueDeRaiz = (lineas, clave) => {
+  const i = lineas.findIndex((l) => l.startsWith(`${clave}:`));
+  if (i === -1) return null;
+  let bloque = lineas[i].slice(clave.length + 1) + "\n";
+  for (let j = i + 1; j < lineas.length && /^(\s|$)/.test(lineas[j]); j++) bloque += lineas[j] + "\n";
+  return bloque;
+};
+
 // ── 12. Un preview no hace cola con producción ────────────────────────────
 //
-// `post-deploy` corre contra la base de PRODUCCIÓN, así que se serializa con
-// un grupo de concurrencia y `cancel-in-progress: false`. Eso está bien. Lo
-// que no estaba bien era que el grupo fuera una constante.
+// `post-deploy` corre contra la base de DEV, con datos reales, así que se
+// serializa con un grupo de concurrencia y `cancel-in-progress: false`. Eso
+// está bien. Lo que no estaba bien era que el grupo fuera una constante.
 //
 // `deployment_status` llega también por cada preview y por cada estado
 // intermedio. Esas corridas saltean todo —`smoke` tiene la guarda y las demás
@@ -706,18 +716,17 @@ console.log("\n▸ Un preview no hace cola con producción");
     if (!/^\s+deployment_status:/m.test(texto)) continue;
 
     const lineas = texto.split(/\r?\n/);
-    const i = lineas.findIndex((l) => l.trim() === "concurrency:" && !/^\s/.test(l));
-    if (i === -1) continue;
-
-    // El bloque son las líneas sangradas que siguen, salteando las vacías.
-    let bloque = "";
-    for (let j = i + 1; j < lineas.length; j++) {
-      if (lineas[j].trim() === "") continue;
-      if (!/^\s/.test(lineas[j])) break;
-      bloque += lineas[j];
-    }
-
-    if (!bloque.includes("${{")) fijos.push(nombre);
+    const crudo = bloqueDeRaiz(lineas, "concurrency");
+    if (crudo === null) continue;
+    // Sin comentarios: el bloque explica el defecto citando la expresión.
+    const bloque = crudo
+      .split("\n")
+      .map((l) => l.replace(/(^|\s)#.*$/, "$1"))
+      .join("\n");
+    // `github.ref` llega vacío en un deployment_status de Vercel (pone el SHA
+    // en `deployment.ref`): `carga-${{ github.ref }}` era un grupo fijo, y una
+    // vista previa cancelaba la carga de QA.
+    if (!bloque.includes("${{") || /github\.(head_)?ref(_name)?\b/.test(bloque)) fijos.push(nombre);
   }
 
   if (fijos.length === 0) {
@@ -727,6 +736,8 @@ console.log("\n▸ Un preview no hace cola con producción");
     for (const f of fijos) console.log(`     .github/workflows/${f}`);
     console.log("     Un preview que saltea todos sus jobs igual ocupa el turno, y");
     console.log("     desaloja de la cola al post-deploy del merge a main.");
+    console.log("     `github.ref` llega vacío en un deployment_status de Vercel: un grupo");
+    console.log("     armado con él es fijo aunque tenga `${{ }}`.");
   }
 }
 
@@ -819,10 +830,11 @@ console.log("\n▸ Ningún job avisa y aprueba con el secreto vacío");
 // el que la escribe es un PR cualquiera, no un deploy.
 //
 // `post-deploy.yml` es la excepción real y a propósito —corre DESPUÉS del
-// deploy, contra producción— así que queda afuera de esta invariante. Los
-// siete jobs viven en `deploy-checks.yml`, que ese archivo llama como
-// workflow reusable: la excepción es la misma, sólo que el `pnpm pentest`
-// que la dispara ahora está en el otro archivo, no en post-deploy.yml.
+// deploy, contra la base de DEV, con datos reales— así que queda afuera de esta
+// invariante. Los seis chequeos y el resumen viven en `deploy-checks.yml`, que
+// ese archivo llama como workflow reusable: la excepción es la misma, sólo que
+// el `pnpm pentest` que la dispara ahora está en el otro archivo, no en
+// post-deploy.yml.
 const EXCEPCION_PRODUCCION = ["post-deploy.yml", "deploy-checks.yml"];
 console.log("\n▸ Lo previo al merge no apunta a producción");
 {
@@ -857,11 +869,11 @@ console.log("\n▸ Lo previo al merge no apunta a producción");
   } else if (apuntanAProduccion.length === 0) {
     bien("tenancy, capa-datos y pentest van contra el ensayo o localhost antes de mergear");
   } else {
-    mal(`${apuntanAProduccion.length} workflow(s) con un job que apunta a producción`);
+    mal(`${apuntanAProduccion.length} workflow(s) con un job que apunta a la base de DEV`);
     for (const w of [...new Set(apuntanAProduccion)]) console.log(`     .github/workflows/${w}`);
     console.log("     Antes de mergear van contra STAGING_* o localhost. La base de");
-    console.log("     producción sólo la toca post-deploy.yml (vía deploy-checks.yml),");
-    console.log("     después del deploy.");
+    console.log("     DEV (`DATABASE_URL`, con datos reales) sólo la toca post-deploy.yml");
+    console.log("     (vía deploy-checks.yml), después del deploy.");
   }
 }
 
@@ -871,8 +883,8 @@ console.log("\n▸ Lo previo al merge no apunta a producción");
 // propio entorno de producción. Con un segundo proyecto para QA, su deploy
 // llega con el mismo evento —`deployment_status`— y la misma etiqueta, así
 // que una guarda que sólo mire que el entorno empieza con `Production`
-// correría el smoke de producción, el ensayo y la carga de lectura contra el
-// alias de producción para un deploy que nunca lo tocó.
+// correría el smoke de DEV, el ensayo y la carga del tablero contra el alias
+// de dev para un deploy que nunca lo tocó.
 //
 // Lo que distingue a los dos proyectos es el SUFIJO del nombre del entorno:
 // cuando hay más de un proyecto, GitHub le agrega el nombre del proyecto y
@@ -888,9 +900,10 @@ console.log("\n▸ Lo previo al merge no apunta a producción");
 // QA. Una invariante verde sobre una premisa falsa es peor que no tenerla.
 //
 // La invariante busca `startsWith(github.event.deployment.environment` sin `!`
-// adelante. El `!` importa: `load-tests.yml` gatea con `!startsWith(...)`
-// —una exclusión, que corre en previews de cualquier proyecto— y no tiene por
-// qué distinguir ningún proyecto.
+// adelante. El `!` importa: `load-tests.yml` gatea su `if` con `!startsWith(...)`
+// y `!endsWith(…, '-prd')` —exclusiones: corre en vistas previas de claimmix y
+// claimmix-qa, nunca en prd— y donde nombra a QA (grupo, título, nombre del
+// job, `if`) lleva su `endsWith`.
 //
 // El grupo de `concurrency` entra como un job más: es la otra copia de la
 // misma condición, y ya se olvidó una vez (#199 arregló el `if` del job y
@@ -913,15 +926,11 @@ console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
     const lineas = texto.split(/\r?\n/);
     const trabajos = trabajosDe(lineas);
 
-    // El grupo de `concurrency` cuelga de la raíz, no de `jobs:`, y dura hasta
-    // la próxima clave sin sangrar.
-    const iConc = lineas.findIndex((l) => l.trim() === "concurrency:" && !/^\s/.test(l));
-    if (iConc !== -1) {
-      let bloque = "";
-      for (let i = iConc + 1; i < lineas.length && /^(\s|$)/.test(lineas[i]); i++) {
-        bloque += lineas[i] + "\n";
-      }
-      trabajos.push(bloque);
+    // `concurrency` y `run-name` cuelgan de la raíz, no de `jobs:`. Un título
+    // que dice DEV para un deploy de QA es el mismo error, leído por una persona.
+    for (const clave of ["concurrency", "run-name"]) {
+      const b = bloqueDeRaiz(lineas, clave);
+      if (b !== null) trabajos.push(b);
     }
 
     for (const trabajo of trabajos) {
@@ -950,7 +959,7 @@ console.log("\n▸ La guarda de post-deploy no es sólo el entorno");
 
 // ── 16. El lint de la CI exige lo mismo que el de la máquina ──────────────
 //
-// El job `Lint` —requerido para mergear— corre `pnpm lint`, y `pnpm check`
+// El job `Tipos y lint` —requerido para mergear— corre `pnpm lint`, y `pnpm check`
 // corre `pnpm verify`, que lintea aparte. Cuando los dos no piden el mismo
 // `--max-warnings`, el requerido es el flojo: un PR con avisos entra, y después
 // `pnpm check --local` se pone en rojo en la máquina del que sigue, por algo que
@@ -974,7 +983,7 @@ console.log("\n▸ El lint de la CI exige lo mismo que el de la máquina");
     console.log("     Sin el tope declarado, eslint aprueba con cualquier cantidad de avisos.");
   } else if (enLint !== enVerify) {
     mal(`lint pide ${enLint} aviso(s) y verify ${enVerify}`);
-    console.log("     El job `Lint` es requerido y corre `pnpm lint`. Si tolera más que");
+    console.log("     El job `Tipos y lint` es requerido y corre `pnpm lint`. Si tolera más que");
     console.log("     `verify`, la CI aprueba lo que `pnpm check --local` rechaza.");
   } else {
     bien(`los dos cortan en ${enLint} aviso(s)`);

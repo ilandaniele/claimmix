@@ -118,6 +118,7 @@ vi.mock("@/core/case/gap-analysis", () => ({
 vi.mock("@/server/ai/severity-classifier", () => ({
   classifySeverity: vi.fn().mockReturnValue("medium"),
   requiresSpecialist: vi.fn().mockReturnValue(false),
+  gravedadSinHechosNuevos: (severidad: unknown) => severidad,
 }));
 
 vi.mock("@/server/ai/mock-extractor", () => ({

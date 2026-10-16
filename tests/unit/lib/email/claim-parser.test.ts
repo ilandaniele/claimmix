@@ -56,21 +56,21 @@ describe("parseEmailClaimFields", () => {
   it("extracts DNI when the following word is stuck to the number", () => {
     const fields = fieldMap(
       parseEmailClaimFields({
-        body: "la persona NICOLAS JASPER con DU Nro.92310691es titular de la cuenta.",
+        body: "la persona LUCAS BARRIENTOS con DU Nro.30111222es titular de la cuenta.",
       })
     );
 
-    expect(fields.get("full_name")).toBe("Nicolas Jasper");
-    expect(fields.get("dni")).toBe("92310691");
+    expect(fields.get("full_name")).toBe("Lucas Barrientos");
+    expect(fields.get("dni")).toBe("30111222");
   });
 
   it("extracts labeled claimant data and mentioned documents from a normal claim body", () => {
     const fields = fieldMap(
       parseEmailClaimFields({
         subject: "Siniestro | Choque 15/03/2024 | Ford Focus vs Renault Sandero",
-        senderEmail: "idaniele@blueboot.com",
+        senderEmail: "diego.paredes@example.com",
         body: `
-          Ilan Daniele <idaniele@blueboot.com>
+          Diego Paredes <diego.paredes@example.com>
 
           Datos del asegurado:
           - Nombre completo: María Elena González

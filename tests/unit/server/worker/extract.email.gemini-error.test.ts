@@ -21,6 +21,7 @@ const {
   mockCheckBudget,
   mockFindCustomerMatches,
   mockFindPolicyMatches,
+  mockProgramarRetoma,
 } = vi.hoisted(() => {
   return {
     mockExtractEmailClaimGemini: vi.fn(),
@@ -29,6 +30,7 @@ const {
     mockCheckBudget: vi.fn(),
     mockFindCustomerMatches: vi.fn(),
     mockFindPolicyMatches: vi.fn(),
+    mockProgramarRetoma: vi.fn(),
   };
 });
 
@@ -106,6 +108,7 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
 vi.mock("@/server/ai/severity-classifier", () => ({
   classifySeverity: vi.fn().mockReturnValue("medium"),
   requiresSpecialist: vi.fn().mockReturnValue(false),
+  gravedadSinHechosNuevos: (severidad: unknown) => severidad,
 }));
 
 vi.mock("@/core/case/fsm", () => ({
@@ -152,6 +155,9 @@ vi.mock("@/server/ai/hydrate-fields", () => ({
   hydrateFieldsFromExtracted: vi.fn().mockReturnValue([]),
   scrubPiiFromSummary: vi.fn((s: string) => s),
 }));
+
+// El arranque del flujo durable no corre acá: se mira con qué caso se lo pidió.
+vi.mock("@/server/intake/programar-retoma", () => ({ programarRetoma: mockProgramarRetoma }));
 
 vi.mock("@/server/intake/simulation-throttle", () => ({
   waitForEmailExtractionTurn: vi.fn().mockResolvedValue({ waitedMs: 0, timedOut: false, blockers: [] }),
@@ -335,13 +341,16 @@ describe("un 429 de cupo no escala: vuelve a la cola como un TIMEOUT", () => {
 
   /*
    * Redespachar al instante quemaba los tres intentos en segundos contra el
-   * mismo cupo agotado. El caso queda marcado y lo retoma el barrido.
+   * mismo cupo agotado. El caso queda marcado y lo retoma el flujo durable
+   * a los 45 s (o el barrido, si no se pudo encolar).
    */
   it("suelta la reserva con la marca puesta y no redespacha", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
 
+    expect(mockProgramarRetoma).toHaveBeenCalledTimes(1);
+    expect(mockProgramarRetoma).toHaveBeenCalledWith("case-gemini-err", "tenant-001");
     const soltada = capturedCaseUpdates.filter(
       (u) => "extraction_lease_at" in u && (u as Record<string, unknown>).extraction_lease_at === null
     );

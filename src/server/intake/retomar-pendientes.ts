@@ -90,6 +90,8 @@ export interface RetomadosResult {
 export async function retomarExtraccionesPendientes(
   opts?: {
     tenantId?: string;
+    /** Sólo este caso y sin ESPERA_MS: lo pide el flujo que lo difirió. Va con tenantId. */
+    caseId?: string;
     limit?: number;
     leaseMs?: number;
     /** Cuándo se corta la invocación (epoch ms). Sin esto no se mira el reloj. */
@@ -118,8 +120,10 @@ export async function retomarExtraccionesPendientes(
         and(
           inArray(cases.status, ESTADOS_DE_ARRANQUE),
           // `updated_at` queda NULL al insertar: coalesce cae a `created_at`
-          // para ese caso.
-          sql`coalesce(${cases.updated_at}, ${cases.created_at}) < ${corte}::timestamptz`,
+          // para ese caso. Con `caseId` no se espera: quien lo pide ya esperó.
+          opts?.caseId
+            ? eq(cases.id, opts.caseId)
+            : sql`coalesce(${cases.updated_at}, ${cases.created_at}) < ${corte}::timestamptz`,
           or(
             // Con la reserva tomada y fresca hay una corrida viva que va a
             // consumir la marca sola. Sólo se retoma lo que quedó huérfano.

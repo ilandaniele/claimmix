@@ -18,8 +18,9 @@
  * Severity ranking: critical > high > medium > low
  */
 
-import type { Severity } from "@/lib/schemas/cases";
+import { SeveritySchema, type Severity } from "@/lib/schemas/cases";
 import { escaparRegex } from "@/core/text/escapar-regex";
+import { esAudioSinTranscribir } from "@/core/adjuntos/transcripcion";
 import type { KnownPattern } from "./prompt";
 
 /**
@@ -292,4 +293,21 @@ export function classifySeverity(
  */
 export function requiresSpecialist(severity: Severity): boolean {
   return severity === "high" || severity === "critical";
+}
+
+/**
+ * La gravedad del modelo cuando lo último que llegó no trae hechos.
+ *
+ * Una nota de voz que no se pudo transcribir le llega al modelo como el puro
+ * marcador, y con eso a veces la calificaba «high»: el caso se derivaba por un
+ * audio mudo. Sin nada nuevo, no pasa de la gravedad que el caso ya tenía.
+ */
+export function gravedadSinHechosNuevos(
+  aiSeverity: Severity | null | undefined,
+  previa: string | null | undefined,
+  ultimoMensaje: string
+): Severity | null | undefined {
+  const tope = SeveritySchema.safeParse(previa);
+  if (!aiSeverity || !tope.success || !esAudioSinTranscribir(ultimoMensaje)) return aiSeverity;
+  return SEVERITY_RANK[aiSeverity] > SEVERITY_RANK[tope.data] ? tope.data : aiSeverity;
 }

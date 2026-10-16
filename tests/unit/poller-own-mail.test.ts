@@ -37,7 +37,7 @@ describe("isOwnMailbox", () => {
 
   it("lets a real claimant through", async () => {
     mocked.mockResolvedValue(null);
-    expect(await isOwnMailbox("Ilan Daniele <idaniele@blueboot.com>")).toBe(false);
+    expect(await isOwnMailbox("Diego Paredes <diego.paredes@example.com>")).toBe(false);
   });
 
   it("lets the message through when the lookup fails", async () => {

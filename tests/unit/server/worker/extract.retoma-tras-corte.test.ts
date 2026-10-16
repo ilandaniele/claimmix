@@ -96,6 +96,7 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
 vi.mock("@/server/ai/severity-classifier", () => ({
   classifySeverity: vi.fn().mockReturnValue("medium"),
   requiresSpecialist: vi.fn().mockReturnValue(false),
+  gravedadSinHechosNuevos: (severidad: unknown) => severidad,
 }));
 
 vi.mock("@/core/case/fsm", () => ({

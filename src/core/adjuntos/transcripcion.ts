@@ -11,6 +11,11 @@
 export const PLACEHOLDER_AUDIO = "[Mensaje de audio adjunto]";
 export const ENCABEZADO_TRANSCRIPCION = "Transcripción de nota de voz:";
 
+/** Una nota de voz que no se pudo transcribir: el mensaje no dice nada más que eso. */
+export function esAudioSinTranscribir(texto: string | null | undefined): boolean {
+  return (texto ?? "").trim() === PLACEHOLDER_AUDIO;
+}
+
 export function conTranscripcion(body: string | null, texto: string): string {
   const actual = body ?? "";
   const limpio = texto.trim();

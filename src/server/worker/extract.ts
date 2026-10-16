@@ -49,7 +49,7 @@ import { resolveExtractionEngine } from "@/server/ai/provider";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { FUNCION_MAS_CORTA_MS, RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 import { errMeta, esPasajero, GeminiExtractionError } from "@/server/ai/gemini-extractor";
-import { classifySeverity, requiresSpecialist } from "@/server/ai/severity-classifier";
+import { classifySeverity, gravedadSinHechosNuevos, requiresSpecialist } from "@/server/ai/severity-classifier";
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
 import { fusionarIndicadores } from "@/core/case/contradicciones";
 import { estimarMonto } from "@/core/case/monto-estimado";
@@ -1011,7 +1011,7 @@ export async function runEmailExtractionWorker(
     // ── f) Classify severity — two-layer (pattern + AI) ──────────────────────
     const finalSeverity = classifySeverity(
       fullText,
-      extractedClaim.severity,
+      gravedadSinHechosNuevos(extractedClaim.severity, caseRow.severity, latestInboundText),
       knownPatterns
     );
     const needsSpecialist = requiresSpecialist(finalSeverity) || hayHeridos(extractedClaim);

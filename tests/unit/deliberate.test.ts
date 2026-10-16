@@ -38,6 +38,7 @@ import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
 import { reservarSiEsPrueba } from "@/server/ai/budget";
 import { separarPorRespaldo } from "@/core/case/respaldado-por-busqueda";
+import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 
 const mockCallGemini = callGemini as unknown as ReturnType<typeof vi.fn>;
 const mockRunTool = runTool as unknown as ReturnType<typeof vi.fn>;
@@ -635,5 +636,11 @@ describe("deliberate — el presupuesto de las pruebas", () => {
   it("una denuncia grave no gasta ni reserva nada", async () => {
     expect(await deliberate(situation({ isHighSeverity: true }))).toBeNull();
     expect(mockReservar).not.toHaveBeenCalled();
+  });
+
+  it("una nota de voz sin transcribir no se delibera: no hay nada por qué derivar", async () => {
+    expect(await deliberate(situation({ latestMessage: ` ${PLACEHOLDER_AUDIO}\n` }))).toBeNull();
+    expect(mockReservar).not.toHaveBeenCalled();
+    expect(mockCallGemini).not.toHaveBeenCalled();
   });
 });

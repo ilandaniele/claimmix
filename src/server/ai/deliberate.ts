@@ -29,6 +29,7 @@
 import "server-only";
 
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
+import { esAudioSinTranscribir } from "@/core/adjuntos/transcripcion";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
 import { describeTools, runTool, type ToolContext } from "@/server/ai/agent-tools";
@@ -161,6 +162,11 @@ export async function deliberate(
   // gets a specialist, whatever a model thinks about it, so there is nothing
   // here to deliberate and no reason to spend a call.
   if (input.isHighSeverity) return null;
+
+  // Una nota de voz que no se pudo transcribir no dice nada que decidir. El
+  // agente sólo veía el marcador y a veces lo tomaba como algo que excede el
+  // trámite y derivaba; el árbol repite el pedido en pie o acusa el archivo.
+  if (esAudioSinTranscribir(input.latestMessage)) return null;
 
   try {
     // Una prueba reserva por adelantado las llamadas que este mensaje puede

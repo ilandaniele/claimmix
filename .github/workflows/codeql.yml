@@ -1,4 +1,4 @@
-name: CodeQL
+name: PR y semanal · CodeQL
 
 # Sin `push` a `main`: ese árbol ya se analizó en el PR de `qa` a `main`, y el
 # lunes vuelve a analizarse con las consultas del día.

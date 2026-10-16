@@ -1,4 +1,4 @@
-name: CI
+name: PR y main · Chequeos del código
 
 on:
   pull_request:
@@ -80,10 +80,20 @@ jobs:
         run: |
           saltear=false
           solo_docs=false
-          # Sólo cuenta una marca de este repo: un fork no puede dejar una.
+          # Sólo cuenta una marca que dejó ci.yml en este repo, desde un commit que ya está en la historia de este.
           marca() {
-            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ci-verde-$1&per_page=20" \
-              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID)] | length" 2>/dev/null || echo 0
+            ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ci-verde-$1&per_page=20" \
+              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID) | .workflow_run.id] | unique[]" 2>/dev/null || true)
+            for id in $ids; do
+              case "$id" in ''|*[!0-9]*) continue ;; esac
+              origen=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '[(.path | split("@")[0]), .head_sha] | join(" ")' 2>/dev/null) || continue
+              [ "${origen%% *}" = ".github/workflows/ci.yml" ] || continue
+              cabeza=${origen#* }
+              case "$cabeza" in ''|*[!0-9a-f]*) continue ;; esac
+              relacion=$(gh api "repos/$GITHUB_REPOSITORY/compare/$cabeza...$GITHUB_SHA" --jq .status 2>/dev/null) || continue
+              case "$relacion" in identical|ahead) echo 1; return ;; esac
+            done
+            echo 0
           }
           # En un PR, GITHUB_SHA es el merge con la base: el árbol que quedaría.
           arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha 2>/dev/null || true)
@@ -124,9 +134,13 @@ jobs:
           retention-days: 7
           overwrite: true
 
-  # ── 1. Tipos ─────────────────────────────────────────────────────────────────
+  # ── 1. Tipos y lint ──────────────────────────────────────────────────────────
+  #
+  # Un solo job: los dos instalan lo mismo, y cada uno repetía el checkout y la
+  # instalación. El lint corre aunque los tipos fallen, para ver los dos rojos
+  # de una vez.
   typecheck:
-    name: Tipos
+    name: Tipos y lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [arbol]
@@ -136,16 +150,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Type check
+        id: tipos
         run: pnpm type-check
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@placeholder/placeholder
@@ -153,31 +169,11 @@ jobs:
           # consulta tira "falta DATABASE_URL_APP" antes de tocar la base.
           DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
 
-  # ── 2. Lint ──────────────────────────────────────────────────────────────────
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [arbol]
-    if: ${{ !cancelled() && needs.arbol.outputs.saltear != 'true' }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Lint
+        if: ${{ !cancelled() && (success() || steps.tipos.outcome == 'failure') }}
         run: pnpm lint
 
-  # ── 3. Tests unitarios ───────────────────────────────────────────────────────
+  # ── 2. Tests unitarios ───────────────────────────────────────────────────────
   unit-tests:
     name: Tests unitarios
     runs-on: ubuntu-latest
@@ -189,11 +185,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -239,22 +236,23 @@ jobs:
           DATABASE_URL_APP: postgresql://placeholder:placeholder@placeholder/placeholder
           MOCK_AI: "true"
 
-  # ── 4. Build ─────────────────────────────────────────────────────────────────
+  # ── 3. Build ─────────────────────────────────────────────────────────────────
   build:
     name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-    needs: [typecheck, lint]
+    needs: [typecheck]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -284,7 +282,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # ── 5. Tests de integración ──────────────────────────────────────────────────
+  # ── 4. Tests de integración ──────────────────────────────────────────────────
   # Runs when INTEGRATION_ENABLED secret is set; skipped otherwise (no live Neon DB).
   # To enable: set INTEGRATION_ENABLED=true in GitHub Actions secrets.
   integration-tests:
@@ -347,11 +345,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -514,7 +513,7 @@ jobs:
           INTEGRATION_ADMIN_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
           INTEGRATION_LOGIN_PASSWORD: ${{ secrets.INTEGRATION_LOGIN_PASSWORD }}
 
-  # ── 6. Tests E2E ─────────────────────────────────────────────────────────────
+  # ── 5. Tests E2E ─────────────────────────────────────────────────────────────
   #
   # Requiere una base viva para que arranque el servidor. Sin el secreto: aviso
   # en un pull request —puede venir de un fork, que no recibe secretos— y ERROR
@@ -566,11 +565,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -628,22 +628,16 @@ jobs:
           ENSAYO_URL: ${{ secrets.E2E_DATABASE_URL }}
 
       # El PDF va al balde de QA (`QA_R2_*`), el mismo que usa el ensayo de
-      # QA. Si esos secretos fueran los de producción, sembrar y limpiar
-      # subirían y borrarían en el balde de un cliente: se corta acá, igual
-      # que en `post-deploy.yml`.
+      # QA. Si esos secretos fueran los de DEV, sembrar y limpiar subirían y
+      # borrarían en el balde de un cliente: se corta acá, igual que en
+      # `post-deploy.yml`. La comparación va en la expresión: al shell llega
+      # sólo true o false.
       - name: El balde de los e2e no es el de producción
         if: env.HAY_E2E != '' && env.HAY_R2 != ''
         run: |
-          if { [ -n "$R2_BALDE_PROD" ] && [ "$R2_BALDE" = "$R2_BALDE_PROD" ]; } ||
-             { [ -n "$R2_LLAVE_PROD" ] && [ "$R2_LLAVE" = "$R2_LLAVE_PROD" ]; }; then
-            echo "::error title=Los e2e apuntan al balde de producción::QA_R2_BUCKET (o QA_R2_ACCESS_KEY_ID) es el de producción."
-            exit 1
-          fi
+          if [ "$MISMO_R2" != "false" ]; then echo "::error title=Los e2e apuntan al balde de DEV::QA_R2_BUCKET (o QA_R2_ACCESS_KEY_ID) es el de DEV."; exit 1; fi
         env:
-          R2_BALDE: ${{ secrets.QA_R2_BUCKET }}
-          R2_LLAVE: ${{ secrets.QA_R2_ACCESS_KEY_ID }}
-          R2_BALDE_PROD: ${{ secrets.R2_BUCKET }}
-          R2_LLAVE_PROD: ${{ secrets.R2_ACCESS_KEY_ID }}
+          MISMO_R2: ${{ (secrets.R2_BUCKET != '' && secrets.QA_R2_BUCKET == secrets.R2_BUCKET) || (secrets.R2_ACCESS_KEY_ID != '' && secrets.QA_R2_ACCESS_KEY_ID == secrets.R2_ACCESS_KEY_ID) }}
 
       # El PDF de 8 MB que abre `adjunto-de-8mb.spec.ts`. Se genera acá, no vive
       # en el repo; sin credenciales de R2 el spec se saltea y lo dice.
@@ -813,7 +807,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # ── 7. Vulnerabilidades y licencias ──────────────────────────────────────────
+  # ── 6. Vulnerabilidades y licencias ──────────────────────────────────────────
   security-audit:
     name: Vulnerabilidades
     runs-on: ubuntu-latest
@@ -825,11 +819,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -897,7 +892,7 @@ jobs:
         # actualización de reglas trae ruido nuevo, esto se pone rojo — que es
         # exactamente lo que tiene que pasar para que alguien lo mire.
 
-  # ── 8. Peso del bundle ───────────────────────────────────────────────────────
+  # ── 7. Peso del bundle ───────────────────────────────────────────────────────
   #
   # El presupuesto de 500 ms (`PRESUPUESTO_P95_MS`) se mide sólo en el
   # post-deploy, contra producción: el ensayo tiene cuatrocientos casos contra
@@ -957,7 +952,7 @@ jobs:
           echo "  scripts/medir-peso.mjs y decí en el commit por qué. Un tope que"
           echo "  se sube solo cada vez que alguien lo pasa no es un tope."
 
-  # ── 9. Aislamiento de tenants ────────────────────────────────────────────────
+  # ── 8. Aislamiento de tenants ────────────────────────────────────────────────
   #
   # `pnpm permisos` le pregunta al catálogo qué puede hacer el rol de la
   # aplicación (lo mismo que se pregunta después de cada deploy); `pnpm
@@ -992,11 +987,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -1017,7 +1013,7 @@ jobs:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           DATABASE_URL_APP: ${{ secrets.STAGING_DATABASE_URL_APP }}
 
-  # ── 10. Pen test local ───────────────────────────────────────────────────────
+  # ── 9. Pen test local ────────────────────────────────────────────────────────
   #
   # `pnpm pentest --solo-superficie`: sólo LA SUPERFICIE de `scripts/pen-test.mts`
   # — cada ruta de `src/app/api` sin credenciales, el subárbol admin de Better
@@ -1052,11 +1048,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -1104,7 +1101,7 @@ jobs:
       - name: La superficie, contra el build local
         run: pnpm pentest --url http://localhost:3000 --solo-superficie
 
-  # ── 11. Bases por cliente ────────────────────────────────────────────────────
+  # ── 10. Bases por cliente ────────────────────────────────────────────────────
   #
   # `pnpm bases:empaquetar --comprobar` falla si la cadena de migraciones
   # empaquetada para las bases nuevas quedó atrás de neon/migrations; no usa
@@ -1143,11 +1140,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -1178,7 +1176,7 @@ jobs:
     permissions:
       contents: read
     needs:
-      [arbol, typecheck, lint, unit-tests, build, integration-tests, e2e-tests,
+      [arbol, typecheck, unit-tests, build, integration-tests, e2e-tests,
        bundle-size, tenencia-capa-datos, pen-test-local, bases]
     if: >-
       ${{ !cancelled() && needs.arbol.outputs.saltear == 'false' && needs.arbol.outputs.arbol != ''

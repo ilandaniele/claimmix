@@ -5019,6 +5019,29 @@ reescribió. #451 los saca del árbol actual con datos sintéticos.
 - Se relanzaron CI, CodeQL y Secretos de #446 y #448–#451. #448–#451 entran a qa juntos
   con #446, en `integra/lote-1-11`.
 
+### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, rama `ci/por-ambiente`)
+
+Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha>` o `PRD · deploy <sha>`, y sus checks llevan el entorno adelante (`DEV / Smoke del deploy`, `QA / Ensayo de conversaciones`, `PRD · Smoke y salud de las bases`). Los siete workflows siguen, con un nombre que dice cuándo corren (`PR y main · Chequeos del código`, `Post-deploy · DEV, QA y PRD`, `Programado · Barrer trabados en DEV y PRD`). No se saca ningún check: `Tipos` y `Lint` pasan a ser un solo job, `Tipos y lint`.
+
+- **Dev sin `inherit`.** El job `produccion` pasó a llamarse `dev` y mapea sus catorce secretos uno por uno: ningún caller usa `secrets: inherit`, y `tests/unit/ci-secretos-del-reusable.test.ts` frena un secreto declarado que no llegue.
+- **Caché y tiempo.** Cada job que instala guarda la caché de pnpm. Con el repo público los runners estándar no se cobran: esto acorta la corrida de cada PR (el plan estimó ≈2 min de runner por push, sin medir), no ahorra plata. El k6 `carga` y `secrets.yml` siguen en `ubuntu-latest`, y el job `origen` y los logs sin detalle de #451 quedan como estaban.
+- **Disparos a mano.** El de `deploy-checks.yml` se fue. El del post-deploy corre sólo desde `main` y sólo contra el alias de dev, con el interruptor `ensayar` (`gh workflow run post-deploy.yml --ref main -f ensayar=false`). Residuo aceptado: ese freno vive en el archivo disparado, y el ruleset 25217107 (sólo por PR) no frena un `workflow_dispatch` desde una rama. Quien edite el freno en una rama y la dispare expone los secretos de dev (el ensayo igual falla en WIF). Lo mismo valía antes por el disparo de `deploy-checks.yml`, que corría código de la rama con todos los secretos.
+- **Marcas que saltean trabajo.** `ensayo-verde-<árbol>` sólo cuenta si la subió el post-deploy de un deploy de QA en verde, y `ci-verde-<árbol>` sólo si la subió `ci.yml` desde un commit que ya está en la historia. Antes valía cualquier artefacto con ese nombre. Limita quién puede dejar una marca; no es una firma.
+- **Cadenas de DEV.** El shell de QA y el de los e2e ya no las reciben: la comparación «¿es la misma base?» va en la expresión y al shell llega sólo `true` o `false`.
+- **k6.** QA tiene su propia cola (`carga-qa`) y cada proyecto la suya para las vistas previas (`carga-preview-<environment>`): antes una vista previa podía cancelar la carga de QA. Contra PRD no corre nunca, ni por un deploy ni por una vista previa del proyecto de prd ni a mano.
+- **Invariantes.** La 12 rechaza un grupo de `concurrency` armado con `github.ref`, y la 15 también lee el `run-name`.
+- **Checks obligatorios.** El ruleset 25217107 todavía no los exige y espera a este renombre: serían los diez de `ci.yml`, `codeql.yml` y `secrets.yml` (con `Tipos y lint` en lugar de `Tipos` y `Lint`) más el estado `Post-deploy QA`. Exigirlos necesita el OK del dueño.
+- **Al llegar a qa y a main**, mirar la primera corrida de DEV, de QA y de PRD: título, nombres de los checks, si el ensayo corrió o se salteó (y, si se salteó, que el resumen nombre el árbol de QA) y el estado `Post-deploy QA`. Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambian de nombre.
+
+### Un audio mudo no inventa una denuncia (2026-10-16, #453)
+
+El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso se derivaba a un especialista en el turno de la nota de voz y el PDF siguiente no se leía. Sin fixtures, la nota es `tests/fixtures/placeholder.ogg`, 2 s de Opus en silencio, y gemini-3.8-flash le inventó voz en 3 de 6 llamadas de una sonda (un robo con la ventana rota, una piedra en el parabrisas). La transcripción falsa reemplazaba al marcador y la deliberación derivaba por hechos que nadie contó. En producción pasaba lo mismo con un audio con ruido.
+
+- **Tope de palabras.** `transcribir.ts` descarta una transcripción con más de cuatro palabras por segundo de audio, más cuatro de gracia (`metadatos.segundos`, medido al recibir; sin duración no se juzga). Log `email_worker.transcripcion_inverosimil`, sólo con las cuentas.
+- **El marcador solo no cuenta hechos.** Un mensaje que es sólo `[Mensaje de audio adjunto]` no se delibera ni sube la gravedad del caso (`gravedadSinHechosNuevos`).
+- Tres corridas de `nota-de-voz-y-pdf` sin fixtures, verdes; en una, la guarda descartó 21 palabras para 2 s de audio. La temperatura no se tocó: Google desaconseja bajarla en Gemini 3.
+- Entra a qa junto con `ci/por-ambiente` (#452) en `integra/ci-y-audio`, para un solo Post-deploy de QA.
+
 ### 🙋 Waiting on you (not code)
 
 - **Promoción a prd.** Con #446 en qa y main en verde, la próxima promoción lleva

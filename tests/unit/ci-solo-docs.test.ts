@@ -113,6 +113,8 @@ const conGhFalso = (script: string, falso: Record<string, string>) => {
       '  repos/fake/repo/commits/*) echo "$FALSO_PADRE" ;;',
       '  *verde-arbol-padre*) echo "$FALSO_HAY_PADRE" ;;',
       '  *actions/artifacts*) echo "$FALSO_HAY" ;;',
+      '  *actions/runs/*) echo "$FALSO_ORIGEN" ;;',
+      '  *compare/c0ffee*) echo "$FALSO_RELACION" ;;',
       '  *compare/*) echo "$FALSO_OTROS" ;;',
       "esac",
       'exit "${FALSO_SALIDA:-0}"',
@@ -130,8 +132,10 @@ const conGhFalso = (script: string, falso: Record<string, string>) => {
       FALSO_ARBOL: "arbol-nuevo",
       FALSO_PADRE: "padre-sha",
       FALSO_ARBOL_PADRE: "arbol-padre",
-      FALSO_HAY: "0",
-      FALSO_HAY_PADRE: "1",
+      FALSO_HAY: "",
+      FALSO_HAY_PADRE: "7",
+      FALSO_ORIGEN: ".github/workflows/post-deploy.yml deployment_status success",
+      FALSO_RELACION: "ahead",
       FALSO_OTROS: "0",
       GITHUB_OUTPUT: salida,
       GITHUB_STEP_SUMMARY: join(dir, "resumen"),
@@ -153,27 +157,56 @@ const conGhFalso = (script: string, falso: Record<string, string>) => {
 // Lo que no es «sólo docs sobre un árbol aprobado» corre todo.
 const SEGURO: [string, Record<string, string>][] = [
   ["otros archivos", { FALSO_OTROS: "2" }],
-  ["el padre sin marca", { FALSO_HAY_PADRE: "0" }],
+  ["el padre sin marca", { FALSO_HAY_PADRE: "" }],
   ["sin padre", { FALSO_PADRE: "" }],
   ["la API falla", { FALSO_SALIDA: "1" }],
   ["respuesta rara", { FALSO_OTROS: "basura" }],
 ];
 
+// Una marca de ci.yml cuenta si la dejó una corrida de ci.yml, desde un commit
+// que ya está en la historia de este (el `compare` da `identical` o `ahead`).
+const conCi = (falso: Record<string, string>) =>
+  conGhFalso(SCRIPTS.ci, { FALSO_ORIGEN: ".github/workflows/ci.yml c0ffee", ...falso });
+
+// Un artefacto con ese nombre lo puede subir cualquier paso de cualquier corrida.
+const MARCA_AJENA_CI: [string, Record<string, string>][] = [
+  ["de otro workflow", { FALSO_ORIGEN: ".github/workflows/post-deploy.yml c0ffee" }],
+  ["de una rama que no es ancestro", { FALSO_RELACION: "diverged" }],
+  ["de un commit posterior", { FALSO_RELACION: "behind" }],
+  ["con una cabeza rara", { FALSO_ORIGEN: ".github/workflows/ci.yml basura" }],
+];
+
+const MARCA_AJENA_QA: [string, Record<string, string>][] = [
+  ["de ci.yml", { FALSO_ORIGEN: ".github/workflows/ci.yml pull_request success" }],
+  ["de un disparo a mano", { FALSO_ORIGEN: ".github/workflows/post-deploy.yml workflow_dispatch success" }],
+  ["de una corrida roja", { FALSO_ORIGEN: ".github/workflows/post-deploy.yml deployment_status failure" }],
+];
+
 describe("ci.yml: `arbol` hereda la marca del padre", () => {
   it.skipIf(!hayBash)("sólo docs sobre un árbol probado: saltea y marca el árbol nuevo", () => {
-    expect(conGhFalso(SCRIPTS.ci, {})).toBe("arbol=arbol-nuevo\nsaltear=true\nsolo_docs=true\n");
+    expect(conCi({})).toBe("arbol=arbol-nuevo\nsaltear=true\nsolo_docs=true\n");
   });
 
   it.skipIf(!hayBash)("con su propia marca saltea sin mirar el padre", () => {
-    expect(conGhFalso(SCRIPTS.ci, { FALSO_HAY: "1", FALSO_OTROS: "9" })).toContain("saltear=true\nsolo_docs=false\n");
+    expect(conCi({ FALSO_HAY: "8", FALSO_OTROS: "9" })).toContain("saltear=true\nsolo_docs=false\n");
   });
 
   it.skipIf(!hayBash).each([...SEGURO, ["un disparo a mano", { EVENTO: "workflow_dispatch" }]] as const)(
     "%s: corre todo",
     (_, falso) => {
-      expect(conGhFalso(SCRIPTS.ci, falso)).toContain("saltear=false\nsolo_docs=false\n");
+      expect(conCi(falso)).toContain("saltear=false\nsolo_docs=false\n");
     },
   );
+
+  it.skipIf(!hayBash).each(MARCA_AJENA_CI)("una marca %s no cuenta: corre todo", (_, falso) => {
+    expect(conCi(falso)).toContain("saltear=false\nsolo_docs=false\n");
+  });
+
+  it("busca la marca de ci.yml, sólo de este repo y sólo de un commit de esta historia", () => {
+    expect(SCRIPTS.ci).toContain(".workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID");
+    expect(SCRIPTS.ci).toContain(".github/workflows/ci.yml");
+    expect(SCRIPTS.ci).toMatch(/identical\|ahead/);
+  });
 
   it("la marca del árbol de sólo docs no la deja un fork", () => {
     const cuerpo = cuerpoDe(ci, "arbol");
@@ -216,9 +249,14 @@ describe("post-deploy.yml: QA no repite el ensayo de un árbol de sólo docs", (
     expect(conGhFalso(SCRIPTS.qa, falso)).toBe("solo_docs=false\n");
   });
 
+  it.skipIf(!hayBash).each(MARCA_AJENA_QA)("una marca %s no cuenta: ensaya", (_, falso) => {
+    expect(conGhFalso(SCRIPTS.qa, falso)).toBe("solo_docs=false\n");
+  });
+
   it("busca la marca de QA, y sólo de este repo", () => {
     expect(SCRIPTS.qa).toContain("actions/artifacts?name=ensayo-verde-$arbol_padre");
     expect(SCRIPTS.qa).toContain(".workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID");
+    expect(SCRIPTS.qa).toContain(".github/workflows/post-deploy.yml deployment_status success");
   });
 
   it("apaga sólo el ensayo; el veredicto sigue exigiendo todo lo demás", () => {

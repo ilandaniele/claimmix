@@ -65,7 +65,7 @@ describe("un check requerido no queda skipped porque falló uno que no lo es", (
   const delRepo = requeridos();
 
   it("la tabla de PROMOCION.md nombra los requeridos de ci.yml", () => {
-    for (const n of ["Tipos", "Build", "Tests E2E", "Aislamiento de tenants", "Pen test local"]) {
+    for (const n of ["Tipos y lint", "Build", "Tests E2E", "Aislamiento de tenants", "Pen test local"]) {
       expect(delRepo.has(n)).toBe(true);
     }
     expect(delRepo.has("Tests de integración")).toBe(false);

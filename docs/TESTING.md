@@ -417,7 +417,7 @@ esa parte no se mide y se avisa — que es distinto de darla por medida.
 
 **El resumen se guarda.** `--reporte carga.json` escribe el JSON y, al lado, el
 mismo objeto como `carga.html`. El post-deploy lo sube como artefacto del
-trabajo *Carga de lectura*, que es lo que hacía falta para que «comparalo con la
+trabajo *Carga del tablero*, que es lo que hacía falta para que «comparalo con la
 corrida del deploy anterior» quiera decir algo.
 
 **La mitad de escritura** manda N asegurados inventados al webhook del deploy de
@@ -884,18 +884,27 @@ producción.
 lint, tests, build, auditoría de dependencias. Si ese árbol ya pasó en el PR,
 sólo corre la auditoría (ver «Antes de mergear» en [docs/PROMOCION.md](PROMOCION.md)).
 
-### Cómo se llama cada check, después de septiembre de 2026
+### Cómo se llama cada check, desde octubre de 2026
 
 Los nombres cambiaron para que un check leído sin el prefijo del workflow —el
-que arma GitHub en la lista de un PR— siga diciendo qué mira. Once son
-obligatorios en `main` y en `qa` (ver el paso 9 de
-[docs/PROMOCION.md](PROMOCION.md)); los demás corren en cada PR pero no
-bloquean el merge.
+que arma GitHub en la lista de un PR— siga diciendo qué mira. Diez son
+obligatorios en `main` y en `qa` (más el estado `Post-deploy QA`, sólo con base
+`main`; ver el paso 9 de [docs/PROMOCION.md](PROMOCION.md)); los demás corren
+en cada PR pero no bloquean el merge.
+
+| Archivo | Nombre en Actions | Cuándo | Contra qué |
+|---|---|---|---|
+| `ci.yml` | PR y main · Chequeos del código | cada PR a qa/main y cada push a main | — |
+| `codeql.yml` | PR y semanal · CodeQL | cada PR y los lunes | — |
+| `secrets.yml` | PR y semanal · Secretos, datos personales y arquitectura | cada PR y los domingos | — |
+| `post-deploy.yml` | Post-deploy · DEV, QA y PRD | cada deploy de Vercel | DEV, QA o PRD, según el proyecto |
+| `deploy-checks.yml` | Chequeos de un deploy (lo llama Post-deploy) | sólo desde post-deploy | DEV o QA |
+| `load-tests.yml` | Post-deploy · Carga k6 de vistas previas y QA | vistas previas de claimmix y claimmix-qa, deploy de QA, a mano; nunca PRD | la URL del deploy |
+| `barrer-trabados.yml` | Programado · Barrer trabados en DEV y PRD | cada 15 min DEV, cada 2 h PRD, a mano | DEV y PRD |
 
 `ci.yml`:
 
-- **Tipos** (obligatorio) — `pnpm type-check`.
-- **Lint** (obligatorio) — `pnpm lint`.
+- **Tipos y lint** (obligatorio) — `pnpm type-check` y después `pnpm lint`, en el mismo job; el lint corre aunque los tipos fallen.
 - **Tests unitarios** (obligatorio) — la suite unitaria con el piso de cobertura de `vitest.config.ts`, más los flujos durables.
 - **Build** (obligatorio) — `pnpm build`.
 - **Tests de integración** — contra el ensayo, si `STAGING_DATABASE_URL` está.
@@ -914,15 +923,12 @@ bloquean el merge.
 
 - **Credenciales, datos personales y arquitectura** (obligatorio) — gitleaks sobre los commits del PR, `bash scripts/check-personal-data.sh` y `node scripts/check-architecture.mjs`, en un solo job; el historial entero corre aparte, los domingos.
 
-**Después de cada deploy de producción** — `.github/workflows/post-deploy.yml`,
-que llama al workflow reusable `.github/workflows/deploy-checks.yml`. GitHub
-recibe de Vercel el aviso de que el deploy terminó bien y dispara siete
-chequeos: el smoke primero, y colgando de él los otros seis.
+**Después de cada deploy** — `.github/workflows/post-deploy.yml`. Lee de qué proyecto de Vercel es el deploy y corre el grupo de ese entorno: DEV (`claimmix`), QA (`claimmix-qa`) o PRD (`claimmix-prd`). Cada corrida se titula con el entorno y el commit —`DEV · deploy <sha>`, `QA · deploy <sha>`, `PRD · deploy <sha>`—, y las que no chequean nada lo dicen: «Sin chequeos» o «Vista previa · sin chequeos». DEV y QA llaman al workflow reusable `.github/workflows/deploy-checks.yml`: seis chequeos, el smoke primero y los otros cinco colgando de él, más el resumen. PRD corre sólo smoke y salud (ver más abajo).
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
 2. `pnpm rehearse`: las veintiséis conversaciones enteras contra el agente real.
-   Corre sólo si el smoke pasó — si producción no llega a la base o al modelo,
+   Corre sólo si el smoke pasó — si el entorno no llega a la base o al modelo,
    el ensayo va a fallar por eso y su resultado no diría nada sobre el agente.
 3. `pnpm load --reporte carga.json`: las consultas del tablero con la mesa
    llena, y el plan que Postgres elige para cada una. Gratis, no escribe nada.
@@ -934,7 +940,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
    extracciones, y borra los casos al terminar.
 5. `pnpm pentest`: cada ruta de la API sin credenciales, las firmas de webhook,
    las cabeceras y lo que cuenta un error. Gratis. Falla si algo quedó abierto.
-6. Migraciones y permisos del rol, en un solo job que sólo lee. Primero, que
+6. Migraciones y permisos de la base, en un solo job que sólo lee. Primero, que
    no haya una migración del repo sin registrar en `schema_migrations`
    (`migrate.mjs --exigir-al-dia`). Después `pnpm permisos`: el rol
    restringido con el que consulta la aplicación puede hacer lo que la capa de
@@ -944,7 +950,7 @@ chequeos: el smoke primero, y colgando de él los otros seis.
    y que toda tabla con `tenant_id` tenga RLS, `FORCE` y política. Las migraciones
    de QA y de producción se aplican a mano, y un `ALTER ROLE` no deja registro.
 
-Hay un séptimo trabajo que no verifica nada, `alcance`. Corre con `if: always()`
+Hay un trabajo más que no verifica nada, `alcance` («Resumen de lo que corrió»). Corre con `if: always()`
 y escribe en el resumen del run una fila por chequeo: **corrió**, **corrió y
 falló**, o **NO corrió y por qué**. También nombra si el smoke fue profundo o
 liviano y qué chequeos de salud se toleraron sin verificar. Existe porque un
@@ -962,23 +968,11 @@ de WhatsApp— ya estaban. `BETTER_AUTH_SECRET` dejó de estar entre ellos: cada
 que importa `@/lib/auth` genera el suyo por corrida (`openssl rand -hex 32`,
 enmascarado), así que el de verdad no sale de Vercel hacia un runner. Lo que el
 chequeo mira de verdad vive en el deploy, no en el runner, que es exactamente el
-punto.
+punto. El job `dev` los pasa uno por uno, con su mismo nombre; ningún caller usa `secrets: inherit`.
 
-**Contra QA corre menos, y lo que no corre queda escrito.** El caller de
-producción hereda los secretos del repositorio; el de QA no puede —eso
-apuntaría a la base de producción los seis trabajos que corren en el runner, y
-tres de ellos escriben—, así que `deploy-checks.yml` declara sus secretos uno
-por uno y el caller de QA mapea cada uno con su nombre `QA_*`. QA corre el
-smoke liviano, más los dos chequeos que sólo leen el catálogo y el registro
-de migraciones; el ensayo corre desde que QA tiene balde de R2 propio
-(`claimmix-qa-attachments`, 20/09), y el timbre, el pen test y la «Carga de
-lectura» de este workflow no corren nunca ahí —el k6 de `load-tests.yml` sí,
-aparte, contra el alias público de QA. Los secretos `QA_*` del repositorio
-existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el
-post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo
-incluido.
+**Contra QA corre menos, y lo que no corre queda escrito.** Ningún caller hereda los secretos: `deploy-checks.yml` declara los suyos uno por uno, el job `dev` pasa los del repositorio con su mismo nombre y el job `qa` mapea cada uno a su `QA_*` —con los de DEV, los trabajos que corren en el runner apuntarían a la base de DEV, que tiene datos reales, y tres de ellos escriben—. Antes, `qa_secretos` comprueba que los de QA no sean los de DEV; la comparación se hace en la expresión, así que el shell de QA nunca recibe una cadena de DEV. QA corre el smoke liviano, migraciones y permisos, el ensayo (desde que tiene balde de R2 propio, `claimmix-qa-attachments`, 20/09) y el pen test, con la pared de un inquilino propio (`--pared-propia`) y los ataques al agente. La entrada por WhatsApp y mail y la «Carga del tablero» no corren nunca ahí; el k6 de `load-tests.yml` sí, aparte, contra el alias público de QA. Los secretos `QA_*` del repositorio existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo incluido.
 
-**La Carga con k6 y los PRs de fork.** `load-tests.yml` corre por
+**El k6 de `load-tests.yml` y los PRs de fork.** `load-tests.yml` corre por
 `deployment_status`, y para ese evento GitHub carga el workflow del commit
 desplegado, no el de `main`: quien despliega un commit también escribe los
 workflows que corren con él, y con los secretos del repo (vale igual para
@@ -993,9 +987,12 @@ runner, no contra la URL: el mismo código, el mismo modelo y los mismos escenar
 cambia la base. Una promoción de `qa` a `main` arma el mismo árbol que QA acaba de ensayar,
 así que repetirlo eran de 25 a 37 minutos de Actions para probar lo mismo. Cuando el
 veredicto de QA sale verde, `qa_veredicto` deja el artefacto `ensayo-verde-<árbol>`; el job
-`ensayo_previo` lo busca y, si está, `Producción` corre todo menos el ensayo y lo anota en
-el resumen. Ante cualquier duda (sin marca, error de la API, disparo a mano) ensaya. Contra
-la base de dev lo vuelve a correr el `pnpm check` completo de después de cada deploy.
+`ensayo_previo` lo busca y, si está, `DEV` corre todo menos el ensayo y lo anota en
+el resumen. La marca sólo cuenta si la dejó el post-deploy de un deploy de QA que terminó
+en verde; un artefacto con ese nombre subido desde otra corrida no saltea nada. Ante
+cualquier duda (sin marca, error de la API, disparo a mano) ensaya, salvo un disparo a mano
+con `ensayar=false`. Contra la base de dev lo vuelve a correr el `pnpm check` completo de
+después de cada deploy.
 
 **Un cambio que sólo toca documentación no se ensaya.** Si el commit desplegado a QA difiere
 de su padre sólo en archivos `.md` (salvo `docs/PROMOCION.md`, que leen los tests) y el
@@ -1008,7 +1005,7 @@ código, 300 archivos o más, un error de la API) corre todo. `tests/unit/ci-sol
 corre los scripts reales de los tres workflows con un `gh` falso.
 
 **Contra prd corre todavía menos, a propósito.** `claimmix-prd` es el proyecto de Vercel
-con los clientes de verdad, y el job `PRD` de `post-deploy.yml` (se dispara con el
+con los clientes de verdad, y el job `PRD · Smoke y salud de las bases` de `post-deploy.yml` (se dispara con el
 entorno `Production` de ese proyecto, igual que el de QA) no escribe nada: corre
 `pnpm smoke` sin `--deep` contra `vars.PRD_URL`, esperando el commit del deploy, y después
 pide `/api/health?deep=1` y falla si `bases.desfase` es verdadero. Con
@@ -1030,10 +1027,9 @@ resto lo frenan los vetos de `scripts/lib/hosts-vetados.mjs` (también por CLI, 
 --pared-propia` se niega por su cuenta. `pnpm pentest --agent` a mano no mira la URL: no lo
 apuntes a prd. Si tocaste el agente, el ensayo es el de dev, el de QA o el local.
 
-También se puede disparar a mano desde la pestaña *Actions* → *Post-deploy* →
-*Run workflow*, con una URL distinta si querés apuntar a un preview.
+También se puede disparar a mano: *Actions* → *Post-deploy · DEV, QA y PRD* → *Run workflow*. Sólo desde `main` y sólo el alias de dev (`https://claimmix-dev.vercel.app`): corre con los secretos de dev. Sin ensayo: `gh workflow run post-deploy.yml --ref main -f ensayar=false`. Una rama se prueba con su PR a qa, no a mano.
 
-El ensayo **escribe en la base de producción**: crea los casos del ensayo y los
+El ensayo **escribe en la base de DEV, que tiene datos reales**: crea los casos del ensayo y los
 borra al terminar. Al empezar barre los que hayan quedado de una corrida que
 se murió a mitad de camino — se los reconoce por identidades inventadas (números
 `5490000…`, direcciones `ensayo.*@example.com`) que ningún asegurado real puede

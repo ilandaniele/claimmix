@@ -225,9 +225,9 @@ Okta o Google Workspace de una aseguradora. Lo prueba el piloto.
   pruebas unitarias e integrales, cobertura, auditoría de dependencias,
   licencias, tamaño del paquete, Semgrep (OWASP Top 10), CodeQL, escaneo de
   secretos (sobre cada cambio y semanal) y un pen test local sin credenciales.
-  Nombres de los jobs: `typecheck`, `lint`, `unit-tests`, `build`,
-  `integration-tests`, `cobertura`, `security-audit`, `bundle-size`,
-  `license-audit`, `tenencia-capa-datos`, `pen-test-local`.
+  Nombres de los jobs, en `ci.yml`: `typecheck` (Tipos y lint), `unit-tests`,
+  `build`, `integration-tests`, `e2e-tests`, `security-audit` (con las
+  licencias), `bundle-size`, `tenencia-capa-datos`, `pen-test-local` y `bases`.
 - **Después de cada deploy** corren las pruebas contra el alias real: `pnpm
   smoke`, el ensayo de conversaciones completas, `pnpm pentest` (mitad gratis) y
   la carga.

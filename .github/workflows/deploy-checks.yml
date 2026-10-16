@@ -1,4 +1,4 @@
-# Qué pregunta cada uno de estos siete chequeos, en detalle.
+# Qué pregunta cada uno de estos seis chequeos y el resumen, en detalle.
 #
 # CI ya corre en cada push: tipos, lint, tests, build. Todo eso pasa en un
 # runner limpio y no dice nada sobre el entorno de producción — que es donde
@@ -24,24 +24,23 @@
 #
 # ── Por qué es un workflow reusable ──────────────────────────────────────────
 #
-# Quien decide CUÁNDO correr esto no es siempre el mismo caller: post-deploy.yml
-# lo llama contra producción, y un segundo proyecto de Vercel para QA lo va a
-# llamar contra su propia URL, con su propia base. Cada caller separa la URL y
-# los secretos con `with:` y `secrets: inherit`; `entorno` sólo identifica cuál
-# llamó — hoy ningún job de acá adentro lo usa todavía, queda declarado para
-# cuando un caller lo necesite (por ejemplo, para distinguirlo en un mensaje).
+# Quien decide CUÁNDO correr esto es post-deploy.yml, y lo llama desde dos
+# jobs: `dev` contra el alias de dev y la base de DEV, y `qa` contra QA, con su
+# propia base. Cada caller separa la URL con `with:` y los secretos mapeados uno
+# por uno (ninguno usa `secrets: inherit`); `entorno` sólo identifica cuál
+# llamó, en el resumen del job `alcance`.
 
-name: Chequeos del deploy
+name: Chequeos de un deploy (lo llama Post-deploy)
 
 on:
   workflow_call:
     inputs:
       url:
-        description: "URL contra la que correr los siete chequeos"
+        description: "URL contra la que correr los seis chequeos"
         required: true
         type: string
       entorno:
-        description: "Nombre del entorno que llama (Production, QA…), sólo para identificarlo"
+        description: "Nombre del entorno que llama (DEV, QA), sólo para identificarlo"
         required: true
         type: string
       medir_carga:
@@ -87,7 +86,7 @@ on:
         type: boolean
         default: true
       pared_propia:
-        description: "Si el pen test arma su inquilino B y su caso señuelo (--pared-propia). Sólo QA: producción lo rechaza."
+        description: "Si el pen test arma su inquilino B y su caso señuelo (--pared-propia). Sólo QA: DEV y PRD lo rechazan."
         required: false
         type: boolean
         default: false
@@ -98,16 +97,16 @@ on:
         default: false
     # ── Por qué los secretos van declarados y no heredados ────────────────────
     #
-    # `secrets: inherit` le pasa al workflow los secretos del caller con SU
-    # nombre. Para producción alcanza. Para QA es peligroso: seis de los siete
-    # jobs corren en el runner y hablan con la base por `DATABASE_URL`, y tres
-    # de ellos ESCRIBEN. Heredando, una corrida de QA crearía y borraría casos
-    # en la base de un cliente.
+    # `secrets: inherit` le pasaría al workflow los secretos del caller con SU
+    # nombre, y ningún caller lo usa. Para QA sería peligroso: los chequeos
+    # corren en el runner y hablan con la base por `DATABASE_URL`, y tres de
+    # ellos ESCRIBEN. Heredando, una corrida de QA crearía y borraría casos en
+    # la base de DEV, que tiene datos reales.
     #
-    # Declarándolos, el caller de QA puede mapear `QA_DATABASE_URL` a
-    # `DATABASE_URL` por nombre. Todos van `required: false` a propósito: el
-    # que falta no rompe la llamada, rompe el job que lo necesita, con el
-    # mensaje del script que lo pide. Un secreto ausente tiene que verse.
+    # Declarados, `dev` pasa cada uno con su nombre y `qa` mapea
+    # `QA_DATABASE_URL` a `DATABASE_URL`. Todos van `required: false` a
+    # propósito: el que falta no rompe la llamada, rompe el job que lo necesita,
+    # con el mensaje del script que lo pide. Un secreto ausente tiene que verse.
     #
     # `BETTER_AUTH_SECRET` NO está y no se hereda: el ensayo, el timbre, la
     # carga y el pen test corren el código acá, en el runner, y ninguno firma
@@ -143,56 +142,6 @@ on:
         required: false
       DEMO_TENANT_ID:
         required: false
-  # Para poder ensayar este archivo en una rama antes de que tenga un caller.
-  # `deployment_status` corre el workflow del commit desplegado, no el de la
-  # rama default (por eso la compuerta `origen` de load-tests.yml es una alarma
-  # y no una barrera), y `workflow_call` resuelve el archivo llamado en el mismo
-  # commit que el caller. Sin este trigger propio no hay forma de lanzar a mano
-  # un cambio acá antes de mergearlo.
-  workflow_dispatch:
-    inputs:
-      url:
-        description: "URL contra la que correr los siete chequeos"
-        required: true
-        type: string
-      # Los mismos interruptores que el caller, repetidos acá a propósito: si no
-      # están, `inputs.correr_ensayo` vale vacío en una corrida a mano y los
-      # jobs se saltean solos. Un archivo que a mano corre otra cosa que la que
-      # corre por caller no sirve para ensayarlo antes de mergearlo.
-      #
-      # Salvo `pared_propia` y `atacar_agente`: escriben, no corren contra
-      # producción, y a mano el smoke sólo admite producción. Ofrecerlos acá era
-      # un formulario que siempre termina en rojo; sólo los pasa `workflow_call`.
-      smoke_profundo:
-        description: "Si el smoke corre con --deep (sube a R2 y llama al modelo)"
-        required: false
-        type: boolean
-        default: true
-      smoke_tolera:
-        description: "Chequeos de salud que este entorno no configura (coma)"
-        required: false
-        type: string
-        default: ""
-      correr_ensayo:
-        description: "Si corre el ensayo de conversaciones"
-        required: false
-        type: boolean
-        default: true
-      correr_timbre:
-        description: "Si corre el timbre"
-        required: false
-        type: boolean
-        default: true
-      correr_pentest:
-        description: "Si corre el pen test"
-        required: false
-        type: boolean
-        default: true
-      medir_carga:
-        description: "Si corre la medición de carga"
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -202,10 +151,9 @@ jobs:
     name: Smoke del deploy
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Sin guarda de entorno acá: la decide quien llama. Por workflow_call es
-    # el job `produccion` de post-deploy.yml (o, mañana, el de QA); por
-    # workflow_dispatch directo sobre este archivo, dispararlo a mano ya es
-    # la decisión.
+    # Sin guarda de entorno acá: la decide quien llama. Es el job `dev` o el
+    # job `qa` de post-deploy.yml; un disparo a mano de post-deploy.yml entra
+    # por `dev`, y ahí dispararlo ya es la decisión.
     steps:
       # Primero el repositorio: la lista de hosts de ClaimMix vive en
       # scripts/lib/hosts-vetados.mjs y la leen los workflows y los guiones.
@@ -217,8 +165,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Este workflow recibe la URL de su caller (o de quien lo dispare a
-      # mano) y siete jobs cuelgan de este primero, todos con secretos. Antes
+      # Este workflow recibe la URL de su caller y los otros cinco chequeos
+      # cuelgan de este primero, todos con secretos. Antes
       # de que exista ninguno, se comprueba a qué despliegue apunta.
       #
       # Sólo los hosts de ClaimMix, no las vistas previas: `CRON_SECRET` es el
@@ -252,11 +200,12 @@ jobs:
             exit 1
           fi
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
@@ -296,7 +245,7 @@ jobs:
       - name: Qué hacer si esto falló
         if: failure()
         run: |
-          echo "::error::El deploy salió pero producción no está sana."
+          echo "::error::El deploy salió pero el entorno no está sano."
           echo ""
           echo "Mirá el detalle arriba. Los tres casos habituales:"
           echo ""
@@ -349,11 +298,12 @@ jobs:
           workload_identity_provider: projects/1032332436198/locations/global/workloadIdentityPools/vercel/providers/github
           service_account: claimmix-extractor@claimmix-506321.iam.gserviceaccount.com
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
@@ -468,7 +418,7 @@ jobs:
   # Y WHATSAPP_PHONE_NUMBER_ID, que es el número al que le "escribe": el webhook
   # rutea por él, y sin él el evento se descarta y el caso nunca aparece.
   timbre:
-    name: Canales de entrada
+    name: Entrada por WhatsApp y mail
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [smoke]
@@ -478,11 +428,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
@@ -600,7 +551,7 @@ jobs:
   # que la tabla es chica. Un rojo así se deja de mirar, igual que el del
   # sorteo de arriba.
   carga:
-    name: Carga de lectura
+    name: Carga del tablero
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [smoke, rehearse, timbre, pentest, permisos]
@@ -608,11 +559,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
@@ -687,7 +639,7 @@ jobs:
   # rechaza. En QA sí (`atacar_agente`), con su cupo y su base. Contra
   # producción se corren a mano al tocar el agente o los prompts, con
   # `pnpm pentest --agent`.
-  # ── Migraciones y permisos del rol ───────────────────────────────────────────
+  # ── Migraciones y permisos de la base ────────────────────────────────────────
   #
   # Tres preguntas a la base, en un solo runner: las tres instalan lo mismo y
   # tardan menos que la instalación. Cada paso corre aunque el anterior falle,
@@ -707,25 +659,26 @@ jobs:
   #
   # Sólo lee.
   permisos:
-    name: Migraciones y permisos del rol
+    name: Migraciones y permisos de la base
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [smoke]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Instalar dependencias
         id: deps
         run: pnpm install --frozen-lockfile
 
-      # `secrets.DATABASE_URL` ya es la base de cada caller (producción por
-      # `inherit`, QA por `QA_DATABASE_URL` en post-deploy.yml). El nombre no es
+      # `secrets.DATABASE_URL` ya es la base de cada caller (DEV con su mismo
+      # nombre, QA por `QA_DATABASE_URL` en post-deploy.yml). El nombre no es
       # `DATABASE_URL` por lo mismo que en ci.yml: `migrate.mjs` no pasa por
       # `enTenant`. Con `--exigir-al-dia` sólo lee.
       - name: Migraciones aplicadas
@@ -810,7 +763,7 @@ jobs:
           PRD_URL: ${{ vars.PRD_URL }}
         run: |
           if { [ "$ATACAR_AGENTE" = "true" ] || [ "$PARED_PROPIA" = "true" ]; } && ! node scripts/lib/hosts-vetados.mjs --veto "$URL"; then
-            echo "::error::atacar_agente y pared_propia escriben casos: no corren contra producción."
+            echo "::error::atacar_agente y pared_propia escriben casos: no corren contra dev ni prd."
             exit 1
           fi
 
@@ -823,11 +776,12 @@ jobs:
           workload_identity_provider: projects/1032332436198/locations/global/workloadIdentityPools/vercel/providers/github
           service_account: claimmix-extractor@claimmix-506321.iam.gserviceaccount.com
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+          cache: pnpm
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
@@ -884,7 +838,7 @@ jobs:
   #
   # Un caller puede apagar los chequeos que su entorno no puede correr. Eso está
   # bien. Lo que no puede pasar es que se apaguen EN SILENCIO: cuatro jobs verdes
-  # de los que tres ni arrancaron se leen igual que siete chequeos pasados, y de
+  # de los que tres ni arrancaron se leen igual que seis chequeos pasados, y de
   # ahí venía el verde por ausencia.
   #
   # Este job corre siempre, aun con todo rojo, y escribe una fila por chequeo en
@@ -892,7 +846,7 @@ jobs:
   # a fallar por lo que ya falló arriba — ese rojo ya está en su propio job — y
   # tampoco lo tapa.
   alcance:
-    name: Resumen de chequeos
+    name: Resumen de lo que corrió
     runs-on: ubuntu-slim
     timeout-minutes: 5
     needs: [smoke, rehearse, timbre, carga, permisos, pentest]
@@ -941,7 +895,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           fila "Smoke del deploy" "$SMOKE" "propio"
           fila "Ensayo de conversaciones" "$ENSAYO" "correr_ensayo"
-          fila "Canales de entrada (Gmail y WhatsApp)" "$TIMBRE" "correr_timbre"
+          fila "Entrada por WhatsApp y mail" "$TIMBRE" "correr_timbre"
           fila "Pen test (superficie y pared)" "$PENTEST" "correr_pentest"
           # Es el mismo job, pero con otro interruptor: si corrió sin `--agent`,
           # el resultado del pen test no dice nada del agente.
@@ -950,8 +904,8 @@ jobs:
           else
             fila "Ataques al agente (pen test)" "skipped" "atacar_agente"
           fi
-          fila "Migraciones y permisos del rol" "$PERMISOS" "-"
-          fila "Carga de lectura" "$CARGA" "medir_carga"
+          fila "Migraciones y permisos de la base" "$PERMISOS" "-"
+          fila "Carga del tablero" "$CARGA" "medir_carga"
           {
             echo ""
             if [ "$PROFUNDO" = "true" ]; then

@@ -455,7 +455,29 @@ jobs:
               if [ "$origen" = ".github/workflows/post-deploy.yml deployment_status success" ]; then hay=1; break; fi
             done
             if [ "$hay" = 1 ]; then
-              otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md") and . != "docs/PROMOCION.md") | not)] | length end' 2>/dev/null || echo 1)
+              otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md")
+                    and . != "docs/PROMOCION.md"
+                    and . != "entrenamiento/base/extraccion/01-confianza.md"
+                    and . != "entrenamiento/base/extraccion/02-gravedad.md"
+                    and . != "entrenamiento/base/extraccion/03-es-denuncia.md"
+                    and . != "entrenamiento/base/extraccion/04-ramo.md"
+                    and . != "entrenamiento/base/extraccion/05-datos-por-ramo.md"
+                    and . != "entrenamiento/base/extraccion/06-mecanica.md"
+                    and . != "entrenamiento/base/extraccion/07-fraude.md"
+                    and . != "entrenamiento/base/extraccion/08-documentacion.md"
+                    and . != "entrenamiento/base/extraccion/90-gravedad-del-codigo.md"
+                    and . != "entrenamiento/base/extraccion/91-derivar.md"
+                    and . != "entrenamiento/base/decidir/01-criterios.md"
+                    and . != "entrenamiento/base/decidir/02-consultar.md"
+                    and . != "entrenamiento/base/decidir/90-pedir.md"
+                    and . != "entrenamiento/base/decidir/91-responder.md"
+                    and . != "entrenamiento/base/redactar/01-voz.md"
+                    and . != "entrenamiento/base/redactar/02-pedir.md"
+                    and . != "entrenamiento/base/redactar/03-acuse.md"
+                    and . != "entrenamiento/base/redactar/04-canal-whatsapp.md"
+                    and . != "entrenamiento/base/redactar/05-canal-mail.md"
+                    and . != "entrenamiento/base/redactar/06-tono.md"
+                    ) | not)] | length end' 2>/dev/null || echo 1)
               if [ "$otros" = 0 ]; then solo_docs=true; fi
             fi
           fi

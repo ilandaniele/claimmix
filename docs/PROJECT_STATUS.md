@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-15. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-16. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -4985,11 +4985,44 @@ sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
   `pnpm check --local` con 3.8 verde: las 26 conversaciones sin diferencias (26,6 min). La
   primera corrida encontró dos mocks de `gap-analyzer` sin `MEDIUM_CONFIDENCE_LOW`.
 
+### Repo público otra vez (2026-10-16, #451)
+
+El 16/10 de madrugada el repo volvió a ser público para que Actions corra en runners
+estándar sin gastar el presupuesto. El dueño aceptó que la historia de git sigue teniendo
+datos reales de una denunciante (DNI, correo, número de denuncia y apellido, desde
+bba09343, #30), además de su propio celular y un ID de facturación: la historia no se
+reescribió. #451 los saca del árbol actual con datos sintéticos.
+
+- **Antes del cambio** se borraron 286 runs de `barrer-trabados` y 78 runs fallidos de la
+  Carga: sus logs tenían el JSON del barrido y detalle de salud.
+- **Ruleset 25217107** «main, qa y prd: sólo por PR»: esas ramas no se pueden borrar, no
+  aceptan force-push y todo entra por PR (0 aprobaciones, sin bypass). Todavía no exige
+  checks: eso espera al renombre de los jobs del CI. La protección clásica de septiembre
+  (14 contextos y `enforce_admins`) no volvió.
+- **Secret scanning y push protection** prendidos, con 0 alertas. La aprobación de
+  workflows de forks queda en el default de GitHub (contribuyentes nuevos).
+- **Logs públicos.** Todo log y artefacto de Actions es público: ningún workflow imprime
+  datos personales, detalle de salud ni secretos. #451 lo cierra para el barrido
+  (`resumen()` en lugar de `cat respuesta.json`) y para `mirar-salud` (`sinDetalle` en
+  Actions). Hasta que #451 llegue a main, el barrido de dev y prd sigue publicando el
+  detalle enmascarado.
+- **Carga y forks.** Un `deployment_status` corre el workflow del SHA desplegado, así que
+  la puerta `origen` de `load-tests.yml` es sólo una alarma. El control real es la Git Fork
+  Protection de Vercel, prendida en los tres proyectos, y no autorizar nunca el preview de
+  un fork.
+- **CodeQL** vuelve a subir el SARIF porque el repo no es privado. En un PR de fork el
+  token es de sólo lectura y la subida falla.
+- **Programados.** En un repo público GitHub apaga los workflows programados tras 60 días
+  sin commits. Si el repo se queda quieto, el barrido se reactiva a mano.
+- **Retención de logs** en el default: con un día se perderían las marcas
+  `ensayo-verde-*` y `ci-verde-*`.
+- Se relanzaron CI, CodeQL y Secretos de #446 y #448–#451. #448–#451 entran a qa juntos
+  con #446, en `integra/lote-1-11`.
+
 ### 🙋 Waiting on you (not code)
 
-- **Actions sin cuota hasta el 1/11.** Sin planes pagos, las opciones son esperar, un runner
-  propio en tu máquina (con tu OK) o un cron externo gratis para el barrido de trabados, que
-  configurás vos. Sin CI no hay promoción a prd: la próxima lleva #436–#441.
+- **Promoción a prd.** Con #446 en qa y main en verde, la próxima promoción lleva
+  #436–#451 y espera tu OK.
 
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner
@@ -4997,9 +5030,6 @@ sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
 - **Póliza cambiada a mitad de caso.** Decidir si el agente avisa cuando la persona corrige el
   número de póliza y si AC24 se afloja para valores que escribió ella misma. El arreglo está
   mapeado en «DNI o CUIT, y tres decisiones de auth».
-- **Actions hasta el 1/11.** El presupuesto del mes se agotó: #440, #441 y #442 esperan CI, y
-  la promoción a prd espera tu OK.
-
 - **App propia del cliente: antes de prenderla.** (1) W6, el ensayo manual en dev con un
   portfolio de prueba nuevo y el chip de repuesto; cierra las incógnitas I1 a I42 de la
   Parte H. (2) Decidir con eso si hace falta App Review (I7, Q35): si hace falta, la vía no se

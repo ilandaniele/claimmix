@@ -36,6 +36,12 @@ const MAX_NOTAS = 2;
 const MAX_TEXTO = 4000;
 const MAX_RESUMEN = 200;
 const SIN_TEXTO = { transcripcion: "", resumen: "" };
+/**
+ * Hablando rápido no se pasa de cuatro palabras por segundo. Con más, el
+ * modelo inventó: ante un audio mudo de 2 s escribía denuncias enteras.
+ */
+const PALABRAS_POR_SEGUNDO = 4;
+const PALABRAS_DE_GRACIA = 4;
 
 /** Los nombres que Vertex entiende para el mismo formato. */
 const MIME_DEL_MODELO: Record<string, string> = {
@@ -76,7 +82,7 @@ export function notasPendientes(adjuntos: AdjuntoDelCaso[]): AdjuntoDelCaso[] {
   }).slice(0, MAX_NOTAS);
 }
 
-function leer(texto: string | null): { transcripcion: string; resumen: string } | null {
+function leer(texto: string | null, segundos: number | undefined): { transcripcion: string; resumen: string } | null {
   if (!texto) return null;
   try {
     const crudo = JSON.parse(texto) as { hay_voz?: unknown; transcripcion?: unknown; resumen?: unknown };
@@ -84,6 +90,11 @@ function leer(texto: string | null): { transcripcion: string; resumen: string } 
     // relleno, y llegaba al extractor como si lo hubiera dicho la persona.
     if (crudo.hay_voz !== true) return SIN_TEXTO;
     const transcripcion = typeof crudo.transcripcion === "string" ? crudo.transcripcion : "";
+    const palabras = transcripcion.split(/\s+/).filter(Boolean).length;
+    if (segundos !== undefined && palabras > segundos * PALABRAS_POR_SEGUNDO + PALABRAS_DE_GRACIA) {
+      logger.warn({ palabras, segundos }, "email_worker.transcripcion_inverosimil");
+      return SIN_TEXTO;
+    }
     const resumen = typeof crudo.resumen === "string" ? crudo.resumen.trim() : "";
     return {
       // Va a `body_text` y de ahí al prompt entre centinelas: no puede cerrarlos.
@@ -135,7 +146,7 @@ export async function transcribirNotasDeVoz(args: {
         { mimeType: MIME_DEL_MODELO[mime] ?? mime, data: bytes.toString("base64") },
       ]);
       await registrarConsumoDelModelo(tenantId, model, usage);
-      hechas.push({ nota, ...(leer(text) ?? SIN_TEXTO) });
+      hechas.push({ nota, ...(leer(text, nota.metadatos?.segundos) ?? SIN_TEXTO) });
     } catch (err) {
       const meta = errMeta(err);
       logger.warn({ case_id: caseId, ...meta }, "email_worker.transcripcion_fallo");

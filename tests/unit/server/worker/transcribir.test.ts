@@ -188,6 +188,22 @@ describe("transcribirNotasDeVoz", () => {
     expect((await correr([nota()])).size).toBe(0);
   });
 
+  it("más palabras que las que entran en el audio es relleno del modelo: no se guarda", async () => {
+    const inventada = "Hola, quería hacer una denuncia por un robo en mi casa, me rompieron la ventana y se llevaron todo.";
+    llamar.mockResolvedValue(respuesta(inventada, "Cuenta un robo."));
+
+    const nuevos = await correr([nota({ metadatos: { firma: true, segundos: 2 } })]);
+
+    expect(nuevos.size).toBe(0);
+    expect(warn).toHaveBeenCalledWith({ palabras: 19, segundos: 2 }, "email_worker.transcripcion_inverosimil");
+    expect(escritas).toHaveLength(1);
+    expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+
+    // La misma frase en un audio largo es verosímil; sin duración medida, no se juzga.
+    expect((await correr([nota({ metadatos: { firma: true, segundos: 6 } })])).size).toBe(1);
+    expect((await correr([nota({ metadatos: { firma: true } })])).size).toBe(1);
+  });
+
   it("una segunda nota del mismo mensaje, en otra corrida, va debajo de la primera", async () => {
     llamar.mockResolvedValue(respuesta("Y el otro auto se fue."));
     const primera = `${ENCABEZADO_TRANSCRIPCION}\nChoqué ayer.`;

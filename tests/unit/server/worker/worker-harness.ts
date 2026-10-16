@@ -350,6 +350,7 @@ export function registrarMocks(opciones: {
       .mockImplementation(
         (severidad: string) => necesitaEspecialista || severidad === "high" || severidad === "critical"
       ),
+    gravedadSinHechosNuevos: (severidad: unknown) => severidad,
   }));
 
   vi.doMock("@/core/case/fsm", () => ({

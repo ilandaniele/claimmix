@@ -5030,7 +5030,7 @@ Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha
 - **Cadenas de DEV.** El shell de QA y el de los e2e ya no las reciben: la comparación «¿es la misma base?» va en la expresión y al shell llega sólo `true` o `false`.
 - **k6.** QA tiene su propia cola (`carga-qa`) y cada proyecto la suya para las vistas previas (`carga-preview-<environment>`): antes una vista previa podía cancelar la carga de QA. Contra PRD no corre nunca, ni por un deploy ni por una vista previa del proyecto de prd ni a mano.
 - **Invariantes.** La 12 rechaza un grupo de `concurrency` armado con `github.ref`, y la 15 también lee el `run-name`.
-- **Checks obligatorios.** El ruleset 25217107 todavía no los exige y espera a este renombre: serían los diez de `ci.yml`, `codeql.yml` y `secrets.yml` (con `Tipos y lint` en lugar de `Tipos` y `Lint`) más el estado `Post-deploy QA`. Exigirlos necesita el OK del dueño.
+- **Checks obligatorios.** Con el OK del dueño, el 16/10 se creó el ruleset 25264579 «main y qa: checks del CI obligatorios», aparte del 25217107 y sin bypass. Exige diez checks de GitHub Actions: `Tipos y lint`, `Tests unitarios`, `Tests de integración`, `Build`, `Tests E2E`, `Aislamiento de tenants`, `Bases por cliente`, `Pen test local`, `Peso del bundle` y `Credenciales, datos personales y arquitectura`. Quedan afuera `Vulnerabilidades` (una alerta nueva lo pone rojo sin cambio de código) y el estado `Post-deploy QA`. Un job salteado por la marca de sólo-docs cuenta como pasado. Si se renombra uno de esos jobs, hay que editar el ruleset en el mismo PR o ningún PR se puede mergear.
 - **Primeras corridas.** QA sobre `2cfb8b42` (#454): `QA · deploy <sha>`, verde entero al primer intento, ensayo en 13 min y pen test en 3. DEV sobre `251b799d` (#455): `DEV · deploy <sha>`, el ensayo se salteó por la marca del árbol de QA y la Carga dio p95 de 434 ms en el peor caso. `pnpm check` completo sobre `251b799d`: verde en 14,5 min (26 conversaciones). Falta mirar la primera de PRD, que llega con la próxima promoción.
 - Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambiaron de nombre.
 
@@ -5045,17 +5045,9 @@ El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso s
 
 ### 🙋 Waiting on you (not code)
 
-- **Promoción a prd.** Main está en verde en `251b799d` (QA, DEV y `pnpm check` completo).
-  La próxima promoción lleva #436–#455 y espera tu OK.
-- **Checks obligatorios.** Ruleset nuevo sólo para main y qa con los checks de `ci.yml`,
-  menos `Vulnerabilidades` (alertas nuevas lo ponen rojo sin cambio de código). Espera tu OK.
-
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner
   `VERTEX_EXTRACTION_MODEL=gemini-3.8-flash` o borrar la línea.
-- **Póliza cambiada a mitad de caso.** Decidir si el agente avisa cuando la persona corrige el
-  número de póliza y si AC24 se afloja para valores que escribió ella misma. El arreglo está
-  mapeado en «DNI o CUIT, y tres decisiones de auth».
 - **App propia del cliente: antes de prenderla.** (1) W6, el ensayo manual en dev con un
   portfolio de prueba nuevo y el chip de repuesto; cierra las incógnitas I1 a I42 de la
   Parte H. (2) Decidir con eso si hace falta App Review (I7, Q35): si hace falta, la vía no se

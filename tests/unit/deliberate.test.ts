@@ -39,6 +39,7 @@ import { runTool } from "@/server/ai/agent-tools";
 import { reservarSiEsPrueba } from "@/server/ai/budget";
 import { separarPorRespaldo } from "@/core/case/respaldado-por-busqueda";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
+import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
 
 const mockCallGemini = callGemini as unknown as ReturnType<typeof vi.fn>;
 const mockRunTool = runTool as unknown as ReturnType<typeof vi.fn>;
@@ -642,5 +643,86 @@ describe("deliberate — el presupuesto de las pruebas", () => {
     expect(await deliberate(situation({ latestMessage: ` ${PLACEHOLDER_AUDIO}\n` }))).toBeNull();
     expect(mockReservar).not.toHaveBeenCalled();
     expect(mockCallGemini).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Lo que el equipo de la aseguradora indicó para decidir entra al prompt como
+ * dato, después de la regla que no se negocia y antes de los criterios, en
+ * todas las pasadas. Sin indicaciones el prompt no cambia ni un carácter.
+ */
+describe("deliberate — las indicaciones del equipo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const INDICACIONES = "- [missing_fields] Pedí primero el DNI: Si faltan varios datos, empezá por el DNI.";
+
+  function consulta(tool: string, args: Record<string, unknown> = {}) {
+    return { text: JSON.stringify({ tool, args }), usage: {}, model: "gemini-test" };
+  }
+
+  function decision() {
+    return {
+      text: JSON.stringify({ intent: "ask", ask_for: ["fotos_danos"], reasoning: "x" }),
+      usage: {},
+      model: "gemini-test",
+    };
+  }
+
+  const prompts = () => mockCallGemini.mock.calls.map((c) => c[0] as string);
+
+  it("el bloque va antes de los criterios en la primera y en la última pasada, y «Nunca pidas» queda después", async () => {
+    mockRunTool
+      .mockResolvedValueOnce({ sin_datos: true })
+      .mockResolvedValueOnce({ encontradas: 0 });
+    mockCallGemini
+      .mockResolvedValueOnce(consulta("verificar_poliza", { numero_poliza: "POL-TEST-1" }))
+      .mockResolvedValueOnce(consulta("polizas_por_dni"))
+      .mockResolvedValueOnce(decision());
+
+    expect(await deliberate(situation({ indicaciones: INDICACIONES }))).not.toBeNull();
+    expect(mockCallGemini).toHaveBeenCalledTimes(3);
+
+    for (const i of [0, 2]) {
+      const prompt = prompts()[i];
+      const bloque = prompt.indexOf("<indicaciones_del_equipo>");
+      expect(bloque).toBeGreaterThan(prompt.indexOf("REGLA QUE NO SE NEGOCIA"));
+      expect(prompt).toContain(INDICACIONES);
+      expect(prompt.indexOf("</indicaciones_del_equipo>")).toBeLessThan(
+        prompt.indexOf("Criterios, en orden:")
+      );
+      expect(prompt.indexOf("Nunca pidas")).toBeGreaterThan(prompt.indexOf("Criterios, en orden:"));
+    }
+  });
+
+  it("sin indicaciones, o con un texto vacío, el prompt es el de siempre", async () => {
+    mockCallGemini
+      .mockResolvedValueOnce(decision())
+      .mockResolvedValueOnce(decision())
+      .mockResolvedValueOnce(decision())
+      .mockResolvedValueOnce(decision());
+
+    await deliberate(situation());
+    await deliberate(situation({ indicaciones: undefined }));
+    await deliberate(situation({ indicaciones: "  " }));
+    await deliberate(situation({ indicaciones: INDICACIONES }));
+
+    const [sin, indefinidas, enBlanco, con] = prompts();
+    expect(sin).not.toContain("indicaciones_del_equipo");
+    expect(indefinidas).toBe(sin);
+    expect(enBlanco).toBe(sin);
+    // Quitado el bloque, queda el mismo prompt: el resto no se movió.
+    expect(con.replace(bloqueDeIndicaciones(INDICACIONES, "decidir"), "")).toBe(sin);
+  });
+
+  it("pasan por la máscara: un DNI no llega al modelo", async () => {
+    mockCallGemini.mockResolvedValueOnce(decision());
+
+    await deliberate(
+      situation({ indicaciones: "- [missing_fields] Pedí primero el DNI: si dice DNI 30123456, no lo repitas." })
+    );
+
+    expect(prompts()[0]).not.toContain("30123456");
   });
 });

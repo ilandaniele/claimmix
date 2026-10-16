@@ -160,6 +160,12 @@ export interface ExtractedClaimOutput {
    * que dio ahora, decide si hay que preguntar cuál es el correcto.
    */
   polizaAnterior?: string | null;
+  /**
+   * Lo que el equipo indicó para decidir y para redactar, ya filtrado y con el
+   * tope aplicado. Sólo viaja con `AGENTE_APRENDIDO_EN_CONVERSACION`: sin él
+   * no está la clave.
+   */
+  aprendido?: { decidir?: string; redactar?: string };
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -246,6 +252,10 @@ const mudo: AgentMessenger = {
   },
 };
 
+/** El mismo mensajero con las indicaciones del equipo en cada mensaje; sin texto, el mismo objeto. */
+const conIndicaciones = (m: AgentMessenger, texto?: string): AgentMessenger =>
+  texto ? { send: (msg) => m.send({ ...msg, indicaciones: texto }) } : m;
+
 export async function orchestratePostExtraction(
   caseId: string,
   tenantId: string,
@@ -290,7 +300,9 @@ export async function orchestratePostExtraction(
   if (yaContestada) {
     logger.warn({ case_id: caseId }, "orchestrate.ya_contestado_por_la_corrida_muerta");
   }
-  const messenger: AgentMessenger = yaContestada ? mudo : messengerPedido;
+  const messenger: AgentMessenger = yaContestada
+    ? mudo
+    : conIndicaciones(messengerPedido, extractedOutput.aprendido?.redactar);
 
   let confirmationEmailDispatched = false;
 
@@ -837,6 +849,9 @@ export async function orchestratePostExtraction(
     isComplete: everythingOutstanding.fields.length === 0,
     yaAveriguado,
     remitente: { dni: dniDeQuienEscribe(extractedClaim.fields) },
+    ...(extractedOutput.aprendido?.decidir
+      ? { indicaciones: extractedOutput.aprendido.decidir }
+      : {}),
   });
 
   /*

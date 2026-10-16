@@ -2617,6 +2617,119 @@ describe("orchestratePostExtraction — acting on the agent's plan", () => {
   });
 });
 
+describe("orchestratePostExtraction — las indicaciones del equipo", () => {
+  /*
+   * `aprendido` lo arma el worker con la bandera prendida. Lo de redactar viaja
+   * en cada mensaje que sale por el mensajero; lo de decidir, a deliberate. Sin
+   * `aprendido` nada de lo que se llama cambia.
+   */
+  const REDACTAR = "- [reply_style] Cercanía: escribí corto y sin vueltas.";
+  const DECIDIR = "- [missing_fields] Pedí primero el DNI: si faltan varios datos, empezá por el DNI.";
+
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  async function run(
+    aprendido?: { decidir?: string; redactar?: string },
+    extra: { claim?: ReturnType<typeof extractEmailClaimMock>; heredadaEn?: string } = {}
+  ) {
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extra.claim ?? extractEmailClaimMock(),
+        senderEmail: SENDER_EMAIL,
+        heredadaEn: extra.heredadaEn,
+        ...(aprendido ? { aprendido } : {}),
+      },
+      NO_MATCHES,
+      messenger
+    );
+    return { messenger, enviados: messenger.send.mock.calls.map((c) => c[0]) };
+  }
+
+  it("con aprendido.redactar, cada mensaje que sale lleva las indicaciones", async () => {
+    gapsAre(["policy_number", "dni"]);
+
+    const { enviados } = await run({ redactar: REDACTAR });
+
+    expect(enviados).toHaveLength(1);
+    expect(enviados[0]).toMatchObject({
+      template: "missing_information_request",
+      indicaciones: REDACTAR,
+    });
+    // Arriba, junto a `lastMessage`: nunca adentro de `data`.
+    expect(enviados[0].data).not.toHaveProperty("indicaciones");
+  });
+
+  it("la derivación también las lleva", async () => {
+    const claim = extractEmailClaimMock({ severity: "high", requires_specialist: true });
+
+    const { enviados } = await run({ redactar: REDACTAR }, { claim });
+
+    const derivacion = enviados.find((m) => m.template === "specialist_escalation");
+    expect(derivacion?.indicaciones).toBe(REDACTAR);
+  });
+
+  it("sin aprendido el mensaje es exactamente el de antes", async () => {
+    gapsAre(["policy_number", "dni"]);
+
+    const sin = await run();
+    vi.clearAllMocks();
+    gapsAre(["policy_number", "dni"]);
+    // Con indicaciones sólo para decidir, el mensajero no las recibe.
+    const soloDecidir = await run({ decidir: DECIDIR });
+    vi.clearAllMocks();
+    gapsAre(["policy_number", "dni"]);
+    const vacio = await run({});
+
+    expect(sin.enviados).toHaveLength(1);
+    expect(sin.enviados[0]).not.toHaveProperty("indicaciones");
+    expect(soloDecidir.enviados).toStrictEqual(sin.enviados);
+    expect(vacio.enviados).toStrictEqual(sin.enviados);
+  });
+
+  it("una corrida heredada que ya contestó sigue muda", async () => {
+    gapsAre(["policy_number", "dni"]);
+    vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(true);
+
+    const { messenger } = await run({ redactar: REDACTAR }, { heredadaEn: "2026-10-16T12:00:00.000Z" });
+
+    expect(messenger.send).not.toHaveBeenCalled();
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("con aprendido.decidir, deliberate las recibe", async () => {
+    gapsAre(["policy_number", "dni"]);
+
+    await run({ decidir: DECIDIR });
+
+    expect(vi.mocked(deliberate)).toHaveBeenCalledWith(
+      expect.objectContaining({ indicaciones: DECIDIR })
+    );
+  });
+
+  it.each([
+    ["sin aprendido", undefined],
+    ["con aprendido sólo para redactar", { redactar: REDACTAR }],
+    ["con aprendido vacío", {}],
+  ])("%s, deliberate recibe lo mismo que antes", async (_caso, aprendido) => {
+    gapsAre(["policy_number", "dni"]);
+
+    await run(aprendido);
+
+    expect(vi.mocked(deliberate)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deliberate).mock.calls[0][0]).not.toHaveProperty("indicaciones");
+  });
+});
+
 describe("orchestratePostExtraction — a question beats the no-repeat guard", () => {
   it("answers even when the request has not changed since last time", async () => {
     // The two guards nearly cancelled each other out. The no-repeat guard

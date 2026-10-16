@@ -85,6 +85,7 @@ import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { mirarPolizas } from "@/core/case/poliza-vigente";
 import { esTitularAjeno } from "@/core/case/titular-ajeno";
 import { hayHeridos, respuestaAHeridos, sinHeridosSupuestos } from "@/core/case/heridos-supuestos";
+import { indicacionesDelEquipo } from "@/core/agente/indicaciones";
 import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { ESTADOS_DE_ARRANQUE, puedeArrancar } from "@/core/case/estados-de-arranque";
@@ -107,6 +108,7 @@ import {
   loadActivePromptRules,
   type PromptRule,
 } from "@/server/training/prompt-rules";
+import { aprendidoEnConversacion } from "@/server/training/aprendido-en-conversacion";
 import {
   consultasDeEjemplos,
   deEjemplos,
@@ -834,6 +836,9 @@ export async function runEmailExtractionWorker(
     const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino } =
       await cargarLoDelPrompt(tenantId, tenantCtx, caseId, caseRow.claim_type);
 
+    // Las mismas reglas que lee la extracción, sin consulta nueva: lo que ven deliberate y compose.
+    const indicaciones = aprendidoEnConversacion() ? indicacionesDelEquipo(promptRules) : undefined;
+
     const learning = {
       rules: formatPromptRules(promptRules),
       approvedExamples: formatApprovedExamples(approvedExamples),
@@ -1530,6 +1535,9 @@ export async function runEmailExtractionWorker(
           preguntadas,
           propuestos: pedido.propuestos,
           polizaAnterior: caseRow.policy_number,
+          ...(indicaciones
+            ? { aprendido: { decidir: indicaciones.decidir, redactar: indicaciones.redactar } }
+            : {}),
         },
         customerMatches,
         messengerFor(caseRow.channel),

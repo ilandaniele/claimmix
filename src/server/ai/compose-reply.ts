@@ -24,6 +24,7 @@ import { provinciasNombradas } from "@/core/geo/provincias";
 import { paraElPrompt, sinNumerosEnteros } from "@/core/ai/para-el-prompt";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { textoBase } from "@/core/agente/entrenamiento-base";
+import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { canonicalFieldKey, labelForField } from "@/lib/labels/claim-fields";
 import { instruccionDeCampo } from "@/lib/labels/instruccion-de-campo";
@@ -142,6 +143,8 @@ export interface ComposeReplyInput {
   escritoPorLaPersona?: string[];
   /** The claimant's most recent message, for tone only. */
   lastMessage?: string;
+  /** Lo que el equipo de la aseguradora indicó sobre cómo escribir; entra en el prompt como dato. */
+  indicaciones?: string;
   /** The deterministic text. The model is asked to do better, not different. */
   fallback: string;
 }
@@ -287,7 +290,7 @@ PROHIBIDO, sin excepción:
 - Pedir algo que no esté en la lista de datos${input.polizaCambiada ? ", salvo el número de póliza correcto" : ""}.${input.polizaCambiada ? "\n- Escribir cualquier número de póliza, ni el nuevo ni el anterior, ni una parte." : ""}
 - Disculpas largas, floreo, o tono de robot.
 
-${textoBase("redactar.tono")}
+${textoBase("redactar.tono")}${bloqueDeIndicaciones(input.indicaciones, "redactar", { polizaCambiada: input.polizaCambiada })}
 
 Devolvé JSON: {"message": "<el texto del mensaje>"}`;
 }

@@ -45,17 +45,18 @@ function montar() {
         role="owner"
         ramos={<div>RamosPanel</div>}
         formulario={<div>FormularioWebPanel</div>}
+        base={<div>BasePanel</div>}
       />
     </LocaleProvider>
   );
 }
 
 describe("la consola del agente es un tablist", () => {
-  it("las diez son pestañas, no botones sueltos", () => {
+  it("las once son pestañas, no botones sueltos", () => {
     montar();
 
     expect(screen.getByRole("tablist")).toBeTruthy();
-    expect(screen.getAllByRole("tab")).toHaveLength(10);
+    expect(screen.getAllByRole("tab")).toHaveLength(11);
   });
 
   it("hay exactamente una seleccionada", () => {
@@ -109,7 +110,7 @@ describe("la consola del agente es un tablist", () => {
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
 
     const pestanas = screen.getAllByRole("tab");
-    expect(pestanas[9]!.getAttribute("aria-selected")).toBe("true");
+    expect(pestanas[10]!.getAttribute("aria-selected")).toBe("true");
   });
 
   it("Inicio y Fin van a los extremos", () => {
@@ -117,7 +118,7 @@ describe("la consola del agente es un tablist", () => {
     const lista = screen.getByRole("tablist");
 
     fireEvent.keyDown(lista, { key: "End" });
-    expect(screen.getAllByRole("tab")[9]!.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("tab")[10]!.getAttribute("aria-selected")).toBe("true");
 
     fireEvent.keyDown(lista, { key: "Home" });
     expect(screen.getAllByRole("tab")[0]!.getAttribute("aria-selected")).toBe("true");
@@ -155,5 +156,13 @@ describe("la consola del agente es un tablist", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Trabajo del equipo" }));
 
     expect(screen.getByText("TrabajoPanel")).toBeTruthy();
+  });
+
+  it("la pestaña de la base muestra lo que arma el servidor", () => {
+    montar();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Base" }));
+
+    expect(screen.getByText("BasePanel")).toBeTruthy();
   });
 });

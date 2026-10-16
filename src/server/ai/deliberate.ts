@@ -30,6 +30,7 @@ import "server-only";
 
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import { textoBase } from "@/core/agente/entrenamiento-base";
+import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
 import { esAudioSinTranscribir } from "@/core/adjuntos/transcripcion";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
@@ -141,6 +142,8 @@ export interface DeliberationInput {
    * texto. Las herramientas buscan por esto y no por lo que pida el modelo.
    */
   remitente?: { dni: string | null };
+  /** Lo que el equipo de la aseguradora indicó para decidir; entra en el prompt como dato. */
+  indicaciones?: string;
 }
 
 /** The deterministic tree remains the fallback, and the switch to reach it. */
@@ -381,7 +384,7 @@ Decidí una de estas acciones:
 - "answer_and_ask": contestar lo que preguntó y aprovechar a pedirle lo que falta.
 - "acknowledge": avisarle que ya tenemos todo y que la denuncia pasa a análisis.
 - "escalate": derivarlo a un especialista.
-- "wait": no escribirle nada.
+- "wait": no escribirle nada.${bloqueDeIndicaciones(input.indicaciones, "decidir")}
 
 ${textoBase("decidir.criterios")}
 

@@ -538,6 +538,23 @@ export const esARServidor = {
   "ramos.guardado": "Guardado.",
   "ramos.error": "No se pudo guardar. Revisá los datos.",
   "ramos.tope": "Llegaste al máximo de {n} tipos propios.",
+  // ── Base del agente, sólo lectura ──────────────────────────────────────────
+  "base.titulo": "Base del agente",
+  "base.explicacion":
+    "La política con la que arranca el agente. La escribe una persona en entrenamiento/base/, viaja con el código y es la misma en todos los ambientes: acá sólo se lee, y se cambia con un PR. Las secciones en modo prompt son el texto que recibe el modelo; las de modo sombra describen una regla del código y sólo sirven para medir al agente, no entran a ningún prompt.",
+  "base.version": "Versión de la base: {version}",
+  "base.paso.extraccion": "Extracción",
+  "base.paso.decidir": "Decidir",
+  "base.paso.redactar": "Redactar",
+  "base.modo.prompt": "Prompt",
+  "base.modo.sombra": "Sombra",
+  "base.reglas.titulo": "Reglas del equipo y pasos que las leen",
+  "base.reglas.tipo": "Tipo de regla",
+  "base.reglas.pasos": "Pasos que la leen",
+  "base.reglas.bandera_apagada": "El aprendizaje desde la conversación está apagado: las reglas sólo llegan a la extracción, y decidir y redactar no las leen.",
+  "base.reglas.bandera_prendida": "El aprendizaje desde la conversación está prendido: las reglas llegan también a decidir y redactar, según su tipo.",
+  "base.propuesta.boton": "Bajar propuesta para la base",
+  "base.propuesta.aviso": "El repo es público. Se tapan DNI, pólizas, enlaces, mails y teléfonos; los nombres no. Leelo entero antes de copiar algo a entrenamiento/base/.",
   // ── Formulario web público (B17) ───────────────────────────────────────────
   "formulario.titulo": "Formulario web de denuncias",
   "formulario.ayuda":

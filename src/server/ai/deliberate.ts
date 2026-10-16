@@ -144,6 +144,18 @@ export interface DeliberationInput {
   remitente?: { dni: string | null };
   /** Lo que el equipo de la aseguradora indicó para decidir; entra en el prompt como dato. */
   indicaciones?: string;
+  /**
+   * Se llama con lo que el modelo opinó, también si `validate` lo rechaza. Es
+   * la sombra: anota y nunca cambia la decisión, así que un error acá se traga.
+   */
+  alPlanear?: (o: OpinionDelAgente) => void;
+}
+
+/** Lo que el modelo quiso hacer, sin texto libre: intención, claves y categoría del rechazo. */
+export interface OpinionDelAgente {
+  intent: AgentIntent;
+  askFor: string[];
+  rechazo: string | null;
 }
 
 /** The deterministic tree remains the fallback, and the switch to reach it. */
@@ -188,6 +200,17 @@ export async function deliberate(
     plan.lookupResults = lookupResults;
 
     const problem = validate(plan, input);
+
+    try {
+      input.alPlanear?.({
+        intent: plan.intent,
+        askFor: [...plan.askFor],
+        rechazo: problem ? categoriaDelRechazo(problem) : null,
+      });
+    } catch {
+      // La sombra nunca cambia la decisión.
+    }
+
     if (problem) {
       logger.warn({
         reason: problem,
@@ -220,6 +243,12 @@ export async function deliberate(
 
     return null;
   }
+}
+
+/** «invented:cbu» → «invented»: la categoría, sin las claves que el modelo escribió. */
+function categoriaDelRechazo(problem: string): string {
+  const categoria = problem.split(":")[0].trim();
+  return /^[a-z_]{1,40}$/.test(categoria) ? categoria : "otro";
 }
 
 /**

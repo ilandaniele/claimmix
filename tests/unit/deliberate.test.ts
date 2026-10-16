@@ -32,7 +32,7 @@ vi.mock("@/server/ai/budget", () => ({
   registrarConsumoDelModelo: vi.fn(async () => undefined),
 }));
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { deliberate, validate, type AgentPlan, type DeliberationInput } from "@/server/ai/deliberate";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
@@ -724,5 +724,175 @@ describe("deliberate — las indicaciones del equipo", () => {
     );
 
     expect(prompts()[0]).not.toContain("30123456");
+  });
+});
+
+/**
+ * La sombra: `alPlanear` recibe lo que el modelo opinó, con lo que ya devolvió,
+ * y no cambia nada de lo que `deliberate` hace ni devuelve.
+ */
+describe("deliberate — la sombra (alPlanear)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReservar.mockResolvedValue({ exceeded: false });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function respuesta(plan: Record<string, unknown>) {
+    return { text: JSON.stringify(plan), usage: {}, model: "gemini-test" };
+  }
+
+  const valido = { intent: "ask", ask_for: ["fotos_danos"], reasoning: "x" };
+
+  it("recibe la opinión de un plan válido", async () => {
+    mockCallGemini.mockResolvedValueOnce(respuesta(valido));
+    const alPlanear = vi.fn();
+
+    const plan = await deliberate(situation({ alPlanear }));
+
+    expect(plan).not.toBeNull();
+    expect(alPlanear).toHaveBeenCalledOnce();
+    expect(alPlanear).toHaveBeenCalledWith({ intent: "ask", askFor: ["fotos_danos"], rechazo: null });
+  });
+
+  it("entrega una copia de las claves: tocarla no cambia el plan", async () => {
+    mockCallGemini.mockResolvedValueOnce(respuesta(valido));
+
+    const plan = await deliberate(
+      situation({ alPlanear: (o) => o.askFor.push("cbu") })
+    );
+
+    expect(plan!.askFor).toEqual(["fotos_danos"]);
+  });
+
+  it("con un plan inventado la recibe igual, con la categoría y sin las claves", async () => {
+    mockCallGemini.mockResolvedValueOnce(
+      respuesta({ intent: "ask", ask_for: ["cbu", "policy_number"], reasoning: "x" })
+    );
+    const alPlanear = vi.fn();
+
+    expect(await deliberate(situation({ alPlanear }))).toBeNull();
+
+    expect(alPlanear).toHaveBeenCalledWith({
+      intent: "ask",
+      askFor: ["cbu", "policy_number"],
+      rechazo: "invented",
+    });
+  });
+
+  it.each([
+    ["ask_without_items", { intent: "ask", ask_for: [], reasoning: "x" }],
+    ["closed_with_gaps_open", { intent: "acknowledge", ask_for: [], reasoning: "x" }],
+    ["silent_before_ever_asking", { intent: "wait", ask_for: [], reasoning: "x" }],
+  ])("el rechazo «%s» llega como categoría", async (categoria, plan) => {
+    mockCallGemini.mockResolvedValueOnce(respuesta(plan));
+    const alPlanear = vi.fn();
+
+    expect(await deliberate(situation({ alPlanear }))).toBeNull();
+
+    expect(alPlanear.mock.calls[0][0].rechazo).toBe(categoria);
+  });
+
+  it("un alPlanear que tira deja el resultado igual", async () => {
+    mockCallGemini.mockResolvedValueOnce(respuesta(valido)).mockResolvedValueOnce(respuesta(valido));
+    const tira = vi.fn(() => {
+      throw new Error("la sombra se cayó");
+    });
+
+    const con = await deliberate(situation({ alPlanear: tira }));
+    const sin = await deliberate(situation());
+
+    expect(tira).toHaveBeenCalledOnce();
+    expect(con).toEqual(sin);
+    expect(con).not.toBeNull();
+  });
+
+  it("un alPlanear que tira tampoco levanta un plan rechazado", async () => {
+    mockCallGemini.mockResolvedValueOnce(
+      respuesta({ intent: "ask", ask_for: ["cbu"], reasoning: "x" })
+    );
+
+    const plan = await deliberate(
+      situation({
+        alPlanear: () => {
+          throw new Error("la sombra se cayó");
+        },
+      })
+    );
+
+    expect(plan).toBeNull();
+  });
+
+  it("no se llama con una denuncia grave", async () => {
+    const alPlanear = vi.fn();
+
+    expect(await deliberate(situation({ isHighSeverity: true, alPlanear }))).toBeNull();
+
+    expect(alPlanear).not.toHaveBeenCalled();
+  });
+
+  it("no se llama con el presupuesto agotado", async () => {
+    mockReservar.mockResolvedValueOnce({ exceeded: true, motivo: "prueba_diaria" });
+    const alPlanear = vi.fn();
+
+    expect(await deliberate(situation({ alPlanear }))).toBeNull();
+
+    expect(alPlanear).not.toHaveBeenCalled();
+  });
+
+  it("no se llama con AGENT_DELIBERATION=off", async () => {
+    vi.stubEnv("AGENT_DELIBERATION", "off");
+    const alPlanear = vi.fn();
+
+    expect(await deliberate(situation({ alPlanear }))).toBeNull();
+
+    expect(alPlanear).not.toHaveBeenCalled();
+    expect(mockCallGemini).not.toHaveBeenCalled();
+  });
+
+  it("no se llama con una nota de voz sin transcribir", async () => {
+    const alPlanear = vi.fn();
+
+    expect(
+      await deliberate(situation({ latestMessage: ` ${PLACEHOLDER_AUDIO}
+`, alPlanear }))
+    ).toBeNull();
+
+    expect(alPlanear).not.toHaveBeenCalled();
+  });
+
+  it("no se llama si el modelo no devuelve un plan que se pueda leer", async () => {
+    mockCallGemini.mockResolvedValueOnce(respuesta({ intent: "inventada", ask_for: [] }));
+    const alPlanear = vi.fn();
+
+    expect(await deliberate(situation({ alPlanear }))).toBeNull();
+
+    expect(alPlanear).not.toHaveBeenCalled();
+  });
+
+  it("no se llama si la llamada al modelo se cae", async () => {
+    mockCallGemini.mockRejectedValueOnce(new Error("TIMEOUT"));
+    const alPlanear = vi.fn();
+
+    expect(await deliberate(situation({ alPlanear }))).toBeNull();
+
+    expect(alPlanear).not.toHaveBeenCalled();
+  });
+
+  it("no suma llamadas al modelo ni reservas: son las mismas con y sin la sombra", async () => {
+    mockCallGemini.mockResolvedValue(respuesta(valido));
+
+    await deliberate(situation());
+    const sin = { gemini: mockCallGemini.mock.calls.length, reserva: mockReservar.mock.calls.length };
+    vi.clearAllMocks();
+    mockReservar.mockResolvedValue({ exceeded: false });
+    mockCallGemini.mockResolvedValue(respuesta(valido));
+    await deliberate(situation({ alPlanear: vi.fn() }));
+
+    expect(mockCallGemini).toHaveBeenCalledTimes(sin.gemini);
+    expect(mockReservar).toHaveBeenCalledTimes(sin.reserva);
   });
 });

@@ -37,6 +37,12 @@ import {
   polizaElegida,
   polizasNombradas,
 } from "@/core/case/poliza-cambiada";
+import {
+  normalizarFaltantes,
+  respuestaDelAgente,
+  respuestaDelCodigo,
+  type ParteDeSombra,
+} from "@/core/agente/sombra";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
@@ -74,7 +80,7 @@ import {
 import { auditoriaSiCambia } from "@/server/cases/auditoria-si-quedo";
 import { anotarDerivacionSiEsNueva } from "@/server/confirmations/derivacion-nueva";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
-import { deliberate } from "@/server/ai/deliberate";
+import { deliberate, type OpinionDelAgente } from "@/server/ai/deliberate";
 import {
   pendingDocKeys,
   reconcileAttachments,
@@ -273,7 +279,12 @@ export async function orchestratePostExtraction(
    * Va aparte y nunca dentro de lo extraído: es un criterio de trabajo del
    * equipo, y nada de lo que se arma acá lo lee el asegurado ni el redactor.
    */
-  trabajo?: CriteriosDeTrabajo
+  trabajo?: CriteriosDeTrabajo,
+  /**
+   * La sombra: qué haría el modelo frente a lo que decide el código. Sólo
+   * anota, con lo que `deliberate` ya devolvió; no cambia nada de lo que sigue.
+   */
+  anotarSombra?: (parte: ParteDeSombra) => void
 ): Promise<void> {
   const { extractedClaim, senderEmail, inReplyToMessageId, latestMessageText, heredadaEn } =
     extractedOutput;
@@ -837,6 +848,7 @@ export async function orchestratePostExtraction(
   // fails is discarded whole and this falls back to the table below, so the
   // worst case is the behaviour we already had.
   const yaAveriguado = loQueYaAveriguamos(customerMatches, extractedOutput.polizas);
+  const visto: { opinion?: OpinionDelAgente } = {};
   const plan = await deliberate({
     caseId,
     tenantId,
@@ -851,6 +863,13 @@ export async function orchestratePostExtraction(
     remitente: { dni: dniDeQuienEscribe(extractedClaim.fields) },
     ...(extractedOutput.aprendido?.decidir
       ? { indicaciones: extractedOutput.aprendido.decidir }
+      : {}),
+    ...(anotarSombra
+      ? {
+          alPlanear: (o: OpinionDelAgente) => {
+            visto.opinion = o;
+          },
+        }
       : {}),
   });
 
@@ -946,6 +965,8 @@ export async function orchestratePostExtraction(
   // place where escalation happens, one audit event, and one guarantee that a
   // specialist is actually told.
   if (plan?.intent === "escalate" && !derivaSola) {
+    anotarSombra?.({ responder: { agente: "derivar", codigo: "sin_derivar", rechazo: null } });
+
     // Quién figura en el padrón, para que el mensaje pueda nombrarlo. Aunque
     // haya salido un conflicto: ése puede ser de otro dato, y el que explica por
     // qué pasa a una persona es éste.
@@ -1000,11 +1021,30 @@ export async function orchestratePostExtraction(
   // arma con lo que falta: alguien que escribe por primera vez tiene que
   // recibir respuesta aunque el agente no haya podido pensar.
   const heredado = keepAskingForWhatIsStillNeeded([], lastAsked, stillOutstanding);
+  const sinPlan = heredado.length > 0 ? heredado : stillOutstanding.slice(0, MAX_ASK_ITEMS);
   const chosen = plan
     ? keepAskingForWhatIsStillNeeded(plan.askFor, lastAsked, stillOutstanding)
-    : heredado.length > 0
-      ? heredado
-      : stillOutstanding.slice(0, MAX_ASK_ITEMS);
+    : sinPlan;
+
+  // La sombra: lo que el árbol pediría sin plan, contra lo que el modelo pidió.
+  if (anotarSombra && !derivaSola) {
+    try {
+      const o = visto.opinion;
+      const pide = o?.intent === "ask" || o?.intent === "answer_and_ask";
+      anotarSombra({
+        pedir: {
+          agente: pide ? normalizarFaltantes(o.askFor) : null,
+          codigo: normalizarFaltantes(sinPlan),
+          descartadas: pide
+            ? o.askFor.filter((k) => !everythingOutstanding.fields.includes(canonicalFieldKey(k)))
+                .length
+            : 0,
+        },
+      });
+    } catch {
+      // La sombra nunca cambia la decisión.
+    }
+  }
 
   const askItems = {
     fields: chosen,
@@ -1103,6 +1143,37 @@ export async function orchestratePostExtraction(
       : false;
 
   const decision = queHacer({ ...señalesBase, aprendimosAlgo });
+
+  // Contrafáctico puro, sin consultas: la decisión del árbol sin plan. No repite
+  // `alreadyAskedFor`, que sería otra ida a la base.
+  if (anotarSombra && !derivaSola) {
+    try {
+      const igual = sinPlan.length === chosen.length && sinPlan.every((k) => chosen.includes(k));
+      const señalesCodigo = {
+        ...señalesBase,
+        elAgenteEspera: false,
+        nosPreguntoAlgo: Boolean(laPreguntaDelMensaje(latestMessageText)),
+        datosQueFaltan: sinPlan.length,
+        yaSePidio: igual
+          ? askAlreadyMade
+          : sinPlan.length > 0 && sinPlan.every((k) => lastAsked.includes(k)),
+        aprendimosAlgo: false,
+      };
+      anotarSombra({
+        responder: {
+          agente: respuestaDelAgente(visto.opinion?.intent),
+          codigo: respuestaDelCodigo(queHacer(señalesCodigo), {
+            enEspera: elPedidoQuedaEnEspera(señalesCodigo),
+            nosPreguntoAlgo: señalesCodigo.nosPreguntoAlgo,
+          }),
+          rechazo: visto.opinion?.rechazo ?? null,
+        },
+      });
+    } catch {
+      // La sombra nunca cambia la decisión.
+    }
+  }
+
   const askIsNew = decision === "pedir";
   const acknowledgeOnly = decision === "acusar-recibo";
   const avisarQueNoEntro = decision === "avisar-que-no-entro";

@@ -85,7 +85,13 @@ import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { mirarPolizas } from "@/core/case/poliza-vigente";
 import { esTitularAjeno } from "@/core/case/titular-ajeno";
 import { hayHeridos, respuestaAHeridos, sinHeridosSupuestos } from "@/core/case/heridos-supuestos";
-import { indicacionesDelEquipo } from "@/core/agente/indicaciones";
+import { VERSION_DEL_ENTRENAMIENTO_BASE } from "@/core/agente/entrenamiento-base";
+import {
+  TOPE_DE_REGLAS_DE_EXTRACCION,
+  indicacionesDelEquipo,
+  reglasQueEntran,
+} from "@/core/agente/indicaciones";
+import { sombraDeLaExtraccion, type ParteDeSombra } from "@/core/agente/sombra";
 import { ultimoPedido } from "@/server/confirmations/ultimo-pedido";
 import { canonizarCampos } from "@/core/case/campos-canonicos";
 import { ESTADOS_DE_ARRANQUE, puedeArrancar } from "@/core/case/estados-de-arranque";
@@ -130,7 +136,7 @@ import {
   type ActivePromptVersion,
 } from "@/server/training/prompt-version";
 import { assessTrainability } from "@/server/training/trainability";
-import { logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
+import { anotarSombraEnLaCorrida, logAgentRun, logAgentRunError } from "@/server/training/agent-runs";
 import { loadMemoryHints as loadClaimMemoryHints } from "@/server/memory/load";
 import { hydrateFieldsFromExtracted, scrubPiiFromSummary } from "@/server/ai/hydrate-fields";
 import { esRamoAdmitido, type RamoDelInquilino } from "@/core/case/ramos";
@@ -963,6 +969,12 @@ export async function runEmailExtractionWorker(
       engine,
     });
 
+    // Lo que opinó el modelo, antes de que sinHeridosSupuestos o la gravedad del caso lo toquen: la sombra lo compara con el código.
+    const opinionDelModelo = {
+      severity: extractedClaim.severity,
+      requires_specialist: extractedClaim.requires_specialist,
+    };
+
     // Lo que leyó de cada archivo va a su fila y no sigue: ni al registro de la
     // corrida, que alimenta el entrenamiento, ni al orquestador.
     // La mecánica del relato sigue el mismo camino: sólo alimenta la opinión de
@@ -1032,7 +1044,7 @@ export async function runEmailExtractionWorker(
       emailText: fullText,
     });
 
-    await logAgentRun({
+    const runId = await logAgentRun({
       tenantId,
       caseId,
       claimMessageId,
@@ -1043,6 +1055,20 @@ export async function runEmailExtractionWorker(
       input: { subject: emailSubject, body: emailBody, sender_email: senderEmail },
       claim: extractedClaim,
       trainability,
+      entrenamiento: {
+        base: VERSION_DEL_ENTRENAMIENTO_BASE,
+        extraccion: reglasQueEntran(promptRules, TOPE_DE_REGLAS_DE_EXTRACCION).map((r) => r.id),
+        ...(indicaciones ? { decidir: indicaciones.ids.decidir, redactar: indicaciones.ids.redactar } : {}),
+      },
+      ...(extractedClaim.is_claim !== false && extractedClaim.parse_failed !== true
+        ? {
+            sombra: sombraDeLaExtraccion(opinionDelModelo, {
+              gravedad: finalSeverity,
+              deriva: needsSpecialist,
+              piso: hayHeridos(extractedClaim) || finalSeverity === "critical",
+            }),
+          }
+        : {}),
     });
 
     // ── g) Handle parse failure (technical error, not a classification) ──────
@@ -1516,6 +1542,8 @@ export async function runEmailExtractionWorker(
       caseRow.channel === "whatsapp_sim" ||
       caseRow.channel === "web"
     ) {
+      // Lo que el agente habría pedido y respondido: pedir y responder se anotan en la fila de la corrida.
+      const parte: ParteDeSombra = {};
       await orchestratePostExtraction(
         caseId,
         tenantId,
@@ -1541,8 +1569,14 @@ export async function runEmailExtractionWorker(
         },
         customerMatches,
         messengerFor(caseRow.channel),
-        criterios
+        criterios,
+        (p) => {
+          Object.assign(parte, p);
+        }
       );
+      if (runId && (parte.pedir || parte.responder)) {
+        await anotarSombraEnLaCorrida(tenantId, caseId, runId, parte);
+      }
     }
 
     // ── o) Extraction complete audit log ──────────────────────────────────────

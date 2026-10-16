@@ -7,10 +7,10 @@
 import { describe, it, expect } from "vitest";
 import { buildEmailClaimPrompt } from "@/server/ai/prompt";
 
-const SUBJECT = "Siniestro Zurich - NICOLAS JASPER";
-const BODY = "Buenos días. Me comunico por el Siniestro 91520998-2 de ZURICH.";
+const SUBJECT = "Siniestro Zurich - LUCAS BARRIENTOS";
+const BODY = "Buenos días. Me comunico por el Siniestro 71840365-4 de ZURICH.";
 
-const PROMPT = buildEmailClaimPrompt(SUBJECT, BODY, [], [], "n10jasper@gmail.com");
+const PROMPT = buildEmailClaimPrompt(SUBJECT, BODY, [], [], "lucas.barrientos@example.com");
 
 describe("buildEmailClaimPrompt — datos requeridos por ramo (P6)", () => {
   it("contiene la sección REQUIRED DATA BY CLAIM TYPE", () => {

@@ -175,11 +175,11 @@ function makeBugPatternClaim(): ExtractedClaim {
     confidence: 0.95,
     fields: [], // <-- BUG: empty
     extracted_fields: {
-      full_name: "NICOLAS JASPER",
-      email: "n10jasper@gmail.com",
+      full_name: "LUCAS BARRIENTOS",
+      email: "lucas.barrientos@example.com",
       phone: "",
-      dni: "92310691",
-      policy_number: "91520998-2",
+      dni: "30111222",
+      policy_number: "71840365-4",
       accident_date: "2024-03-15",
       accident_location: "Av. Cabildo",
       accident_description: "Choque entre dos vehículos",
@@ -215,9 +215,9 @@ function setupDbMock() {
   capturedCustomerMatcherInput = {};
   instalarDbSimulado(db as unknown as Record<string, unknown>, {
     mensaje: {
-      body: "Buenos días. Soy NICOLAS JASPER. DU Nro.92310691. Siniestro 91520998-2.",
+      body: "Buenos días. Soy LUCAS BARRIENTOS. DU Nro.30111222. Siniestro 71840365-4.",
       subject: "Siniestro Zurich",
-      from_addr: "n10jasper@gmail.com",
+      from_addr: "lucas.barrientos@example.com",
     },
     // Sólo interesan los de `extracted_fields`, y se reconocen por la columna:
     // el mismo espía lo comparten todas las inserciones del worker.
@@ -256,7 +256,7 @@ describe("INT-1: Worker hydrates fields[] from extracted_fields when fields[] is
     const fullNameRow = allInserted.find((r) => r.field_key === "full_name");
 
     expect(fullNameRow).toBeDefined();
-    expect(fullNameRow?.field_value).toBe("NICOLAS JASPER");
+    expect(fullNameRow?.field_value).toBe("LUCAS BARRIENTOS");
     expect(Number(fullNameRow?.confidence)).toBeGreaterThanOrEqual(0.85);
   });
 
@@ -267,7 +267,7 @@ describe("INT-1: Worker hydrates fields[] from extracted_fields when fields[] is
     const dniRow = allInserted.find((r) => r.field_key === "dni");
 
     expect(dniRow).toBeDefined();
-    expect(dniRow?.field_value).toBe("92310691");
+    expect(dniRow?.field_value).toBe("30111222");
     expect(Number(dniRow?.confidence)).toBeGreaterThanOrEqual(0.85);
   });
 
@@ -278,7 +278,7 @@ describe("INT-1: Worker hydrates fields[] from extracted_fields when fields[] is
     const policyRow = allInserted.find((r) => r.field_key === "policy_number");
 
     expect(policyRow).toBeDefined();
-    expect(policyRow?.field_value).toBe("91520998-2");
+    expect(policyRow?.field_value).toBe("71840365-4");
     expect(Number(policyRow?.confidence)).toBeGreaterThanOrEqual(0.85);
   });
 
@@ -289,7 +289,7 @@ describe("INT-1: Worker hydrates fields[] from extracted_fields when fields[] is
     const emailRow = allInserted.find((r) => r.field_key === "email");
 
     expect(emailRow).toBeDefined();
-    expect(emailRow?.field_value).toBe("n10jasper@gmail.com");
+    expect(emailRow?.field_value).toBe("lucas.barrientos@example.com");
   });
 
   it("all upserted fields have confidence >= HIGH_CONFIDENCE_THRESHOLD (0.60)", async () => {
@@ -339,7 +339,7 @@ describe("INT-2: Customer matcher receives full_name even when only in fields[]"
       is_claim: true,
       confidence: 0.92,
       fields: [
-        { field_key: "full_name", field_value: "NICOLAS JASPER", confidence: 0.9, source: "ai" },
+        { field_key: "full_name", field_value: "LUCAS BARRIENTOS", confidence: 0.9, source: "ai" },
         { field_key: "accident_date", field_value: "2024-03-15", confidence: 0.85, source: "ai" },
       ],
       extracted_fields: undefined, // not in typed object
@@ -362,6 +362,6 @@ describe("INT-2: Customer matcher receives full_name even when only in fields[]"
 
     await runEmailExtractionWorker("case-001", "tenant-001", "user-001");
 
-    expect(capturedCustomerMatcherInput.full_name).toBe("NICOLAS JASPER");
+    expect(capturedCustomerMatcherInput.full_name).toBe("LUCAS BARRIENTOS");
   });
 });

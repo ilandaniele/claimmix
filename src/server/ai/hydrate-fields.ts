@@ -68,7 +68,7 @@ export function hydrateFieldsFromExtracted(extracted: ExtractedClaim): Extracted
 
 /**
  * Argentine DNI: 7–8 contiguous digits, optionally dotted (e.g. 12.345.678).
- * Matches: 92310691, 9231069, 12.345.678
+ * Matches: 30111222, 3011122, 12.345.678
  *
  * Es global (`/g`): usarla sólo con `.replace`, nunca con `.test` (un `.test`
  * con `/g` arrastra `lastIndex` de la llamada anterior y da falsos negativos).
@@ -77,7 +77,7 @@ export const DNI_RE = /\b\d{1,2}\.?\d{3}\.?\d{3}\b/g;
 
 /**
  * Generic claim/policy reference: 4+ uppercase-or-digit chars with optional dash + digits.
- * Covers siniestro refs like "91520998-2" and policy codes like "POL-12345".
+ * Covers siniestro refs like "71840365-4" and policy codes like "POL-12345".
  * Only redacts when the matched string is >= 6 chars total (avoids false positives on
  * common abbreviations like "AC6", "T01", etc.).
  */

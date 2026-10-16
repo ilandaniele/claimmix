@@ -23,9 +23,11 @@ const MARCA = { ok: "✓", degraded: "!", down: "✗" };
 /**
  * @param {number} codigo   el código HTTP; 0 si no contestó
  * @param {unknown} cuerpo  el JSON que devolvió, o null si no se pudo parsear
+ * @param {{ sinDetalle?: boolean }} [opciones]  `sinDetalle`: nombre y estado de cada
+ *   chequeo, sin el detalle (el número de WhatsApp, la casilla de Gmail…), para un log público
  * @returns {Lectura}
  */
-export function interpretarSalud(codigo, cuerpo) {
+export function interpretarSalud(codigo, cuerpo, opciones = {}) {
   /** @param {string} mensaje @returns {Lectura} */
   const seco = (mensaje) => ({
     estado: "sin-lectura",
@@ -64,7 +66,12 @@ export function interpretarSalud(codigo, cuerpo) {
   }
 
   /** @param {Chequeo} x */
-  const nombrar = (x) => `${x.name} — ${x.detail}`;
+  const nombrar = (x) => (opciones.sinDetalle ? `${x.name} — ${x.status}` : `${x.name} — ${x.detail}`);
+  /** @param {Chequeo} x */
+  const linea = (x) => {
+    const marca = MARCA[/** @type {keyof typeof MARCA} */ (x.status)] ?? "?";
+    return opciones.sinDetalle ? `${marca} ${x.name}` : `${marca} ${x.name}: ${x.detail}`;
+  };
 
   const errores = chequeos.filter((x) => x.status === "down").map(nombrar);
 
@@ -75,9 +82,7 @@ export function interpretarSalud(codigo, cuerpo) {
 
   return {
     estado,
-    lineas: chequeos.map(
-      (x) => `${MARCA[/** @type {keyof typeof MARCA} */ (x.status)] ?? "?"} ${x.name}: ${x.detail}`
-    ),
+    lineas: chequeos.map(linea),
     avisos: chequeos.filter((x) => x.status === "degraded").map(nombrar),
     errores,
   };

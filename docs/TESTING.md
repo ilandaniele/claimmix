@@ -978,6 +978,16 @@ existen desde el 20/09 (paso 10 de [docs/PROMOCION.md](PROMOCION.md)); el
 post-deploy de esa noche, run 35551526692, corrió todo en verde, ensayo
 incluido.
 
+**La Carga con k6 y los PRs de fork.** `load-tests.yml` corre por
+`deployment_status`, y para ese evento GitHub carga el workflow del commit
+desplegado, no el de `main`: quien despliega un commit también escribe los
+workflows que corren con él, y con los secretos del repo (vale igual para
+`post-deploy.yml` y `deploy-checks.yml`). El job `origen` (sólo sigue si el commit
+es la punta de una rama de este repo) frena la vista previa de un fork que no tocó
+workflows, cuyo servidor recibiría la cuenta admin, pero no a quien los edita. El
+control real es **no autorizar nunca en Vercel la vista previa de un PR de fork**:
+Git Fork Protection está prendida en los tres proyectos y así tiene que quedar.
+
 **Contra dev, el ensayo no se repite si QA ya pasó ese árbol.** El ensayo corre en el
 runner, no contra la URL: el mismo código, el mismo modelo y los mismos escenarios, y sólo
 cambia la base. Una promoción de `qa` a `main` arma el mismo árbol que QA acaba de ensayar,

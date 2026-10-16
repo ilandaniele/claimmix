@@ -5005,13 +5005,12 @@ sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
   Parte H. (2) Decidir con eso si hace falta App Review (I7, Q35): si hace falta, la vía no se
   publica para autoalta. (3) Abogado (Q15): anexo `#app-propia`, Platform Terms §6.a.iv y §5.a,
   y las plantillas `legal.*`; hasta entonces nada en prd. (4) Generar `WHATSAPP_APP_SECRETS_KEY`
-  (32 bytes en base64), una distinta por ambiente y con copia fuera de Vercel. (5) La 0051 a
-  mano en las tres bases (es la misma de la Parte G; si alguna ya tiene una versión anterior,
-  reaplicar lo que cambió). (6) Pegar el texto propuesto del anexo y de la sección de
+  (32 bytes en base64), una distinta por ambiente y con copia fuera de Vercel. (5) Hecho: la
+  0051 está en QA, dev, staging y prd (comprobado el 15/10). (6) Pegar el texto propuesto del anexo y de la sección de
   privacidad (Parte H, «pendiente del dueño») en `src/app/terms` y `src/app/privacy`: el código
   no los toca. (7) `ALTA_APP_PROPIA=1` en dev, y `pnpm check` completo después del deploy.
 
-- **WABA propia: Meta y la 0051, en este orden.** Es el bloqueo de Meta que queda: sin la
+- **WABA propia: lo que queda de Meta, en este orden.** Es el bloqueo de Meta que queda: sin la
   verificación del negocio y la revisión de la app, un cliente nuevo no puede abrir el
   popup. (1) Verificar el negocio Veltra (CUIT con la razón social exacta). (2) Datos de la
   app: ícono, `/privacy`, `/terms` y la URL de eliminación de datos
@@ -5019,10 +5018,9 @@ sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
   Revisión de la app con acceso avanzado a `whatsapp_business_management` y
   `whatsapp_business_messaging`. (5) Facebook Login for Business y una configuración de
   Embedded Signup v4 con token que no vence: el `config_id` es `META_ES_CONFIG_ID`. (6)
-  Suscribir `account_update` y `phone_number_name_update`. (7) **Aplicar la 0051 a mano**,
-  con el dueño de la base (necesita `BYPASSRLS`), en QA (`ep-wispy-flower`), producción
-  (`ep-proud-resonance`) y la rama `production` de Veltra, y después `pnpm permisos &&
-  pnpm tenancy` en cada una; sin ella el CI queda rojo por `--exigir-al-dia`. (8) Probar
+  Hecho: la app está suscripta a `account_update` y `phone_number_name_update` (leído por
+  Graph el 15/10). (7) Hecho: la 0051 está en QA, dev, staging y prd (comprobado el 15/10).
+  (8) Probar
   solo en dev, con un portfolio de prueba nuevo y una SIM libre, y confirmar que el
   `user_id` de `debug_token` es el mismo que trae el `signed_request` del borrado. (9)
   Cambiar el texto de `src/app/privacy/page.tsx` con la sección `#meta` propuesta en la
@@ -5035,13 +5033,8 @@ sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
   a los clientes de dev con SSO o API v1 del dominio nuevo. La política de privacidad
   todavía nombra el permiso `gmail.readonly`, que el alta corta ya no pide: ese texto lo
   cambia el dueño. Lista completa en `docs/PROMOCION.md`, sección «Prd».
-- **Número por código: aplicar la 0049 ANTES de mergear.** Es sólo la función
-  `claimmix_numero_automatico` (`0049_numero_por_codigo.sql`), aditiva e
-  idempotente. Se aplica a mano, con el dueño de la base (necesita `BYPASSRLS`), en
-  este orden: QA (`ep-wispy-flower`), producción (`ep-proud-resonance`) y la rama
-  `production` de Veltra. Después, en cada una con su `DATABASE_URL_APP`,
-  `pnpm permisos && pnpm tenancy`. Sin ella el CI queda rojo por `--exigir-al-dia`.
-  Pendiente aparte: la prueba real en QA con una SIM libre que no esté en la app de
+- **Número por código.** La 0049 (`claimmix_numero_automatico`) ya está en QA, dev,
+  staging y prd (comprobado el 15/10). Queda la prueba real en QA con una SIM libre que no esté en la app de
   WhatsApp (receta en `docs/whatsapp-setup.md`), decidir si se verifica la empresa
   en Meta para subir el tope de números, y no prender la bandera en producción
   hasta que QA salga bien. La retoma tras un corte no necesita migración.

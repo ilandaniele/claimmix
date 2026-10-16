@@ -4,7 +4,7 @@
  * UNIT-3: Empty fields[] + populated extracted_fields → keys hydrated
  * UNIT-4: Pre-populated fields[] entry → no duplicate added
  * UNIT-5: field_confidences[key] used when present
- * SEC-2: summary containing DNI "92310691" is scrubbed
+ * SEC-2: summary containing DNI "30111222" is scrubbed
  */
 
 import { describe, it, expect } from "vitest";
@@ -47,7 +47,7 @@ describe("hydrateFieldsFromExtracted — UNIT-3: empty fields[] + populated extr
   it("hydrates full_name and dni when fields[] is empty", () => {
     const claim = makeClaim({
       fields: [],
-      extracted_fields: { full_name: "NICOLAS JASPER", dni: "92310691" },
+      extracted_fields: { full_name: "LUCAS BARRIENTOS", dni: "30111222" },
       field_confidences: {},
     });
 
@@ -57,11 +57,11 @@ describe("hydrateFieldsFromExtracted — UNIT-3: empty fields[] + populated extr
     const dniEntry = result.find((f) => f.field_key === "dni");
 
     expect(fullNameEntry).toBeDefined();
-    expect(fullNameEntry?.field_value).toBe("NICOLAS JASPER");
+    expect(fullNameEntry?.field_value).toBe("LUCAS BARRIENTOS");
     expect(fullNameEntry?.confidence).toBe(0.85); // default
 
     expect(dniEntry).toBeDefined();
-    expect(dniEntry?.field_value).toBe("92310691");
+    expect(dniEntry?.field_value).toBe("30111222");
     expect(dniEntry?.confidence).toBe(0.85); // default
   });
 
@@ -121,7 +121,7 @@ describe("hydrateFieldsFromExtracted — UNIT-4: no duplicate when fields[] alre
           source: "ai",
         },
       ],
-      extracted_fields: { full_name: "NICOLAS JASPER" },
+      extracted_fields: { full_name: "LUCAS BARRIENTOS" },
       field_confidences: {},
     });
 
@@ -164,7 +164,7 @@ describe("hydrateFieldsFromExtracted — UNIT-5: field_confidences used when pre
   it("uses field_confidences[key] for confidence when available", () => {
     const claim = makeClaim({
       fields: [],
-      extracted_fields: { dni: "92310691" },
+      extracted_fields: { dni: "30111222" },
       field_confidences: { dni: 0.92 },
     });
 
@@ -245,14 +245,14 @@ describe("hydrateFieldsFromExtracted — edge cases", () => {
   it("trims leading/trailing whitespace from hydrated values", () => {
     const claim = makeClaim({
       fields: [],
-      extracted_fields: { full_name: "  NICOLAS JASPER  " },
+      extracted_fields: { full_name: "  LUCAS BARRIENTOS  " },
       field_confidences: {},
     });
 
     const result = hydrateFieldsFromExtracted(claim);
     const entry = result.find((f) => f.field_key === "full_name");
 
-    expect(entry?.field_value).toBe("NICOLAS JASPER");
+    expect(entry?.field_value).toBe("LUCAS BARRIENTOS");
   });
 
   it("truncates field_value to 2000 chars", () => {
@@ -292,48 +292,48 @@ describe("hydrateFieldsFromExtracted — edge cases", () => {
 describe("scrubPiiFromSummary — SEC-2: DNI scrubbing", () => {
   it("removes literal DNI value from summary", () => {
     const claim = makeClaim({
-      extracted_fields: { full_name: "NICOLAS JASPER", dni: "92310691" },
-      summary: "El asegurado NICOLAS JASPER con DNI 92310691 reportó el siniestro.",
+      extracted_fields: { full_name: "LUCAS BARRIENTOS", dni: "30111222" },
+      summary: "El asegurado LUCAS BARRIENTOS con DNI 30111222 reportó el siniestro.",
     });
 
     const result = scrubPiiFromSummary(claim);
 
-    expect(result.summary).not.toContain("92310691");
+    expect(result.summary).not.toContain("30111222");
     expect(result.summary).toContain("[DNI omitido]");
   });
 
   it("removes full_name from summary and replaces with 'el asegurado'", () => {
     const claim = makeClaim({
-      extracted_fields: { full_name: "NICOLAS JASPER", dni: "92310691" },
-      summary: "NICOLAS JASPER solicitó asistencia.",
+      extracted_fields: { full_name: "LUCAS BARRIENTOS", dni: "30111222" },
+      summary: "LUCAS BARRIENTOS solicitó asistencia.",
     });
 
     const result = scrubPiiFromSummary(claim);
 
-    expect(result.summary).not.toContain("NICOLAS JASPER");
+    expect(result.summary).not.toContain("LUCAS BARRIENTOS");
     expect(result.summary).toContain("el asegurado");
   });
 
   it("removes DNI from suggested_reply", () => {
     const claim = makeClaim({
-      extracted_fields: { dni: "92310691" },
-      suggested_reply: "Estimado cliente, su DNI 92310691 fue verificado.",
+      extracted_fields: { dni: "30111222" },
+      suggested_reply: "Estimado cliente, su DNI 30111222 fue verificado.",
     });
 
     const result = scrubPiiFromSummary(claim);
 
-    expect(result.suggested_reply).not.toContain("92310691");
+    expect(result.suggested_reply).not.toContain("30111222");
   });
 
   it("removes policy_number from summary", () => {
     const claim = makeClaim({
-      extracted_fields: { policy_number: "91520998-2" },
-      summary: "El siniestro 91520998-2 está siendo procesado.",
+      extracted_fields: { policy_number: "71840365-4" },
+      summary: "El siniestro 71840365-4 está siendo procesado.",
     });
 
     const result = scrubPiiFromSummary(claim);
 
-    expect(result.summary).not.toContain("91520998-2");
+    expect(result.summary).not.toContain("71840365-4");
     expect(result.summary).toContain("[póliza omitida]");
   });
 
@@ -361,27 +361,27 @@ describe("scrubPiiFromSummary — SEC-2: DNI scrubbing", () => {
 
   it("is case-insensitive for full_name matching", () => {
     const claim = makeClaim({
-      extracted_fields: { full_name: "NICOLAS JASPER" },
-      summary: "nicolas jasper realizó la denuncia.",
+      extracted_fields: { full_name: "LUCAS BARRIENTOS" },
+      summary: "lucas barrientos realizó la denuncia.",
     });
 
     const result = scrubPiiFromSummary(claim);
 
-    expect(result.summary).not.toContain("nicolas jasper");
+    expect(result.summary).not.toContain("lucas barrientos");
     expect(result.summary).toContain("el asegurado");
   });
 
   it("does not modify extracted_fields (only free-text fields are scrubbed)", () => {
     const claim = makeClaim({
-      extracted_fields: { full_name: "NICOLAS JASPER", dni: "92310691" },
-      summary: "NICOLAS JASPER, DNI 92310691",
+      extracted_fields: { full_name: "LUCAS BARRIENTOS", dni: "30111222" },
+      summary: "LUCAS BARRIENTOS, DNI 30111222",
     });
 
     const result = scrubPiiFromSummary(claim);
 
     // Structured fields should be UNTOUCHED
-    expect(result.extracted_fields?.full_name).toBe("NICOLAS JASPER");
-    expect(result.extracted_fields?.dni).toBe("92310691");
+    expect(result.extracted_fields?.full_name).toBe("LUCAS BARRIENTOS");
+    expect(result.extracted_fields?.dni).toBe("30111222");
   });
 
   it("applies generic DNI pattern fallback for new DNI values not in extracted_fields", () => {
@@ -399,14 +399,14 @@ describe("scrubPiiFromSummary — SEC-2: DNI scrubbing", () => {
 
   it("does not mutate the input claim", () => {
     const claim = makeClaim({
-      extracted_fields: { dni: "92310691" },
-      summary: "DNI 92310691 en el texto.",
+      extracted_fields: { dni: "30111222" },
+      summary: "DNI 30111222 en el texto.",
     });
 
     scrubPiiFromSummary(claim);
 
     // Original summary should be unchanged
-    expect(claim.summary).toBe("DNI 92310691 en el texto.");
+    expect(claim.summary).toBe("DNI 30111222 en el texto.");
   });
 
   it("returns empty summary unchanged when it was already empty", () => {

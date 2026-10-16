@@ -5292,7 +5292,7 @@ sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
   is the plan, not the code — that becomes a step-shaped outage the month it hits.
 - ~~**New GCP project + `pnpm switch-gcp`**~~ ✅ **DONE 2026-08-24.** Extraction now
   runs on **`claimmix-506321`**, inside the `veltra-claimmix-org` organisation and on
-  **its own billing account** (`0158E1-5C6451-D20FCE`), so the model's spend stops
+  **its own billing account** of the organisation, so the model's spend stops
   landing on a personal card. The ID is not `claimmix-veltra`: project IDs are
   immutable and `claimmix` was already taken by the personal project, so Google
   appended the number. Two projects are now called "claimmix" — worth renaming the old
@@ -5406,7 +5406,7 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
   to `.gitignore`. BUT the `veltra.soporte@gmail.com` app password was pasted into a
   chat session (lives in transcripts) → **rotate that password**. The dead `AQ.` key was
   also pasted around; it's dead, so no action needed once replaced.
-- ~~**WhatsApp — real number**~~ ✅ **DONE.** It took two attempts: `+54 9 11 2318-4512`
+- ~~**WhatsApp — real number**~~ ✅ **DONE.** It took two attempts: a personal line
   failed because it still had a WhatsApp account attached and a fresh chip never got the
   SMS code. The number that worked is the one in production now. If it ever has to be
   swapped again, the Vercel change is a one-liner once you have the new **Phone Number

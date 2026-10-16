@@ -10,11 +10,11 @@
 import { describe, it, expect } from "vitest";
 import { buildEmailClaimPrompt } from "@/server/ai/prompt";
 
-const SUBJECT = "Siniestro Zurich - NICOLAS JASPER";
+const SUBJECT = "Siniestro Zurich - LUCAS BARRIENTOS";
 const BODY =
-  "Buenos días. Me comunico por el Siniestro 91520998-2 de ZURICH. DU Nro.92310691. Adjunto constancia.";
+  "Buenos días. Me comunico por el Siniestro 71840365-4 de ZURICH. DU Nro.30111222. Adjunto constancia.";
 
-const PROMPT = buildEmailClaimPrompt(SUBJECT, BODY, [], [], "n10jasper@gmail.com");
+const PROMPT = buildEmailClaimPrompt(SUBJECT, BODY, [], [], "lucas.barrientos@example.com");
 
 describe("buildEmailClaimPrompt — RULE D (PII structured extraction)", () => {
   it("contains the new RULE D wording requiring extraction into extracted_fields AND fields[]", () => {
@@ -161,7 +161,7 @@ describe("buildEmailClaimPrompt — sender hint by channel (F3)", () => {
       BODY,
       [],
       [],
-      "n10jasper@gmail.com",
+      "lucas.barrientos@example.com",
       "",
       undefined,
       "email"
@@ -196,11 +196,11 @@ describe("buildEmailClaimPrompt - Gemini training-memory context", () => {
     BODY,
     [],
     [],
-    "n10jasper@gmail.com",
+    "lucas.barrientos@example.com",
     "",
     {
       rules: "RULE: Extract numero_siniestro when present.",
-      approvedExamples: "EXAMPLE 1 (human-approved): EXPECTED OUTPUT: {\"numero_siniestro\":\"91520998-2\"}",
+      approvedExamples: "EXAMPLE 1 (human-approved): EXPECTED OUTPUT: {\"numero_siniestro\":\"71840365-4\"}",
       customFields: "- key: numero_siniestro; label: Numero de siniestro; required=true",
       tenantSystemPrompt: "Prefer Zurich policy context when present.",
     }

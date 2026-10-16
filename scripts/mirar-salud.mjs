@@ -59,7 +59,10 @@ async function consultar() {
 
 if (SECRET) {
   const { codigo, cuerpo } = await consultar();
-  const lectura = interpretarSalud(codigo, cuerpo);
+  // Los logs de Actions pueden ser públicos: ahí van el nombre y el estado de cada
+  // chequeo, sin el detalle (número de WhatsApp, casilla de Gmail, migraciones…).
+  // Corrido a mano se ve entero.
+  const lectura = interpretarSalud(codigo, cuerpo, { sinDetalle: process.env.GITHUB_ACTIONS === "true" });
 
   for (const l of lectura.lineas) console.log(l);
   console.log(`\nsalud: ${lectura.estado}`);

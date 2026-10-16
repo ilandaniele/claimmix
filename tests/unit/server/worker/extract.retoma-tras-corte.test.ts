@@ -20,6 +20,7 @@ const {
   mockCheckBudget,
   mockFindCustomerMatches,
   mockFindPolicyMatches,
+  mockProgramarRetoma,
 } = vi.hoisted(() => {
   return {
     mockExtractEmailClaimGemini: vi.fn(),
@@ -28,6 +29,7 @@ const {
     mockCheckBudget: vi.fn(),
     mockFindCustomerMatches: vi.fn(),
     mockFindPolicyMatches: vi.fn(),
+    mockProgramarRetoma: vi.fn(),
   };
 });
 
@@ -94,6 +96,7 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
 vi.mock("@/server/ai/severity-classifier", () => ({
   classifySeverity: vi.fn().mockReturnValue("medium"),
   requiresSpecialist: vi.fn().mockReturnValue(false),
+  gravedadSinHechosNuevos: (severidad: unknown) => severidad,
 }));
 
 vi.mock("@/core/case/fsm", () => ({
@@ -140,6 +143,9 @@ vi.mock("@/server/ai/hydrate-fields", () => ({
   hydrateFieldsFromExtracted: vi.fn().mockReturnValue([]),
   scrubPiiFromSummary: vi.fn((s: string) => s),
 }));
+
+// El arranque del flujo durable no corre acá: se mira con qué caso se lo pidió.
+vi.mock("@/server/intake/programar-retoma", () => ({ programarRetoma: mockProgramarRetoma }));
 
 vi.mock("@/server/intake/simulation-throttle", () => ({
   waitForEmailExtractionTurn: vi.fn().mockResolvedValue({ waitedMs: 0, timedOut: false, blockers: [] }),
@@ -260,6 +266,7 @@ describe("el worker pasa al extractor si el caso viene de un intento sin termina
 
     expect(mockExtractEmailClaimGemini).toHaveBeenCalledTimes(1);
     expect(capturedCaseUpdates.some((u) => "intentos_de_extraccion" in u)).toBe(false);
+    expect(mockProgramarRetoma).not.toHaveBeenCalled();
   });
 });
 
@@ -291,6 +298,8 @@ describe("el reintento por falla pasajera sigue como antes, también en una reto
     );
     expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeUndefined();
     expect(mockLogAgentRunError).not.toHaveBeenCalled();
+    expect(mockProgramarRetoma).toHaveBeenCalledTimes(1);
+    expect(mockProgramarRetoma).toHaveBeenCalledWith("case-retoma", "tenant-001");
   });
 
   it("el primer TIMEOUT de un caso va a la cola sin la señal", async () => {
@@ -304,6 +313,24 @@ describe("el reintento por falla pasajera sigue como antes, también en una reto
       expect.objectContaining({ extraction_pending: true, intentos_de_extraccion: expect.anything() })
     );
     expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeUndefined();
+    expect(mockProgramarRetoma).toHaveBeenCalledTimes(1);
+    expect(mockProgramarRetoma).toHaveBeenCalledWith("case-retoma", "tenant-001");
+  });
+
+  it("pide la retoma recién cuando la reserva ya está suelta", async () => {
+    // La retoma la toma por la reserva: si se encolara antes de soltarla,
+    // el flujo podría despertar y encontrarla viva.
+    setupDbMock({ intentos_de_extraccion: 0 });
+    mockExtractEmailClaimGemini.mockRejectedValue(ERRORES[0][1]());
+    let alPedirla: Array<Record<string, unknown>> = [];
+    mockProgramarRetoma.mockImplementation(async () => {
+      alPedirla = [...capturedCaseUpdates];
+    });
+
+    await runEmailExtractionWorker("case-retoma", "tenant-001", "user-001");
+
+    expect(mockProgramarRetoma).toHaveBeenCalledTimes(1);
+    expect(alPedirla).toContainEqual(expect.objectContaining({ extraction_lease_at: null }));
   });
 
   it("con los intentos agotados escala como error del proveedor, señal o no", async () => {
@@ -327,5 +354,6 @@ describe("el reintento por falla pasajera sigue como antes, también en una reto
     expect(payloadDelExtractor().trasCorte).toBe(true);
     expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeDefined();
     expect(mockLogAgentRunError).toHaveBeenCalledTimes(1);
+    expect(mockProgramarRetoma).not.toHaveBeenCalled();
   });
 });

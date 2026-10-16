@@ -350,6 +350,7 @@ export function registrarMocks(opciones: {
       .mockImplementation(
         (severidad: string) => necesitaEspecialista || severidad === "high" || severidad === "critical"
       ),
+    gravedadSinHechosNuevos: (severidad: unknown) => severidad,
   }));
 
   vi.doMock("@/core/case/fsm", () => ({
@@ -397,7 +398,11 @@ export function registrarMocks(opciones: {
     denunciaSimuladaVacia: vi.fn(() => claimSimulado()),
   }));
 
-  return { mockDb, espiaDeAuditoria, espiaDeBusqueda };
+  // El arranque del flujo durable no corre acá: se mira con qué caso se lo pidió.
+  const espiaDeRetoma = vi.fn().mockResolvedValue(undefined);
+  vi.doMock("@/server/intake/programar-retoma", () => ({ programarRetoma: espiaDeRetoma }));
+
+  return { mockDb, espiaDeAuditoria, espiaDeBusqueda, espiaDeRetoma };
 }
 
 /** El `status` que quedó escrito en el caso, de todo lo que se haya escrito. */

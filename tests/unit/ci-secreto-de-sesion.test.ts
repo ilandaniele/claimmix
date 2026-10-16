@@ -31,9 +31,11 @@ describe("el secreto de sesión de producción no llega a los jobs de PR", () =>
   });
 });
 
-describe("el disparo a mano del post-deploy de producción", () => {
-  it("sólo admite el alias de dev: `produccion` hereda los secretos de dev", () => {
+describe("el disparo a mano del post-deploy de DEV", () => {
+  it("sólo desde main y sólo el alias de dev: `dev` recibe los secretos de dev", () => {
     const yml = sinComentarios("post-deploy.yml");
+    expect(yml).toMatch(/"\$REF" != "refs\/heads\/main"/);
+    expect(yml).toContain("REF: ${{ github.ref }}");
     expect(yml).toContain("claimmix-dev.vercel.app) ;;");
     expect(yml).not.toContain("claimmix-qa.vercel.app) ;;");
     expect(yml).not.toContain("claimmix-prd.vercel.app) ;;");
@@ -49,7 +51,7 @@ describe("el ensayo del deploy usa los mismos topes de IA que Vercel", () => {
   });
 });
 
-describe("las vistas previas no reciben el CRON_SECRET de producción", () => {
+describe("las vistas previas no reciben el CRON_SECRET de DEV", () => {
   it.each(["deploy-checks.yml", "post-deploy.yml", "barrer-trabados.yml"])(
     "%s no admite el sufijo de las vistas previas",
     (nombre) => {
@@ -58,9 +60,9 @@ describe("las vistas previas no reciben el CRON_SECRET de producción", () => {
   );
 });
 
-describe("el disparo a mano de deploy-checks.yml", () => {
-  // `workflow_dispatch` resuelve los secretos del repositorio, que son los de
-  // dev: el único destino que les corresponde es el alias de dev.
+describe("el disparo a mano del post-deploy, dentro de deploy-checks.yml", () => {
+  // Un disparo a mano del post-deploy llega acá con `event_name`
+  // `workflow_dispatch` y los secretos de dev.
   // El paso se lee crudo —con sus comentarios, que no cambian el script— para
   // poder correrlo tal como lo corre el runner.
   const pasoDestino = () => {

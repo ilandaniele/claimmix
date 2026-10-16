@@ -1,4 +1,11 @@
-name: Carga
+name: Post-deploy · Carga k6 de vistas previas y QA
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('A mano · {0} · {1}', inputs.escenario, inputs.base_url)
+  || github.event.deployment_status.state != 'success' && format('Sin carga · Vercel avisó {0}', github.event.deployment_status.state)
+  || endsWith(github.event.deployment.environment, '-prd') && format('Sin carga · {0}', github.event.deployment.environment)
+  || startsWith(github.event.deployment.environment, 'Production') && endsWith(github.event.deployment.environment, '-qa') && format('QA · k6 · {0}', github.event.deployment.sha)
+  || !startsWith(github.event.deployment.environment, 'Production') && format('Vista previa · k6 · {0}', github.event.deployment.sha)
+  || format('Sin carga · {0}', github.event.deployment.environment) }}
 
 # ── Qué corre solo y qué se pide a mano ─────────────────────────────────────
 #
@@ -52,15 +59,46 @@ on:
 permissions:
   contents: read
 
+# `github.ref` llega vacío en un deployment_status de Vercel: `carga-${{ github.ref }}`
+# era un grupo fijo, y una vista previa cancelaba el k6 de QA. Ahora QA tiene su
+# cola; las vistas previas, una por proyecto, donde la nueva corta a la vieja; y
+# lo de a mano espera en vez de cortar.
 concurrency:
-  group: carga-${{ github.ref }}
-  cancel-in-progress: true
+  group: >-
+    ${{ github.event_name == 'workflow_dispatch' && 'carga-a-mano'
+    || github.event.deployment_status.state != 'success' && format('carga-sin-cola-{0}', github.run_id)
+    || startsWith(github.event.deployment.environment, 'Production') && endsWith(github.event.deployment.environment, '-qa') && 'carga-qa'
+    || !startsWith(github.event.deployment.environment, 'Production') && format('carga-preview-{0}', github.event.deployment.environment)
+    || format('carga-sin-cola-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  carga:
-    name: Carga con k6
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
+  # ── De quién es el commit ──────────────────────────────────────────────────
+  #
+  # `deployment_status` también sale de la vista previa de un PR desde un fork
+  # (si alguien la autoriza en Vercel). `carga` hace checkout de ese commit,
+  # corre su código (`scripts/lib/`, `tests/load/`) y manda al host desplegado
+  # la cuenta admin, el bypass de Vercel y el CRON_SECRET de las previews: con
+  # el repo público, código y credenciales de un tercero.
+  #
+  # Sólo se sigue si el commit es la punta de una rama de ESTE repositorio. Sin
+  # checkout: acá no corre nada del commit. Si la consulta falla, el job falla.
+  #
+  # ⛔ Esto frena el caso común, no al que edita workflows. Para
+  # `deployment_status` GitHub carga el workflow del commit DESPLEGADO, no el de
+  # la rama default (24/09: 8819e62f corrió «Carga con k6» cuando `main`
+  # todavía lo llamaba «k6»): un fork puede traer su propio workflow, con
+  # cualquier nombre, y los secretos del repo a mano. El control real es no
+  # autorizar nunca en Vercel la vista previa de un PR de fork (Git Fork
+  # Protection, prendida en los tres proyectos). Ver docs/TESTING.md.
+  origen:
+    name: ¿El commit es de este repo?
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    outputs:
+      propio: ${{ steps.punta.outputs.propio }}
     # El evento `deployment_status` llega también para estados intermedios y
     # para producción. Acá interesan las vistas previas que terminaron bien y
     # el proyecto de QA: contra la producción de los clientes esto no corre
@@ -79,12 +117,47 @@ jobs:
     # dejaba de ser igual a `Production` y entraba acá: k6 midiendo carga contra
     # la base de los clientes. No llegó a pasar sólo porque falta el secreto de
     # Vercel y el job muere antes.
+    #
+    # `!endsWith(…, '-prd')` deja afuera el deploy y las vistas previas del
+    # proyecto de prd: contra PRD no corre carga.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.deployment_status.state == 'success' &&
+       !endsWith(github.event.deployment.environment, '-prd') &&
        (!startsWith(github.event.deployment.environment, 'Production') ||
         endsWith(github.event.deployment.environment, '-qa')))
+    steps:
+      - name: ¿Es la punta de una rama de este repo?
+        id: punta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENTO: ${{ github.event_name }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          set -euo pipefail
+          # `workflow_dispatch` lo lanza un colaborador desde una rama de acá.
+          if [ "$EVENTO" = "workflow_dispatch" ]; then
+            echo "propio=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Un fork no deja el commit como punta de ninguna rama de este repo.
+          # Sin `|| true`: si la API falla o no contesta una lista, el paso falla.
+          N=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/branches-where-head" \
+            --jq 'if type == "array" then length else error("no es una lista") end')
+          if [ "$N" -gt 0 ]; then
+            echo "propio=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "propio=0" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Carga salteada::El commit no es la punta de ninguna rama de este repositorio (es de un fork, o la rama ya avanzó), y por eso no se le mandan credenciales."
+          fi
 
+  carga:
+    name: ${{ github.event_name == 'workflow_dispatch' && 'A mano' || startsWith(github.event.deployment.environment, 'Production') && endsWith(github.event.deployment.environment, '-qa') && 'QA' || 'Vista previa' }} · Carga k6
+    needs: origen
+    # Las condiciones de evento y entorno están en `origen`.
+    if: needs.origen.outputs.propio == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 180 || 15 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -93,11 +166,14 @@ jobs:
 
       - name: Elegir escenario
         id: plan
+        env:
+          EVENTO: ${{ github.event_name }}
+          ESCENARIO: ${{ inputs.escenario }}
         run: |
-          if [ "${{ github.event_name }}" = "deployment_status" ]; then
+          if [ "$EVENTO" = "deployment_status" ]; then
             echo "escenario=smoke" >> "$GITHUB_OUTPUT"
           else
-            echo "escenario=${{ inputs.escenario }}" >> "$GITHUB_OUTPUT"
+            echo "escenario=$ESCENARIO" >> "$GITHUB_OUTPUT"
           fi
 
       # ── A dónde se mandan las credenciales ─────────────────────────────────
@@ -157,6 +233,10 @@ jobs:
               exit 1 ;;
           esac
 
+          # PRD no se mide nunca. Mismo criterio que hosts-vetados.mjs: minúsculas y sin punto final.
+          host=$(printf '%s' "$HOST" | tr '[:upper:]' '[:lower:]' | sed 's/\.*$//')
+          case "$host" in claimmix.vercel.app|claimmix-prd.vercel.app|claimmix-prd-*) echo "::error title=Destino no reconocido::$URL es de PRD: contra PRD no corre carga. Se corta."; exit 1 ;; esac
+
           # Y recién ahí la lista blanca.
           #
           # El alias de QA va LITERAL, no como comodín. Sus vistas previas ya
@@ -192,9 +272,9 @@ jobs:
       # Automation) y ponerlo acá como `VERCEL_AUTOMATION_BYPASS_SECRET`.
       #
       # Mientras no esté, esto NO corre y lo dice. No sale verde —un verde que no
-      # midió es peor que un rojo. Se avisa (no se falla) sólo cuando la corrida
-      # viene de un fork, que por diseño no recibe secretos; en cualquier otro
-      # caso falta el secreto porque nadie lo creó, y eso tiene que ser rojo.
+      # midió es peor que un rojo. Los forks quedan afuera en `origen`, antes de
+      # llegar acá: si falta el secreto es porque nadie lo creó, y eso tiene que
+      # ser rojo.
       #
       # El secreto existe en el repo desde el 17/09, y desde el 19/09 el alcance
       # Preview del proyecto tiene `DATABASE_URL`, `DATABASE_URL_APP` y
@@ -205,13 +285,9 @@ jobs:
         id: llave
         env:
           HAY: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          ES_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
           if [ -n "$HAY" ]; then
             echo "hay=1" >> "$GITHUB_OUTPUT"
-          elif [ "$ES_FORK" = "true" ]; then
-            echo "hay=0" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Carga sin medir::Fork sin secretos, no se probó."
           else
             echo "hay=0" >> "$GITHUB_OUTPUT"
             echo "::error title=Carga sin medir::Falta VERCEL_AUTOMATION_BYPASS_SECRET. La vista previa está protegida y k6 mediría la pantalla de Vercel, no la aplicación. Creá el secreto en Vercel (Settings → Deployment Protection → Protection Bypass for Automation) y agregalo en GitHub."
@@ -257,8 +333,9 @@ jobs:
           || steps.plan.outputs.escenario == 'publico')
         run: |
           mkdir -p resultados
-          k6 run "tests/load/scenarios/${{ steps.plan.outputs.escenario }}.js"
+          k6 run "tests/load/scenarios/$ESCENARIO.js"
         env:
+          ESCENARIO: ${{ steps.plan.outputs.escenario }}
           BASE_URL: ${{ steps.destino.outputs.url }}
           # La vista previa no es localhost, así que un perfil pesado pide
           # permiso explícito. El smoke del deploy no lo necesita.
@@ -397,7 +474,9 @@ jobs:
           echo "/api/health -> $COD"
           if jq -e . salud.json > /dev/null 2>&1; then
             jq -r '"entorno=" + (.environment // "?") + " commit=" + (.commit // "?") + " estado=" + (.status // "?")' salud.json
-            jq -r '.checks[]? | "  " + .name + ": " + .status + " — " + (.detail // "" | .[0:120])' salud.json
+            # Sin `.detail`: el log de Actions es público y el detalle es lo que
+            # protege el Bearer. Para verlo, `node scripts/mirar-salud.mjs` a mano.
+            jq -r '.checks[]? | "  " + .name + ": " + .status' salud.json
           else
             head -c 300 salud.json
             echo

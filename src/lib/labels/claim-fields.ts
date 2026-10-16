@@ -45,7 +45,8 @@ const FIELD_LABELS: Record<string, FieldLabel> = {
   email: { label: "Correo electrónico", kind: "dato" },
   phone: { label: "Teléfono de contacto", kind: "dato" },
   email_or_phone: { label: "Un dato de contacto", kind: "dato" },
-  dni: { label: "DNI del titular", kind: "dato" },
+  // Un consorcio o una empresa no tienen DNI: el titular se identifica con el CUIT.
+  dni: { label: "DNI o CUIT del titular", kind: "dato" },
   policy_number: { label: "Número de póliza", kind: "dato" },
   accident_date: { label: "Fecha del siniestro", kind: "dato" },
   accident_location: { label: "Lugar del siniestro", kind: "dato" },

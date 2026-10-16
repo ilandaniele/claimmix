@@ -55,22 +55,26 @@ const evaluar = (expresion: string, entorno: string, evento: string) => {
   const js = expresion
     .replace(/\$\{\{|\}\}/g, "")
     .replace(/format\('post-deploy-sin-cola-\{0\}', github\.run_id\)/g, "'sin-cola'")
+    .replace(/format\('carga-sin-cola-\{0\}', github\.run_id\)/g, "'carga-sin-cola'")
     .replace(/!cancelled\(\)|always\(\)/g, "true")
     .replace(/needs\.validar_url\.result/g, "'skipped'")
     .replace(/github\.event\.deployment_status\.state/g, "'success'")
     .replace(/github\.event\.deployment\.environment/g, "entorno")
+    .replace(/github\.(event\.deployment\.)?sha\b/g, "'abc123'")
     .replace(/github\.event_name/g, "evento");
   return new Function(
     "entorno",
     "evento",
     "startsWith",
     "endsWith",
+    "format",
     `return (${js});`,
   )(
     entorno,
     evento,
     (a: string, b: string) => a.startsWith(b),
     (a: string, b: string) => a.endsWith(b),
+    (s: string, ...a: unknown[]) => s.replace(/\{(\d+)\}/g, (_, i) => String(a[Number(i)])),
   );
 };
 
@@ -98,7 +102,7 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
 
   // [job, dev, qa, prd, vista previa]
   it.each([
-    ["produccion", true, false, false, false],
+    ["dev", true, false, false, false],
     ["ensayo_previo", true, false, false, false],
     ["qa_secretos", false, true, false, false],
     ["qa", false, true, false, false],
@@ -112,8 +116,8 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
     expect(evaluar(si, PREVIEW, "deployment_status")).toBe(preview);
   });
 
-  it("un disparo a mano sólo entra a `produccion`, el de dev", () => {
-    expect(evaluar(condicion("produccion"), "", "workflow_dispatch")).toBe(true);
+  it("un disparo a mano sólo entra a `dev`", () => {
+    expect(evaluar(condicion("dev"), "", "workflow_dispatch")).toBe(true);
     for (const id of ["ensayo_previo", "qa_secretos", "qa", "prd"]) {
       expect(evaluar(condicion(id), "", "workflow_dispatch")).toBe(false);
     }
@@ -121,11 +125,39 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
 
   it("el grupo de concurrencia es el mismo reparto, con una cola por base", () => {
     const grupo = plegado(yml, /^concurrency:\n {2}group: >-\n((?: {4}\S.*\n)+)/m);
-    expect(evaluar(grupo, DEV, "deployment_status")).toBe("post-deploy-contra-produccion");
-    expect(evaluar(grupo, QA, "deployment_status")).toBe("post-deploy-contra-qa");
-    expect(evaluar(grupo, PRD, "deployment_status")).toBe("post-deploy-contra-prd");
+    expect(evaluar(grupo, DEV, "deployment_status")).toBe("post-deploy-dev");
+    expect(evaluar(grupo, QA, "deployment_status")).toBe("post-deploy-qa");
+    expect(evaluar(grupo, PRD, "deployment_status")).toBe("post-deploy-prd");
     expect(evaluar(grupo, PREVIEW, "deployment_status")).toBe("sin-cola");
-    expect(evaluar(grupo, "", "workflow_dispatch")).toBe("post-deploy-contra-produccion");
+    expect(evaluar(grupo, "", "workflow_dispatch")).toBe("post-deploy-dev");
+  });
+
+  it("el título de la corrida dice el entorno y el commit", () => {
+    const titulo = plegado(yml, /^run-name: >-\n((?: {2}\S.*\n)+)/m);
+    expect(evaluar(titulo, DEV, "deployment_status")).toBe("DEV · deploy abc123");
+    expect(evaluar(titulo, QA, "deployment_status")).toBe("QA · deploy abc123");
+    expect(evaluar(titulo, PRD, "deployment_status")).toBe("PRD · deploy abc123");
+    expect(evaluar(titulo, PREVIEW, "deployment_status")).toBe("Vista previa · sin chequeos · abc123");
+    expect(evaluar(titulo, "", "workflow_dispatch")).toBe("DEV · a mano · abc123");
+  });
+
+  it("el disparo a mano pide la URL y si ensaya, nada más", () => {
+    const dispatch = yml.slice(yml.indexOf("  workflow_dispatch:"), yml.indexOf("\nconcurrency:"));
+    const claves = [...dispatch.matchAll(/^ {6}([\w-]+):\s*$/gm)].map((m) => m[1]);
+    expect(claves).toEqual(["url", "ensayar"]);
+    const ensayar = dispatch.slice(dispatch.indexOf("      ensayar:"));
+    expect(ensayar).toContain("type: boolean");
+    expect(ensayar).toContain("default: true");
+  });
+
+  it("load-tests.yml: QA tiene su cola, cada proyecto la suya para las vistas previas, y lo de a mano espera", () => {
+    const load = leer("load-tests.yml");
+    const grupo = plegado(load, /^concurrency:\n {2}group: >-\n((?: {4}\S.*\n)+)/m);
+    expect(evaluar(grupo, QA, "deployment_status")).toBe("carga-qa");
+    expect(evaluar(grupo, PREVIEW, "deployment_status")).toBe(`carga-preview-${PREVIEW}`);
+    expect(evaluar(grupo, DEV, "deployment_status")).toBe("carga-sin-cola");
+    expect(evaluar(grupo, PRD, "deployment_status")).toBe("carga-sin-cola");
+    expect(evaluar(grupo, "", "workflow_dispatch")).toBe("carga-a-mano");
   });
 
   it("el job de prd sólo mira la salud: nada que escriba ni heredado", () => {
@@ -147,16 +179,21 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
   });
 });
 
-describe("post-deploy.yml: producción no repite el ensayo que QA ya pasó", () => {
+describe("post-deploy.yml: DEV no repite el ensayo que QA ya pasó", () => {
   const yml = sinComentarios("post-deploy.yml");
   const previo = cuerpoDe(yml, "ensayo_previo");
   const veredicto = cuerpoDe(yml, "qa_veredicto");
 
-  it("`produccion` ensaya salvo que la marca diga lo contrario", () => {
-    const produccion = cuerpoDe(yml, "produccion");
-    expect(produccion).toContain("needs: [validar_url, ensayo_previo]");
-    expect(produccion).toContain("correr_ensayo: ${{ needs.ensayo_previo.outputs.correr != 'false' }}");
-    expect(produccion).not.toMatch(/needs\.ensayo_previo\.result/);
+  it("`dev` ensaya salvo que la marca o el disparo a mano digan lo contrario", () => {
+    const dev = cuerpoDe(yml, "dev");
+    expect(dev).toContain("needs: [validar_url, ensayo_previo]");
+    expect(dev).toContain(
+      "correr_ensayo: ${{ needs.ensayo_previo.outputs.correr != 'false' && github.event.inputs.ensayar != 'false' }}",
+    );
+    expect(dev).not.toMatch(/needs\.ensayo_previo\.result/);
+    // `inputs.ensayar` es null en un deploy, y `null != false` da false en
+    // Actions: apagaría el ensayo de cada deploy. Sólo vale el de `github.event`.
+    expect(dev.replace(/github\.event\.inputs\.ensayar/g, "")).not.toMatch(/inputs\.ensayar/);
   });
 
   it("la marca la deja el veredicto verde de QA, después de publicarlo", () => {
@@ -170,20 +207,30 @@ describe("post-deploy.yml: producción no repite el ensayo que QA ya pasó", () 
   it("busca el mismo nombre que deja QA, y sólo de este repo", () => {
     expect(previo).toContain("actions/artifacts?name=ensayo-verde-$arbol");
     expect(previo).toContain(".workflow_run.head_repository_id == $GITHUB_REPOSITORY_ID");
+    expect(previo).toContain("actions/runs/$id");
+    expect(previo).toContain(".github/workflows/post-deploy.yml deployment_status success");
   });
 
   const script = scriptDe(pasoDe(previo, "Buscar la marca de QA"));
+  const P = ".github/workflows/post-deploy.yml";
   it.skipIf(!hayBash).each([
-    ["arbol-falso", "1", 0, "false"],
-    ["arbol-falso", "0", 0, "true"],
-    ["", "1", 1, "true"],
-    ["arbol-falso", "basura", 0, "true"],
-  ])("árbol %j, marcas %j, gh sale con %i: correr=%s", (arbol, hay, salida, esperado) => {
+    // Una marca de verdad: la dejó el post-deploy de un deploy de QA en verde.
+    ["arbol-falso", "7", `${P} deployment_status success`, 0, "false"],
+    ["arbol-falso", "", `${P} deployment_status success`, 0, "true"],
+    ["", "7", `${P} deployment_status success`, 1, "true"],
+    ["arbol-falso", "basura", `${P} deployment_status success`, 0, "true"],
+    // Un artefacto con ese nombre lo puede subir cualquier paso de cualquier corrida.
+    ["arbol-falso", "7", ".github/workflows/ci.yml pull_request success", 0, "true"],
+    ["arbol-falso", "7", `${P} workflow_dispatch success`, 0, "true"],
+    ["arbol-falso", "7", `${P} deployment_status failure`, 0, "true"],
+    // Con `gh` caído sigue el stdout de `$(... || true)`, pero `origen=$(...) || continue` salta.
+    ["arbol-falso", "7", `${P} deployment_status success`, 1, "true"],
+  ])("árbol %j, corridas %j, origen %j, gh sale con %i: correr=%s", (arbol, ids, origen, salida, esperado) => {
     const dir = mkdtempSync(join(tmpdir(), "gh-falso-"));
     const gh = join(dir, "gh");
     writeFileSync(
       gh,
-      '#!/bin/sh\ncase "$*" in\n  *git/commits*) echo "$FALSO_ARBOL" ;;\n  *actions/artifacts*) echo "$FALSO_HAY" ;;\nesac\nexit "$FALSO_SALIDA"\n',
+      '#!/bin/sh\ncase "$*" in\n  *git/commits*) echo "$FALSO_ARBOL" ;;\n  *actions/artifacts*) echo "$FALSO_HAY" ;;\n  *actions/runs/*) echo "$FALSO_ORIGEN" ;;\nesac\nexit "$FALSO_SALIDA"\n',
     );
     chmodSync(gh, 0o755);
     const salidaGh = join(dir, "salida");
@@ -194,7 +241,8 @@ describe("post-deploy.yml: producción no repite el ensayo que QA ya pasó", () 
         ...process.env,
         PATH: `${dir}${delimiter}${process.env.PATH}`,
         FALSO_ARBOL: arbol,
-        FALSO_HAY: hay,
+        FALSO_HAY: ids,
+        FALSO_ORIGEN: origen,
         FALSO_SALIDA: String(salida),
         GITHUB_OUTPUT: salidaGh,
         GITHUB_STEP_SUMMARY: join(dir, "resumen"),

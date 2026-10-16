@@ -135,7 +135,15 @@ async function destinoDelCorreo(formData: FormData): Promise<string> {
   if (!rl.allowed || !porIp.allowed) return conError("intentos");
 
   // Un desafío no pasado termina como cualquier otro final: sin mail y sin decir por qué.
-  if (!(await verificarTurnstile(formData.get("cf-turnstile-response"), ip))) return AVISO_NEUTRO;
+  const desafio = await verificarTurnstile(formData.get("cf-turnstile-response"), ip);
+  if (!desafio.paso) {
+    const { motivo, codigos } = desafio;
+    // Error si la clave está mal pegada: deja a todos afuera en silencio.
+    const claveRota = codigos?.some((c) => c === "invalid-input-secret" || c === "missing-input-secret");
+    if (claveRota) logger.error({ motivo, codigos }, "registro.turnstile_no_paso");
+    else logger.warn({ motivo, codigos }, "registro.turnstile_no_paso");
+    return AVISO_NEUTRO;
+  }
 
   /*
    * Los pedidos por día de una misma IP, con el desafío ya pasado. Cuenta el

@@ -27,6 +27,7 @@ import {
   LO_REVISA_UN_ESPECIALISTA,
   NO_COINCIDE_CON_EL_TITULAR,
 } from "@/core/mensajes/titular-que-no-coincide";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { SI_RESPONDES_EL_CORREO } from "@/core/mensajes/traspaso";
 
@@ -59,6 +60,8 @@ export interface DataConfirmationRequestData extends CampoAConfirmar {
   cuerpo?: string | null;
   /** Quien escribe no es el titular y el caso ya se derivó: no se pregunta nada. */
   titularAjeno?: boolean;
+  /** La persona dio otra póliza a mitad de la charla: se pregunta sin repetir ninguna. */
+  polizaCambiada?: boolean;
   /** Lo que la persona preguntó en esta vuelta: el piso le contesta con la frase honesta. */
   question?: string | null;
 }
@@ -126,6 +129,17 @@ function armarBloque(campo: CampoAConfirmar): BloqueDeCampo {
   };
 }
 
+// Sin valores: ni el de antes ni el de ahora. Abierto, así que pide el dato y no un «Confirmo».
+function bloqueDePolizaCambiada(): BloqueDeCampo {
+  const { label } = labelForField("policy_number");
+  return {
+    abierto: true,
+    html: `<p><strong>Campo:</strong> ${escapeHtml(label)}</p>
+  <p>${escapeHtml(POLIZA_CAMBIADA)}</p>`,
+    text: [`Campo: ${label}`, POLIZA_CAMBIADA].join("\n"),
+  };
+}
+
 export function renderDataConfirmationRequest(
   data: DataConfirmationRequestData
 ): {
@@ -134,20 +148,26 @@ export function renderDataConfirmationRequest(
   text: string;
   cuerpo: string;
 } {
+  // Con póliza cambiada, `fieldKey` trae el número: nunca cae al campo suelto.
   const campos: CampoAConfirmar[] =
     data.fields && data.fields.length > 0
       ? data.fields
-      : [
-          {
-            fieldKey: data.fieldKey,
-            proposedValue: data.proposedValue,
-            conflictWithValue: data.conflictWithValue,
-          },
-        ];
+      : data.polizaCambiada
+        ? []
+        : [
+            {
+              fieldKey: data.fieldKey,
+              proposedValue: data.proposedValue,
+              conflictWithValue: data.conflictWithValue,
+            },
+          ];
 
   const ajeno = data.titularAjeno === true;
   // Derivado en esta vuelta: un bloque abierto pide el dato, y nadie lee la respuesta.
-  const bloques = campos.map(armarBloque).filter((b) => !(ajeno && b.abierto));
+  const bloques = [
+    ...campos.map(armarBloque),
+    ...(data.polizaCambiada ? [bloqueDePolizaCambiada()] : []),
+  ].filter((b) => !(ajeno && b.abierto));
 
   /*
    * Con que UNO traiga valor, hay algo que confirmar.

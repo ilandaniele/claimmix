@@ -65,7 +65,7 @@ describe("AC24: PII masking in outbound email templates", () => {
 
     expect(maskPolicyNumber("POL-123456")).toBe("POL-****3456");
     expect(maskPolicyNumber("12345678")).toBe("****5678");
-    expect(maskPolicyNumber("POL-1234")).toBe("POL-****1234");
+    expect(maskPolicyNumber("POL-1234")).toBe("****");
   });
 
   it("renderTemplate confirmation_received contains masked policy_number", async () => {

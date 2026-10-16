@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-15. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-16. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -3166,7 +3166,15 @@ sobre el 429 que esperaban. Una línea por arreglo:
   instante: lo retoma el barrido, así un cupo agotado no quema los tres intentos
   en segundos. *Ampliado 2026-09-23:* un 429 o un TIMEOUT del reconocedor de
   negativas entra por la misma puerta y con el mismo tope. Ver «El parte que un
-  429 daba por no rechazado».
+  429 daba por no rechazado». *Enmendado 2026-10-15:* el barrido sólo corría
+  con tráfico de otro caso o con el cron diario, y en WhatsApp un caso cortado
+  por un TIMEOUT de Gemini 3.8 esperó 5 minutos y otro quedó sin respuesta. Al
+  soltar la reserva, el worker encola ahora el flujo durable
+  `src/workflows/retomar-tras-corte.ts`, que espera 45 s y retoma ese caso con
+  los mismos predicados del barrido (`retomarExtraccionesPendientes` con
+  `caseId`, sin los dos minutos de espera). Sin reintentos del SDK, y el tope de
+  tres intentos no cambia. Si el flujo no se puede encolar, se anota
+  `retomar_pendientes.retoma_no_programada` y queda el barrido de siempre.
 - **Un 429 en la deliberación queda a la vista.** `deliberate.ts` sigue
   cayendo a la plantilla, pero escribe `agent.deliberation_failed` en la
   auditoría con el estado y el código del proveedor. *Enmendado 2026-09-22:*
@@ -3937,7 +3945,8 @@ punto de cada ítem: `docs/AUDITORIA-2026-09.md` §14.
 - Observaciones que quedan sin construir, riesgo bajo: en el ensayo de
   «Devolver al agente» el cliente dio la póliza POL-4471-A y, tras la
   devolución, escribió «póliza 4455», y el agente aceptó el número nuevo sin
-  señalar la contradicción; y el título del commit `fe7d15a` quedó cortado
+  señalar la contradicción (resuelto el 15/10: ver «Póliza cambiada a mitad
+  de la charla»); y el título del commit `fe7d15a` quedó cortado
   (le falta «auditadas»), sin corregir para no reescribir la historia.
 - 28/09: el primer intento del script de la plantilla leyó mal `.env.local`
   (la línea del token de WhatsApp termina en un comentario) y Graph devolvió
@@ -4879,24 +4888,182 @@ y `/api/health?deep=1` sin desfase de bases.
   dev dio 389 ms al primer intento (antes oscilaba entre 477 y 576).
 - **Pen test** (#424): el asistente reintenta una vez si el modelo no contesta.
 
+### workflow 5 y ESLint 10 (2026-10-15, #438/#439, en main; a prd con la próxima promoción)
+
+Los majors que Dependabot juntó en #434, menos TypeScript 7. Entraron por #438 a qa (ensayo y
+pen test verdes) y por #439 a main (`080eb325`); Dependabot cerró #434 solo.
+
+- **workflow 5.2.0 y `@workflow/vitest` 5.0.3.** El código sólo usa `start()` y las directivas
+  `"use workflow"`/`"use step"`, que no cambian. Los runs nuevos quedan en la región de la
+  función (gru1, antes iad1); los de 4.x terminan en su deployment, sin migrar nada.
+- **ESLint 10.12.** `eslint-config-next` 16.4 lo soporta; los avisos de peer de
+  `eslint-plugin-import`, `jsx-a11y` y `react` son esperables.
+- **TypeScript 7 afuera.** Compila el proyecto, pero typescript-eslint 8.71 no lo soporta y el
+  lint no arranca. `dependabot.yml` ignora el major de `typescript` hasta que
+  typescript-eslint/typescript-eslint#10940 lo resuelva.
+- **Verificado.** Dev salteó el ensayo que QA ya había pasado, Carga 434 ms (peor caso), y el
+  `pnpm check` completo dio verde en 14,4 min: 14 497 tests, flujos 3/3, 26 conversaciones y
+  smoke sobre `080eb32`.
+
+### Actions sin cuota hasta el 1/11, y CI que saltea lo que es sólo documentación (2026-10-15, #441)
+
+El presupuesto de US$ 50 por mes de GitHub Actions de la cuenta se gastó entero el 15/10:
+octubre suma US$ 64,08 brutos, de los que claimmix son 42,44 y uns-study 20,40 (propflow
+0,85, republica-en-llamas 0,38). Desde ahí ningún job arranca («The job was not started
+because an Actions budget is preventing further use») hasta que el ciclo se reinicia el
+1/11. No se sube el presupuesto ni se cambia de plan.
+
+- **Qué queda parado.** CI, CodeQL y Secretos de los PR, los Post-deploy de QA, dev y PRD, la
+  Carga y el barrido `barrer-trabados`. Los casos trabados en prd los levanta sólo el cron
+  diario de Vercel `/api/cron/reap-stuck` (04:07 UTC). #440 (sólo docs) está en qa sin
+  veredicto: el ensayo del run 38711929216 se canceló a los 75 min por timeouts de Vertex y
+  el reintento (el primero de dos) no arrancó por el presupuesto.
+- **Dónde se fueron los minutos de octubre.** 7058 en total: CI de PR 3298, Post-deploy 1728,
+  CI de push 795, CodeQL de PR 414, Secretos de PR 197, barrido 170, CodeQL de push 134 y
+  Carga 101. Un PR que sólo tocaba documentación costaba unos 60 minutos (CI 30, CodeQL 5,
+  Secretos 1 y QA de 22 a 25).
+- **Sólo docs** (#441). Un commit que sólo cambia archivos `.md` (salvo
+  `docs/PROMOCION.md`, que leen los tests) sobre un árbol que ya pasó hereda su marca: `arbol`
+  saltea los jobs de código, CodeQL no analiza y el Post-deploy de QA corre todo menos el
+  ensayo, con el veredicto en verde y la marca `ensayo-verde-<árbol>`, así que dev tampoco
+  ensaya. Un renombre desde un archivo de código, 300 archivos o más, o un error de la API
+  cuentan como código. `tests/unit/ci-solo-docs.test.ts` corre los scripts reales con un `gh`
+  falso; en Actions no se puede probar hasta el 1/11.
+- **Aviso.** GitHub pasa `ubuntu-latest` a Ubuntu 26 desde el 19/10.
+
+### DNI o CUIT, y tres decisiones de auth (2026-10-15, #442)
+
+- **DNI o CUIT del titular** (#442, en la rama `agente/dni-o-cuit`). En `consorcio-por-mail` el
+  agente le pedía DNI a un consorcio, que no tiene. La etiqueta de `dni` pasa a «DNI o CUIT del
+  titular», la oración de pedido de `dni` y `dni_asegurado` nombra el CUIT para consorcios y
+  empresas, el prompt de extracción acepta el CUIT en `dni`, y el control de campos caídos de
+  `compose-reply.ts` toma «CUIT» como pedido del dato. Ensayo verde con 2.5-flash y con
+  3.8-flash; unit tests y `pnpm check --local --fast` verdes. Espera CI (ver abajo).
+- **Póliza cambiada a mitad de caso.** Al escribir esta sección quedaba como decisión del
+  dueño, porque el aviso parecía chocar con AC24. Lo resolvió #443 sin aflojarlo: el agente
+  pregunta cuál vale sin repetir ningún número (ver la sección siguiente).
+- **Prefetch fuera del proxy: descartado.** Sacar del matcher los pedidos con
+  `next-router-prefetch` ahorraría invocaciones, pero ese header lo pone el cliente: cualquiera
+  se saltearía la redirección a `/login` y el CSP con nonce.
+- **`cookieCache` de 60 s: se queda.** Ya estaba decidido (ver más arriba): el remedio es
+  invalidar, no acortar, y eso pide un hook de Better Auth. La pantalla avisa la demora.
+- **Restablecer contraseña no es atómico: aceptado.** Better Auth cambia la clave y cierra las
+  sesiones en sentencias separadas sobre `neon-http`, que no tiene transacciones interactivas.
+  Hacerlo atómico pide pasar ese camino a un pool por WebSocket; no compensa el riesgo hoy.
+- **Latencia de 3.8 en prd: sin datos.** La base de prd tiene 0 casos y 0 eventos de
+  proveedor; no hay tráfico que medir. En local, una extracción tardó 25 s.
+- **CI parado hasta el 1/11.** El presupuesto de Actions del mes se agotó y todos los jobs
+  fallan a los 2–3 s. #441 y #442 esperan CI; #440 espera el veredicto de QA. La promoción de
+  #436–#442 a prd queda para después, con el OK del dueño.
+
+### Póliza cambiada a mitad de la charla (2026-10-15, #443 a qa, espera CI hasta el 1/11)
+
+Cierra la observación del ensayo `devolver-al-agente` (#338, `AUDITORIA-2026-09.md`): la
+persona daba `POL-4471-A` y después escribía «póliza 4455», y el agente tomaba el número nuevo
+sin decir nada. Plano en `.claude/handoff/poliza-cambiada.md`.
+
+- **Detección.** `src/core/case/poliza-cambiada.ts` compara las dos sin dejarse engañar: «4471»
+  es `POL-4471-A` dicha a medias y «4455» no es `2914455123`. El orquestador mira lo que leyó el
+  extractor y, además, lo que el texto da como póliza («póliza 4455»): el extractor relee toda la
+  charla y a veces se queda con la primera.
+- **Pregunta sin números (AC24).** Con otra póliza, la rama D manda `POLIZA_CAMBIADA` («no
+  coincide con el que teníamos… ¿nos escribís el número correcto?»), sin repetir ninguna de las
+  dos. La plantilla, el mensaje de WhatsApp y el redactor la llevan; el redactor no ve los
+  dígitos del último mensaje y dos guardas rechazan un texto que la omita o cite un número.
+- **Resolución.** `cases.policy_number` sigue con la primera mientras la fila queda pendiente
+  con las dos. La respuesta la cierra un paso propio con `polizaElegida`; si eligió la nueva,
+  se actualiza el caso. «No sé» o «la primera» dejan la fila pendiente y se vuelve a preguntar.
+- **Pólizas cortas en el prompt del redactor.** `sinNumerosEnteros` pedía seis dígitos y
+  `POL-4471-A` llegaba entera: el ensayo devolvió «entendemos que la póliza es la POL-4471-A».
+  Ahora una póliza con prefijo y cuatro o cinco dígitos entra como `POL-****`; la patente no se
+  toca. El prefijo queda a propósito: con `****` solo, el modelo escribió «la patente es la ****».
+- **Verificado.** Tests unitarios, `tsc` y ESLint verdes. `pnpm rehearse devolver-al-agente` con
+  `gemini-3.8-flash` (el de los entornos desplegados): verde, el turno 5 pregunta sin números y
+  ninguna respuesta cita 4471 ni 4455. Con 2.5 local el turno 6 salió rojo dos de cuatro veces
+  por el desboque conocido del extractor (8192 tokens, el corte de 30 s lo vuelve TIMEOUT sin
+  reintento); con `GEMINI_TIMEOUT_MS=0` reintenta con la corrección de MAX_TOKENS y queda verde.
+  `pnpm check --local` con 3.8 verde: las 26 conversaciones sin diferencias (26,6 min). La
+  primera corrida encontró dos mocks de `gap-analyzer` sin `MEDIUM_CONFIDENCE_LOW`.
+
+### Repo público otra vez (2026-10-16, #451)
+
+El 16/10 de madrugada el repo volvió a ser público para que Actions corra en runners
+estándar sin gastar el presupuesto. El dueño aceptó que la historia de git sigue teniendo
+datos reales de una denunciante (DNI, correo, número de denuncia y apellido, desde
+bba09343, #30), además de su propio celular y un ID de facturación: la historia no se
+reescribió. #451 los saca del árbol actual con datos sintéticos.
+
+- **Antes del cambio** se borraron 286 runs de `barrer-trabados` y 78 runs fallidos de la
+  Carga: sus logs tenían el JSON del barrido y detalle de salud.
+- **Ruleset 25217107** «main, qa y prd: sólo por PR»: esas ramas no se pueden borrar, no
+  aceptan force-push y todo entra por PR (0 aprobaciones, sin bypass). Todavía no exige
+  checks: eso espera al renombre de los jobs del CI. La protección clásica de septiembre
+  (14 contextos y `enforce_admins`) no volvió.
+- **Secret scanning y push protection** prendidos, con 0 alertas. La aprobación de
+  workflows de forks queda en el default de GitHub (contribuyentes nuevos).
+- **Logs públicos.** Todo log y artefacto de Actions es público: ningún workflow imprime
+  datos personales, detalle de salud ni secretos. #451 lo cierra para el barrido
+  (`resumen()` en lugar de `cat respuesta.json`) y para `mirar-salud` (`sinDetalle` en
+  Actions). Hasta que #451 llegue a main, el barrido de dev y prd sigue publicando el
+  detalle enmascarado.
+- **Carga y forks.** Un `deployment_status` corre el workflow del SHA desplegado, así que
+  la puerta `origen` de `load-tests.yml` es sólo una alarma. El control real es la Git Fork
+  Protection de Vercel, prendida en los tres proyectos, y no autorizar nunca el preview de
+  un fork.
+- **CodeQL** vuelve a subir el SARIF porque el repo no es privado. En un PR de fork el
+  token es de sólo lectura y la subida falla.
+- **Programados.** En un repo público GitHub apaga los workflows programados tras 60 días
+  sin commits. Si el repo se queda quieto, el barrido se reactiva a mano.
+- **Retención de logs** en el default: con un día se perderían las marcas
+  `ensayo-verde-*` y `ci-verde-*`.
+- Se relanzaron CI, CodeQL y Secretos de #446 y #448–#451. #448–#451 entran a qa juntos
+  con #446, en `integra/lote-1-11`.
+
+### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, rama `ci/por-ambiente`)
+
+Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha>` o `PRD · deploy <sha>`, y sus checks llevan el entorno adelante (`DEV / Smoke del deploy`, `QA / Ensayo de conversaciones`, `PRD · Smoke y salud de las bases`). Los siete workflows siguen, con un nombre que dice cuándo corren (`PR y main · Chequeos del código`, `Post-deploy · DEV, QA y PRD`, `Programado · Barrer trabados en DEV y PRD`). No se saca ningún check: `Tipos` y `Lint` pasan a ser un solo job, `Tipos y lint`.
+
+- **Dev sin `inherit`.** El job `produccion` pasó a llamarse `dev` y mapea sus catorce secretos uno por uno: ningún caller usa `secrets: inherit`, y `tests/unit/ci-secretos-del-reusable.test.ts` frena un secreto declarado que no llegue.
+- **Caché y tiempo.** Cada job que instala guarda la caché de pnpm. Con el repo público los runners estándar no se cobran: esto acorta la corrida de cada PR (el plan estimó ≈2 min de runner por push, sin medir), no ahorra plata. El k6 `carga` y `secrets.yml` siguen en `ubuntu-latest`, y el job `origen` y los logs sin detalle de #451 quedan como estaban.
+- **Disparos a mano.** El de `deploy-checks.yml` se fue. El del post-deploy corre sólo desde `main` y sólo contra el alias de dev, con el interruptor `ensayar` (`gh workflow run post-deploy.yml --ref main -f ensayar=false`). Residuo aceptado: ese freno vive en el archivo disparado, y el ruleset 25217107 (sólo por PR) no frena un `workflow_dispatch` desde una rama. Quien edite el freno en una rama y la dispare expone los secretos de dev (el ensayo igual falla en WIF). Lo mismo valía antes por el disparo de `deploy-checks.yml`, que corría código de la rama con todos los secretos.
+- **Marcas que saltean trabajo.** `ensayo-verde-<árbol>` sólo cuenta si la subió el post-deploy de un deploy de QA en verde, y `ci-verde-<árbol>` sólo si la subió `ci.yml` desde un commit que ya está en la historia. Antes valía cualquier artefacto con ese nombre. Limita quién puede dejar una marca; no es una firma.
+- **Cadenas de DEV.** El shell de QA y el de los e2e ya no las reciben: la comparación «¿es la misma base?» va en la expresión y al shell llega sólo `true` o `false`.
+- **k6.** QA tiene su propia cola (`carga-qa`) y cada proyecto la suya para las vistas previas (`carga-preview-<environment>`): antes una vista previa podía cancelar la carga de QA. Contra PRD no corre nunca, ni por un deploy ni por una vista previa del proyecto de prd ni a mano.
+- **Invariantes.** La 12 rechaza un grupo de `concurrency` armado con `github.ref`, y la 15 también lee el `run-name`.
+- **Checks obligatorios.** El ruleset 25217107 todavía no los exige y espera a este renombre: serían los diez de `ci.yml`, `codeql.yml` y `secrets.yml` (con `Tipos y lint` en lugar de `Tipos` y `Lint`) más el estado `Post-deploy QA`. Exigirlos necesita el OK del dueño.
+- **Al llegar a qa y a main**, mirar la primera corrida de DEV, de QA y de PRD: título, nombres de los checks, si el ensayo corrió o se salteó (y, si se salteó, que el resumen nombre el árbol de QA) y el estado `Post-deploy QA`. Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambian de nombre.
+
+### Un audio mudo no inventa una denuncia (2026-10-16, #453)
+
+El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso se derivaba a un especialista en el turno de la nota de voz y el PDF siguiente no se leía. Sin fixtures, la nota es `tests/fixtures/placeholder.ogg`, 2 s de Opus en silencio, y gemini-3.8-flash le inventó voz en 3 de 6 llamadas de una sonda (un robo con la ventana rota, una piedra en el parabrisas). La transcripción falsa reemplazaba al marcador y la deliberación derivaba por hechos que nadie contó. En producción pasaba lo mismo con un audio con ruido.
+
+- **Tope de palabras.** `transcribir.ts` descarta una transcripción con más de cuatro palabras por segundo de audio, más cuatro de gracia (`metadatos.segundos`, medido al recibir; sin duración no se juzga). Log `email_worker.transcripcion_inverosimil`, sólo con las cuentas.
+- **El marcador solo no cuenta hechos.** Un mensaje que es sólo `[Mensaje de audio adjunto]` no se delibera ni sube la gravedad del caso (`gravedadSinHechosNuevos`).
+- Tres corridas de `nota-de-voz-y-pdf` sin fixtures, verdes; en una, la guarda descartó 21 palabras para 2 s de audio. La temperatura no se tocó: Google desaconseja bajarla en Gemini 3.
+- Entra a qa junto con `ci/por-ambiente` (#452) en `integra/ci-y-audio`, para un solo Post-deploy de QA.
+
 ### 🙋 Waiting on you (not code)
+
+- **Promoción a prd.** Con #446 en qa y main en verde, la próxima promoción lleva
+  #436–#451 y espera tu OK.
 
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner
   `VERTEX_EXTRACTION_MODEL=gemini-3.8-flash` o borrar la línea.
-
+- **Póliza cambiada a mitad de caso.** Decidir si el agente avisa cuando la persona corrige el
+  número de póliza y si AC24 se afloja para valores que escribió ella misma. El arreglo está
+  mapeado en «DNI o CUIT, y tres decisiones de auth».
 - **App propia del cliente: antes de prenderla.** (1) W6, el ensayo manual en dev con un
   portfolio de prueba nuevo y el chip de repuesto; cierra las incógnitas I1 a I42 de la
   Parte H. (2) Decidir con eso si hace falta App Review (I7, Q35): si hace falta, la vía no se
   publica para autoalta. (3) Abogado (Q15): anexo `#app-propia`, Platform Terms §6.a.iv y §5.a,
   y las plantillas `legal.*`; hasta entonces nada en prd. (4) Generar `WHATSAPP_APP_SECRETS_KEY`
-  (32 bytes en base64), una distinta por ambiente y con copia fuera de Vercel. (5) La 0051 a
-  mano en las tres bases (es la misma de la Parte G; si alguna ya tiene una versión anterior,
-  reaplicar lo que cambió). (6) Pegar el texto propuesto del anexo y de la sección de
+  (32 bytes en base64), una distinta por ambiente y con copia fuera de Vercel. (5) Hecho: la
+  0051 está en QA, dev, staging y prd (comprobado el 15/10). (6) Pegar el texto propuesto del anexo y de la sección de
   privacidad (Parte H, «pendiente del dueño») en `src/app/terms` y `src/app/privacy`: el código
   no los toca. (7) `ALTA_APP_PROPIA=1` en dev, y `pnpm check` completo después del deploy.
 
-- **WABA propia: Meta y la 0051, en este orden.** Es el bloqueo de Meta que queda: sin la
+- **WABA propia: lo que queda de Meta, en este orden.** Es el bloqueo de Meta que queda: sin la
   verificación del negocio y la revisión de la app, un cliente nuevo no puede abrir el
   popup. (1) Verificar el negocio Veltra (CUIT con la razón social exacta). (2) Datos de la
   app: ícono, `/privacy`, `/terms` y la URL de eliminación de datos
@@ -4904,10 +5071,9 @@ y `/api/health?deep=1` sin desfase de bases.
   Revisión de la app con acceso avanzado a `whatsapp_business_management` y
   `whatsapp_business_messaging`. (5) Facebook Login for Business y una configuración de
   Embedded Signup v4 con token que no vence: el `config_id` es `META_ES_CONFIG_ID`. (6)
-  Suscribir `account_update` y `phone_number_name_update`. (7) **Aplicar la 0051 a mano**,
-  con el dueño de la base (necesita `BYPASSRLS`), en QA (`ep-wispy-flower`), producción
-  (`ep-proud-resonance`) y la rama `production` de Veltra, y después `pnpm permisos &&
-  pnpm tenancy` en cada una; sin ella el CI queda rojo por `--exigir-al-dia`. (8) Probar
+  Hecho: la app está suscripta a `account_update` y `phone_number_name_update` (leído por
+  Graph el 15/10). (7) Hecho: la 0051 está en QA, dev, staging y prd (comprobado el 15/10).
+  (8) Probar
   solo en dev, con un portfolio de prueba nuevo y una SIM libre, y confirmar que el
   `user_id` de `debug_token` es el mismo que trae el `signed_request` del borrado. (9)
   Cambiar el texto de `src/app/privacy/page.tsx` con la sección `#meta` propuesta en la
@@ -4920,13 +5086,8 @@ y `/api/health?deep=1` sin desfase de bases.
   a los clientes de dev con SSO o API v1 del dominio nuevo. La política de privacidad
   todavía nombra el permiso `gmail.readonly`, que el alta corta ya no pide: ese texto lo
   cambia el dueño. Lista completa en `docs/PROMOCION.md`, sección «Prd».
-- **Número por código: aplicar la 0049 ANTES de mergear.** Es sólo la función
-  `claimmix_numero_automatico` (`0049_numero_por_codigo.sql`), aditiva e
-  idempotente. Se aplica a mano, con el dueño de la base (necesita `BYPASSRLS`), en
-  este orden: QA (`ep-wispy-flower`), producción (`ep-proud-resonance`) y la rama
-  `production` de Veltra. Después, en cada una con su `DATABASE_URL_APP`,
-  `pnpm permisos && pnpm tenancy`. Sin ella el CI queda rojo por `--exigir-al-dia`.
-  Pendiente aparte: la prueba real en QA con una SIM libre que no esté en la app de
+- **Número por código.** La 0049 (`claimmix_numero_automatico`) ya está en QA, dev,
+  staging y prd (comprobado el 15/10). Queda la prueba real en QA con una SIM libre que no esté en la app de
   WhatsApp (receta en `docs/whatsapp-setup.md`), decidir si se verifica la empresa
   en Meta para subir el tope de números, y no prender la bandera en producción
   hasta que QA salga bien. La retoma tras un corte no necesita migración.
@@ -5184,7 +5345,7 @@ y `/api/health?deep=1` sin desfase de bases.
   is the plan, not the code — that becomes a step-shaped outage the month it hits.
 - ~~**New GCP project + `pnpm switch-gcp`**~~ ✅ **DONE 2026-08-24.** Extraction now
   runs on **`claimmix-506321`**, inside the `veltra-claimmix-org` organisation and on
-  **its own billing account** (`0158E1-5C6451-D20FCE`), so the model's spend stops
+  **its own billing account** of the organisation, so the model's spend stops
   landing on a personal card. The ID is not `claimmix-veltra`: project IDs are
   immutable and `claimmix` was already taken by the personal project, so Google
   appended the number. Two projects are now called "claimmix" — worth renaming the old
@@ -5298,7 +5459,7 @@ regenerated. Latest dump: `training-examples-2026-08-07.json` (206 + 20 rules).
   to `.gitignore`. BUT the `veltra.soporte@gmail.com` app password was pasted into a
   chat session (lives in transcripts) → **rotate that password**. The dead `AQ.` key was
   also pasted around; it's dead, so no action needed once replaced.
-- ~~**WhatsApp — real number**~~ ✅ **DONE.** It took two attempts: `+54 9 11 2318-4512`
+- ~~**WhatsApp — real number**~~ ✅ **DONE.** It took two attempts: a personal line
   failed because it still had a WhatsApp account attached and a fresh chip never got the
   SMS code. The number that worked is the one in production now. If it ever has to be
   swapped again, the Vercel change is a one-liner once you have the new **Phone Number

@@ -140,7 +140,7 @@ describe("recordarCaso", () => {
       tenantId: TENANT_ID,
       to: "juan@correo.test",
       template: "missing_information_request",
-      data: { missingFields: ["policy_number"], isFollowUp: true },
+      data: { missingFields: ["policy_number"], isFollowUp: true, repitePedido: true },
     });
     expect(m.auditar).toHaveBeenCalledWith({
       tenant_id: TENANT_ID,

@@ -700,6 +700,32 @@ describe("composeReply — the brief it hands the model", () => {
     await composeReply(base({ intent: "closing", origenWeb: true, isFollowUp: true }));
     expect(mockCall.mock.calls[0][0] as string).not.toContain("completó el formulario de denuncia");
   });
+
+  it("la sección del recordatorio entra sólo cuando el mensaje repite un pedido", async () => {
+    const mensaje = "Hola, Marta. Te recordamos que necesitamos el número de póliza para seguir.";
+
+    replies(mensaje);
+    await composeReply(base({ fields: ["policy_number"], isFollowUp: true, repitePedido: true }));
+    expect(mockCall.mock.calls[0][0] as string).toContain(textoBase("redactar.recordatorio"));
+
+    for (const over of [{ repitePedido: false }, {}]) {
+      vi.clearAllMocks();
+      replies(mensaje);
+      await composeReply(base({ fields: ["policy_number"], isFollowUp: true, ...over }));
+      expect(mockCall.mock.calls[0][0] as string).not.toContain(textoBase("redactar.recordatorio"));
+    }
+  });
+
+  it("un recordatorio que abre con «Te recordamos que…» pasa todas las guardas", async () => {
+    replies("Te recordamos que necesitamos el número de póliza y el DNI del titular para seguir con tu caso.");
+
+    const out = await composeReply(
+      base({ fields: ["policy_number", "dni"], isFollowUp: true, repitePedido: true })
+    );
+
+    expect(out).toMatch(/^Te recordamos que/);
+    expect(out).not.toBe(FALLBACK);
+  });
 });
 
 /**

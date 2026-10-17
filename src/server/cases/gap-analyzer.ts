@@ -34,34 +34,22 @@ import {
 } from "@/lib/db/schema";
 import type { ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
-import { camposRequeridosDelRamo, clavesQueSatisfacen } from "@/core/case/required-fields";
+import { camposRequeridosDelRamo } from "@/core/case/required-fields";
 import { esRamoNativo } from "@/core/case/ramos";
 import { CONFIANZA_DE_DATO_PRESENTE } from "@/core/case/faltantes-vigentes";
+import {
+  claveDelRamoDelCaso,
+  faltantesRequeridos,
+  mapaDeCampos,
+} from "@/core/case/faltantes-requeridos";
 import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/**
- * Fields that MUST be present for an email claim to be considered complete.
- * Note: 'email' and 'phone' are treated as a contact pair — at least one required.
- */
-export const REQUIRED_CLAIM_FIELDS = [
-  "full_name",
-  "accident_date",
-  "accident_description",
-  "claim_type",
-  // A claim an insurer cannot attach to a policy is not a claim it can act on.
-  // These were absent from the list, so nothing ever asked for them and a case
-  // could reach listo_para_core with no way to identify the policyholder,
-  // while the agent spent its one question confirming an inferred province.
-  "policy_number",
-  "dni",
-] as const;
-
-/** At least one of these contact fields must be present. */
-export const REQUIRED_CONTACT_FIELDS = ["email", "phone"] as const;
+// Viven en el núcleo; se siguen exportando desde acá.
+export { REQUIRED_CLAIM_FIELDS, REQUIRED_CONTACT_FIELDS } from "@/core/case/faltantes-requeridos";
 
 /** Confidence threshold for 'medium' confidence (IC9). */
 export const MEDIUM_CONFIDENCE_LOW = CONFIANZA_DE_DATO_PRESENTE;
@@ -150,26 +138,12 @@ export async function analyzeEmailClaimGaps(
 
   // ── 2. Build a map of extracted field values and confidences ──────────────
   //
-  // Keyed by canonical name, best copy wins. The extractor emits `numero_poliza`
-  // as readily as `policy_number`, and with the policy number now required, a
-  // raw-key map would report it missing while holding it under the other
-  // spelling — and email the claimant asking for something they already sent.
-  const fieldMap = new Map<string, ExtractedField>();
-  // Stored first, this run second: a fresh reading of the same field wins ties,
-  // so a correction in the latest message is not outranked by the old value.
-  for (const f of [...storedFields, ...extractedFields]) {
-    const key = canonicalFieldKey(f.field_key);
-    const existing = fieldMap.get(key);
-    if (!existing || f.confidence >= existing.confidence) {
-      fieldMap.set(key, f);
-    }
-  }
+  // Stored first, this run second: a fresh reading of the same field wins ties
+  // (ver `mapaDeCampos`).
+  const fieldMap = mapaDeCampos([...storedFields, ...extractedFields]);
 
-  // Lo que pide el ramo de este caso, además de los campos base. Sólo cuando
-  // `claim_type` está lo bastante firme: con poca confianza no sabemos qué
-  // ramo es, y pedir de más sería peor que no pedir todavía.
-  const tipo = fieldMap.get("claim_type");
-  const claveDelRamo = tipo && tipo.confidence >= MEDIUM_CONFIDENCE_LOW ? tipo.field_value : null;
+  // Lo que pide el ramo de este caso, además de los campos base.
+  const claveDelRamo = claveDelRamoDelCaso(fieldMap);
   // Los ramos propios sólo se leen si el de este caso no es uno del código.
   const delRamo = camposRequeridosDelRamo(
     claveDelRamo,
@@ -177,51 +151,7 @@ export async function analyzeEmailClaimGaps(
   );
 
   // ── 3. Determine missing required fields ──────────────────────────────────
-  const missingRequiredFields: string[] = [];
-
-  // Check mandatory fields, más lo que pida el ramo de este caso.
-  for (const reqField of [...REQUIRED_CLAIM_FIELDS, ...delRamo]) {
-    const extracted = mejorEntreClaves(fieldMap, clavesQueSatisfacen(reqField));
-    const isMissingInDB = missingDocKeys.includes(reqField);
-
-    if (isMissingInDB && !extracted) {
-      // Still missing — no re-extraction has provided it
-      missingRequiredFields.push(reqField);
-    } else if (!extracted && !isMissingInDB) {
-      // Not in extracted fields and not in missing_docs — add it
-      missingRequiredFields.push(reqField);
-    } else if (extracted && extracted.confidence < MEDIUM_CONFIDENCE_LOW) {
-      // Below low confidence threshold → treat as missing (AC8, IC9)
-      missingRequiredFields.push(reqField);
-    }
-  }
-
-  /*
-   * Hace falta AL MENOS UNO de los campos de contacto.
-   *
-   * Recorre `REQUIRED_CONTACT_FIELDS` en vez de escribir "email" y "phone" a
-   * mano cuatro veces, que es como estaba: la constante se exportaba con el
-   * comentario «al menos uno de estos tiene que estar» y no la usaba nadie, ni
-   * siquiera esta comprobación. Agregarle un tercer canal —WhatsApp, por
-   * ejemplo— no cambiaba absolutamente nada, y el que la agregara no tenía
-   * forma de enterarse.
-   */
-  const tieneAlguno = REQUIRED_CONTACT_FIELDS.some((clave) => {
-    const campo = fieldMap.get(clave);
-    return campo !== undefined && campo.confidence >= MEDIUM_CONFIDENCE_LOW;
-  });
-
-  // Se pidió y no llegó, o nunca lo mencionaron: en los dos casos falta.
-  const algunoPedidoYSinValor = REQUIRED_CONTACT_FIELDS.some((clave) =>
-    missingDocKeys.includes(clave)
-  );
-  const ningunoMencionado = REQUIRED_CONTACT_FIELDS.every(
-    (clave) => !fieldMap.has(clave)
-  );
-
-  if (!tieneAlguno && (algunoPedidoYSinValor || ningunoMencionado)) {
-    missingRequiredFields.push("email_or_phone");
-  }
+  const missingRequiredFields = faltantesRequeridos(fieldMap, delRamo, missingDocKeys);
 
   // ── 4. Fetch pending claim_field_confirmations ────────────────────────────
   const pendingConfirmations = confirmaciones.filter((c) => c.status === "pending");
@@ -361,25 +291,6 @@ async function leerElCaso(
     ]);
     return { storedFields, missingDocKeys, confirmaciones };
   }
-}
-
-/**
- * La entrada de mayor confianza entre las claves que satisfacen un campo
- * requerido. Para los campos base, `clavesQueSatisfacen` sólo devuelve la
- * clave pedida, así que esto es `fieldMap.get(reqField)` como antes.
- */
-function mejorEntreClaves(
-  fieldMap: Map<string, ExtractedField>,
-  claves: readonly string[]
-): ExtractedField | undefined {
-  let mejor: ExtractedField | undefined;
-  for (const clave of claves) {
-    const campo = fieldMap.get(canonicalFieldKey(clave));
-    if (campo && (!mejor || campo.confidence > mejor.confidence)) {
-      mejor = campo;
-    }
-  }
-  return mejor;
 }
 
 interface FilaDeCampo {

@@ -17,7 +17,7 @@ import { AgentExportPanel } from "./AgentExportPanel";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import { BatchSimulatePanel } from "./BatchSimulatePanel";
 
-type TabId = "modelos" | "campos" | "ramos" | "formulario" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote" | "trabajo";
+type TabId = "modelos" | "campos" | "ramos" | "formulario" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote" | "trabajo" | "base";
 
 /**
  * La etiqueta es una CLAVE, no un texto: la lista se arma una sola vez cuando
@@ -36,6 +36,7 @@ const TABS = [
   { id: "uso", clave: "consola.tab.uso", icon: Activity },
   { id: "lote", clave: "consola.tab.lote", icon: Layers },
   { id: "trabajo", clave: "consola.tab.trabajo", icon: ClipboardList },
+  { id: "base", clave: "consola.tab.base", icon: Brain },
 ] as const satisfies readonly { id: TabId; clave: ClaveDelCliente; icon: unknown }[];
 
 /** `aria-controls` necesita un id, y el panel es uno solo para todas. */
@@ -54,17 +55,19 @@ const ID_PANEL = "panel-de-la-consola";
  * en `@/lib/ui/pestanas`, compartidas por las dos, para que no terminen siendo
  * dos tablist con teclados distintos.
  *
- * `ramos` y `formulario` llegan armados por el servidor: son formularios
- * nativos que no necesitan estado de cliente, y así no suman JS.
+ * `ramos`, `formulario` y `base` llegan armados por el servidor: son formularios
+ * nativos o texto que no necesitan estado de cliente, y así no suman JS.
  */
 export function AgentConsoleClient({
   role,
   ramos,
   formulario,
+  base,
 }: {
   role: string;
   ramos: ReactNode;
   formulario: ReactNode;
+  base: ReactNode;
 }) {
   const [tab, setTab] = useState<TabId>("modelos");
   const t = useT();
@@ -139,6 +142,7 @@ export function AgentConsoleClient({
         {tab === "uso" && <ProviderUsagePanel />}
         {tab === "lote" && <BatchSimulatePanel />}
         {tab === "trabajo" && <TrabajoPanel />}
+        {tab === "base" && base}
       </div>
     </div>
   );

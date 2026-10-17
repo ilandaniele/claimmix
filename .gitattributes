@@ -3,3 +3,9 @@
 # corre. En Windows `core.autocrlf` los reescribe a CRLF en cada checkout, así
 # que la única forma de que sobrevivan es pedir LF explícitamente.
 .claude/workflows/*.js text eol=lf
+
+# Los prompts dorados y la base del agente se comparan byte a byte: un CRLF de
+# Windows los pone en rojo.
+tests/unit/__prompts__/*.txt text eol=lf
+entrenamiento/**/*.md text eol=lf
+src/core/agente/entrenamiento-base.generated.ts text eol=lf

@@ -80,7 +80,17 @@ describe("el filtro de sólo docs", () => {
       }
     }
     expect(leidos.size).toBeGreaterThan(0);
-    for (const md of leidos) expect(FILTRO).toContain(`. != "${md}"`);
+    for (const md of leidos) {
+      if (!md.startsWith("entrenamiento/")) expect(FILTRO).toContain(`. != "${md}"`);
+    }
+  });
+
+  // La base del agente se empaqueta en código: un `.md` de más o de menos sin
+  // `pnpm entrenamiento:empaquetar` rompe el test de deriva. Por eso es todo el
+  // directorio, no una lista de archivos que alguien tenga que mantener.
+  it("deja afuera todo `entrenamiento/`, sin lista de archivos", () => {
+    expect(FILTRO).toContain('(startswith("entrenamiento/") | not)');
+    expect(FILTRO).not.toContain('. != "entrenamiento/');
   });
 
   const caso = (archivos: unknown) => JSON.stringify({ files: archivos });
@@ -88,6 +98,13 @@ describe("el filtro de sólo docs", () => {
     ["sólo docs", caso([{ filename: "docs/PROJECT_STATUS.md" }, { filename: "README.md" }]), "0"],
     ["un test", caso([{ filename: "docs/TESTING.md" }, { filename: "tests/unit/a.test.ts" }]), "1"],
     ["el `.md` que leen los tests", caso([{ filename: "docs/PROMOCION.md" }]), "1"],
+    ["un `.md` de la base del agente", caso([{ filename: "entrenamiento/base/redactar/06-tono.md" }]), "1"],
+    ["un `.md` nuevo de la base del agente", caso([{ filename: "entrenamiento/base/redactar/07-cierre.md" }]), "1"],
+    [
+      "un `.md` de la base del agente renombrado",
+      caso([{ filename: "docs/x.md", previous_filename: "entrenamiento/base/decidir/90-pedir.md" }]),
+      "1",
+    ],
     ["código renombrado a `.md`", caso([{ filename: "docs/x.md", previous_filename: "src/x.ts" }]), "1"],
     ["sin lista de archivos", JSON.stringify({}), "1"],
     ["lista truncada", caso(Array.from({ length: 300 }, (_, i) => ({ filename: `docs/${i}.md` }))), "1"],

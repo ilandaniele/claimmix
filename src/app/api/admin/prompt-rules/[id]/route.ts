@@ -19,6 +19,7 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { motivoDeReglaInvalida } from "@/core/agente/indicaciones";
 
 const ParamsSchema = z.object({ id: z.guid() });
 
@@ -80,6 +81,13 @@ export async function PATCH(
     const parsed = UpdateRuleSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
+    }
+    const { title, rule_text } = parsed.data;
+    if (
+      (title !== undefined && motivoDeReglaInvalida(title)) ||
+      (rule_text !== undefined && motivoDeReglaInvalida(rule_text))
+    ) {
+      throw new AppError("VALIDATION_FAILED", "La regla no puede llevar enlaces, mails ni etiquetas del sistema.");
     }
 
     // Tenant-scoped fetch first (IDOR-safe 404). A DB error here degrades to

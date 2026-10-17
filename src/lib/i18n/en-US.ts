@@ -33,6 +33,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "nav.agenteBloqueado": "Only administrators can open the agent console.",
   "nav.facturacion": "Billing",
   "nav.cartera": "Portfolio",
+  "nav.altas": "Sign-ups",
 
   "age.now": "Now",
   "age.minutes": "{n}m ago",
@@ -812,6 +813,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   // ── La consola del agente — /agente, la pantalla entera ───────────
   // Distinto de `agente.*`, que es el panel de análisis adentro de un caso.
   // Acá se configura el agente; allá se lee lo que el agente extrajo.
+  "consola.tab.base": "Base",
   "consola.tab.campos": "Custom fields",
   "consola.tab.ejemplos": "Approved examples",
   "consola.tab.entrenamiento": "Optional fine-tuning",

@@ -114,8 +114,10 @@ const DIAS_DE_HISTORIAL = 90;
 export const DIAS_MAXIMOS_DE_PRUEBA = 90;
 /** Filas de la pantalla; con el tope de 24 h son semanas de altas. */
 const FILAS_MAXIMAS = 200;
+/** Ventana de la demora del alta en el panel. */
+const DIAS_DE_DEMORA = 30;
 
-/** Las columnas y las tablas que la 0048 y la 0051 agregan, y sus funciones: sin ellas el panel no tiene de dónde leer. */
+/** Las columnas y las tablas que agregan la 0048, la 0050 (`tenant_bases`, para la demora) y la 0051, y sus funciones: sin ellas el panel no tiene de dónde leer. */
 const FALTA_LA_0048 = new Set(["42P01", "42703", "42883"]);
 
 // sin-inquilino: El panel del operador cruza inquilinos a propósito: lista las
@@ -267,11 +269,18 @@ export interface PanelDeAltas {
   altas: FilaDeAlta[];
   creadas24h: number;
   tope: number;
+  /** Lo que tardó en quedar lista la base de las altas de los últimos 30 días, en segundos (de `creada_at` a `lista_at` en tenant_bases); null sin ninguna lista. */
+  demoraDeAlta: { mediana: number | null; p95: number | null };
 }
+
+const SIN_DEMORA: PanelDeAltas["demoraDeAlta"] = { mediana: null, p95: null };
 
 type Cruda = Record<string, unknown>;
 
 const texto = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+
+const segundos = (v: unknown): number | null =>
+  v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
 
 /** Una fecha de la base, venga como texto o como Date, en texto ISO. */
 function fecha(v: unknown): string | null {
@@ -339,10 +348,11 @@ function aFila(f: Cruda): FilaDeAlta {
 /**
  * Las altas automáticas, más nuevas primero, en UNA consulta: el inquilino, su
  * número, su WABA propia si la tiene, la marca de «número en revisión» (del asiento de alta), los otros
- * titulares del mismo número y cuántas altas van en 24 h. El 9 argentino se
- * ignora al comparar, igual que `mismoNumero`: «+549…» y «+54…» son el mismo.
+ * titulares del mismo número, cuántas altas van en 24 h y cuánto tardó en quedar
+ * lista la base de las de los últimos 30 días (mediana y p95, de `tenant_bases`).
+ * El 9 argentino se ignora al comparar, igual que `mismoNumero`: «+549…» y «+54…» son el mismo.
  *
- * El conteo de 24 h va aparte de la lista para que una lista vacía igual lo traiga.
+ * El conteo de 24 h y la demora van aparte de la lista para que una lista vacía igual los traiga.
  */
 export async function listarAltas(): Promise<PanelDeAltas> {
   const tope = topeGlobalDelDia();
@@ -351,24 +361,32 @@ export async function listarAltas(): Promise<PanelDeAltas> {
   } catch (e) {
     if (!FALTA_LA_0048.has(codigoPg(e) ?? "")) throw e;
   }
-  // Sin la 0051 falta sólo la tabla de la WABA propia: el panel sigue con lo de antes y ningún espacio la tiene. Si también falta la 0048, no hay panel.
+  // Sin la 0051 falta sólo la tabla de la WABA propia: el panel sigue con lo de antes y ningún espacio la tiene. Si también falta la 0048 o la 0050, no hay panel.
   try {
     return await altasDe(false, tope);
   } catch (e) {
     if (!FALTA_LA_0048.has(codigoPg(e) ?? "")) throw e;
-    return { migracionPendiente: true, altas: [], creadas24h: 0, tope };
+    return { migracionPendiente: true, altas: [], creadas24h: 0, tope, demoraDeAlta: SIN_DEMORA };
   }
 }
 
 async function altasDe(conWabas: boolean, tope: PanelDeAltas["tope"]): Promise<PanelDeAltas> {
   const filas = filasDe<Cruda>(
     await ejecutar(sql`
-      select c.creadas_24h, l.*
+      select c.creadas_24h, d.demora_mediana_s, d.demora_p95_s, l.*
       from (
         select count(*)::int as creadas_24h
         from public.tenants
         where autoalta and created_at > now() - interval '24 hours'
       ) c
+      cross join (
+        select
+          round(percentile_cont(0.5) within group (order by extract(epoch from tb.lista_at - tb.creada_at)::float8))::int as demora_mediana_s,
+          round(percentile_cont(0.95) within group (order by extract(epoch from tb.lista_at - tb.creada_at)::float8))::int as demora_p95_s
+        from public.tenant_bases tb
+        join public.tenants x on x.id = tb.tenant_id and x.autoalta
+        where tb.lista_at > now() - make_interval(days => ${DIAS_DE_DEMORA}::int)
+      ) d
       left join (
         select
           t.id as tenant_id, t.name as nombre, t.contact_email, t.created_at, t.plan, t.billing_status,
@@ -422,6 +440,7 @@ async function altasDe(conWabas: boolean, tope: PanelDeAltas["tope"]): Promise<P
     altas: filas.filter((f) => f.tenant_id != null).map(aFila),
     creadas24h: Number(filas[0]?.creadas_24h ?? 0) || 0,
     tope,
+    demoraDeAlta: { mediana: segundos(filas[0]?.demora_mediana_s), p95: segundos(filas[0]?.demora_p95_s) },
   };
 }
 

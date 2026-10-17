@@ -36,16 +36,15 @@ variables. Los valores de secretos los pega sólo el dueño, en la pantalla de V
    los tres proyectos y admite a lo sumo una promoción a prd por día.
 2. dev y QA en paralelo. Gonzalo no depende del número de WhatsApp ni de prd.
 3. prd. El número por código va primero a prd, porque en la WABA queda un solo lugar libre
-   (D1).
+   (D1). Dev y QA también reciben la bandera (D1, b), pero ese lugar es primero del cliente
+   ficticio de prd.
 4. El «Ensayo del prompt» después de cada deploy, y «Cuánto consume» (C1) después del paso 12
    de dev.
 
-**Contradicción en los docs.** `docs/PROJECT_STATUS.md:5101-5105` y
-`docs/whatsapp-setup.md:369` dicen que el número por código no se prende en prd hasta que la
-prueba en QA salga bien. `docs/whatsapp-setup.md:371-374` dice que en prd está prendido desde
-el 09/10 y que la primera alta real hace de prueba. Esta guía sigue lo segundo, que es el
-estado real (D1, opción c). Cuando el dueño confirme D1, [Claude] corrige los otros dos
-textos.
+**Contradicción en los docs, resuelta.** Los otros docs decían que el número por código no se
+prende en prd hasta que la prueba en QA salga bien. El 17/10 el dueño eligió D1 (b): prd lo
+tiene prendido desde el 09/10, y dev y QA lo reciben en el lote de A12. `docs/whatsapp-setup.md`
+y `docs/PROJECT_STATUS.md` se corrigieron en este mismo cambio.
 
 ## Lo que hoy no es igual
 
@@ -53,8 +52,10 @@ textos.
   las claves de Turnstile, el remitente o `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET`, y la
   bandera (`docs/PROJECT_STATUS.md:5053`).
 - QA no tiene token de WhatsApp ni casilla de la plataforma, a propósito
-  (`docs/PROMOCION.md:323-327`).
-- El número por código sólo está prendido en prd (`ALTA_NUMERO_AUTOMATICO`).
+  (`docs/PROMOCION.md:323-327`). Sigue así hasta que QA tenga su propia WABA y su propio token
+  (después de A5; ver «Después de A5: una WABA y un token por ambiente»).
+- El número por código sólo está prendido hoy en prd (`ALTA_NUMERO_AUTOMATICO`). Va en 1
+  también en dev y QA (D1, b), y se carga en el lote de A12.
 - `BASE_POR_CLIENTE` sólo está prendida en prd. En dev y QA queda en 0 porque no tiene vuelta
   (`docs/PROMOCION.md:779-784`, D2).
 - El entrenamiento del agente: dev tiene 19 reglas y 207 ejemplos, prd ninguno y QA no está
@@ -116,7 +117,7 @@ Lo leído en `/registro` de cada ambiente el 16/10 y lo que dicen los docs
 |---|---|---|---|
 | Alta | Abierta con Google, correo y Turnstile; sin aviso del número por código | Sólo el botón de Google; no se ven el correo ni Turnstile | Google, correo, Turnstile y el aviso del número por código; falta la prueba de punta a punta (`docs/PROMOCION.md:713-716`) |
 | Base propia | No, por excepción (`BASE_POR_CLIENTE` en 0, `docs/PROMOCION.md:560`) | No, por excepción (`docs/PROMOCION.md:784`) | Sí: `BASE_POR_CLIENTE` prendida y la base de casa lista (`docs/PROJECT_STATUS.md:4760-4764`) |
-| WhatsApp | El número de la plataforma, en la WABA de Veltra compartida con prd | No tiene, a propósito (`docs/PROMOCION.md:323-327`) | Número por código prendido desde el 09/10, nunca probado contra Meta en vivo (`docs/whatsapp-setup.md:371-374`) |
+| WhatsApp | El número de la plataforma, en la WABA de Veltra compartida con prd | No tiene, a propósito (`docs/PROMOCION.md:323-327`); sin token hasta su propia WABA (después de A5) | Número por código prendido desde el 09/10, nunca probado contra Meta en vivo (`docs/whatsapp-setup.md`, «Estado al 17/10») |
 | Mail | Casilla de la plataforma y push de Pub/Sub hacia `claimmix-dev` (`docs/PROJECT_STATUS.md:4766-4767`) | Sin casilla ni Pub/Sub, a propósito (`docs/PROMOCION.md:323-327`) | Tópico propio `gmail-push-prd`; ninguna casilla conectada hasta que un cliente la conecte (`docs/PROMOCION.md:736-738`) |
 | Consumo | Presupuesto mensual no documentado | `AI_TENANT_DAILY_TOKEN_CAP` en 20 M (`docs/PROMOCION.md:253`); el resto no documentado | US$ 50 en total, 1 por espacio en prueba y 30 entre todos (`docs/PROMOCION.md:733-734`) |
 | Usuarios | Operadores por `ADMIN_EMAILS`; invitaciones con el remitente cargado | `ADMIN_EMAILS` figura en la lista de QA (`docs/PROMOCION.md:266`), pero no está comprobado que tenga valor | Operador por `ADMIN_EMAILS`; ningún cliente con usuarios todavía |
@@ -127,7 +128,7 @@ Lo leído en `/registro` de cada ambiente el 16/10 y lo que dicen los docs
 Lo que se consigue o se decide una sola vez, en este orden. Cuando los docs no dicen cuánto
 tarda algo, la guía lo dice así.
 
-- [ ] **A1. Decisiones que traban algo.**
+- [x] **A1. Decisiones que traban algo.** 17/10.
   - **Quién:** [Dueño].
   - **Dónde:** esta tabla; el detalle de cada una está en «Decisiones pendientes del dueño».
   - **Qué hacer:** aceptar la recomendación o elegir otra opción, y anotarla al lado.
@@ -144,6 +145,36 @@ tarda algo, la guía lo dice así.
     | D8. Quién es operador | El dueño, en los tres. Gonzalo no, en QA: una dirección de `ADMIN_EMAILS` no puede hacer autoalta | A3; QA pasos 1 y 4 |
     | D14. MCP de WhatsApp | No instalarlo para esta guía | «MCP de WhatsApp (opcional)» |
     | D15. Canal de reporte | Un chat o un correo con el dueño | QA paso 12; «Si prueban otros en prd» |
+
+  - **Elegido el 17/10:**
+    - **D1: (b).** `ALTA_NUMERO_AUTOMATICO` va en 1 también en dev y QA (prd ya la tiene), y se
+      carga en el lote de A12. Todavía no está prendida en dev ni en QA. El dueño agregó tres
+      cosas.
+      - El único lugar libre de la WABA actual (compartida por dev y prd, la del número de la
+        plataforma) es primero del cliente ficticio de prd. En dev, mientras el lugar siga
+        libre, el alta tomaría ese lugar: el dueño no elige la opción de teléfono en dev hasta
+        terminar el alta ficticia de prd y borrar su número (D5), o hasta A5. Con 2 números en
+        la WABA, el código manda cualquier alta siguiente a revisión con `sin_lugar`
+        (`src/server/alta/numero-automatico.ts:283`; tope `ALTA_NUMEROS_MAXIMOS_WABA`, 2 por
+        omisión, `:97`).
+      - QA lleva la bandera en 1 y sigue sin token de WhatsApp: un alta de QA que elija el
+        teléfono termina en revisión con `sin_credencial` (`:335`, `:410`).
+      - A futuro, una WABA por ambiente. Espera a A5 (ver «Después de A5: una WABA y un token
+        por ambiente»).
+    - **D2:** `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada a «iguales».
+    - **D3:** QA con la casilla de Gmail de prueba de Gonzalo. Sin número de WhatsApp hasta que
+      QA tenga su propia WABA y su propio token (después de A5).
+    - **D4: (a).** El dueño tiene un dominio propio: las dos direcciones de cada cliente de
+      prueba van en ese dominio.
+    - **D5:** después de la prueba, borrar el número del cliente ficticio en WhatsApp Manager y
+      suspender el espacio. Purgar la base sólo si faltan MB.
+    - **D6:** `ALTA_AUTOMATICA` en 1 en QA.
+    - **D7:** los topes del alta y de la prueba, iguales a prd en los tres. `MONTHLY_BUDGET_USD`
+      y `AI_TENANT_DAILY_TOKEN_CAP`, más altos en dev y QA (excepción), y en esos dos
+      `AI_TENANT_DAILY_TOKEN_CAP` igual a la variable del repo.
+    - **D8:** el dueño es operador en los tres. Gonzalo no lo es en QA.
+    - **D14:** no instalar el MCP de WhatsApp.
+    - **D15:** los reportes van por chat o por correo al dueño.
 
   - **Salió bien si:** cada fila tiene una opción anotada.
   - **Si falla:** sin D1 no se empieza prd; sin D3, QA se hace con simulaciones; sin D4, el
@@ -196,19 +227,27 @@ tarda algo, la guía lo dice así.
     proveedor y no puede ser el número de la plataforma.
   - **Salió bien si:** la SIM recibe un SMS de prueba y el número nunca se usó en WhatsApp.
   - **Si falla:** otra SIM. Una sola alcanza mientras Veltra no esté verificada: queda un
-    único lugar libre en la WABA para los tres ambientes.
-  - **Fuentes:** `docs/whatsapp-setup.md:207-215` («Lo que hace la persona»), `:343-349` («El
-    PIN de dos pasos»), `:283-291` («El tope de Meta»).
+    único lugar libre en la WABA para los tres ambientes (el tope es del portfolio de Veltra,
+    no de la WABA: ver A5).
+  - **Fuentes:** `docs/whatsapp-setup.md:207-215` («Lo que hace la persona»), `:351-357` («El
+    PIN de dos pasos»), `:283-299` («El tope de Meta»).
 - [ ] **A5. La verificación del negocio Veltra en Meta.**
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > Centro de seguridad.
   - **Qué hacer:** pedirla con la constancia de CUIT con la razón social exacta y un
-    comprobante de domicilio.
+    comprobante de domicilio. El tope de números lo cuenta Meta por portfolio de negocio, no por
+    WABA; la documentación de la Cloud API
+    (https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers) dice: «New business
+    portfolios are initially capped at two registered business phone numbers.» Veltra es un
+    solo portfolio y ya usa un lugar con el número de la plataforma, así que una WABA nueva
+    dentro de Veltra no suma lugares. Con Veltra verificada, el dueño decidió que cada ambiente
+    tenga su propia WABA y su propio usuario del sistema. Los pasos están en «Después de A5:
+    una WABA y un token por ambiente».
   - **Salió bien si:** Meta muestra el negocio como verificado. Los docs no dicen cuánto
     tarda.
   - **Si falla:** no bloquea esta guía. Hasta que salga, hay un solo número automático para
     los tres ambientes.
-  - **Fuentes:** `docs/whatsapp-setup.md:423-424`.
+  - **Fuentes:** `docs/whatsapp-setup.md:435-436`.
 - [ ] **A6. La pantalla de consentimiento de Google, publicada.**
   - **Quién:** [Dueño].
   - **Dónde:** consola de Google Cloud, el proyecto del cliente OAuth > APIs y servicios >
@@ -297,6 +336,45 @@ tarda algo, la guía lo dice así.
   - **Fuentes:** `docs/PROJECT_STATUS.md:117-118`; `docs/PROMOCION.md:586-589` (tope de
     builds), `:706` (redeploy).
 
+### Después de A5: una WABA y un token por ambiente
+
+El dueño quiere una WABA por ambiente, y hoy no se puede por dos razones. El tope de dos
+números es por portfolio de negocio, no por WABA (A5): Veltra es un solo portfolio y ya usa un
+lugar con el número de la plataforma, así que una WABA nueva dentro de Veltra no suma lugares.
+Y cada WABA necesita su propio número de la plataforma, porque el alta lee el nombre visible
+de ese número en la misma WABA y `entornoDeMeta` necesita la credencial de esa WABA. Por eso
+esto espera a A5, que sube el tope, o a un portfolio aparte. Hasta entonces dev y prd siguen
+con la WABA y el token actuales, y QA sigue sin token.
+
+Receta para QA, con las acciones del dueño en Meta Business Suite (los nombres de los menús
+pueden variar):
+
+1. [Dueño] Crear la WABA de QA.
+2. [Dueño] Registrar en esa WABA un número de plataforma de QA, con otra SIM (no la de A4).
+3. [Dueño] En Usuarios > Usuarios del sistema, agregar un usuario del sistema **nuevo**,
+   `claimmix-qa`, con rol de administrador.
+4. [Dueño] Asignarle dos activos con control total: la app de ClaimMix y la WABA de QA.
+5. [Dueño] En `claimmix-qa`, «Generar token»: app de ClaimMix, vencimiento «Nunca» y los
+   permisos `whatsapp_business_management` y `whatsapp_business_messaging`. Meta lo muestra
+   una sola vez.
+6. [Dueño] Pegar el token en la pantalla de Vercel del proyecto `claimmix-qa` como
+   `WHATSAPP_ACCESS_TOKEN` (Sensitive), junto con `WHATSAPP_APP_SECRET` y
+   `WHATSAPP_VERIFY_TOKEN`.
+
+[Claude] carga los ids que no son secretos (`WHATSAPP_BUSINESS_ACCOUNT_ID`, con el id de la WABA
+de QA, y `WHATSAPP_PHONE_NUMBER_ID`) y sube `ALTA_NUMEROS_MAXIMOS_WABA`. Después, un redeploy de
+`claimmix-qa` y la «Prueba real en QA» de `docs/whatsapp-setup.md`.
+
+**Nunca apretar «Generar token» en el usuario del sistema que usan dev y prd. Ese token es
+permanente y no se rota. El de
+QA sale de un usuario nuevo y no toca el actual. Los tokens nunca pasan por el chat.**
+
+Si el dueño quiere separar también dev y prd, la receta es la misma, con un usuario del sistema
+y una WABA para cada uno.
+
+- **Fuentes:** `src/server/alta/numero-automatico.ts:97`, `:242`, `:283`, `:335`;
+  `docs/whatsapp-setup.md`, «El tope de Meta».
+
 ### Lo que tiene que quedar igual en los tres
 
 No existe ningún script ni endpoint que compare las variables de los tres proyectos: hoy se
@@ -307,8 +385,8 @@ dice.
 | Variable | Tipo | Igual o excepción | Estado conocido | Cómo comprobarlo |
 |---|---|---|---|---|
 | `ALTA_AUTOMATICA` (`src/lib/auth/registro-permitido.ts:53`) | bandera | igual (D6) | dev y prd en 1 (`docs/PROJECT_STATUS.md:4763-4764`); QA desconocido. `docs/PROMOCION.md:726` todavía dice 0 para prd | Vercel; una autoalta de prueba |
-| `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | excepción: ver la fila «Número por código» | dev y QA apagada, prd prendida | el aviso del número en `/registro` |
-| Número por código | bandera y Meta | excepción: sólo prd hasta que Meta verifique a Veltra (2 números por portfolio y uno ya es el de la plataforma). La verificación la pide el [Dueño] en Meta Business Suite (A5). Cuando sale, se sube `ALTA_NUMEROS_MAXIMOS_WABA` y se puede prender en dev; QA además necesita token propio (D3) | sólo prd | el aviso del número en `/registro`; `docs/whatsapp-setup.md:283-291` |
+| `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | igual: 1 en los tres (D1, b); en QA sin token, el alta va a revisión con `sin_credencial` | dev y QA apagada hasta el lote de A12, prd prendida | el aviso del número en `/registro` |
+| Número por código | bandera y Meta | excepción de hecho aunque la bandera sea igual (D1, b): el tope de Meta es de 2 números por portfolio y uno ya es el de la plataforma, así que queda un solo lugar libre para dev y prd juntos, y es primero del cliente ficticio de prd. QA tiene la bandera pero no token, y sus altas por código van a revisión con `sin_credencial`. QA tiene su propia WABA y su propio token recién después de A5 (la verificación la pide el [Dueño] en Meta Business Suite) | prd prendido; dev y QA van en 1 en el lote de A12 | el aviso del número en `/registro`; `docs/whatsapp-setup.md:283-299` |
 | `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1` |
 | Entrenamiento del agente (reglas y ejemplos de `/agente`) | datos de cada espacio | excepción hasta que el entrenamiento base viva en el repo, igual en los tres (`docs/PROJECT_STATUS.md:5055-5063`). No existe un script que copie reglas y ejemplos entre ambientes (`scripts/export-training.mjs:11`) | dev 19 reglas y 207 ejemplos en el espacio de prueba; prd ninguno; QA desconocido | `/agente`, solapas «Reglas de prompt» y «Ejemplos aprobados» (`src/lib/i18n/es-AR.ts:844`, `:852`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` (`.env.example:312-313`) | valor y secreto | igual (dev y prd comparten la clave del sitio) | dev y prd cargadas; QA desconocido | el desafío en `/registro` |
@@ -326,8 +404,8 @@ dice.
 | `GEMINI_TRANSPORT` (`.env.example:118`) en `vertex`, sin `VERTEX_EXTRACTION_MODEL`, `MOCK_AI` y `AI_MOCK` apagadas (`src/server/ai/provider.ts:293`) | valor | igual | iguales desde el 15/10 | Vercel; un caso de prueba que el agente conteste |
 | `AGENT_DELIBERATION`, `AGENT_COMPOSE_REPLIES` (`.env.example:91-92`) | bandera | igual | sin documentar | `/api/health` con `CRON_SECRET` |
 | `VERTEX_AI_TUNING_ENABLED` (`.env.example:104`), `RETENCION_MODO` (`:471`), `PURGA_ADJUNTOS_MODO` (`:477`), `ALTA_WABA_PROPIA` (`:266`), `ALTA_APP_PROPIA` (`:280`) | bandera | igual | apagadas en los tres | Vercel |
-| `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` (`.env.example:363-378`) | secreto y valor | dev y prd iguales (comparten app y WABA); QA vacías, excepción (D3) | dev cargadas; prd según el paso 2 de prd | chequeo `whatsapp` de `/api/health` |
-| `WHATSAPP_PHONE_NUMBER_ID` | valor | dev y prd iguales (el id del número de la plataforma), si el dueño acepta el paso 2 de prd | dev cargada; prd vacía según `docs/PROMOCION.md:736-738` | chequeo `whatsapp` de `/api/health` |
+| `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` (`.env.example:363-378`) | secreto y valor | dev y prd iguales (comparten app y WABA); QA vacías hasta que tenga su propia WABA y su propio token (después de A5; ver «Después de A5: una WABA y un token por ambiente»), excepción (D3) | dev cargadas; prd según el paso 2 de prd | chequeo `whatsapp` de `/api/health` |
+| `WHATSAPP_PHONE_NUMBER_ID` | valor | dev y prd iguales (el id del número de la plataforma), si el dueño acepta el paso 2 de prd; QA vacía hasta su propia WABA (después de A5) | dev cargada; prd vacía según `docs/PROMOCION.md:736-738` | chequeo `whatsapp` de `/api/health` |
 | `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`, `GMAIL_USER_EMAIL`, `GMAIL_REFRESH_TOKEN` | valor y secreto | excepción: sólo dev tiene número y casilla de la plataforma | prd vacías según `docs/PROMOCION.md:736-738` | Vercel |
 | `PUBSUB_TOPIC`, `PUBSUB_AUDIENCE`, `PUBSUB_SERVICE_ACCOUNT` (`.env.example:327-339`) | valor | excepción: un tópico por ambiente; QA sin Pub/Sub | dev y prd cargadas | log `webhooks.gmail.sin_audiencia_en_produccion` |
 | `NEXT_PUBLIC_SITE_URL` (`.env.example:187`), `DEFAULT_TENANT_ID`, `GOOGLE_DEFAULT_TENANT_ID` (`:47-49`) | valor | excepción: uno por ambiente | cargadas | login; respuestas 403 `INVALID_ORIGIN` de `/api/auth` |
@@ -345,8 +423,9 @@ que el alta termina directo en la bandeja.
 **El cliente de dev está partido en dos espacios.** El alta del paso 3 crea un espacio nuevo,
 «el espacio de autoalta», con la dirección del dueño que no es de operador. Ahí van el Gmail
 del paso 7, el segundo usuario del paso 8 y la denuncia por correo del paso 10. dev no tiene
-número por código, así que la denuncia por WhatsApp del paso 9 entra por el número de la
-plataforma y cae en otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
+número por código (la bandera va en 1, pero el dueño no elige esa opción en dev: ver el paso
+1), así que la denuncia por WhatsApp del paso 9 entra por el número de la plataforma y cae en
+otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
 `.env.example:372`). El paso 12 lee los dos.
 
 - [ ] **1. Configuración (parte del lote de A12).**
@@ -361,7 +440,11 @@ plataforma y cae en otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID
       `PUBSUB_SERVICE_ACCOUNT`.
     - WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TENANT_ID`,
       `WHATSAPP_BUSINESS_ACCOUNT_ID` y `WHATSAPP_VERIFY_TOKEN`.
-    - `ALTA_NUMERO_AUTOMATICO` no está en dev, y queda así salvo que D1 diga otra cosa.
+    - `ALTA_NUMERO_AUTOMATICO` va en `1` en dev (D1, b) y se carga en el lote de A12; hoy no
+      está. **No elegir la opción del celular en dev** (pedir el código en la tarjeta de
+      WhatsApp de Primeros pasos) hasta que el alta del cliente ficticio de prd esté hecha y su
+      número borrado (D5), o hasta A5: el único lugar libre de la WABA es primero de prd. Con la
+      WABA llena, el pedido de dev va a revisión con `sin_lugar`.
     - `scripts/sync-vercel-env.mjs` sirve sólo para lo suyo, en dev: sube siete variables
       (las `GMAIL_*` de la casilla de la plataforma y `CRON_SECRET`) desde `.env.local`.
       Sólo con `.env.local` al día, y nunca para QA ni prd.
@@ -398,8 +481,8 @@ plataforma y cae en otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID
   - **Salió bien si:** termina en `/bandeja?bienvenida=1`.
   - **Si falla:**
     - `/registro?e=datos`: la empresa, el celular o la casilla de los términos están mal.
-    - `/registro?e=celular`: sólo aparece donde `ALTA_NUMERO_AUTOMATICO` está en 1 (hoy, prd)
-      y el +54 viene sin el 9. En dev no sale nunca.
+    - `/registro?e=celular`: sólo aparece donde `ALTA_NUMERO_AUTOMATICO` está en 1 (hoy, prd;
+      dev y QA desde el lote de A12, D1 b) y el +54 del campo de WhatsApp viene sin el 9.
     - `/registro?e=intentos`: se llegó a un cupo por IP o del día. Esperar al otro día.
     - `registro_cerrado`, o la tarjeta «cerrada» en `/alta`: `ALTA_AUTOMATICA` no vale
       exactamente `1` y la dirección no está en la lista.
@@ -438,7 +521,8 @@ plataforma y cae en otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID
   - **Dónde:** el resultado del paso 2 y la tarjeta de Primeros pasos en `/configuracion`.
   - **Qué hacer:** nada que conectar. dev usa el número de la plataforma, ya conectado, que
     cae en el espacio de la plataforma. El espacio de autoalta no tiene número propio
-    mientras `ALTA_NUMERO_AUTOMATICO` siga apagada, y la tarjeta de Primeros pasos lo dice.
+    mientras el dueño no elija la opción del celular (paso 1), y la tarjeta de Primeros pasos lo
+    dice.
   - **Salió bien si:** el paso 2 dio `whatsapp` operativo.
   - **Si falla:** leer el detalle del chequeo.
     - «sin configurar»: faltan `WHATSAPP_ACCESS_TOKEN` o `WHATSAPP_PHONE_NUMBER_ID` en ese
@@ -542,8 +626,8 @@ plataforma y cae en otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID
 
 QA es el proyecto `claimmix-qa`, rama `qa`, base `ep-wispy-flower`, en
 `https://claimmix-qa.vercel.app` (`docs/PROMOCION.md:561`). A propósito, no le escribe a nadie:
-no tiene número de WhatsApp ni casilla de la plataforma (`docs/PROMOCION.md:323-327`). Los
-pasos 6, 7 y 10 dependen de D3. Gonzalo no necesita acceso a Vercel, a GitHub ni a las
+no tiene token ni número de WhatsApp (hasta que tenga su propia WABA, después de A5) ni casilla
+de la plataforma (`docs/PROMOCION.md:323-327`). Los pasos 6, 7 y 10 dependen de D3. Gonzalo no necesita acceso a Vercel, a GitHub ni a las
 consolas: eso lo hacen el dueño y Claude. Gonzalo reporta por el canal de D15, con el
 ambiente, la hora, una captura y el número de caso.
 
@@ -563,6 +647,8 @@ ambiente, la hora, una captura y el número de caso.
       carga el token por la CLI de Vercel. claimmix-prd no se carga así.
     - `TURNSTILE_SITE_KEY` y `TURNSTILE_SECRET_KEY`, con el hostname de A8.
     - `ALTA_AUTOMATICA` en `1` (D6), o la dirección de Gonzalo en `SIGNUP_ALLOWED_EMAILS`.
+    - `ALTA_NUMERO_AUTOMATICO` en `1` (D1, b), **sin** `WHATSAPP_ACCESS_TOKEN`: el alta que pida
+      el celular termina en revisión con `sin_credencial` (paso 7).
     - `GMAIL_TOKEN_ENCRYPTION_KEY`, propia de QA. No figura en la lista de QA, y sin ella no
       se puede guardar una casilla.
     - `ADMIN_EMAILS` con la dirección del dueño, para que el dueño opere `/admin/altas` en QA.
@@ -595,7 +681,7 @@ ambiente, la hora, una captura y el número de caso.
     `/alta/correo?t=` vale 60 minutos.
   - **Salió bien si:** termina en `/bandeja?bienvenida=1`, y `/configuracion` muestra
     «Primeros pasos», que sólo aparece para quien administra un espacio de autoalta.
-  - **Si falla:** los mismos casos que el paso 3 de dev (en QA no sale `?e=celular`). Si
+  - **Si falla:** los mismos casos que el paso 3 de dev (en QA, con `ALTA_NUMERO_AUTOMATICO` en 1, `?e=celular` sale si el +54 viene sin el 9). Si
     `/alta` muestra el aviso de operador, la dirección de Gonzalo está en `ADMIN_EMAILS` de
     QA.
   - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:741`;
@@ -618,7 +704,7 @@ ambiente, la hora, una captura y el número de caso.
   - **Salió bien si:** el alta no pasó por `/preparando`.
   - **Si falla:** si pasó, avisar a Claude antes de seguir (como el paso 5 de dev).
   - **Fuentes:** `.github/workflows/barrer-trabados.yml:87-89`, `:152`.
-- [ ] **6. Gmail (si D3 lo decide).**
+- [ ] **6. Gmail (D3: la casilla de prueba de Gonzalo).**
   - **Quién:** [Gonzalo].
   - **Dónde:** `/configuracion`, «Conectar Gmail».
   - **Qué hacer:** una casilla de prueba de Gonzalo que no se use en dev ni en prd. La casilla
@@ -630,17 +716,22 @@ ambiente, la hora, una captura y el número de caso.
     en la pantalla de Google: falta la URI de A7. Error del servidor a la vuelta: falta
     `GMAIL_TOKEN_ENCRYPTION_KEY`. Avisar al dueño por D15.
   - **Fuentes:** `src/app/api/admin/gmail-accounts/callback/route.ts:93`.
-- [ ] **7. Número de WhatsApp: QA no tiene.**
-  - **Quién:** [Gonzalo].
-  - **Dónde:** la tarjeta de WhatsApp de Primeros pasos, en `/configuracion`.
-  - **Qué hacer:** mirarla. QA no tiene token de WhatsApp, así que no hay número ni número por
-    código.
-  - **Salió bien si:** la tarjeta no ofrece pedir código.
-  - **Si falla:** si ofrece pedir código, avisar al dueño: `ALTA_NUMERO_AUTOMATICO` quedó
-    prendida en QA. Si D3 decide darle número a QA, hacen falta una app y un número de prueba
-    propios, o el lugar libre de la WABA, que hoy es de prd (D1). La «Prueba real en QA» de
-    los docs supone ese token y hoy no se puede hacer tal cual.
-  - **Fuentes:** `docs/PROMOCION.md:325-327`; `docs/whatsapp-setup.md:351`.
+- [ ] **7. Número de WhatsApp: QA no tiene token.**
+  - **Quién:** [Gonzalo], y el [Dueño] para mirar el resultado en `/admin/altas`.
+  - **Dónde:** la tarjeta de WhatsApp de Primeros pasos, en `/configuracion`; el resultado, en
+    `https://claimmix-qa.vercel.app/admin/altas`.
+  - **Qué hacer:** QA muestra la opción del celular (la bandera va en 1, D1 b) pero no tiene
+    token de WhatsApp. Gonzalo elige la opción del celular y pide el código. El [Dueño] mira
+    el espacio en `/admin/altas`.
+  - **Salió bien si:** el pedido termina en revisión con `sin_credencial` en `/admin/altas`.
+    Es el resultado esperado hasta que QA tenga su propia WABA y su propio token (después de
+    A5, ver «Después de A5: una WABA y un token por ambiente»). Mientras tanto no hay número
+    conectado en QA ni «Prueba real en QA» (`docs/whatsapp-setup.md`).
+  - **Si falla:** si QA manda de verdad un código por SMS o por llamada, avisar al dueño: se
+    cargó un token de WhatsApp en QA y ocupa el lugar libre de la WABA, que es primero del
+    cliente ficticio de prd (D1).
+  - **Fuentes:** `src/server/alta/numero-automatico.ts:335`, `:410`;
+    `docs/PROMOCION.md:325-327`; `docs/whatsapp-setup.md:359`.
 - [ ] **8. Segundo usuario.**
   - **Quién:** [Gonzalo].
   - **Dónde:** `/admin/users`, «Invitar usuario».
@@ -708,8 +799,9 @@ prd es el proyecto `claimmix-prd`, rama `prd`, base de control `neondb` (host `e
 `docs/PROMOCION.md:811`) y una base `t_<hex>` por cliente, en `https://claimmix.vercel.app`
 (`docs/PROMOCION.md:562`). El único lugar libre de la WABA va acá primero: la bandera del número
 está prendida, falta la prueba de punta a punta y la primera alta real hace de prueba
-(`docs/whatsapp-setup.md:371-374`). Nada de lo que sigue se hace en dev ni en QA antes, para no
-ocupar ese lugar.
+(`docs/whatsapp-setup.md`, «Estado al 17/10»). Dev y QA reciben la bandera en el lote de A12
+(D1, b), pero ninguno ocupa ese lugar antes: QA no tiene token, y en dev nadie pide el código
+hasta que esta alta termine y su número se borre (D5), o hasta A5.
 
 - [ ] **1. Configuración (parte del lote de A12).**
   - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos.
@@ -768,7 +860,7 @@ ocupar ese lugar.
     `:770`; `src/server/whatsapp/numeros.ts:49-54`, `:174-177`, `:409-411`;
     `src/server/alta/numero-automatico.ts:243`; `src/app/api/health/route.ts:410-413`;
     `.github/workflows/post-deploy.yml:657`; `scripts/smoke-production.mts:265-269`;
-    `docs/PROJECT_STATUS.md:5101-5102`.
+    `docs/PROJECT_STATUS.md:5245-5250`.
 - [ ] **3. Antes del alta: salud de las bases.**
   - **Quién:** [Claude].
   - **Dónde:** la terminal.
@@ -823,8 +915,8 @@ ocupar ese lugar.
     `rechazo`, `sin_webhook` o `incierto`. [Claude] mira en los logs
     `whatsapp.alta_numero.graph` y `alta.numero_en_revision`, y anota los códigos de Meta y si
     el número entró con el 9.
-  - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:728-729`; `docs/whatsapp-setup.md:318-337`,
-    `:360-361`.
+  - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:728-729`; `docs/whatsapp-setup.md:326-345`,
+    `:369-370`.
 - [ ] **8. El número en WhatsApp Manager.**
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > WhatsApp Manager, la WABA de Veltra.
@@ -832,7 +924,7 @@ ocupar ese lugar.
   - **Salió bien si:** el número figura y el nombre visible está aprobado o en revisión.
   - **Si falla:** si quedó un número sobrante de un intento fallido, borrarlo ahí. ClaimMix
     no borra números, y uno abandonado ocupa el lugar.
-  - **Fuentes:** `docs/whatsapp-setup.md:339-340`.
+  - **Fuentes:** `docs/whatsapp-setup.md:347-348`.
 - [ ] **9. Gmail.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/configuracion`, «Conectar Gmail».
@@ -921,7 +1013,7 @@ ocupar ese lugar.
   - **Salió bien si:** el espacio figura suspendido, y el número ya no está en la WABA.
   - **Si falla:** si la purga da error, [Claude] la vuelve a listar sin `--apply` y se lo
     muestra al dueño.
-  - **Fuentes:** `docs/PROMOCION.md:715`; `docs/whatsapp-setup.md:339-340`.
+  - **Fuentes:** `docs/PROMOCION.md:715`; `docs/whatsapp-setup.md:347-348`.
 
 ## Si prueban otros en prd
 
@@ -948,7 +1040,7 @@ Para quien no es el dueño ni Gonzalo y prueba ClaimMix en prd.
   - US$ 1 de IA por espacio y US$ 30 entre todas las pruebas: el agente deja de analizar.
     Activar con cuota 0 a quien siga probando (D4), o esperar al mes siguiente.
   - Invitaciones: cinco por día y del mismo dominio, en prueba.
-- **Fuentes:** `docs/whatsapp-setup.md:283-291`; `src/server/alta/aviso-operador.ts:30-35`;
+- **Fuentes:** `docs/whatsapp-setup.md:283-299`; `src/server/alta/aviso-operador.ts:30-35`;
   `docs/PROMOCION.md:727-734`; `src/server/alta/crear-inquilino.ts:52-62`, `:79`.
 
 ## Ensayo del prompt
@@ -1156,8 +1248,8 @@ Y al dueño:
 - [ ] 1. [Dueño] Mirar el espacio nuevo en `/admin/altas`: número, casilla y estado. Si no
   figura, [Claude] busca el alta en los logs.
 - [ ] 2. [Dueño] Si el número quedó en revisión, resolverlo según la tabla de
-  `docs/whatsapp-setup.md:318-337`. Si el motivo es `sin_webhook`, el número quedó conectado
-  pero sin su webhook propio; qué hacer está en `docs/whatsapp-setup.md:337`.
+  `docs/whatsapp-setup.md:326-345`. Si el motivo es `sin_webhook`, el número quedó conectado
+  pero sin su webhook propio; qué hacer está en `docs/whatsapp-setup.md:345`.
 - [ ] 3. [Dueño] Si hace falta, extender la prueba (de 1 a 90 días, nunca acorta) desde
   `/admin/altas`. Salió bien si la fecha de vencimiento cambió.
 - [ ] 4. [Dueño] Cuando paga, activarlo desde `/admin/altas` con su plan y su cuota: deja de
@@ -1175,42 +1267,50 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   probó contra Meta en vivo. Opciones: (a) apagarlo en prd hasta probarlo en otro lado; (b)
   prenderlo también en dev y QA, sabiendo que ocupa el único lugar libre de la WABA mientras
   el negocio no esté verificado, y que QA no tiene token de WhatsApp; (c) dejarlo como está y
-  que el alta del cliente ficticio de prd sea la prueba, como propone
-  `docs/whatsapp-setup.md:371-374`. **Recomendación: (c).** Contradice
-  `docs/PROJECT_STATUS.md:5101-5105` y `docs/whatsapp-setup.md:369`, que [Claude] corrige
-  cuando el dueño confirme.
+  que el alta del cliente ficticio de prd sea la prueba, como proponía
+  `docs/whatsapp-setup.md` antes del 17/10. **Recomendación: (c).** **Elegido el 17/10: (b).**
+  La bandera va en 1 en los tres y se carga en el lote de A12. El único lugar libre de la WABA
+  actual es primero del cliente ficticio de prd, y en dev nadie pide el código hasta que esa
+  alta termine y su número se borre (D5), o hasta A5. QA no tiene token: su alta por código va a
+  revisión con `sin_credencial`. `docs/whatsapp-setup.md` y `docs/PROJECT_STATUS.md` ya lo dicen.
 - **D2. `BASE_POR_CLIENTE` en dev y QA.** Los docs la dejan en 0 para siempre en dev y QA
   (`docs/PROMOCION.md:784`); la regla de ambientes iguales pide lo mismo que prd. Prenderla en
   dev dejaría huérfanos los datos de dev en la base de control, y no existe herramienta para
   pasarlos. No tiene vuelta. **Recomendación: 0, como excepción declarada a «iguales».**
+  **Elegido el 17/10:** 0 en dev y QA.
 - **D3. QA con canales reales.** QA no le escribe a nadie, a propósito. **Recomendación:** una
   casilla de Gmail de prueba de Gonzalo, que sólo contesta a quien le escribe; número de
-  WhatsApp no, porque ocuparía el único lugar libre de la WABA y QA no tiene token.
+  WhatsApp no, porque ocuparía el único lugar libre de la WABA y QA no tiene token. **Elegido
+  el 17/10:** la casilla de Gmail de prueba de Gonzalo; sin número de WhatsApp hasta que QA
+  tenga su propia WABA y su propio token (después de A5).
 - **D4. Invitaciones en un espacio en prueba.** Con gmail.com se rechazan. Opciones: (a) usar
   direcciones de un dominio propio que no sea un proveedor abierto; (b) activar el espacio
   desde `/admin/altas` con cuota 0, que levanta los topes de la prueba y lo cuenta como activo
   en la cartera; (c) quedarse con el rechazo como resultado esperado, y el pedido 3 queda sin
   cumplir en prd. SSO no sirve: pide un dominio corporativo verificado por DNS y un proveedor
   OIDC (`src/app/api/admin/sso/route.ts:6-11`). **Recomendación: (a) si el dueño tiene el
-  dominio; si no, (b), sabiendo que cambia el paso 14 de prd.**
+  dominio; si no, (b), sabiendo que cambia el paso 14 de prd.** **Elegido el 17/10: (a).** El
+  dueño tiene un dominio propio y las dos direcciones de cada cliente de prueba van en él.
 - **D5. El cliente ficticio de prd, después.** Conservarlo como cliente de prueba permanente
   (ocupa una base, MB y el número) o suspenderlo y purgar su base, que no se deshace.
   **Recomendación:** si Veltra sigue sin verificar, borrar su número en WhatsApp Manager para
   que el primer cliente real tenga lugar, y suspender el espacio; purgar la base sólo si hacen
-  falta los MB.
+  falta los MB. **Elegido el 17/10:** la recomendación.
 - **D6. `ALTA_AUTOMATICA` en QA.** Prenderla para que Gonzalo haga autoalta, o poner sólo la
   dirección de Gonzalo en `SIGNUP_ALLOWED_EMAILS`. **Recomendación: prenderla en 1**, igual que
-  dev y prd.
+  dev y prd. **Elegido el 17/10:** 1 en QA.
 - **D7. Cifras de los topes:** `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB`,
   `MONTHLY_BUDGET_USD` y los `AI_*`. **Recomendación:** los del alta y los de la prueba, iguales
   a prd en los tres. `MONTHLY_BUDGET_USD` y `AI_TENANT_DAILY_TOKEN_CAP`, excepción en dev y QA:
   ahí gasta el ensayo, unos 1,5 M de tokens por corrida, y el tope de dev y QA tiene que ser
-  igual a la variable del repo (`docs/PROMOCION.md:283-292`).
+  igual a la variable del repo (`docs/PROMOCION.md:283-292`). **Elegido el 17/10:** la
+  recomendación.
 - **D8. Quién es operador en cada ambiente** (`ADMIN_EMAILS`, que habilita junto con el rol
   owner o admin, el correo verificado y la sesión en el espacio casa), si Gonzalo lo es en QA,
   y si se unifican los tres lectores de esa variable, que cambia quién es administrador
   (`docs/AUDITORIA-2026-09.md:438`, `:543`). **Recomendación:** el dueño en los tres; Gonzalo
-  no, porque una dirección de operador no puede hacer autoalta.
+  no, porque una dirección de operador no puede hacer autoalta. **Elegido el 17/10:** el dueño
+  es operador en los tres y Gonzalo no lo es en QA.
 - **D9.** Pedir la verificación del negocio en Meta (A5).
 - **D10.** Seguir con el tope de 100 usuarios de Google o pedir la verificación, que puede ser
   paga.
@@ -1221,10 +1321,12 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
 - **D13.** Las decisiones de los ítems 7, 10, 14, 15, 16, 17, 18 y 19 del plan.
 - **D14. MCP de WhatsApp.** Opcional, sobre la API oficial; no hace falta para el alta y le da
   el token permanente a código de terceros (`docs/whatsapp-setup.md:93-128`).
-  **Recomendación: no instalarlo por ahora.** Si el dueño lo quiere, el paso M1.
+  **Recomendación: no instalarlo por ahora.** Si el dueño lo quiere, el paso M1. **Elegido el
+  17/10:** no instalarlo.
 - **D15. Canal de reporte** de Gonzalo y de quienes prueben en prd. En el repo no existe.
   **Recomendación:** un chat o un correo con el dueño, y siempre con el ambiente, la hora, una
-  captura y el número de caso.
+  captura y el número de caso. **Elegido el 17/10:** los reportes van por chat o por correo al
+  dueño.
 
 ## Qué hace Claude
 
@@ -1248,8 +1350,7 @@ Apenas el dueño avise, Claude puede:
   con la revisión de seguridad en Fable (u Opus) para los ítems 3 y 4.
 - Corregir los docs que quedaron viejos: `.env.example` (variables que faltan y sobran);
   `docs/PROMOCION.md:676-679` (dice que los secretos de prd se cargan con
-  `sync-vercel-env.mjs`), `:726` y `:736-738`; y `docs/PROJECT_STATUS.md:5101-5105` y
-  `docs/whatsapp-setup.md:369`, según D1.
+  `sync-vercel-env.mjs`), `:726` y `:736-738`.
 
 Claude no carga valores de secretos: el remitente de QA con `token-remitente.mts` lo carga el
 dueño (QA, paso 1). Claude no entra a las consolas de Google, Meta, Cloudflare ni Neon con la
@@ -1260,8 +1361,8 @@ sesión del dueño, y no decide nada de la lista de arriba.
 - `docs/whatsapp-setup.md`: Parte B, la app de Meta (`:38`); Parte D, el MCP (`:93`); Parte E,
   reabrir tras 24 h y la plantilla (`:130`); Parte F, el número por código (`:162`), con «Antes
   de prenderlo» (`:178`), «Lo que hace la persona» (`:207`), «El tope de Meta» (`:283`), «Los
-  topes» (`:293`), «Qué hace el operador ante cada aviso» (`:318`) y «Prueba real en QA»
-  (`:351`); Parte G, la WABA propia (`:377`); Parte H, la app propia (`:596`).
+  topes» (`:301`), «Qué hace el operador ante cada aviso» (`:326`) y «Prueba real en QA»
+  (`:359`); Parte G, la WABA propia (`:389`); Parte H, la app propia (`:608`).
 - `docs/PROMOCION.md`: «Las diecisiete variables de claimmix-qa» (`:234`), «Los ambientes»
   (`:556`), «El camino a prd» (`:577`), «Las dos fases» (`:632`), «BASE_POR_CLIENTE es de ida»
   (`:779`), «Migrar después de un cambio de esquema» (`:786`) y «Lo que queda abierto» (`:801`).
@@ -1269,5 +1370,6 @@ sesión del dueño, y no decide nada de la lista de arriba.
   `pnpm bases:probar` (`:815`), «Cuándo correr qué» (`:857`), «Lo que corre solo» (`:882`) y
   `/api/health` (`:1068`).
 - `docs/PROJECT_STATUS.md`: estado del alta y de prd (`:4760-4768`), la promoción del 16/10 y lo
-  que todavía no es igual (`:5051-5053`), «El agente aprende de la consola» (`:5055`), lo que
-  espera al dueño (`:5065`) y el número por código (`:5101-5105`).
+  que todavía no es igual (`:5051-5053`), «El agente aprende de la consola» (`:5055`), las
+  decisiones de A1 (`:5190-5196`), lo que espera al dueño (`:5198`) y el número por código
+  (`:5245-5250`).

@@ -5050,7 +5050,7 @@ El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso s
 
 Con el OK del dueño, #458 llevó main a prd (`98a30dcb`). Entraron la pregunta por la póliza cambiada y el cierre con la póliza del caso (#443, #444), la retoma sola tras un timeout de Gemini (#447), el tope de palabras del audio (#453), DNI o CUIT (#442), el remitente de QA y la caja de Turnstile (#448, #449), el repo público (#451), workflow 5 y ESLint 10 (#438) y la CI por entorno (#441, #445, #452). No había migraciones nuevas. El Post-deploy de PRD (`PRD · Smoke y salud de las bases`) dio verde al primer intento. Desde ese día el dueño pidió que dev, qa y prd estén siempre iguales hasta nuevo aviso: lo que entra a qa sigue el mismo día a main y a prd.
 
-Lo que todavía no es igual (leído en `/registro` de cada ambiente el 16/10): prd muestra el desafío de Turnstile, la opción de alta con correo y el aviso del número por código; dev muestra Turnstile y el correo pero no el número por código (`ALTA_NUMERO_AUTOMATICO`); QA no muestra ninguno de los tres (faltan las claves de Turnstile, el remitente o `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`, y la bandera). Igualarlos son variables de Vercel. Prender el número por código en dev o en QA ocupa el mismo lugar libre de la WABA de Veltra que usa prd, así que espera la decisión del dueño.
+Lo que todavía no es igual (leído en `/registro` de cada ambiente el 16/10): prd muestra el desafío de Turnstile, la opción de alta con correo y el aviso del número por código; dev muestra Turnstile y el correo pero no el número por código (`ALTA_NUMERO_AUTOMATICO`); QA no muestra ninguno de los tres (faltan las claves de Turnstile, el remitente o `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`, y la bandera). Igualarlos son variables de Vercel. El 17/10 el dueño decidió (D1, b) prender el número por código también en dev y en QA, y las banderas se cargan en el lote de A12 de `docs/PUESTA_EN_MARCHA.md`. El único lugar libre de la WABA de Veltra es primero del cliente ficticio de prd, y QA, sin token de WhatsApp, manda esas altas a revisión con `sin_credencial`.
 
 ### El agente aprende de la consola (2026-10-16, PR #461, que suma #460)
 
@@ -5175,6 +5175,26 @@ Arregla la regresión que encontró la lectura del transcripto de la segunda pro
 - **Entrenamiento base.** 21 secciones, reempaquetado; los tres prompts dorados de WhatsApp (`compose-ask-whatsapp.txt`, `compose-poliza-cambiada-whatsapp.txt`, `compose-recordatorio-whatsapp.txt`) cambian sólo por esa oración. No hay cuerpo en inglés para esta sección, así que no cambia nada de i18n.
 - **Verificación.** Cinco versiones de la oración, cada una con su workflow (type-check, lint, `entrenamiento:empaquetar --comprobar` y la suite completa, 15.034 tests verdes) y una revisión de la redacción contra el resto del entrenamiento; la quinta revisión, sólo de regresiones, no encontró ninguna. Ensayos contra el agente real: v1 (cinco escenarios) verde; v2 rojo sólo en el turno 3 de `choque-completo` por `claim_attachments_bucket.upload_failed` (la subida de la licencia a R2 desde la red local falló y la licencia nunca se leyó: infraestructura, no redacción); v3 (los mismos cinco) verde, con `choque-completo` pasando; v4 y v5 (ocho: los cinco más `incendio-grave`, `accidente-personal-fractura` y `archivo-pesado`) verdes y sin `upload_failed`. Con v5, los seguimientos vuelven a abrir con «Gracias, Martín.», «Gracias, Roberto.» o «Gracias, Lucía.», los primeros mensajes con «Hola, Martín. Gracias por los datos.», y ninguna charla que sigue vuelve a decir «Hola»; los casos graves (incendio, fractura) saludan y no agradecen, y no se agradecen ni el archivo de más de 10 MB ni la nota de voz sin voz. Sombra de v5: gravedad 19/19, derivar 17/19, pedir 8/13, responder 11/15; las dos diferencias de «derivar» son la derivación de `nota-de-voz-y-pdf` y la fractura, y el único BAJA EL PISO es otra vez la fractura (la sombra no derivaría, el código deriva, el piso lo ataja y el caso termina en `requiere_especialista`). Queda como variación del modelo el turno 2 de `goteo`: todavía sin nombre, no agradeció en ninguno de los tres últimos ensayos. `foto-que-no-es-nada` T2 (`ignored_unclaim`) y `devolver-al-agente` T3 (el caso lo tiene una persona) quedan en silencio, como en corridas anteriores.
 
+### Promoción del 17/10 (tercera): el acuse de recibo en los tres ambientes
+
+#468 entró a qa el 17/10 a las 04:23 UTC (`b204dd25`). #469 lo llevó a main a las 04:44 UTC (`f16652f0`, mismo árbol que qa) y #470 de main a prd a las 19:00 UTC (`8a64ed8e`), el mismo día, porque dev, qa y prd tienen que estar iguales. Sin migraciones ni variables nuevas.
+
+- **QA.** Post-deploy sobre `b204dd25` (run 39002465574) en verde en 18 min: secretos propios, smoke, migraciones y permisos, ensayo de conversaciones (las 24 sin diferencias con lo esperado) y pen test. La carga de k6 (run 39002465482) también en verde.
+- **La sombra en QA.** 36 vueltas: gravedad 36/36, derivar 35/36 con el BAJA EL PISO de la fractura atajado por el piso, pedir 6/17 (8 de las 11 diferencias son el tope de 4 contra `MAX_ASK_ITEMS = 5`) y responder 19/26.
+- **DEV.** Post-deploy sobre `f16652f0` (run 39003765605) en verde: smoke, entrada por WhatsApp y mail, migraciones y permisos, pen test y carga del tablero (p95 peor caso 411 ms). El ensayo se salteó porque QA ya había ensayado el mismo árbol.
+- **`pnpm check` completo después del deploy de dev.** Verde en 15,1 min al segundo intento: tipos, lint, tests y las 26 conversaciones sin diferencias con lo esperado. El primer intento cortó en la verificación por la caída conocida del worker de vitest en Windows, con cero tests fallidos. La sombra, leída de las líneas `◐ sombra` del log: 39 vueltas, gravedad 39/39, derivar 38/39 (el mismo BAJA EL PISO de la fractura, atajado por el piso), pedir 10/21 (8 de las 11 diferencias son el tope de 4 contra 5) y responder 21/29.
+- **PRD.** `PRD · Smoke y salud de las bases` sobre `8a64ed8e` (run 39060635332) en verde.
+- **El transcripto, leído.** Comparado con el del check anterior, con un refutador por observación: 12 observaciones de tono, las 12 refutadas (variaciones entre corridas o textos fijos del código, no del agente). Los seguimientos vuelven a agradecer («Gracias, Martín.»), y no aparece PII, ninguna promesa ni nada que toque el piso.
+- **Paridad.** `git rev-parse origin/{qa,main,prd}^{tree}` da el mismo árbol en los tres: `cfb98a63`.
+
+### Puesta en marcha: las decisiones de A1 (17/10)
+
+El dueño eligió las opciones de A1 de `docs/PUESTA_EN_MARCHA.md`. Ninguna bandera está cargada todavía en dev ni en QA: van en el lote de A12.
+
+- **D1 (b).** `ALTA_NUMERO_AUTOMATICO` en 1 también en dev y QA (prd la tiene desde el 09/10). El único lugar libre de la WABA es primero del cliente ficticio de prd; en dev nadie pide el código hasta que esa alta termine y su número se borre (D5), o hasta A5. QA va sin token de WhatsApp: sus altas por código terminan en revisión con `sin_credencial`.
+- **El resto.** D2: `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada. D3: Gmail de prueba de Gonzalo en QA, sin número de WhatsApp hasta su propia WABA. D4 (a): dominio propio del dueño. D5: borrar el número del cliente ficticio y suspender el espacio. D6: `ALTA_AUTOMATICA` en 1 en QA. D7: topes iguales a prd; `MONTHLY_BUDGET_USD` y `AI_TENANT_DAILY_TOKEN_CAP` más altos en dev y QA. D8: el dueño es operador en los tres, Gonzalo no. D14: sin MCP de WhatsApp. D15: reportes por chat o correo al dueño.
+- **Hallazgo de Meta.** El tope de dos números es por portfolio de negocio, no por WABA (https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers: «New business portfolios are initially capped at two registered business phone numbers.»). Veltra es un solo portfolio y su número de la plataforma ya usa un lugar, así que una WABA nueva dentro de Veltra no suma lugares, y cada WABA necesita su propio número de la plataforma. Una WABA y un token por ambiente esperan a A5: receta en `docs/PUESTA_EN_MARCHA.md`, «Después de A5: una WABA y un token por ambiente».
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
@@ -5223,10 +5243,11 @@ Arregla la regresión que encontró la lectura del transcripto de la segunda pro
   todavía nombra el permiso `gmail.readonly`, que el alta corta ya no pide: ese texto lo
   cambia el dueño. Lista completa en `docs/PROMOCION.md`, sección «Prd».
 - **Número por código.** La 0049 (`claimmix_numero_automatico`) ya está en QA, dev,
-  staging y prd (comprobado el 15/10). Queda la prueba real en QA con una SIM libre que no esté en la app de
-  WhatsApp (receta en `docs/whatsapp-setup.md`), decidir si se verifica la empresa
-  en Meta para subir el tope de números, y no prender la bandera en producción
-  hasta que QA salga bien. La retoma tras un corte no necesita migración.
+  staging y prd (comprobado el 15/10). La bandera está prendida en prd desde el 09/10, y el alta
+  del cliente ficticio de prd es la prueba en vivo (receta en `docs/whatsapp-setup.md`). El 17/10
+  el dueño decidió prenderla también en dev y en QA (D1, b), en el lote de A12. Queda decidir si
+  se verifica la empresa en Meta para subir el tope de números (A5); la prueba real en QA espera
+  a su propia WABA y a su token. La retoma tras un corte no necesita migración.
 - **Después del deploy: `pnpm check` completo y `pnpm knock`.** El mail real que
   deposita el timbre trae el `Authentication-Results` alineado de Gmail y tiene que
   seguir abriendo o siguiendo caso: es la única prueba de la decisión sobre el From

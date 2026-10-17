@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-16. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-17. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5129,6 +5129,13 @@ Los cuatro ítems chicos del «Plan para que el alta sea automática» (`docs/PU
 - **Ítem 6.** El guardia, `/configuracion` y `/api/health` leen el tope con la misma función, `topeMensualDelProyecto()` en `src/server/ai/tope-mensual.ts`. Antes health leía el 0 como 200 y la pantalla mostraba siempre 200. Con `MONTHLY_BUDGET_USD=0` el guardia frena la IA de los clientes (la demo sigue con su tope, `DEMO_MONTHLY_BUDGET_USD`), la pantalla dice «IA frenada» y health queda en `degraded` con HTTP 200: un `down` daría 503 y tumbaría el smoke, el `curl -fsS` del Post-deploy y el barrido. Que 0 quiera decir «sin tope» (opción B) lo decide el dueño.
 - **Ítem 12.** `.env.example` nombra todas las variables que lee el código, y `tests/unit/env-example-completo.test.ts` falla si aparece una nueva sin anotar.
 - **Verificación.** Suite entera en verde (14.319 tests) antes de sumar el Lote A. La revisión de Fable pidió un test que fije que el guardia frena con el tope en 0 y precisar que la demo tiene su propio tope; las dos cosas están. La auditoría #90 queda parcial: health todavía repite la suma del gasto del mes.
+
+### Promoción del 17/10: la consola del agente y el alta, lote 1, en los tres ambientes
+
+#461 entró a qa el 17/10 a las 00:05 UTC (`00c7d9c9`), y con él quedaron mergeados #459 y #460. #462 lo lleva a main y después va un PR de main a prd, el mismo día, porque dev, qa y prd tienen que estar iguales. Sin migraciones ni variables nuevas, y `AGENTE_APRENDIDO_EN_CONVERSACION` sigue ausente en los tres ambientes.
+
+- **QA.** Post-deploy sobre `00c7d9c9` (run 38984817593): smoke, migraciones y permisos, secretos propios y ensayo de conversaciones en verde, las 24 sin diferencias con lo esperado.
+- **La sombra en QA.** El ensayo de QA escribe la sombra en la base de QA, lo que confirma el permiso de `UPDATE` en `agent_runs` con tráfico real. Resumen del ensayo (no cuenta para el resultado): gravedad 36/36, derivar 36/36, pedir 7/18 (39 %), responder 17/23 (74 %), 31 vueltas sin opinión y **cero `BAJA EL PISO`**. De las 11 diferencias de pedir, 7 son el modelo pidiendo exactamente lo mismo que el código menos un campo: cuatro cosas donde el código pide cinco. Es el «como máximo 4 cosas» del criterio 4 de `deliberate` contra `MAX_ASK_ITEMS = 5` (decisión 7 de la lista de arriba), así que esa parte de la diferencia la pone la base, no el modelo; con el mismo tope, pedir quedaría cerca de 14/18. Las de responder son `pedir` contra `callar` en los dos sentidos. Gravedad y derivar ya están al 100 % pero con 36 comparaciones, lejos de las 100 que pide el umbral.
 
 ### 🙋 Waiting on you (not code)
 

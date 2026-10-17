@@ -629,6 +629,33 @@ describe("webMessenger", () => {
     expect(cuerpoEnviado()).not.toContain(SI_NO_FUISTE_VOS);
   });
 
+  it("le pasa al redactor si el pedido repite uno anterior", async () => {
+    escribe("Ilan, te recordamos que necesitamos el número de póliza para seguir con tu reclamo.");
+
+    await mandar("missing_information_request", { ...PEDIDO, isFollowUp: true, repitePedido: true });
+    expect(compose.mock.calls[0][0]).toMatchObject({ isFollowUp: true, repitePedido: true });
+
+    compose.mockClear();
+    await mandar("missing_information_request", { ...PEDIDO, isFollowUp: true });
+    expect(compose.mock.calls[0][0]).toMatchObject({ isFollowUp: true, repitePedido: false });
+  });
+
+  it("sin isFollowUp, el redactor sabe por lo que ya salió si es el primer mensaje; con isFollowUp, no pregunta", async () => {
+    escribe("Ya le pasamos tu reclamo a una persona del equipo, que te va a escribir en breve.");
+
+    await mandar("specialist_escalation", { caseId: CASE, claimantName: "Ana" });
+    expect(compose.mock.calls[0][0]).toMatchObject({ isFollowUp: false });
+
+    compose.mockClear();
+    enviosPrevios = [{ id: "ya-salio-algo" }];
+    await mandar("specialist_escalation", { caseId: CASE, claimantName: "Ana" });
+    expect(compose.mock.calls[0][0]).toMatchObject({ isFollowUp: true });
+
+    compose.mockClear();
+    await mandar("missing_information_request", { ...PEDIDO, isFollowUp: false });
+    expect(compose.mock.calls[0][0]).toMatchObject({ isFollowUp: false });
+  });
+
   it("el mensajero de correo no marca el origen web", async () => {
     escribe("Ilan, para seguir con tu reclamo necesitamos el número de póliza. Contanos y avanzamos.");
 

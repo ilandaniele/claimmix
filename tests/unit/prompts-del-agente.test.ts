@@ -244,4 +244,20 @@ describe("prompts del agente — compose", () => {
 
     await expect(texto).toMatchFileSnapshot("./__prompts__/compose-poliza-cambiada-whatsapp.txt");
   });
+
+  it("recordatorio de un pedido, por WhatsApp", async () => {
+    const texto = await prompt(
+      "Hola, Marta. Te recordamos que necesitamos el número de póliza para seguir con tu caso.",
+      base({
+        intent: "ask",
+        channel: "whatsapp",
+        fields: ["policy_number"],
+        claimantName: "Marta Prueba",
+        isFollowUp: true,
+        repitePedido: true,
+      })
+    );
+
+    await expect(texto).toMatchFileSnapshot("./__prompts__/compose-recordatorio-whatsapp.txt");
+  });
 });

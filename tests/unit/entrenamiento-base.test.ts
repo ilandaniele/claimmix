@@ -53,11 +53,11 @@ describe("el módulo generado", () => {
     expect(GENERADO).not.toMatch(/node:|require\(/);
   });
 
-  it("son 20 secciones y los ids no se repiten", () => {
+  it("son 21 secciones y los ids no se repiten", () => {
     const ids = ENTRENAMIENTO_BASE.map((s) => s.id);
 
-    expect(ids).toHaveLength(20);
-    expect(new Set(ids).size).toBe(20);
+    expect(ids).toHaveLength(21);
+    expect(new Set(ids).size).toBe(21);
   });
 
   it("el id es <paso>.<slug del archivo> y la ruta existe", () => {
@@ -115,8 +115,8 @@ describe("el módulo generado", () => {
 describe("las secciones de prompt son el texto que corre", () => {
   const delPrompt = ENTRENAMIENTO_BASE.filter((s) => s.modo === "prompt");
 
-  it("hay 16", () => {
-    expect(delPrompt).toHaveLength(16);
+  it("hay 17", () => {
+    expect(delPrompt).toHaveLength(17);
   });
 
   it.each(delPrompt.map((s) => [s.id, s.texto] as const))("%s aparece tal cual en un prompt dorado", (_id, cuerpo) => {
@@ -177,7 +177,7 @@ describe("el accesor", () => {
     }
     expect(seccionesDelPaso("extraccion")).toHaveLength(10);
     expect(seccionesDelPaso("decidir")).toHaveLength(4);
-    expect(seccionesDelPaso("redactar")).toHaveLength(6);
+    expect(seccionesDelPaso("redactar")).toHaveLength(7);
   });
 
   it("textoDeSombra une las cuatro con una línea en blanco, y con decisiones sólo esas", () => {

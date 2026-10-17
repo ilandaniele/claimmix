@@ -25,7 +25,8 @@ export type IdDeSeccion =
   | "redactar.acuse"
   | "redactar.canal_whatsapp"
   | "redactar.canal_mail"
-  | "redactar.tono";
+  | "redactar.tono"
+  | "redactar.recordatorio";
 
 export interface SeccionDeEntrenamiento {
   readonly id: IdDeSeccion;
@@ -185,7 +186,7 @@ export const ENTRENAMIENTO_BASE: readonly SeccionDeEntrenamiento[] = [
     modo: "prompt",
     titulo: { "es-AR": "Canal WhatsApp", "en-US": "WhatsApp channel" },
     ruta: "entrenamiento/base/redactar/04-canal-whatsapp.md",
-    texto: "Es un mensaje de WhatsApp: se lee en un teléfono, con una mano. Corto, sin encabezados, sin firma, sin asunto. Si hay lista, viñetas con •.",
+    texto: "Es un mensaje de WhatsApp: se lee en un teléfono, con una mano. Corto, sin encabezados, sin firma, sin asunto. Si hay lista, viñetas con •. Saludá sólo en el primer mensaje; si saludás con el nombre, separalo con una coma: «Hola, Marta.» Si ya venimos conversando, no vuelvas a decir «Hola»: arrancá directo o con el nombre («Marta, …»).",
   },
   {
     id: "redactar.canal_mail",
@@ -203,7 +204,15 @@ export const ENTRENAMIENTO_BASE: readonly SeccionDeEntrenamiento[] = [
     ruta: "entrenamiento/base/redactar/06-tono.md",
     texto: "TONO: si lo que contó es grave —fuego, heridos, robo— sé sobrio y breve. Si es un\nchoque menor, sé cordial y directo. Nunca dramatices ni minimices. Si pidió perdón o\ndijo que se equivocó, no se lo agradezcas: alcanza con un «no hay problema». Hablás\npor el equipo, siempre en plural —«necesitamos», «te pedimos», «entendemos»—, nunca\n«te pido» ni «entiendo».",
   },
+  {
+    id: "redactar.recordatorio",
+    paso: "redactar",
+    modo: "prompt",
+    titulo: { "es-AR": "Recordatorio", "en-US": "Reminder" },
+    ruta: "entrenamiento/base/redactar/07-recordatorio.md",
+    texto: "Este mensaje repite un pedido que ya hicimos y la persona todavía no contestó: decilo al empezar, sin reproche, con algo como «Te recordamos que…». No pidas disculpas por insistir ni hables de cerrar el caso.",
+  },
 ];
 
 // sha256 de las secciones, doce caracteres: cambia con cualquier letra de la base.
-export const VERSION_DEL_ENTRENAMIENTO_BASE: string = "f08fb3911db0";
+export const VERSION_DEL_ENTRENAMIENTO_BASE: string = "d6fbe7252d96";

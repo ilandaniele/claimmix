@@ -147,15 +147,11 @@ export const emailMessenger: AgentMessenger = {
  * cargó y la respuesta viaja por la casilla de la aseguradora, igual que la de
  * un correo. Lo único distinto es cómo le habla el primer mensaje.
  *
- * «Primero» es lo que hay en `outbound_messages`, no lo que el orquestador
- * haya marcado: sólo los pedidos de datos traen `isFollowUp`, así que el
- * pedido de confirmación o la derivación de un caso que ya venía hablando
- * repetían la frase y el agradecimiento.
+ * «Primero» se decide en `esSeguimiento`, igual que para el redactor.
  */
 export const webMessenger: AgentMessenger = {
   async send(message) {
-    const isFollowUp =
-      message.data.isFollowUp ?? (await hasPriorOutbound(message.caseId, message.tenantId));
+    const isFollowUp = await esSeguimiento(message);
     return emailMessenger.send({
       ...message,
       data: { ...message.data, origenWeb: true, isFollowUp },
@@ -241,7 +237,8 @@ function renderAsk(data: Record<string, unknown>): string {
     i.value ? `• ${i.label}: entendimos "${i.value}"` : `• ${i.label}`;
 
   const vuelta = data.isFollowUp === true;
-  const lead = remaining > 0 ? "Para empezar, necesitamos" : vuelta ? "Para seguir, necesitamos" : "Necesitamos";
+  const seguir = data.repitePedido === true ? "Te recordamos que necesitamos" : "Para seguir, necesitamos";
+  const lead = remaining > 0 ? "Para empezar, necesitamos" : vuelta ? seguir : "Necesitamos";
 
   const blocks: string[] = [];
   if (datos.length > 0) {
@@ -544,6 +541,16 @@ function conflictosParaElRedactor(
     }));
 }
 
+/**
+ * «Primero» es lo que hay en `outbound_messages`, no lo que el orquestador
+ * haya marcado: sólo los pedidos de datos traen `isFollowUp`, así que el
+ * pedido de confirmación o la derivación de un caso que ya venía hablando
+ * repetían el saludo, la frase y el agradecimiento.
+ */
+async function esSeguimiento(message: AgentMessage): Promise<boolean> {
+  return (message.data.isFollowUp ?? (await hasPriorOutbound(message.caseId, message.tenantId))) === true;
+}
+
 async function writeReply(
   message: AgentMessage,
   fallback: string,
@@ -572,7 +579,8 @@ async function writeReply(
     claimTypeLabel: labelForClaimType(
       typeof message.data.claimType === "string" ? message.data.claimType : null
     ),
-    isFollowUp: message.data.isFollowUp === true,
+    isFollowUp: await esSeguimiento(message),
+    repitePedido: message.data.repitePedido === true,
     origenWeb: message.data.origenWeb === true,
     claimantName:
       typeof message.data.claimantName === "string" ? message.data.claimantName : null,

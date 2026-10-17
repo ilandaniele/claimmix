@@ -1,6 +1,6 @@
 /**
  * El panel de la base del agente (pestaña «Base» de /agente) lo pinta el servidor, sin consultas:
- * las 20 secciones con su texto, la tabla de qué tipo de regla lee cada paso y el enlace a la propuesta.
+ * las 21 secciones con su texto, la tabla de qué tipo de regla lee cada paso y el enlace a la propuesta.
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -26,11 +26,11 @@ const SECCIONES = PASOS_DEL_AGENTE.flatMap((paso) => seccionesDelPaso(paso));
 afterEach(() => vi.unstubAllEnvs());
 
 describe("EntrenamientoBasePanel", () => {
-  it("pinta las 20 secciones, cada una con su id, su ruta y su texto entero", () => {
+  it("pinta las 21 secciones, cada una con su id, su ruta y su texto entero", () => {
     const html = pintar();
 
-    expect(SECCIONES).toHaveLength(20);
-    expect(html.match(/<details/g)).toHaveLength(20);
+    expect(SECCIONES).toHaveLength(21);
+    expect(html.match(/<details/g)).toHaveLength(21);
     for (const s of SECCIONES) {
       expect(html, s.id).toContain(s.id);
       expect(html, s.ruta).toContain(s.ruta);

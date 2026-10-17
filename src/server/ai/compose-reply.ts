@@ -63,6 +63,8 @@ export interface ComposeReplyInput {
   claimTypeLabel?: string | null;
   /** True when we have already written to this claimant about this case. */
   isFollowUp?: boolean;
+  /** Recordatorio o reenvío: repite un pedido que la persona todavía no contestó. */
+  repitePedido?: boolean;
   /** El caso entró por el formulario web: la persona completó un formulario, no escribió un mail. */
   origenWeb?: boolean;
   /**
@@ -277,7 +279,7 @@ ${items.length > 0 && input.intent !== "acknowledgement" ? `DATOS A PEDIR:\n${it
 ${conflictos.length > 0 ? `\nDATOS QUE NO COINCIDEN (nombrá los dos valores de cada uno, copiados tal cual):\n${conflictos.join("\n")}` : ""}
 ${input.claimTypeLabel ? `\nTipo de siniestro: ${input.claimTypeLabel}` : ""}
 ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName)}. Podés llamarla por su nombre de pila.` : ""}
-${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}
+${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}${input.repitePedido ? `\n${textoBase("redactar.recordatorio")}` : ""}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${enmascarar(input.lastMessage).slice(0, 600)}"""` : ""}
 
 ${channelBrief}

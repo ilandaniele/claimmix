@@ -220,7 +220,7 @@ describe("reenviarPedido", () => {
         tenantId: TENANT_ID,
         to: "juan@x.com",
         template: "missing_information_request",
-        data: expect.objectContaining({ missingFields: ["full_name"], isFollowUp: true }),
+        data: expect.objectContaining({ missingFields: ["full_name"], isFollowUp: true, repitePedido: true }),
       })
     );
 

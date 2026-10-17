@@ -82,6 +82,8 @@ const DINAMICA = /\b(?:process\.env|env|entorno)\[\s*(?!["'`])/;
 const NOMBRE_EN_LISTA = /["']([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)["']/g;
 
 const EXTENSIONES = /\.(?:ts|tsx|mts|mjs|js)$/;
+/** Lo genera el build del SDK de workflow y está en `.gitignore`: no es código del repo. */
+const GENERADOS = ["src/app/.well-known/workflow/"];
 
 function archivosDe(carpeta: string): string[] {
   return (
@@ -91,7 +93,9 @@ function archivosDe(carpeta: string): string[] {
     }) as string[]
   )
     .map((f) => `${carpeta}/${f.split("\\").join("/")}`)
-    .filter((f) => EXTENSIONES.test(f));
+    .filter(
+      (f) => EXTENSIONES.test(f) && !GENERADOS.some((g) => f.startsWith(g))
+    );
 }
 
 /** Los de la raíz (configs e instrumentation.ts) también leen variables. */

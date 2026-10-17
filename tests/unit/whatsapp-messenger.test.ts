@@ -65,6 +65,12 @@ vi.mock("@/server/alta/aviso-operador", () => ({ avisarNumeroEnRevision: vi.fn()
 // La salud de la WABA que confirma un 131031: lo que contesta Graph se arma en cada test.
 vi.mock("@/server/whatsapp/app-del-cliente", () => ({ leerSalud: vi.fn() }));
 
+// La base de estos tests no tiene `select`: sin esto, cada mensaje sin
+// `isFollowUp` anotaría un error al preguntar si ya salió algo.
+vi.mock("@/server/confirmations/envio-previo", () => ({
+  hasPriorOutbound: vi.fn().mockResolvedValue(false),
+}));
+
 vi.mock("@/server/email/dispatch", () => ({
   dispatchOutboundEmail: vi.fn().mockResolvedValue(undefined),
 }));
@@ -89,6 +95,7 @@ import { primeraRespuestaDeApp, wabaEnFalla } from "@/server/alta/panel-operador
 import { avisarNumeroEnRevision } from "@/server/alta/aviso-operador";
 import { leerSalud } from "@/server/whatsapp/app-del-cliente";
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
+import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
@@ -280,6 +287,27 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).not.toContain("Hola,");
     expect(body).not.toMatch(/recibimos tu denuncia/i);
     expect(body.startsWith("Para seguir, necesitamos que nos cuentes:")).toBe(true);
+  });
+
+  it("un pedido repetido abre diciendo que es un recordatorio, y uno nuevo no", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number"],
+      isFollowUp: true,
+      repitePedido: true,
+    });
+    expect(sentBody().startsWith("Te recordamos que necesitamos que nos cuentes:")).toBe(true);
+  });
+
+  it("repitePedido no cambia el primer lote de un pedido largo", async () => {
+    await send("missing_information_request", {
+      caseId: CASE,
+      missingFields: ["policy_number", "dni_asegurado", "telefono_contacto", "hora_siniestro", "accident_date", "accident_location", "fotos_danos"],
+      isFollowUp: true,
+      repitePedido: true,
+    });
+    expect(sentBody()).toContain("Para empezar, necesitamos");
+    expect(sentBody()).not.toContain("Te recordamos");
   });
 
   it("names every field in Spanish, never the database key", async () => {
@@ -1519,6 +1547,18 @@ describe("whatsappMessenger — la derivación con heridos", () => {
         usage: { promptTokens: 0, completionTokens: 0 },
       });
     const prompt = () => String((callGemini as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+
+    // nota-de-voz-y-pdf, 17/10: la derivación del turno 3 volvía a abrir con «Hola, Lucía.».
+    it("en una charla que ya venía, la derivación no se escribe como primer mensaje", async () => {
+      redacta(`Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`);
+      (hasPriorOutbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+
+      await send("specialist_escalation", { caseId: CASE, severity: "critical" });
+
+      expect(hasPriorOutbound).toHaveBeenCalledWith(CASE, TENANT);
+      expect(prompt()).toContain("Ya venimos conversando");
+      expect(prompt()).not.toContain("Es el primer mensaje");
+    });
 
     it("con heridos, la consigna llega al redactor", async () => {
       const redactado = `${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;

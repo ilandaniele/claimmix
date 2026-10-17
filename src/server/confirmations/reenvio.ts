@@ -452,6 +452,7 @@ export async function enviarPedido(
       knownValues: decision.conocidos,
       claimantName: decision.claimantName,
       isFollowUp: true,
+      repitePedido: true,
       ...(decision.porPlantilla ? { porPlantilla: true } : {}),
     },
   });

@@ -368,6 +368,11 @@ Meta el tope, la revisión del nombre y que el webhook del número nuevo llegue 
 espacio. Las constantes están juntas en `src/server/whatsapp/alta-de-numero.ts` para
 ajustarlas después. En producción se prende recién cuando QA salga bien.
 
+Estado al 16/10: en prd la bandera está prendida desde el 09/10 y esta prueba en QA no
+se hizo. La primera alta real en prd hace de prueba: mirar `whatsapp.alta_numero.graph`
+y `alta.numero_en_revision` en los logs. Si el dueño prefiere probar antes, se apaga en
+prd y se prende sólo en QA.
+
 
 ## Parte G — WABA propia por cliente (Embedded Signup)
 

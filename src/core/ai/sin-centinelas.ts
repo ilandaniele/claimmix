@@ -51,6 +51,8 @@ const CENTINELAS = [
   "historial_del_hilo",
   // Los tipos de siniestro que creó la aseguradora: nombres escritos por una persona.
   "tipos_del_inquilino",
+  // Las indicaciones del equipo que entran a deliberate y a compose: las escribe la aseguradora.
+  "indicaciones_del_equipo",
 ] as const;
 
 /** La forma de un centinela: `<tag>` o `</tag>`, con o sin espacios adentro. */

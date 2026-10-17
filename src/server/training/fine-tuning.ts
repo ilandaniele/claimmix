@@ -36,11 +36,7 @@ import {
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import {
-  getDefaultGeminiModel,
-  getTenantGeminiModel,
-  setTenantModelDefaults,
-} from "@/server/ai/provider";
+import { getDefaultGeminiModel, getTenantGeminiModel } from "@/server/ai/provider";
 
 function toJsonlLine(example: {
   input_payload: Record<string, unknown>;
@@ -249,10 +245,6 @@ export async function activateFineTunedModel(tenantId: string, userId: string, j
   );
   if (!job) throw new Error("NOT_FOUND");
 
-  await setTenantModelDefaults(tenantId, {
-    provider: "gemini",
-    geminiModel: job.base_model || getDefaultGeminiModel(),
-  });
   const now = new Date().toISOString();
   await enTenant(tenantCtx, (db) =>
     db

@@ -562,8 +562,12 @@ describe("cuánto queda del presupuesto de IA", () => {
   const leer = async () => {
     const res = await GET(request(`Bearer ${SECRET}`));
     const body = await res.json();
-    return body.checks.find((c: { name: string }) => c.name === "presupuesto");
+    return { ...body.checks.find((c: { name: string }) => c.name === "presupuesto"), http: res.status };
   };
+
+  afterEach(() => {
+    delete process.env.MONTHLY_BUDGET_USD;
+  });
 
   it("lejos del tope, en verde y con el número", async () => {
     gastadoUsd = 20;
@@ -593,6 +597,34 @@ describe("cuánto queda del presupuesto de IA", () => {
     const p = await leer();
     expect(p.status).toBe("down");
     expect(p.detail).toContain("frenada");
+  });
+
+  it("muestra el tope que lee el guardia, no un 200 fijo", async () => {
+    process.env.MONTHLY_BUDGET_USD = "50";
+    gastadoUsd = 20;
+    const p = await leer();
+    expect(p.status).toBe("ok");
+    expect(p.detail).toContain("US$20.00 de US$50 (40%)");
+  });
+
+  it("un tope con decimales sale tal cual, como en /configuracion", async () => {
+    process.env.MONTHLY_BUDGET_USD = "49.5";
+    gastadoUsd = 10;
+    expect((await leer()).detail).toContain("de US$49.5 ");
+  });
+
+  it("con el tope en 0 la IA está frenada a propósito: avisa, no tumba el despliegue", async () => {
+    process.env.MONTHLY_BUDGET_USD = "0";
+    gastadoUsd = 12.5;
+    const p = await leer();
+    // `degraded` y no `down`: `down` da 503 y el smoke lo cuenta como falla.
+    // Apagar la IA a mano no es una caída.
+    expect(p.status).toBe("degraded");
+    expect(p.http).toBe(200);
+    expect(p.detail).toContain("US$12.50");
+    expect(p.detail).toContain("frenada");
+    expect(p.detail).toContain("MONTHLY_BUDGET_USD=0");
+    expect(p.detail).not.toContain("US$200");
   });
 
   it("si la consulta falla, avisa en vez de decir que está todo bien", async () => {

@@ -35,6 +35,7 @@ describe("i18n de la bandeja y el shell", () => {
       "configuracion.umbralAyuda",
       "configuracion.capMensual",
       "configuracion.capAyuda",
+      "configuracion.iaFrenada",
       "configuracion.soloAdmins",
       "configuracion.miClave",
       "configuracion.sistema",

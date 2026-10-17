@@ -3,7 +3,8 @@
  *
  * Stores what the agent saw (input_payload), what it produced (output_payload),
  * per-field confidence, missing fields, and the trainability suggestion.
- * Append-only; written with the service-role client from the extraction worker.
+ * Se inserta una fila por corrida; después sólo se completa
+ * confidence_payload.sombra (anotarSombraEnLaCorrida).
  *
  * The raw email content lives in input_payload (jsonb) — protected by tenant
  * RLS, required by the review workflow so a human can audit exactly what the
@@ -13,11 +14,12 @@
  */
 
 import "server-only";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { getDefaultGeminiModel } from "@/server/ai/provider";
+import type { ParteDeSombra, SombraDeLaVuelta } from "@/core/agente/sombra";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import type { TrainabilityAssessment } from "./trainability";
 import { logger } from "@/lib/observability/logger";
@@ -37,6 +39,10 @@ export interface LogAgentRunParams {
   };
   claim: ExtractedClaim;
   trainability: TrainabilityAssessment;
+  /** Gravedad y derivación: qué decidiría el modelo frente a lo que decidió el código. */
+  sombra?: SombraDeLaVuelta;
+  /** Con qué entrenamiento corrió: la versión de la base y los id de las reglas que entraron por paso. */
+  entrenamiento?: { base: string; extraccion: string[]; decidir?: string[]; redactar?: string[] };
 }
 
 /**
@@ -88,6 +94,8 @@ export async function logAgentRun(
         confidence: f.confidence,
         source: f.source,
       })),
+      ...(params.entrenamiento ? { entrenamiento: params.entrenamiento } : {}),
+      ...(params.sombra ? { sombra: params.sombra } : {}),
     },
     missing_fields: claim.missing_fields ?? [],
     is_trainable_suggestion: trainability.isTrainableSuggestion,
@@ -126,6 +134,37 @@ export async function logAgentRun(
     }
     // Never break the extraction pipeline because run logging failed.
     return null;
+  }
+}
+
+/**
+ * Suma a la sombra de la corrida lo que sólo se sabe después de decidir la
+ * respuesta (pedir y responder). No pisa lo que `sombra` ya tiene ni toca otras
+ * claves de confidence_payload. Nunca tira: sin sombra el agente anda igual, y
+ * lo único que se anota es el código o el nombre del error, sin contenido.
+ */
+export async function anotarSombraEnLaCorrida(
+  tenantId: string,
+  caseId: string,
+  runId: string,
+  parte: ParteDeSombra
+): Promise<void> {
+  const t = tables.agentRuns;
+  try {
+    await enTenant({ tenantId }, (db) =>
+      db
+        .update(t)
+        .set({
+          confidence_payload: sql`${t.confidence_payload} || jsonb_build_object('sombra', coalesce(${t.confidence_payload}->'sombra', '{}'::jsonb) || ${JSON.stringify(parte)}::jsonb)`,
+        })
+        .where(and(eq(t.id, runId), eq(t.case_id, caseId)))
+    );
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    logger.warn(
+      { detalle: code ?? (e instanceof Error ? e.name : "UnknownError") },
+      "agent_runs.sombra_error"
+    );
   }
 }
 

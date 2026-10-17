@@ -108,7 +108,10 @@ jobs:
               arbol_padre=""
               [ -z "$padre" ] || arbol_padre=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$padre" --jq .tree.sha 2>/dev/null || true)
               if [ -n "$arbol_padre" ] && [ "$(marca "$arbol_padre")" -gt 0 ] 2>/dev/null; then
-                otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$GITHUB_SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md") and . != "docs/PROMOCION.md") | not)] | length end' 2>/dev/null || echo 1)
+                otros=$(gh api "repos/$GITHUB_REPOSITORY/compare/$padre...$GITHUB_SHA" --jq 'if (.files | type) != "array" or (.files | length) >= 300 then 1 else [.files[] | .filename, (.previous_filename // empty) | select((endswith(".md")
+                    and . != "docs/PROMOCION.md"
+                    and (startswith("entrenamiento/") | not)
+                    ) | not)] | length end' 2>/dev/null || echo 1)
                 if [ "$otros" = 0 ]; then saltear=true; solo_docs=true; fi
               fi
             fi

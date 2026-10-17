@@ -19,6 +19,7 @@ import {
   Play,
   Receipt,
   Briefcase,
+  UserPlus,
   MailX,
   MessageSquareReply,
   Sparkles,
@@ -147,7 +148,7 @@ export function Sidebar({
   estadoDelAgente,
 }: {
   role: string;
-  /** Quien opera ClaimMix, no el asegurador. Ve la cartera de clientes. */
+  /** Quien opera ClaimMix, no el asegurador. Ve la cartera y las altas. */
   isOperator?: boolean;
   /** Sin el Plan Pro, lo del Plan Pro va con candado. */
   esPro?: boolean;
@@ -223,11 +224,14 @@ export function Sidebar({
           { label: t("nav.facturacion"), href: "/admin/facturacion", icon: Receipt },
         ]
       : []),
-    // La cartera cruza tenants: la ve el operador, no el asegurador. Se
-    // oculta en vez de deshabilitarse — que la pantalla exista tampoco es
-    // algo que le tenga que constar a un cliente.
+    // La cartera y las altas cruzan tenants: las ve el operador, no el
+    // asegurador. Se ocultan en vez de deshabilitarse — que la pantalla
+    // exista tampoco es algo que le tenga que constar a un cliente.
     ...(isOperator
-      ? [{ label: t("nav.cartera"), href: "/admin/cartera", icon: Briefcase }]
+      ? [
+          { label: t("nav.cartera"), href: "/admin/cartera", icon: Briefcase },
+          { label: t("nav.altas"), href: "/admin/altas", icon: UserPlus },
+        ]
       : []),
   ], esPro, t);
 

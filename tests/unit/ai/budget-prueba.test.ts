@@ -606,6 +606,15 @@ describe("lo que no cambia para los demás", () => {
     estado.tokensDelInquilino = 0;
     expect(await pasan(50)).toBe(39);
   });
+
+  it("con MONTHLY_BUDGET_USD en 0 el guardia frena aunque no se haya gastado nada", async () => {
+    // /configuracion y /api/health lo muestran como «IA frenada»: el guardia tiene que coincidir.
+    process.env.MONTHLY_BUDGET_USD = "0";
+    estado.fila = fila({ billing_status: "active", trial_ends_at: null });
+    estado.proyecto = { total: 0, pruebas: 0 };
+
+    expect(await checkBudget(OTRA_PRUEBA)).toMatchObject({ exceeded: true, motivo: "mensual" });
+  });
 });
 
 describe("cuando el contador no contesta", () => {

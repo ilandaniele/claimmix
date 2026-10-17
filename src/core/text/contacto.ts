@@ -1,5 +1,5 @@
 /**
- * Email y teléfono en texto libre. Las mismas para el export
+ * Email, teléfono y enlaces en texto libre. Las mismas para el export
  * (`src/server/agents/export.ts`), para `sinDatosDeLaPersona` y para el filtro
  * de resúmenes (`src/core/ai/resumen-seguro.ts`): las capas de tachado
  * comparten la misma regla en vez de mantener cada una la suya.
@@ -9,3 +9,5 @@
  */
 export const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 export const PHONE_RE = /(?<!\w)(?:\+?\d[\d .()/-]{7,}\d)(?!\w)/g;
+// Un enlace con o sin esquema. Global: se usa con match o search, nunca con test.
+export const ENLACE_RE = /(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\/\S*/gi;

@@ -29,6 +29,8 @@
 import "server-only";
 
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
+import { textoBase } from "@/core/agente/entrenamiento-base";
+import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
 import { esAudioSinTranscribir } from "@/core/adjuntos/transcripcion";
 import { callGemini, errMeta } from "@/server/ai/gemini-extractor";
 import { labelForField } from "@/lib/labels/claim-fields";
@@ -140,6 +142,20 @@ export interface DeliberationInput {
    * texto. Las herramientas buscan por esto y no por lo que pida el modelo.
    */
   remitente?: { dni: string | null };
+  /** Lo que el equipo de la aseguradora indicó para decidir; entra en el prompt como dato. */
+  indicaciones?: string;
+  /**
+   * Se llama con lo que el modelo opinó, también si `validate` lo rechaza. Es
+   * la sombra: anota y nunca cambia la decisión, así que un error acá se traga.
+   */
+  alPlanear?: (o: OpinionDelAgente) => void;
+}
+
+/** Lo que el modelo quiso hacer, sin texto libre: intención, claves y categoría del rechazo. */
+export interface OpinionDelAgente {
+  intent: AgentIntent;
+  askFor: string[];
+  rechazo: string | null;
 }
 
 /** The deterministic tree remains the fallback, and the switch to reach it. */
@@ -184,6 +200,17 @@ export async function deliberate(
     plan.lookupResults = lookupResults;
 
     const problem = validate(plan, input);
+
+    try {
+      input.alPlanear?.({
+        intent: plan.intent,
+        askFor: [...plan.askFor],
+        rechazo: problem ? categoriaDelRechazo(problem) : null,
+      });
+    } catch {
+      // La sombra nunca cambia la decisión.
+    }
+
     if (problem) {
       logger.warn({
         reason: problem,
@@ -216,6 +243,12 @@ export async function deliberate(
 
     return null;
   }
+}
+
+/** «invented:cbu» → «invented»: la categoría, sin las claves que el modelo escribió. */
+function categoriaDelRechazo(problem: string): string {
+  const categoria = problem.split(":")[0].trim();
+  return /^[a-z_]{1,40}$/.test(categoria) ? categoria : "otro";
 }
 
 /**
@@ -380,47 +413,9 @@ Decidí una de estas acciones:
 - "answer_and_ask": contestar lo que preguntó y aprovechar a pedirle lo que falta.
 - "acknowledge": avisarle que ya tenemos todo y que la denuncia pasa a análisis.
 - "escalate": derivarlo a un especialista.
-- "wait": no escribirle nada.
+- "wait": no escribirle nada.${bloqueDeIndicaciones(input.indicaciones, "decidir")}
 
-Criterios, en orden:
-
-1. Lo que podés averiguar vos, no se lo pidas a la persona. Si una consulta te
-   devolvió el dato, va en "resuelto" y NO en "ask_for". Ejemplo: te dio el DNI,
-   buscaste sus pólizas y encontraste POL-1234 — entonces resuelto incluye
-   {"campo": "policy_number", "valor": "POL-1234"} y no le preguntás nada sobre
-   la póliza. Pedirle un dato que acabás de sacar de nuestra propia base es el
-   error más caro que podés cometer acá: es exactamente lo que hace un
-   formulario, y por eso existís vos.
-
-2. Si preguntó algo, hay que contestarle. Ignorar una pregunta y seguir pidiendo
-   documentación es lo que hace que un sistema parezca una máquina. Aunque no
-   sepamos la respuesta exacta, se le puede decir con honestidad en qué estado
-   está su caso.
-
-3. Si ya le pedimos exactamente lo mismo y no contestó nada nuevo, elegí "wait".
-   Repetir el mismo pedido porque llegó un mensaje cualquiera es acoso, no
-   seguimiento.
-
-4. Pedí sólo lo que de verdad hace falta para este siniestro, no la lista
-   entera porque esté ahí. Como máximo 4 cosas, y ordenadas por lo que más
-   traba el expediente. Un dato que bloquea vale más que una foto.
-
-5. Si no falta nada, "acknowledge".
-
-6. Elegí "escalate" cuando esto excede a un trámite: la póliza está vencida, no
-   existe o el DNI no coincide con el titular, la persona está muy angustiada,
-   menciona abogados o juicio, se contradice de forma seria, o pasa cualquier
-   otra cosa que una persona con criterio no resolvería por chat. Derivar nunca
-   está mal: lo mira alguien. Seguir pidiendo papeles cuando el caso ya se salió
-   del molde, sí.
-
-   Pero no derives por lo que NO pudiste averiguar. Si una consulta te dice que
-   la aseguradora todavía no cargó sus datos, o que falló, seguí con el trámite
-   normal como si no la hubieras hecho.
-
-   Tampoco derives porque no exista un papel: que el otro conductor no quiso
-   hacer el parte amistoso o que no hubo denuncia policial es lo más común en un
-   choque. Se sigue sin ese papel y, si no falta nada más, "acknowledge".
+${textoBase("decidir.criterios")}
 
 Nunca pidas algo que no esté en la lista de arriba, ni con otro nombre.
 ${toolSection(lastChance)}
@@ -465,9 +460,7 @@ ANTES DE DECIDIR PODÉS AVERIGUAR ESTO:
 
 ${describeTools()}
 
-Consultá cuando la respuesta cambie lo que vas a hacer. Sobre todo: nunca le
-pidas a la persona un dato que podés buscar vos, y nunca sigas un trámite sobre
-una póliza sin haber mirado si existe y está vigente.
+${textoBase("decidir.consultar")}
 `;
 }
 

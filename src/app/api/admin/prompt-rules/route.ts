@@ -1,7 +1,8 @@
 /**
  * /api/admin/prompt-rules — Agent Training Console rules CRUD.
  *
- * GET  — list all rules for the tenant (active + inactive).
+ * GET  — list all rules for the tenant (active + inactive). Con ?formato=propuesta
+ *        baja las activas como Markdown, tapadas, para revisar y llevar a la base del agente.
  * POST — create a rule. Body: { title, rule_text, rule_type, active? }.
  *
  * Rules are tenant-scoped (explicit tenant_id filter via enTenant, backed by
@@ -25,6 +26,8 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 import { rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { motivoDeReglaInvalida, type ReglaDelEquipo } from "@/core/agente/indicaciones";
+import { NOMBRE_DE_LA_PROPUESTA, propuestaParaLaBase } from "@/core/agente/propuesta";
 
 const RULE_TYPES = [
   "extraction",
@@ -54,7 +57,7 @@ const RULE_COLUMNS = {
   updated_at: t.updated_at,
 };
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const { userRow } = await requireAdmin();
     // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
@@ -77,7 +80,19 @@ export async function GET() {
       return err(new AppError("INTERNAL_ERROR"));
     }
 
-    return ok({ rules: data ?? [] });
+    const rules = data ?? [];
+    if (request.nextUrl.searchParams.get("formato") === "propuesta") {
+      return new Response(propuestaParaLaBase(rules.filter((r) => r.active) as ReglaDelEquipo[]), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/markdown; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${NOMBRE_DE_LA_PROPUESTA}"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    return ok({ rules });
   } catch (e) {
     return err(e);
   }
@@ -97,6 +112,9 @@ export async function POST(request: NextRequest) {
     const parsed = CreateRuleSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError("VALIDATION_FAILED", undefined, parsed.error.flatten());
+    }
+    if (motivoDeReglaInvalida(parsed.data.title) || motivoDeReglaInvalida(parsed.data.rule_text)) {
+      throw new AppError("VALIDATION_FAILED", "La regla no puede llevar enlaces, mails ni etiquetas del sistema.");
     }
 
     let data;

@@ -12,10 +12,17 @@ const { mockTenant } = vi.hoisted(() => ({ mockTenant: vi.fn() }));
 vi.mock("@/data/scope", () => ({
   enTenant: mockTenant,
 }));
+vi.mock("@/lib/audit/log");
+vi.mock("@/server/ai/provider", async (orig) => ({
+  ...(await orig<typeof import("@/server/ai/provider")>()),
+  setTenantModelDefaults: vi.fn(),
+}));
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { QueryBuilder } from "drizzle-orm/pg-core";
 
+import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
+import { setTenantModelDefaults } from "@/server/ai/provider";
 import {
   listFineTuneJobs,
   startFineTuneJob,
@@ -64,5 +71,34 @@ describe("fine-tuning.ts — nunca toca un trabajo de Vertex AI", () => {
     );
     expect(sql).toMatch(/"provider" = \$\d+/);
     expect(params).toEqual(expect.arrayContaining(["gemini"]));
+  });
+});
+
+describe("fine-tuning.ts — activar un paquete no pisa el modelo del inquilino", () => {
+  const TENANT = "10000000-0000-0000-0000-000000000001";
+  const USER = "20000000-0000-0000-0000-000000000001";
+
+  beforeEach(() => {
+    mockTenant.mockReset();
+    vi.mocked(setTenantModelDefaults).mockClear();
+    vi.mocked(writeAuditLog).mockClear();
+  });
+
+  it("no llama a setTenantModelDefaults y conserva update, auditoría y retorno", async () => {
+    mockTenant
+      .mockResolvedValueOnce([{ id: JOB, base_model: "gemini-test-model" }])
+      .mockResolvedValueOnce(undefined);
+
+    const res = await activateFineTunedModel(TENANT, USER, JOB);
+
+    expect(setTenantModelDefaults).not.toHaveBeenCalled();
+    expect(mockTenant).toHaveBeenCalledTimes(2);
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: AuditEvent.FINETUNE_MODEL_DEPLOYED,
+        target_id: JOB,
+      })
+    );
+    expect(res).toEqual({ model: "gemini-test-model", provider: "gemini" });
   });
 });

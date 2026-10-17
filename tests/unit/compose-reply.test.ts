@@ -26,6 +26,8 @@ import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
+import { textoBase } from "@/core/agente/entrenamiento-base";
+import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
 
 const mockCall = callGemini as unknown as ReturnType<typeof vi.fn>;
 
@@ -1350,5 +1352,77 @@ describe("composeReply — no dicta lo que sólo sabemos por el padrón", () => 
 
     expect(out).toBe(DICTA);
     expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("composeReply — las indicaciones del equipo", () => {
+  /*
+   * Lo que la aseguradora indicó sobre cómo escribir entra al prompt como dato,
+   * entre TONO y el pedido del JSON. No cambia lo que hay que decir ni lo
+   * prohibido: eso sigue arriba y la guarda sigue mandando a la plantilla.
+   */
+  const INDICACIONES = "- [reply_style] Cercanía: escribí corto y sin vueltas.";
+  const TONO = textoBase("redactar.tono");
+  const BUENO = "Para seguir con tu denuncia necesitamos el número de póliza, por favor.";
+  const PIDE_POLIZA = { fields: ["policy_number"] };
+
+  it("el bloque va entre TONO y «Devolvé JSON» en los dos intentos", async () => {
+    // «cubierto» lo frena la guarda: el segundo intento arma el prompt de nuevo.
+    responde("Tu denuncia ya está cubierta, pasanos el número de póliza.", BUENO);
+
+    expect(await composeReply(base({ ...PIDE_POLIZA, indicaciones: INDICACIONES }))).toBe(BUENO);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+
+    for (const [prompt] of mockCall.mock.calls as string[][]) {
+      const tono = prompt.indexOf(TONO);
+      const bloque = prompt.indexOf("<indicaciones_del_equipo>");
+      const json = prompt.indexOf("Devolvé JSON");
+      expect(tono).toBeGreaterThan(-1);
+      expect(bloque).toBe(tono + TONO.length + 2);
+      expect(prompt).toContain(INDICACIONES);
+      expect(prompt.indexOf("</indicaciones_del_equipo>")).toBeLessThan(json);
+      expect(prompt).toContain(
+        `${bloqueDeIndicaciones(INDICACIONES, "redactar")}\n\nDevolvé JSON`
+      );
+    }
+  });
+
+  it.each([undefined, "", "   "])(
+    "sin indicaciones (%j) no aparece la etiqueta ni queda un blanco de más",
+    async (indicaciones) => {
+      replies(BUENO);
+
+      await composeReply(base({ ...PIDE_POLIZA, indicaciones }));
+
+      const prompt = mockCall.mock.calls[0][0] as string;
+      expect(prompt).not.toContain("indicaciones_del_equipo");
+      expect(prompt).toContain(`${TONO}\n\nDevolvé JSON`);
+    }
+  );
+
+  it("pasan por la máscara: un DNI no llega al modelo", async () => {
+    replies(BUENO);
+
+    await composeReply(
+      base({ ...PIDE_POLIZA, indicaciones: "- [reply_style] Tono: si dice DNI 30123456, no lo repitas." })
+    );
+
+    expect(mockCall.mock.calls[0][0] as string).not.toContain("30123456");
+  });
+
+  it("con la póliza cambiada tapa también los números cortos", async () => {
+    replies(`Gracias por avisarnos. ${POLIZA_CAMBIADA}`);
+
+    await composeReply(
+      base({
+        intent: "conflict",
+        polizaCambiada: true,
+        indicaciones: "- [reply_style] Tono: no nombres la póliza 4455.",
+      })
+    );
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).not.toContain("4455");
+    expect(prompt).toContain("no nombres la póliza ***.");
   });
 });

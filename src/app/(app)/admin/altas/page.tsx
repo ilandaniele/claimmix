@@ -14,6 +14,7 @@
 
 import { redirect } from "next/navigation";
 
+import { duracionLegible } from "@/core/fecha/duracion";
 import { dominioDelMail } from "@/core/sso";
 import { PLANS } from "@/lib/billing/plans";
 import { nombreDePlan } from "@/lib/billing/plan-label";
@@ -125,7 +126,7 @@ export default async function AltasPage({
         <p className="text-sm text-amber-700">{t("migracion.pendiente")}</p>
       ) : (
         <>
-          <div className="mb-6 max-w-xs">
+          <div className="mb-6 grid max-w-xl gap-3 sm:grid-cols-2">
             <div
               className={`rounded-lg border px-4 py-3 ${
                 llegoAlAviso(panel.creadas24h, panel.tope)
@@ -142,6 +143,14 @@ export default async function AltasPage({
               {panel.tope === 0 && (
                 <p className="mt-0.5 text-xs text-slate-500">{t("altas.stat.cerrada")}</p>
               )}
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                {t("altas.stat.demora")
+                  .replace("{mediana}", duracionLegible(panel.demoraDeAlta.mediana, locale))
+                  .replace("{p95}", duracionLegible(panel.demoraDeAlta.p95, locale))}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{t("altas.stat.demora30d")}</p>
             </div>
           </div>
 

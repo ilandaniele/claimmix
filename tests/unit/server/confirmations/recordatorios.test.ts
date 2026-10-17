@@ -6,7 +6,7 @@
  * así que la reserva y la ancla se prueban por la consulta que sale.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   consultas: [] as { sql: string; params: unknown[] }[],
@@ -126,6 +126,10 @@ beforeEach(() => {
   };
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("recordarCaso", () => {
   it("mail a las 48 h: manda las claves abiertas y audita con actor null", async () => {
     await expect(recordar(48)).resolves.toBe("enviado");
@@ -146,6 +150,21 @@ describe("recordarCaso", () => {
       event_type: "claim.reminder_sent",
       payload: { etapa: 1, horas: 48, canal: "email", via: "texto" },
     });
+  });
+
+  // El recordatorio repite el pedido que ya salió: no lee el extracto ni las reglas
+  // del cliente, así que lo que el agente aprendió no puede viajar en el mensaje.
+  it.each(["email", "whatsapp"])("%s: con lo aprendido prendido, el pedido sale sin la clave «indicaciones»", async (canal) => {
+    vi.stubEnv("AGENTE_APRENDIDO_EN_CONVERSACION", "1");
+    s.canal = canal;
+    s.entrante = tras(40).toISOString();
+
+    await expect(recordar(48)).resolves.toBe("enviado");
+
+    const mensaje = m.enviar.mock.calls[0][0];
+    expect(mensaje).not.toHaveProperty("indicaciones");
+    expect(mensaje.data).not.toHaveProperty("indicaciones");
+    expect(m.consultas.some((c) => c.sql.includes("agent_prompt_rules"))).toBe(false);
   });
 
   it("antes de las 48 h no reserva nada", async () => {

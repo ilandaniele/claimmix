@@ -1649,17 +1649,53 @@ describe("listarAltas", () => {
 
   it("sin altas igual trae el conteo de 24 h", async () => {
     h.execute.mockResolvedValue(filas({ creadas_24h: 5, tenant_id: null }));
-    expect(await listarAltas()).toEqual({ migracionPendiente: false, altas: [], creadas24h: 5, tope: 20 });
+    expect(await listarAltas()).toEqual({
+      migracionPendiente: false,
+      altas: [],
+      creadas24h: 5,
+      tope: 20,
+      demoraDeAlta: { mediana: null, p95: null },
+    });
 
     h.execute.mockResolvedValue(filas());
     expect(await listarAltas()).toMatchObject({ altas: [], creadas24h: 0 });
+  });
+
+  it("la mediana y el p95 de 30 días salen de tenant_bases en la misma consulta", async () => {
+    h.execute.mockResolvedValue(filas({ creadas_24h: 0, tenant_id: null, demora_mediana_s: 95, demora_p95_s: 610 }));
+
+    const panel = await listarAltas();
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    expect(panel.demoraDeAlta).toEqual({ mediana: 95, p95: 610 });
+    const q = consulta();
+    expect(q.sql).toContain("percentile_cont(0.5)");
+    expect(q.sql).toContain("percentile_cont(0.95)");
+    expect(q.sql).toContain("from public.tenant_bases tb");
+    expect(q.sql).toContain("tb.lista_at - tb.creada_at");
+    expect(q.sql).toContain("x.autoalta");
+    expect(q.params).toEqual(expect.arrayContaining([30]));
+  });
+
+  it("sin altas listas en 30 días la demora es null, no cero", async () => {
+    h.execute.mockResolvedValue(filas({ creadas_24h: 1, tenant_id: null, demora_mediana_s: null, demora_p95_s: null }));
+    expect((await listarAltas()).demoraDeAlta).toEqual({ mediana: null, p95: null });
+
+    h.execute.mockResolvedValue(filas());
+    expect((await listarAltas()).demoraDeAlta).toEqual({ mediana: null, p95: null });
   });
 
   it("sin la 0048 devuelve migracionPendiente, y otro error sube", async () => {
     for (const codigo of ["42P01", "42703", "42883"]) {
       h.execute.mockReset();
       h.execute.mockRejectedValue(errorPg(codigo));
-      expect(await listarAltas()).toEqual({ migracionPendiente: true, altas: [], creadas24h: 0, tope: 20 });
+      expect(await listarAltas()).toEqual({
+        migracionPendiente: true,
+        altas: [],
+        creadas24h: 0,
+        tope: 20,
+        demoraDeAlta: { mediana: null, p95: null },
+      });
     }
     h.execute.mockReset();
     h.execute.mockRejectedValue(errorPg("08006"));

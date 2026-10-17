@@ -38,6 +38,7 @@ export const esAR = {
   "nav.agenteBloqueado": "Solo administradores pueden abrir la consola del agente.",
   "nav.facturacion": "Facturación",
   "nav.cartera": "Cartera",
+  "nav.altas": "Altas",
   "nav.asistente": "Asistente",
 
   /*
@@ -840,6 +841,7 @@ export const esAR = {
   // ── La consola del agente — /agente, la pantalla entera ───────────
   // Distinto de `agente.*`, que es el panel de análisis adentro de un caso.
   // Acá se configura el agente; allá se lee lo que el agente extrajo.
+  "consola.tab.base": "Base",
   "consola.tab.campos": "Campos personalizados",
   "consola.tab.ejemplos": "Ejemplos aprobados",
   "consola.tab.entrenamiento": "Fine-tuning opcional",

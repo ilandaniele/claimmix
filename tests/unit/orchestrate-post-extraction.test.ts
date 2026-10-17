@@ -10,13 +10,18 @@
  * AC12: confirmation_received dispatched when is_claim=true and not escalated
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { is, Param } from "drizzle-orm";
-import { orchestratePostExtraction } from "@/server/confirmations/orchestrate";
+import {
+  orchestratePostExtraction,
+  type ExtractedClaimOutput,
+} from "@/server/confirmations/orchestrate";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
 import type { AgentMessenger } from "@/server/confirmations/messenger";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
+import type { ParteDeSombra } from "@/core/agente/sombra";
+import type { OpinionDelAgente } from "@/server/ai/deliberate";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -2614,6 +2619,470 @@ describe("orchestratePostExtraction — acting on the agent's plan", () => {
     await run();
 
     expect(askCall()?.[0].data?.missingFields).toEqual(GAPS);
+  });
+});
+
+describe("orchestratePostExtraction — las indicaciones del equipo", () => {
+  /*
+   * `aprendido` lo arma el worker con la bandera prendida. Lo de redactar viaja
+   * en cada mensaje que sale por el mensajero; lo de decidir, a deliberate. Sin
+   * `aprendido` nada de lo que se llama cambia.
+   */
+  const REDACTAR = "- [reply_style] Cercanía: escribí corto y sin vueltas.";
+  const DECIDIR = "- [missing_fields] Pedí primero el DNI: si faltan varios datos, empezá por el DNI.";
+
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  async function run(
+    aprendido?: { decidir?: string; redactar?: string },
+    extra: { claim?: ReturnType<typeof extractEmailClaimMock>; heredadaEn?: string } = {}
+  ) {
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extra.claim ?? extractEmailClaimMock(),
+        senderEmail: SENDER_EMAIL,
+        heredadaEn: extra.heredadaEn,
+        ...(aprendido ? { aprendido } : {}),
+      },
+      NO_MATCHES,
+      messenger
+    );
+    return { messenger, enviados: messenger.send.mock.calls.map((c) => c[0]) };
+  }
+
+  it("con aprendido.redactar, cada mensaje que sale lleva las indicaciones", async () => {
+    gapsAre(["policy_number", "dni"]);
+
+    const { enviados } = await run({ redactar: REDACTAR });
+
+    expect(enviados).toHaveLength(1);
+    expect(enviados[0]).toMatchObject({
+      template: "missing_information_request",
+      indicaciones: REDACTAR,
+    });
+    // Arriba, junto a `lastMessage`: nunca adentro de `data`.
+    expect(enviados[0].data).not.toHaveProperty("indicaciones");
+  });
+
+  it("la derivación también las lleva", async () => {
+    const claim = extractEmailClaimMock({ severity: "high", requires_specialist: true });
+
+    const { enviados } = await run({ redactar: REDACTAR }, { claim });
+
+    const derivacion = enviados.find((m) => m.template === "specialist_escalation");
+    expect(derivacion?.indicaciones).toBe(REDACTAR);
+  });
+
+  it("sin aprendido el mensaje es exactamente el de antes", async () => {
+    gapsAre(["policy_number", "dni"]);
+
+    const sin = await run();
+    vi.clearAllMocks();
+    gapsAre(["policy_number", "dni"]);
+    // Con indicaciones sólo para decidir, el mensajero no las recibe.
+    const soloDecidir = await run({ decidir: DECIDIR });
+    vi.clearAllMocks();
+    gapsAre(["policy_number", "dni"]);
+    const vacio = await run({});
+
+    expect(sin.enviados).toHaveLength(1);
+    expect(sin.enviados[0]).not.toHaveProperty("indicaciones");
+    expect(soloDecidir.enviados).toStrictEqual(sin.enviados);
+    expect(vacio.enviados).toStrictEqual(sin.enviados);
+  });
+
+  it("una corrida heredada que ya contestó sigue muda", async () => {
+    gapsAre(["policy_number", "dni"]);
+    vi.mocked(yaContestamosElUltimoMensaje).mockResolvedValue(true);
+
+    const { messenger } = await run({ redactar: REDACTAR }, { heredadaEn: "2026-10-16T12:00:00.000Z" });
+
+    expect(messenger.send).not.toHaveBeenCalled();
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+
+  it("con aprendido.decidir, deliberate las recibe", async () => {
+    gapsAre(["policy_number", "dni"]);
+
+    await run({ decidir: DECIDIR });
+
+    expect(vi.mocked(deliberate)).toHaveBeenCalledWith(
+      expect.objectContaining({ indicaciones: DECIDIR })
+    );
+  });
+
+  it.each([
+    ["sin aprendido", undefined],
+    ["con aprendido sólo para redactar", { redactar: REDACTAR }],
+    ["con aprendido vacío", {}],
+  ])("%s, deliberate recibe lo mismo que antes", async (_caso, aprendido) => {
+    gapsAre(["policy_number", "dni"]);
+
+    await run(aprendido);
+
+    expect(vi.mocked(deliberate)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deliberate).mock.calls[0][0]).not.toHaveProperty("indicaciones");
+  });
+});
+
+describe("orchestratePostExtraction — la sombra", () => {
+  /*
+   * El séptimo parámetro anota qué haría el modelo frente a lo que decide el
+   * código, con lo que `deliberate` ya devolvió. No cambia ninguna decisión, no
+   * suma llamadas al modelo ni a la base, y no anota donde el modelo no opina:
+   * la derivación por gravedad o heridos y el titular ajeno.
+   */
+  const GAPS = ["accident_date", "policy_number", "dni"];
+  const GAPS_ORDENADOS = ["accident_date", "dni", "policy_number"];
+
+  function gapsAre(fields: string[]) {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: fields,
+      fieldsNeedingConfirmation: [],
+      isComplete: fields.length === 0,
+      status: fields.length === 0 ? "listo_para_core" : "info_faltante",
+    });
+  }
+
+  /** El mock de deliberate que, además de devolver el plan, opina por el callback como el real. */
+  function opina(opinion: OpinionDelAgente | null, plan: Record<string, unknown> | null) {
+    vi.mocked(deliberate).mockImplementation(async (input) => {
+      if (opinion) input.alPlanear?.(opinion);
+      return plan as never;
+    });
+  }
+
+  const plan = (over: Record<string, unknown>) => ({
+    intent: "ask",
+    askFor: [],
+    question: null,
+    reasoning: "",
+    noteForAnalyst: null,
+    resolved: [],
+    toolCalls: [],
+    ...over,
+  });
+
+  async function run(
+    over: {
+      claim?: ReturnType<typeof extractEmailClaimMock>;
+      salida?: Partial<ExtractedClaimOutput>;
+      conSombra?: boolean;
+    } = {}
+  ) {
+    const anotarSombra = vi.fn<(parte: ParteDeSombra) => void>();
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: over.claim ?? extractEmailClaimMock(),
+        senderEmail: SENDER_EMAIL,
+        ...over.salida,
+      },
+      NO_MATCHES,
+      messenger,
+      undefined,
+      over.conSombra === false ? undefined : anotarSombra
+    );
+    return {
+      anotadas: anotarSombra.mock.calls.map((c) => c[0]),
+      enviados: messenger.send.mock.calls.map((c) => c[0]),
+    };
+  }
+
+  it("anota pedir y responder con las formas esperadas", async () => {
+    gapsAre(GAPS);
+    opina(
+      { intent: "ask", askFor: ["policy_number"], rechazo: null },
+      plan({ intent: "ask", askFor: ["policy_number"] })
+    );
+
+    const { anotadas } = await run();
+
+    expect(anotadas).toStrictEqual([
+      { pedir: { agente: ["policy_number"], codigo: GAPS_ORDENADOS, descartadas: 0 } },
+      { responder: { agente: "pedir", codigo: "pedir", rechazo: null } },
+    ]);
+  });
+
+  it("un plan rechazado anota igual lo que el modelo pidió, con la categoría del rechazo", async () => {
+    // `validate` tiró el plan: el código sigue con el árbol, y la sombra cuenta
+    // qué quiso pedir el modelo y por qué no entró.
+    gapsAre(GAPS);
+    opina({ intent: "ask", askFor: ["cbu", "policy_number"], rechazo: "invented" }, null);
+
+    const { anotadas, enviados } = await run();
+
+    expect(anotadas).toStrictEqual([
+      { pedir: { agente: ["cbu", "policy_number"], codigo: GAPS_ORDENADOS, descartadas: 1 } },
+      { responder: { agente: "pedir", codigo: "pedir", rechazo: "invented" } },
+    ]);
+    expect(enviados[0].data?.missingFields).toEqual(GAPS);
+  });
+
+  it("sin opinión del modelo anota lo del código y deja al agente en null", async () => {
+    gapsAre(GAPS);
+    opina(null, null);
+
+    const { anotadas } = await run();
+
+    expect(anotadas).toStrictEqual([
+      { pedir: { agente: null, codigo: GAPS_ORDENADOS, descartadas: 0 } },
+      { responder: { agente: null, codigo: "pedir", rechazo: null } },
+    ]);
+  });
+
+  it("si el modelo no pidió, pedir no tiene opinión del agente aunque haya claves", async () => {
+    gapsAre(GAPS);
+    opina({ intent: "answer", askFor: [], rechazo: "answer_alone_with_gaps_open" }, null);
+
+    const { anotadas } = await run();
+
+    expect(anotadas[0]).toStrictEqual({
+      pedir: { agente: null, codigo: GAPS_ORDENADOS, descartadas: 0 },
+    });
+    expect(anotadas[1]).toMatchObject({
+      responder: { agente: "contestar", rechazo: "answer_alone_with_gaps_open" },
+    });
+  });
+
+  it("un plan que deriva anota derivar contra sin_derivar y nada de pedir", async () => {
+    gapsAre(GAPS);
+    opina(
+      { intent: "escalate", askFor: [], rechazo: null },
+      plan({ intent: "escalate", reasoning: "la póliza venció en 2020" })
+    );
+
+    const { anotadas, enviados } = await run();
+
+    expect(anotadas).toStrictEqual([
+      { responder: { agente: "derivar", codigo: "sin_derivar", rechazo: null } },
+    ]);
+    expect(enviados.map((m) => m.template)).toContain("specialist_escalation");
+  });
+
+  it.each([
+    ["severidad alta", { claim: extractEmailClaimMock({ severity: "high", requires_specialist: true }) }],
+    ["severidad crítica", { claim: extractEmailClaimMock({ severity: "critical", requires_specialist: true }) }],
+    [
+      "póliza sin vigencia",
+      { salida: { polizas: { vigentes: 0, noVigentes: 1, vencioEl: null, derivar: true } } },
+    ],
+  ])("con derivaSola (%s) no anota pedir ni responder", async (_caso, over) => {
+    gapsAre(GAPS);
+    opina({ intent: "ask", askFor: ["policy_number"], rechazo: null }, null);
+
+    const { anotadas, enviados } = await run(over);
+
+    expect(anotadas).toStrictEqual([]);
+    expect(enviados.map((m) => m.template)).toContain("specialist_escalation");
+  });
+
+  it("el titular ajeno se deriva antes de deliberar y no anota nada", async () => {
+    gapsAre(GAPS);
+    opina({ intent: "ask", askFor: ["policy_number"], rechazo: null }, null);
+
+    const { anotadas, enviados } = await run({ salida: { titularAjeno: true } });
+
+    expect(anotadas).toStrictEqual([]);
+    expect(vi.mocked(deliberate)).not.toHaveBeenCalled();
+    expect(enviados.map((m) => m.template)).toContain("specialist_escalation");
+  });
+
+  describe("responder: lo que el árbol habría hecho sin plan", () => {
+    it("con el pedido en pie y el agente callado, los dos callan", async () => {
+      setupDbMocks({ lastAskRows: [{ asked_keys: ["policy_number"] }] });
+      gapsAre(["policy_number", "dni"]);
+      opina({ intent: "wait", askFor: [], rechazo: null }, plan({ intent: "wait" }));
+
+      const { anotadas } = await run();
+
+      expect(anotadas[1]).toStrictEqual({
+        responder: { agente: "callar", codigo: "callar", rechazo: null },
+      });
+    });
+
+    it("sin plan el árbol repetiría el pedido en pie: callar, aunque el modelo pida más", async () => {
+      setupDbMocks({ lastAskRows: [{ asked_keys: ["policy_number"] }] });
+      gapsAre(["policy_number", "dni"]);
+      opina(
+        { intent: "ask", askFor: ["dni"], rechazo: null },
+        plan({ intent: "ask", askFor: ["dni"] })
+      );
+
+      const { anotadas, enviados } = await run();
+
+      expect(anotadas).toStrictEqual([
+        { pedir: { agente: ["dni"], codigo: ["policy_number"], descartadas: 0 } },
+        { responder: { agente: "pedir", codigo: "callar", rechazo: null } },
+      ]);
+      // La decisión real es la del plan: pide las dos.
+      expect(enviados[0].data?.missingFields).toEqual(["policy_number", "dni"]);
+    });
+
+    it.each([
+      ["contestar", "answer", "¿Cuánto tarda esto?", "contestar"],
+      ["cerrar", "acknowledge", "Gracias", "cerrar"],
+      ["contestar contra cerrar", "answer", "Gracias", "cerrar"],
+    ])("sin nada que pedir, %s", async (_caso, intent, mensaje, codigo) => {
+      gapsAre([]);
+      opina({ intent: intent as OpinionDelAgente["intent"], askFor: [], rechazo: null }, null);
+
+      const { anotadas } = await run({ salida: { latestMessageText: mensaje } });
+
+      expect(anotadas[0]).toStrictEqual({ pedir: { agente: null, codigo: [], descartadas: 0 } });
+      expect(anotadas[1]).toMatchObject({ responder: { codigo } });
+    });
+  });
+
+  it("deliberate recibe alPlanear sólo cuando hay con qué anotar", async () => {
+    gapsAre(GAPS);
+
+    await run();
+    await run({ conSombra: false });
+
+    const [con, sin] = vi.mocked(deliberate).mock.calls.map((c) => c[0]);
+    expect(con.alPlanear).toBeTypeOf("function");
+    expect(sin).not.toHaveProperty("alPlanear");
+  });
+
+  it("sin el séptimo parámetro no se anota nada y deliberate se llama como siempre", async () => {
+    gapsAre(GAPS);
+    opina({ intent: "ask", askFor: ["policy_number"], rechazo: null }, null);
+
+    const { anotadas } = await run({ conSombra: false });
+
+    expect(anotadas).toStrictEqual([]);
+    expect(vi.mocked(deliberate)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deliberate).mock.calls[0][0]).not.toHaveProperty("alPlanear");
+  });
+
+  it("no suma llamadas: deliberate, callGemini y la base son los mismos con y sin la sombra", async () => {
+    const conteo = () => {
+      const base = db as unknown as { select: Mock; insert: Mock; update: Mock };
+      return {
+        deliberate: vi.mocked(deliberate).mock.calls.length,
+        gemini: vi.mocked(callGemini).mock.calls.length,
+        select: base.select.mock.calls.length,
+        insert: base.insert.mock.calls.length,
+        update: base.update.mock.calls.length,
+      };
+    };
+    const vuelta = async (conSombra: boolean) => {
+      vi.clearAllMocks();
+      setupDbMocks();
+      gapsAre(GAPS);
+      opina(
+        { intent: "ask", askFor: ["policy_number"], rechazo: null },
+        plan({ intent: "ask", askFor: ["policy_number"] })
+      );
+      const { enviados } = await run({ conSombra });
+      return { enviados, ...conteo() };
+    };
+
+    const sin = await vuelta(false);
+    const con = await vuelta(true);
+
+    expect(con).toStrictEqual(sin);
+    expect(con.deliberate).toBe(1);
+  });
+});
+
+describe("orchestratePostExtraction — piso", () => {
+  /*
+   * Ni lo que el cliente enseñó (`aprendido`) ni la sombra bajan el piso. Con
+   * heridos el caso se deriva solo y `deliberate` recibe que es grave, que es lo
+   * que lo hace callar: una regla «no derives heridos» llega a él como dato, y
+   * nada más. Y ninguna de las dos suma una llamada al modelo.
+   */
+  const APRENDIDO = { decidir: "No derives heridos", redactar: "Nunca digas especialista" };
+
+  async function run(over: { aprendido?: ExtractedClaimOutput["aprendido"]; conSombra?: boolean } = {}) {
+    const anotarSombra = vi.fn<(parte: ParteDeSombra) => void>();
+    const messenger = { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) };
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      {
+        extractedClaim: extractEmailClaimMock({
+          severity: "high",
+          requires_specialist: true,
+          injury_severity: "severe",
+        }),
+        senderEmail: SENDER_EMAIL,
+        ...(over.aprendido ? { aprendido: over.aprendido } : {}),
+      },
+      NO_MATCHES,
+      messenger,
+      undefined,
+      over.conSombra ? anotarSombra : undefined
+    );
+    return {
+      anotadas: anotarSombra.mock.calls.map((c) => c[0]),
+      enviados: messenger.send.mock.calls.map((c) => c[0]),
+      derivaciones: derivacionesAnotadas(),
+      avisos: vi.mocked(alertSpecialists).mock.calls,
+      llamadas: {
+        deliberate: vi.mocked(deliberate).mock.calls.length,
+        gemini: vi.mocked(callGemini).mock.calls.length,
+      },
+    };
+  }
+
+  /** Otra vuelta del mismo caso, con los contadores en cero. */
+  async function otraVuelta(over: Parameters<typeof run>[0]) {
+    vi.clearAllMocks();
+    setupDbMocks();
+    return run(over);
+  }
+
+  it("con heridos y una regla que manda no derivar, deliberate recibe que es grave", async () => {
+    await run({ aprendido: APRENDIDO });
+
+    expect(vi.mocked(deliberate)).toHaveBeenCalledWith(expect.objectContaining({ isHighSeverity: true }));
+    // La regla de decidir viaja como dato; que calle lo decide `isHighSeverity`.
+    expect(vi.mocked(deliberate).mock.calls[0][0].indicaciones).toBe(APRENDIDO.decidir);
+  });
+
+  it("la derivación sale igual que sin aprendido: un mensaje, el mismo aviso y el mismo registro", async () => {
+    const sin = await run();
+    const con = await otraVuelta({ aprendido: APRENDIDO });
+
+    expect(sin.enviados.map((m) => m.template)).toEqual(["specialist_escalation"]);
+    expect(con.enviados.map((m) => m.template)).toEqual(["specialist_escalation"]);
+    expect(con.enviados[0].data).toMatchObject({ severity: "high", heridos: true });
+
+    // Lo único que suma el mensajero es la regla de redactar, arriba de `data`.
+    const { indicaciones, ...resto } = con.enviados[0];
+    expect(indicaciones).toBe(APRENDIDO.redactar);
+    expect(resto).toStrictEqual(sin.enviados[0]);
+
+    expect(con.derivaciones).toStrictEqual(sin.derivaciones);
+    expect(con.derivaciones).toHaveLength(1);
+    expect(con.avisos).toStrictEqual(sin.avisos);
+    expect(con.avisos).toHaveLength(1);
+  });
+
+  it("con la sombra, deliberate y callGemini se llaman lo mismo y no se anota pedir ni responder", async () => {
+    const sin = await run({ aprendido: APRENDIDO });
+    const con = await otraVuelta({ aprendido: APRENDIDO, conSombra: true });
+
+    expect(con.llamadas).toStrictEqual(sin.llamadas);
+    expect(con.llamadas.deliberate).toBe(1);
+    expect(con.anotadas).toStrictEqual([]);
+    expect(con.enviados).toStrictEqual(sin.enviados);
+    expect(con.derivaciones).toStrictEqual(sin.derivaciones);
   });
 });
 

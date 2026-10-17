@@ -13,14 +13,14 @@ import { asc, eq } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { logger } from "@/lib/observability/logger";
+import {
+  TOPE_DE_REGLAS_DE_EXTRACCION,
+  lineaDeRegla,
+  reglasQueEntran,
+  type TipoDeRegla,
+} from "@/core/agente/indicaciones";
 
-export type PromptRuleType =
-  | "extraction"
-  | "classification"
-  | "severity"
-  | "missing_fields"
-  | "reply_style"
-  | "core_mapping";
+export type PromptRuleType = TipoDeRegla;
 
 export interface PromptRule {
   id: string;
@@ -31,9 +31,6 @@ export interface PromptRule {
 
 /** Max rules injected per run — keeps the prompt bounded. */
 const MAX_ACTIVE_RULES = 50;
-
-/** Max total characters of rule text injected per run. */
-const MAX_RULES_CHARS = 6_000;
 
 /** La consulta sola, para poder mandarla en un lote. Ver `consultaAgentTraining`. */
 export function consultaPromptRules(db: ClienteDatos) {
@@ -77,17 +74,5 @@ export async function loadActivePromptRules(
  * Returns "" when there are no rules.
  */
 export function formatPromptRules(rules: PromptRule[]): string {
-  if (rules.length === 0) return "";
-
-  const lines: string[] = [];
-  let used = 0;
-
-  for (const rule of rules) {
-    const line = `- [${rule.rule_type}] ${rule.title}: ${rule.rule_text}`.trim();
-    if (used + line.length > MAX_RULES_CHARS) break;
-    lines.push(line);
-    used += line.length + 1;
-  }
-
-  return lines.join("\n");
+  return reglasQueEntran(rules, TOPE_DE_REGLAS_DE_EXTRACCION).map(lineaDeRegla).join("\n");
 }

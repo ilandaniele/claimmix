@@ -39,6 +39,13 @@ import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 import { readable } from "@/core/email/texto-legible";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
+import {
+  conteoVacio,
+  lineaDeSombra,
+  resumenDeSombra,
+  sumarSombra,
+  type SombraDeLaVuelta,
+} from "@/core/agente/sombra";
 import { diceCuidado } from "@/core/mensajes/derivacion";
 import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
@@ -71,6 +78,7 @@ const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-
 const { db } = await import("@/lib/db");
 const { CONTACT_DOC_KEYS } = await import("@/server/cases/documents");
 const {
+  agentRuns,
   cases,
   claimAttachments,
   claimFieldConfirmations,
@@ -1383,6 +1391,42 @@ async function checkStatusYParaResponder(
   }
 }
 
+// El modo sombra: qué habría decidido el modelo frente al código. Se imprime y
+// se suma, pero no entra a `failures` ni al código de salida.
+const sombrasImpresas = new Map<string, Set<string>>();
+let conteoDeSombra = conteoVacio();
+
+/**
+ * Imprime la sombra de las corridas del caso que todavía no se vieron. Sin
+ * reloj: lo visto es el id de la corrida, y una retoma puede dejar dos filas.
+ */
+async function imprimirSombra(caso: string): Promise<void> {
+  try {
+    const filas = await db
+      .select({
+        id: agentRuns.id,
+        sombra: sql<unknown>`${agentRuns.confidence_payload}->'sombra'`.mapWith(
+          agentRuns.confidence_payload
+        ),
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.case_id, caso), sql`${agentRuns.confidence_payload}->'sombra' is not null`))
+      .orderBy(asc(agentRuns.created_at));
+    const vistas = sombrasImpresas.get(caso) ?? new Set<string>();
+    sombrasImpresas.set(caso, vistas);
+    for (const fila of filas) {
+      if (vistas.has(fila.id)) continue;
+      const s = fila.sombra as SombraDeLaVuelta | null;
+      if (s?.v !== 1) continue;
+      console.log(`   ◐ sombra: ${lineaDeSombra(s)}`);
+      conteoDeSombra = sumarSombra(conteoDeSombra, s);
+      vistas.add(fila.id);
+    }
+  } catch {
+    console.log("   ◐ sombra: sin datos");
+  }
+}
+
 async function runScenario(scenario: Scenario, actor: PatchActor | null): Promise<string | null> {
   console.log(`\n▸ ${scenario.id} — ${scenario.what}`);
 
@@ -1552,6 +1596,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
       for (const reply of said) {
         console.log(`       🤖 ${readable(reply.body).replace(/\n/g, "\n          ")}`);
       }
+      await imprimirSombra(active);
 
       // Sobre el texto legible, no sobre el HTML crudo: una frase con comilla o
       // con `&` está ahí como entidad y no machearía nunca, así que la
@@ -2207,6 +2252,8 @@ if (reporte) {
   console.log(`
 (diferencias escritas en ${reporte})`);
 }
+
+if (conteoDeSombra.vueltas > 0) console.log("\n" + resumenDeSombra(conteoDeSombra));
 
 if (unrehearsed.size > 0) {
   // Said out loud rather than left implicit. A suite that reports "todo verde"

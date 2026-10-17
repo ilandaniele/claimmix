@@ -4,8 +4,11 @@ _Last updated: 2026-10-16. This file is the single source of truth for "where th
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
-> through **Vertex AI** (postpay, no prepay wall), and the agent is trained on **206
-> approved examples** without needing fine-tuning. **WhatsApp runs on the real Argentine
+> through **Vertex AI** (postpay, no prepay wall), and the agent answers with the
+> base Gemini model (no fine-tuned model is active anywhere) plus context pasted into the
+> extraction prompt: up to 3 human-approved examples, admin rules and per-sender memory.
+> Code rules still make the critical decisions; moving them into console-editable training
+> is in progress (see "El agente aprende de la consola"). **WhatsApp runs on the real Argentine
 > number**, verified, WABA approved. Intake mail arrives at **veltra.claimmix@gmail.com**
 > and nothing else. 21–24 August went into hardening, then the commercial layer, then
 > the last metre of the wire: the app was attacked on purpose, load-tested at a hundred
@@ -48,7 +51,7 @@ insurance market. Inbound claims (email, WhatsApp, or simulated) → AI extracti
 
 ## Cómo probar que todo anda
 
-`pnpm check` corre todo: tipos, lint, ~1960 tests, quince conversaciones
+`pnpm check` corre todo: tipos, lint, ~1960 tests, veintiséis conversaciones
 enteras por WhatsApp y por mail sobre los canales simulados, y un chequeo
 contra el deploy que está corriendo. **No le manda un mensaje a nadie.**
 
@@ -4708,11 +4711,12 @@ sola migración (la 0047).
 
 Un PR con dos partes que no se tocan.
 
-- **Número por código (apagado).** Desde Configuración, el owner o el admin de un
+- **Número por código (apagado al escribirse; prendido en prd desde el 09/10).** Desde Configuración, el owner o el admin de un
   espacio del alta automática pide el código por SMS o llamada, lo escribe, y Meta
   suma su número a la WABA de la plataforma (`src/server/alta/numero-automatico.ts`,
   cliente de Graph en `src/server/whatsapp/alta-de-numero.ts`). Sólo corre con
-  `ALTA_NUMERO_AUTOMATICO=1`, que no está en ningún ambiente: sin ella, o sin la
+  `ALTA_NUMERO_AUTOMATICO=1`, que cuando entró este PR no estaba en ningún ambiente (desde
+  el 09/10 está en prd, ver «Estado al 2026-10-09»): sin ella, o sin la
   0049, nada llama a Graph. Sólo móviles argentinos (`+549` y diez dígitos), y el
   nombre visible es el del número de la plataforma. Cualquier caso raro termina en
   «revisión» con un mail al operador; `/admin/altas` sigue de respaldo. El número de
@@ -4763,10 +4767,9 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
   `vars.PRD_URL` apunta al dominio nuevo. Vertex anda en prd por el pool WIF `vercel-prd`; el
   webhook de WhatsApp y el push de Gmail de dev apuntan a `claimmix-dev`, y prd tiene su
   propio tópico `gmail-push-prd`.
-- **Falta:** R2 de prd (lo configura el dueño; hasta entonces `/api/health` de prd da 503 y
-  el Post-deploy de PRD sale rojo sólo por eso), Turnstile con los hosts nuevos, la prueba
-  de punta a punta de un alta con el dueño, 24 h de logs y la verificación del negocio en
-  Meta.
+- **Falta:** la prueba de punta a punta de un alta con el dueño, 24 h de logs y la
+  verificación del negocio en Meta. R2 de prd quedó el 09/10 (#401) y Turnstile anda en dev y
+  en prd (leído en `/registro` el 16/10).
 - **El flag es de ida.** Con clientes vivos no se apaga `BASE_POR_CLIENTE`: la base de
   control no tiene sus datos de negocio. Para frenar se usa `ALTA_AUTOMATICA=0` y se arregla
   hacia adelante.
@@ -4888,7 +4891,7 @@ y `/api/health?deep=1` sin desfase de bases.
   dev dio 389 ms al primer intento (antes oscilaba entre 477 y 576).
 - **Pen test** (#424): el asistente reintenta una vez si el modelo no contesta.
 
-### workflow 5 y ESLint 10 (2026-10-15, #438/#439, en main; a prd con la próxima promoción)
+### workflow 5 y ESLint 10 (2026-10-15, #438/#439, en prd por #458)
 
 Los majors que Dependabot juntó en #434, menos TypeScript 7. Entraron por #438 a qa (ensayo y
 pen test verdes) y por #439 a main (`080eb325`); Dependabot cerró #434 solo.
@@ -4923,7 +4926,7 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
   Carga 101. Un PR que sólo tocaba documentación costaba unos 60 minutos (CI 30, CodeQL 5,
   Secretos 1 y QA de 22 a 25).
 - **Sólo docs** (#441). Un commit que sólo cambia archivos `.md` (salvo
-  `docs/PROMOCION.md`, que leen los tests) sobre un árbol que ya pasó hereda su marca: `arbol`
+  `docs/PROMOCION.md`, que leen los tests, y todo `entrenamiento/`, que se empaqueta en código) sobre un árbol que ya pasó hereda su marca: `arbol`
   saltea los jobs de código, CodeQL no analiza y el Post-deploy de QA corre todo menos el
   ensayo, con el veredicto en verde y la marca `ensayo-verde-<árbol>`, así que dev tampoco
   ensaya. Un renombre desde un archivo de código, 300 archivos o más, o un error de la API
@@ -4952,11 +4955,11 @@ because an Actions budget is preventing further use») hasta que el ciclo se rei
   Hacerlo atómico pide pasar ese camino a un pool por WebSocket; no compensa el riesgo hoy.
 - **Latencia de 3.8 en prd: sin datos.** La base de prd tiene 0 casos y 0 eventos de
   proveedor; no hay tráfico que medir. En local, una extracción tardó 25 s.
-- **CI parado hasta el 1/11.** El presupuesto de Actions del mes se agotó y todos los jobs
-  fallan a los 2–3 s. #441 y #442 esperan CI; #440 espera el veredicto de QA. La promoción de
-  #436–#442 a prd queda para después, con el OK del dueño.
+- **CI parado hasta el 1/11 (resuelto el 16/10).** El presupuesto de Actions del mes se
+  agotó y todos los jobs fallaban a los 2–3 s. Con el repo público otra vez Actions corre sin
+  cuota, y #436–#453 llegaron a prd por #458.
 
-### Póliza cambiada a mitad de la charla (2026-10-15, #443 a qa, espera CI hasta el 1/11)
+### Póliza cambiada a mitad de la charla (2026-10-15, #443, en prd por #458)
 
 Cierra la observación del ensayo `devolver-al-agente` (#338, `AUDITORIA-2026-09.md`): la
 persona daba `POL-4471-A` y después escribía «póliza 4455», y el agente tomaba el número nuevo
@@ -5019,7 +5022,7 @@ reescribió. #451 los saca del árbol actual con datos sintéticos.
 - Se relanzaron CI, CodeQL y Secretos de #446 y #448–#451. #448–#451 entran a qa juntos
   con #446, en `integra/lote-1-11`.
 
-### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, #452, en main por #455)
+### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, #452, en prd por #458)
 
 Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha>` o `PRD · deploy <sha>`, y sus checks llevan el entorno adelante (`DEV / Smoke del deploy`, `QA / Ensayo de conversaciones`, `PRD · Smoke y salud de las bases`). Los siete workflows siguen, con un nombre que dice cuándo corren (`PR y main · Chequeos del código`, `Post-deploy · DEV, QA y PRD`, `Programado · Barrer trabados en DEV y PRD`). No se saca ningún check: `Tipos` y `Lint` pasan a ser un solo job, `Tipos y lint`.
 
@@ -5030,8 +5033,8 @@ Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha
 - **Cadenas de DEV.** El shell de QA y el de los e2e ya no las reciben: la comparación «¿es la misma base?» va en la expresión y al shell llega sólo `true` o `false`.
 - **k6.** QA tiene su propia cola (`carga-qa`) y cada proyecto la suya para las vistas previas (`carga-preview-<environment>`): antes una vista previa podía cancelar la carga de QA. Contra PRD no corre nunca, ni por un deploy ni por una vista previa del proyecto de prd ni a mano.
 - **Invariantes.** La 12 rechaza un grupo de `concurrency` armado con `github.ref`, y la 15 también lee el `run-name`.
-- **Checks obligatorios.** El ruleset 25217107 todavía no los exige y espera a este renombre: serían los diez de `ci.yml`, `codeql.yml` y `secrets.yml` (con `Tipos y lint` en lugar de `Tipos` y `Lint`) más el estado `Post-deploy QA`. Exigirlos necesita el OK del dueño.
-- **Primeras corridas.** QA sobre `2cfb8b42` (#454): `QA · deploy <sha>`, verde entero al primer intento, ensayo en 13 min y pen test en 3. DEV sobre `251b799d` (#455): `DEV · deploy <sha>`, el ensayo se salteó por la marca del árbol de QA y la Carga dio p95 de 434 ms en el peor caso. `pnpm check` completo sobre `251b799d`: verde en 14,5 min (26 conversaciones). Falta mirar la primera de PRD, que llega con la próxima promoción.
+- **Checks obligatorios.** Con el OK del dueño, el 16/10 se creó el ruleset 25264579 «main y qa: checks del CI obligatorios», aparte del 25217107 y sin bypass. Exige diez checks de GitHub Actions: `Tipos y lint`, `Tests unitarios`, `Tests de integración`, `Build`, `Tests E2E`, `Aislamiento de tenants`, `Bases por cliente`, `Pen test local`, `Peso del bundle` y `Credenciales, datos personales y arquitectura`. Quedan afuera `Vulnerabilidades` (una alerta nueva lo pone rojo sin cambio de código) y el estado `Post-deploy QA`. Un job salteado por la marca de sólo-docs cuenta como pasado. Si se renombra uno de esos jobs, hay que editar el ruleset en el mismo PR o ningún PR se puede mergear.
+- **Primeras corridas.** QA sobre `2cfb8b42` (#454): `QA · deploy <sha>`, verde entero al primer intento, ensayo en 13 min y pen test en 3. DEV sobre `251b799d` (#455): `DEV · deploy <sha>`, el ensayo se salteó por la marca del árbol de QA y la Carga dio p95 de 434 ms en el peor caso. `pnpm check` completo sobre `251b799d`: verde en 14,5 min (26 conversaciones). Con el sólo-docs #457 (`392681ad`), DEV volvió a saltear el ensayo y la Carga dio 492 ms. PRD sobre `98a30dcb` (#458): `PRD · deploy <sha>`, smoke y salud de las bases verdes al primer intento.
 - Mergear sólo con `gh run list --workflow=post-deploy.yml --status in_progress` vacío: los grupos de `concurrency` cambiaron de nombre.
 
 ### Un audio mudo no inventa una denuncia (2026-10-16, #453)
@@ -5043,19 +5046,99 @@ El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso s
 - Tres corridas de `nota-de-voz-y-pdf` sin fixtures, verdes; en una, la guarda descartó 21 palabras para 2 s de audio. La temperatura no se tocó: Google desaconseja bajarla en Gemini 3.
 - Entró a qa junto con #452 por #454 (`2cfb8b42`) y a main por #455 (`251b799d`). En QA, sin fixtures, el ensayo de conversaciones pasó al primer intento.
 
+### Promoción a prd del 16/10 (#458)
+
+Con el OK del dueño, #458 llevó main a prd (`98a30dcb`). Entraron la pregunta por la póliza cambiada y el cierre con la póliza del caso (#443, #444), la retoma sola tras un timeout de Gemini (#447), el tope de palabras del audio (#453), DNI o CUIT (#442), el remitente de QA y la caja de Turnstile (#448, #449), el repo público (#451), workflow 5 y ESLint 10 (#438) y la CI por entorno (#441, #445, #452). No había migraciones nuevas. El Post-deploy de PRD (`PRD · Smoke y salud de las bases`) dio verde al primer intento. Desde ese día el dueño pidió que dev, qa y prd estén siempre iguales hasta nuevo aviso: lo que entra a qa sigue el mismo día a main y a prd.
+
+Lo que todavía no es igual (leído en `/registro` de cada ambiente el 16/10): prd muestra el desafío de Turnstile, la opción de alta con correo y el aviso del número por código; dev muestra Turnstile y el correo pero no el número por código (`ALTA_NUMERO_AUTOMATICO`); QA no muestra ninguno de los tres (faltan las claves de Turnstile, el remitente o `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`, y la bandera). Igualarlos son variables de Vercel. Prender el número por código en dev o en QA ocupa el mismo lugar libre de la WABA de Veltra que usa prd, así que espera la decisión del dueño.
+
+### El agente aprende de la consola (2026-10-16, PR #461, que suma #460)
+
+Revisión del 16/10, leída en el código y en las bases: el agente no actúa según un modelo entrenado. Cada caso lo atiende `gemini-3.8-flash` sin ajustar, siguiendo instrucciones escritas a mano. Las decisiones críticas las toma el código: gravedad y derivación (`severity-classifier.ts`, `extract.ts`), qué pedir (`required-fields.ts`, `required-docs.ts`), contestar o callar (`reply-decision.ts`), orquestación y estados (`orchestrate.ts`, `fsm.ts`). Lo único aprendido es contexto pegado al prompt de extracción (hasta 3 ejemplos aprobados, reglas del admin, memoria por remitente), y no llega a `deliberate` ni a `compose-reply`. Activar un modelo ajustado no tenía efecto: el transporte de Vertex ignora `active_model`, y `activateFineTunedModel` lo dejaba en nulo. En dev el tenant de prueba tiene 19 reglas y 207 ejemplos; en prd no hay ninguno.
+
+Decisiones del dueño (16/10):
+- El agente decide según el entrenamiento. En código queda sólo un piso que el entrenamiento no puede bajar: heridos o muerte pasan a una persona, se tapan los datos personales, no se promete cobertura ni montos, y se respeta el tope de gasto.
+- El entrenamiento base vive en el repo, así es igual en dev, qa y prd. La consola lo muestra y cada cliente suma o corrige lo suyo encima. Un cambio a la base se escribe en la consola y se pasa al repo.
+- Las reglas de código pasan al entrenamiento sin perder lo que anda: primero en modo sombra (el agente decide según el entrenamiento, el código sigue decidiendo y se registra cada diferencia), y una decisión pasa al entrenamiento sólo cuando el ensayo y el eval muestran que coincide.
+- Un fine-tuning pago en Vertex no se lanza sin OK del dueño, y antes tiene que pasar el eval.
+
+La política con la que arranca el agente salió de tres archivos de código y pasó a Markdown en `entrenamiento/base/`. Las reglas que el equipo escribe en la consola pueden llegar, detrás de una bandera apagada, a los pasos que deciden y redactan la respuesta. Y un modo sombra mide cuánto coincide el modelo con el código, para saber algún día qué decisiones se le pueden pasar. **Sin migración, sin llamadas nuevas a Gemini y, con la bandera apagada, sin cambios en los prompts del agente**: los prompts dorados lo prueban byte a byte. Esto es el Lote A (A0 a A16); el Lote B está diseñado y no se construyó.
+
+- **Dónde vive la base y cómo se cambia.** `entrenamiento/base/<paso>/NN-<slug>.md`, con paso `extraccion`, `decidir` o `redactar`: 20 secciones, 16 de modo `prompt` (el texto exacto que recibe el modelo, copiado de lo que corría) y 4 de modo `sombra` (describen una regla del código y no entran a ningún prompt de producción). Se cambia **editando el `.md`, corriendo `pnpm entrenamiento:empaquetar` y abriendo un PR**. El comando escribe `src/core/agente/entrenamiento-base.generated.ts`, un módulo sin imports (Turbopack de Next 16 no trae `?raw`, el ensayo corre con tsx en el mismo proceso y Vercel no empaqueta los `.md`; es el patrón de `scripts/empaquetar-bases.mjs`), con una versión de doce caracteres que cambia con cualquier letra de la base. Como viaja con el código, es la misma en dev, qa y prd. **La consola nunca escribe el repo** ni llama a la API de GitHub. Un `.md` editado sin empaquetar lo frena el test de deriva (`tests/unit/entrenamiento-base.test.ts`), y uno de modo `prompt` cambia lo que ve el modelo, así que también frena los prompts dorados (`tests/unit/prompts-del-agente.test.ts`). Ese PR no cuenta como «sólo documentación» para el salto de CI de #441: corre entero.
+- **Qué queda en código.** Lo que es piso o estructura. En la extracción: el rol, el contexto temporal, las reglas de seguridad, el bloque `INJURY`, los campos, los archivos y las partes. En `deliberate`: los datos, las acciones, «REGLA QUE NO SE NEGOCIA», el menú de herramientas, el formato de salida y `validate`. En `compose`: `escalation`, `closing`, los conflictos con el traspaso, la pregunta, `PROHIBIDO`, `FORBIDDEN` y la guarda de cuidado.
+- **La pestaña Base y la propuesta descargable.** En `/agente`, sólo lectura: la versión, las 20 secciones con su texto tal como corre (modo `prompt` o `sombra`, y la ruta del archivo), una tabla de tipos de regla contra los pasos que las leen (con los pasos que hoy no leen tachados mientras la bandera está apagada) y un botón. Lo arma el servidor, sin consultas; el costo es del orden de 25 a 30 KB de texto en cada carga de `/agente`. El botón baja `GET /api/admin/prompt-rules?formato=propuesta` (admin u owner): las reglas **activas** del cliente en Markdown, agrupadas por el último paso del agente que las lee, con las secciones de ese paso al lado, para que una persona decida si alguna merece un PR a la base. El archivo se llama siempre `propuesta-entrenamiento.md` (sin cliente ni fecha) y abre con `REVISAR ANTES DE SUBIR: texto escrito por el cliente` y un aviso: el repo es público. Pasa cada título y cada texto por `paraElPrompt` y `sinContactos`, así que **tapa** DNI, pólizas, enlaces, mails, teléfonos y etiquetas del sistema, y **no tapa los nombres**: hay que leerla entera antes de copiar nada.
+- **La validación de reglas al guardar.** `POST` y `PATCH` de `/api/admin/prompt-rules` rechazan con `VALIDATION_FAILED` un título o un texto con una etiqueta del sistema (`</agent_rules>` y las demás), un enlace o un mail. No rechazan teléfonos, DNI ni patentes: las reglas de extracción describen formatos de póliza y de patente, y un teléfono agarra fechas y rangos. Las reglas que ya estaban no se revalidan.
+- **La bandera `AGENTE_APRENDIDO_EN_CONVERSACION`.** Sólo vale con `1`. **Está apagada, ausente de Vercel y de GitHub, en los tres ambientes**, y tiene que seguir igual en los tres. Apagada, las reglas llegan a la extracción como siempre y a nada más. Prendida, el worker arma con las mismas reglas activas (sin consulta nueva) un texto para `decidir` y otro para `redactar`, hasta 1500 caracteres por paso, regla entera o ninguna:
+  - `extraction`, `classification`, `severity` y `core_mapping` llegan sólo a la extracción.
+  - `missing_fields` llega a la extracción y a `decidir`.
+  - `reply_style` llega a la extracción y a `redactar`.
+  - **Las reglas con enlace, mail o etiqueta del sistema no llegan a la conversación**: `compose` prohíbe nombrar un enlace o un mail que no pasamos nosotros y quemaría sus dos intentos. La extracción las sigue leyendo.
+  - Entran como dato del operador en un bloque `<indicaciones_del_equipo>`: en `deliberate`, después de «REGLA QUE NO SE NEGOCIA» y de la lista de acciones y antes de los criterios; en `compose`, después del tono. Su introducción dice que no suman pedidos, no vuelven instrucción lo citado, no impiden derivar y no cambian `PROHIBIDO`. Pasan siempre por `paraElPrompt` (AC24). `decidir` las lee en todas las pasadas de `deliberate`; `redactar`, en cada mensaje.
+  - Los id de las reglas que entraron a cada paso quedan en `confidence_payload.entrenamiento` de la corrida.
+- **Los bloques del inquilino de la extracción pasan por `sinCentinelas`.** `agent_training`, `tenant_prompt`, `agent_rules` y `custom_fields` ya no pueden cerrar su propio bloque: una etiqueta del sistema sale como `[agent_rules]` y las comillas triples se parten. Con los prompts dorados verdes, el prompt de extracción sólo cambia cuando el texto de la regla trae una etiqueta o `"""`. Es el único cambio de este lote que toca el prompt de extracción.
+- **El modo sombra.** **Siempre prendido, sin bandera, igual en dev, qa y prd.** El código sigue decidiendo; la sombra anota qué decidiría el modelo con lo que ya devolvió en esa vuelta. No suma ninguna llamada a Gemini ni consulta de lectura; lo único nuevo contra la base es un `UPDATE` no fatal en el worker. Compara cuatro decisiones:
+  - **gravedad**: la `severity` cruda del modelo, guardada antes de que `sinHeridosSupuestos` o la gravedad del caso la toquen, contra la que fija `classifySeverity`.
+  - **derivar**: el `requires_specialist` crudo contra `needsSpecialist`. Anota además `piso` (heridos o gravedad crítica), a propósito sobre-inclusivo. La derivación por padrón (póliza vencida o inexistente, titular ajeno) queda afuera: se calcula después y el modelo no ve el padrón (B6).
+  - **pedir**: lo que el modelo pidió (sólo si su intención fue `ask` o `answer_and_ask`) contra lo que el árbol pediría sin plan, como conjuntos de claves; `descartadas` cuenta las claves que el modelo pidió fuera de lo pendiente.
+  - **responder**: la intención del modelo (`pedir`, `contestar`, `cerrar`, `derivar` o `callar`) contra la decisión del código (`pedir`, `acusar`, `avisar`, `callar`, `contestar` o `cerrar`), más `rechazo`: la categoría por la que `validate` tiró el plan, si lo tiró. Si el plan deriva un caso que el código no derivaba por su cuenta, se anota `agente: derivar` contra `codigo: sin_derivar` y cuenta como diferencia.
+  - **El contrafáctico de responder es una aproximación.** Es la decisión del árbol sin plan: sin espera del agente, con la pregunta leída del mensaje, sin «aprendimos algo» y con el «ya se pidió» calculado con lo último que pedimos. No repite `alreadyAskedFor` (sería una consulta) ni mira `checkConfirmationAlreadySent`. `avisar` no se compara: el agente no tiene equivalente.
+  - **Sin plan no hay opinión** (deliberate apagado, caso grave, audio sin transcribir, presupuesto agotado o error): esa vuelta cuenta como «sin opinión», no como diferencia. La opinión llega por un callback, también cuando `validate` rechaza el plan.
+  - **Dónde se guarda.** En `agent_runs.confidence_payload.sombra`, un jsonb que ya existía: `{ v: 1, gravedad?, derivar?, pedir?, responder? }`. `gravedad` y `derivar` van en el `INSERT` de `logAgentRun` (sólo si hay denuncia y el parseo salió bien); `pedir` y `responder` se suman después con `anotarSombraEnLaCorrida`, un `UPDATE` por `enTenant` filtrado por corrida y caso que no pisa lo anterior y, si falla, sólo deja un log con el código. Sólo guarda enums, booleanos, categorías, id y claves con forma de campo (`/^[a-z0-9_]{1,40}$/`, hasta diez): ni PII ni texto libre. Ni la evaluación ni la propuesta leen `input_payload` ni `output_payload`; un test lo comprueba.
+  - **Cómo se mide.** Hay coincidencia si son iguales (los conjuntos, en `pedir`); si falta una opinión, o el código dice `avisar`, no se compara. Mide coincidencia, **no acierto**. `bajaElPiso` es `derivar.piso` con el agente diciendo que no deriva: una diferencia de gravedad sola no lo baja. El ensayo imprime una línea `◐ sombra` por corrida y un resumen que no cuenta para el veredicto; `pnpm sombra:evaluar` mide gravedad, derivar y pedir sin pasar por el ensayo (ver `docs/TESTING.md`).
+- **El umbral propuesto** (lo decide el dueño). Una decisión es candidata a pasar al modelo con **al menos 95 % de coincidencia sobre al menos 100 comparaciones** con opinión de los dos lados, en la evaluación completa para gravedad, derivar y pedir y en dos ensayos completos seguidos para las cuatro, y con **cero** `BAJA EL PISO` en total. Recién entonces es candidata (B1), una por PR y con el OK del dueño. La parte de piso de derivar (heridos o muerte) no pasa nunca, aunque coincida al 100 %. En código: `cumpleElUmbral` en `src/core/agente/sombra.ts`.
+- **El piso y dónde vive.** Ningún texto de entrenamiento, ni de la base ni del cliente, toca estos cuatro puntos: viven en código y en validadores deterministas, no en prompts. `tests/unit/piso-del-agente.test.ts` prueba cada uno con una regla que pide justo lo contrario.
+  - **Heridos o muerte van a una persona.** `hayHeridos` y `classifySeverity` con su léxico (`severity-classifier.ts`), `needsSpecialist` en `extract.ts`, y en `orchestrate.ts` `isHighSeverity`, `derivaSola` y la escalada antes de deliberar. `deliberate` no opina en un caso grave, y el bloque `INJURY` de la extracción queda literal en `prompt.ts`. Las indicaciones entran recién en `deliberate`, que no opina cuando hay heridos.
+  - **PII tapada (AC24) y nada cruza inquilinos.** `paraElPrompt` (`src/core/ai/para-el-prompt.ts`) con enlaces, DNI, pólizas, pólizas cortas, el número de póliza cambiada y centinelas, aplicado siempre por `bloqueDeIndicaciones`; las reglas con enlace, mail o etiqueta quedan afuera de la conversación; la propuesta sale tapada; la sombra guarda sólo claves seguras; todo va por `enTenant`, con RLS.
+  - **No prometer cobertura ni montos.** `PROHIBIDO` y la pregunta en `compose-reply.ts`, `FORBIDDEN` y `violation` (mandan a la plantilla), `llevaCuidado` y el traspaso de la derivación, y `validate` de `deliberate`. El bloque del cliente va después del tono y su introducción dice que no cambia `PROHIBIDO`; la garantía es `FORBIDDEN`, que es determinista.
+  - **Tope de gasto.** `checkBudget` en el worker antes de extraer, `reservarSiEsPrueba` con las llamadas por deliberación y `registrarConsumoDelModelo`. La sombra no suma llamadas y el bloque del cliente no suma pasadas: sólo tokens, hasta 1500 caracteres más la introducción.
+- **El permiso que necesita la sombra, comprobado el 16/10** (sólo lectura): `select has_table_privilege('claimmix_app', 'agent_runs', 'UPDATE');` da `true` en dev y QA, y en prd da `true` en la base del inquilino (`t_<hex>`). En `neondb` de prd da `false`, y está bien: con `BASE_POR_CLIENTE=1` esa es la base de control, donde el rol de la app sólo lee las tablas de negocio, y los datos de cada aseguradora viven en su base. Para comprobarlo en prd hay que mirar la base del inquilino, no la de control. Si algún día diera `false` donde viven los casos, la sombra de `pedir` y `responder` queda vacía sin romper nada (el error se anota con su código en `agent_runs.sombra_error`), y se ve en el ensayo. No hay migración ni cambio de variables de entorno.
+- **Las 19 reglas de dev, sin tocar.** Dev tiene 19 reglas de una semilla vieja de junio; qa y prd tienen cero. Este lote no las borra, ni las desactiva, ni las edita, ni las copia a la base; con la bandera apagada siguen entrando sólo a la extracción, como hoy, y la validación nueva no las revalida.
+- **Verificación.** `pnpm check --local` del 16/10 en verde, en 13,8 min: tipos, lint, 14.989 tests unitarios, invariantes y las 26 conversaciones sin diferencias con lo esperado, con `gemini-3.8-flash`. La primera lectura de la sombra en ese ensayo (no cuenta para el resultado): gravedad 40/40 (100 %), derivar 39/40 (98 %), pedir 10/21 (48 %), responder 23/30 (77 %), 29 vueltas sin opinión y **un `BAJA EL PISO`**: en `accidente-personal-fractura` («me fracturé la muñeca», sin palabras de gravedad) el modelo no derivaba y el código sí, y el caso terminó en `requiere_especialista`. Es justo lo que el piso tiene que atajar, y confirma que la parte de heridos de derivar no pasa al modelo. Pedir y responder están lejos del umbral. Falta `pnpm check` completo después del deploy, leyendo el transcripto del ensayo: media respuesta puede pasar todas las verificaciones y sonar mal. Los tests unitarios prueban qué texto llega y que el piso se sostiene con el modelo mockeado, no que el modelo siga las reglas del cliente: eso sólo se ve en un ensayo con la bandera prendida.
+
+**Decisiones que esperan al dueño**
+
+1. **Prender `AGENTE_APRENDIDO_EN_CONVERSACION`**, siempre con el mismo valor en dev, qa y prd. Recomendación: no prenderla hasta resolver las 19 reglas de dev y ver un ensayo local con la bandera en `1`.
+2. **Qué tipos de regla llegan a cada paso.** Hoy `missing_fields` va a `decidir` y `reply_style` a `redactar`, que es lo que promete la consola. La crítica de seguridad propone que `decidir` reciba `severity` y `reply_style`, y que `extraction`, `missing_fields`, `classification` y `core_mapping` queden sólo en la extracción. Es una línea en `PASOS_POR_TIPO`.
+3. **Las 19 reglas de dev, sin borrar nada.** Desactivar las de `reply_style` y `missing_fields` que chocan con la base («usted», «Estimado/a» y la firma contra el voseo y el tono; «número de caso» y «plazo de 5 días hábiles» contra `PROHIBIDO` y `FORBIDDEN`, con lo que cada respuesta caería a la plantilla después de gastar dos llamadas; «bloquear sin póliza» empuja a `deliberate` a pedir fuera de la lista y `validate` tira el plan), desactivar el truco `[email_sim]` o las 19 (para que los tres ambientes queden iguales también en datos), o dejarlas como están con la bandera apagada. Desactivarlas las saca también de la extracción de dev: hay que volver a ensayar y leer el transcripto. El truco `[email_sim]` nunca va a la base ni a un entrenamiento. Las que describen bien el comportamiento de hoy (fecha AAAA-MM-DD, patentes Mercosur, criterio de `is_claim`) se pueden llevar a la base con la propuesta de la consola y un PR, si el ensayo las respalda; nada se siembra con `export-training.mjs`, que cruza inquilinos y lee `.env.local`.
+4. **El umbral** de arriba (95 %, 100 comparaciones, evaluación completa más dos ensayos y cero `BAJA EL PISO`).
+5. **El costo y el momento de la evaluación completa.** `pnpm sombra:evaluar --todos` son unas 163 extracciones con `gemini-3.8-flash`, el doble con `--sin-sombra`, y no se ven en el tope ni en `/metricas`. Por omisión corre con un límite de 10.
+6. **`extraction.json`.** Si sigue mostrando `confidence_payload.sombra` y `.entrenamiento` a todos los roles. No tienen PII y la ruta ya expone `raw_agent_output`; si no se quiere, se quitan en la ruta con un destructurado.
+7. **«Como máximo 4 cosas»** en el criterio 4 de `deliberate`, contra `MAX_ASK_ITEMS = 5`. Queda byte a byte; corregirlo es un PR a `entrenamiento/base/decidir/01-criterios.md` y cambia el comportamiento.
+8. **Las indicaciones en todas las pasadas de `deliberate`** (lo que hace hoy) o sólo en la pasada 0. Con sólo la 0, los turnos con consulta ignoran la regla.
+9. **El texto de las introducciones del bloque**, que ya no dicen «mandan ellas», y si el criterio 6 (póliza vencida, abogados, angustia) se refuerza en la base.
+10. **El alcance de la validación al guardar.** Hoy rechaza etiquetas, enlaces y mails; sumar teléfonos, DNI y patentes da falsos positivos en fechas y en ejemplos de formato.
+11. **Dónde vive la pestaña Base.** Los 25 a 30 KB en cada carga de `/agente`, o una página propia `/agente/base`.
+12. **El piso de derivar en la sombra:** heridos o gravedad crítica. Es sobre-inclusivo a propósito; una gravedad alta por pérdida total no es piso.
+13. **El Lote B**, todo con OK del dueño y ninguno construido:
+    - B1: pasar al entrenamiento cada decisión que cumpla el umbral, una por PR; el piso nunca pasa.
+    - B2, B3 y B8: el ajuste pago de Vertex (servir el modelo ajustado, la compuerta de aprobación con `eval:extraccion` y el desfase del JSONL de entrenamiento). Sólo después de la evaluación y con el OK de gasto.
+    - B4: los candidatos a ejemplo y los id de ejemplos por corrida, nunca de `email_sim` ni `whatsapp_sim` ni con texto de corridas por mail.
+    - B5: el léxico del piso de heridos con negaciones («no hubo heridos»), en código.
+    - B6: medir la derivación por padrón, con una llamada extra sólo en el ensayo o la evaluación y detrás de una variable de entorno.
+    - B7: reglas del cliente en una sola línea en el prompt de extracción, con el snapshot regenerado y revisado.
+    - B9: los agregados de la sombra en la consola.
+    - B10: filtrar las claves inventadas que el extractor devuelve por culpa de una regla.
+14. **Propuestas para un PR en un repo público.** Se tapan DNI, pólizas, enlaces, mails y teléfonos, pero no los nombres: el dueño las lee antes de abrir el PR.
+
+### Alta automática, lote 1 (2026-10-16, PR #461)
+
+Los cuatro ítems chicos del «Plan para que el alta sea automática» (`docs/PUESTA_EN_MARCHA.md`) que no esperaban una decisión del dueño. Sin migración ni variables nuevas. Entran en el mismo PR que el Lote A del agente, para gastar un solo deploy.
+
+- **Ítem 1.** El menú lateral del operador muestra «Altas», con enlace a `/admin/altas`. Un admin de un cliente no lo ve.
+- **Ítem 5.** `/admin/altas` muestra la mediana y el p95 de lo que tardó un espacio en quedar listo en los últimos 30 días, desde `tenant_bases` (`src/server/alta/panel-operador.ts`; el formato sale de `src/core/fecha/duracion.ts`).
+- **Ítem 6.** El guardia, `/configuracion` y `/api/health` leen el tope con la misma función, `topeMensualDelProyecto()` en `src/server/ai/tope-mensual.ts`. Antes health leía el 0 como 200 y la pantalla mostraba siempre 200. Con `MONTHLY_BUDGET_USD=0` el guardia frena la IA de los clientes (la demo sigue con su tope, `DEMO_MONTHLY_BUDGET_USD`), la pantalla dice «IA frenada» y health queda en `degraded` con HTTP 200: un `down` daría 503 y tumbaría el smoke, el `curl -fsS` del Post-deploy y el barrido. Que 0 quiera decir «sin tope» (opción B) lo decide el dueño.
+- **Ítem 12.** `.env.example` nombra todas las variables que lee el código, y `tests/unit/env-example-completo.test.ts` falla si aparece una nueva sin anotar.
+- **Verificación.** Suite entera en verde (14.319 tests) antes de sumar el Lote A. La revisión de Fable pidió un test que fije que el guardia frena con el tope en 0 y precisar que la demo tiene su propio tope; las dos cosas están. La auditoría #90 queda parcial: health todavía repite la suma del gasto del mes.
+
 ### 🙋 Waiting on you (not code)
 
-- **Promoción a prd.** Main está en verde en `251b799d` (QA, DEV y `pnpm check` completo).
-  La próxima promoción lleva #436–#455 y espera tu OK.
-- **Checks obligatorios.** Ruleset nuevo sólo para main y qa con los checks de `ci.yml`,
-  menos `Vulnerabilidades` (alertas nuevas lo ponen rojo sin cambio de código). Espera tu OK.
-
+- **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
+  QA (cuenta de Gonzalo) y prd (cliente ficticio) completos e iguales, con quién hace cada
+  paso, las decisiones D1 a D15 y el plan para que el alta sea automática, está en
+  `docs/PUESTA_EN_MARCHA.md`. Empieza por A1, las decisiones que traban algo.
 - **Limpieza del 15/10.** Desinstalar la GitHub App `supabase`: Supabase no se usa y su
   check «Supabase Preview» sale rojo en los PR. En `.env.local`, poner
   `VERTEX_EXTRACTION_MODEL=gemini-3.8-flash` o borrar la línea.
-- **Póliza cambiada a mitad de caso.** Decidir si el agente avisa cuando la persona corrige el
-  número de póliza y si AC24 se afloja para valores que escribió ella misma. El arreglo está
-  mapeado en «DNI o CUIT, y tres decisiones de auth».
 - **App propia del cliente: antes de prenderla.** (1) W6, el ensayo manual en dev con un
   portfolio de prueba nuevo y el chip de repuesto; cierra las incógnitas I1 a I42 de la
   Parte H. (2) Decidir con eso si hace falta App Review (I7, Q35): si hace falta, la vía no se
@@ -5081,10 +5164,8 @@ El Post-deploy de QA sobre `e6e25edd` dio rojo en `nota-de-voz-y-pdf`: el caso s
   `user_id` de `debug_token` es el mismo que trae el `signed_request` del borrado. (9)
   Cambiar el texto de `src/app/privacy/page.tsx` con la sección `#meta` propuesta en la
   Parte G: ese archivo lo toca el dueño. (10) La app en modo Live y una sola promoción.
-- **Ambiente prd: lo que queda del dueño.** El bucket `claimmix-prd-attachments` de R2 y su
-  token cargados en `claimmix-prd` (después Claude redeploya y mira `/api/health?deep=1`);
-  los hostnames `claimmix-dev.vercel.app` y `claimmix-prd.vercel.app` en el widget de
-  Turnstile; un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
+- **Ambiente prd: lo que queda del dueño.** (R2 de prd y los hostnames de Turnstile ya
+  están.) Un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
   propios; la verificación del negocio en Meta para pasar de 2 números en la WABA; y avisar
   a los clientes de dev con SSO o API v1 del dominio nuevo. La política de privacidad
   todavía nombra el permiso `gmail.readonly`, que el alta corta ya no pide: ese texto lo

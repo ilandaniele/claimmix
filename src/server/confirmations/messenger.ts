@@ -67,6 +67,8 @@ export interface AgentMessage {
   tenantId: string;
   /** The claimant's most recent message — used only to pitch the tone. */
   lastMessage?: string;
+  /** Lo que el equipo indicó sobre cómo escribir: va al redactor, no a la plantilla ni a `data`. */
+  indicaciones?: string;
   /** Email address, or a wa_id — digits only, no '+'. */
   to: string;
   template: EmailTemplate;
@@ -582,6 +584,7 @@ async function writeReply(
       ? (message.data.escritoPorLaPersona as unknown[]).map(String)
       : undefined,
     lastMessage: message.lastMessage,
+    ...(message.indicaciones ? { indicaciones: message.indicaciones } : {}),
     fallback,
   });
 }

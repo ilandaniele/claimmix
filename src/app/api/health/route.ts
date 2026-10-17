@@ -35,6 +35,7 @@ import { filasDe } from "@/lib/db/filas";
 import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
+import { topeMensualDelProyecto } from "@/server/ai/tope-mensual";
 import { basePorCliente } from "@/data/bases";
 import { enControl, enTenant } from "@/data/scope";
 
@@ -579,9 +580,13 @@ async function checkGmail(): Promise<Check> {
  * Excluye al inquilino de la demo por el mismo motivo que `checkBudget`: ese
  * endpoint corre sin autenticación y su gasto no puede frenar una denuncia
  * real.
+ *
+ * El tope lo lee la misma función que el guardia. Con `MONTHLY_BUDGET_USD=0` la
+ * IA está frenada a propósito: sale `degraded` y no `down`, para que apagarla
+ * a mano no tumbe el smoke ni el despliegue.
  */
 async function checkPresupuesto(): Promise<Check> {
-  const tope = Number.parseFloat(process.env.MONTHLY_BUDGET_USD ?? "") || 200;
+  const tope = topeMensualDelProyecto();
   const demo = process.env.DEMO_TENANT_ID?.trim() || null;
 
   try {
@@ -599,8 +604,11 @@ async function checkPresupuesto(): Promise<Check> {
     );
 
     const gastado = Number(filas[0]?.total ?? 0);
-    const parte = tope > 0 ? gastado / tope : 0;
-    const cuanto = `US$${gastado.toFixed(2)} de US$${tope.toFixed(0)} (${Math.round(parte * 100)}%)`;
+    if (tope === 0) {
+      return degraded("presupuesto", `US$${gastado.toFixed(2)} · IA frenada (MONTHLY_BUDGET_USD=0)`);
+    }
+    const parte = gastado / tope;
+    const cuanto = `US$${gastado.toFixed(2)} de US$${tope} (${Math.round(parte * 100)}%)`;
 
     if (parte >= 1) {
       return down("presupuesto", `${cuanto} — la extracción está frenada`);

@@ -290,6 +290,14 @@ va a revisión con el aviso `sin_lugar`, hasta que se verifique la empresa y se 
 devuelve `/phone_numbers`, en cualquier estado, antes de agregar. Si no se las puede
 contar enteras, el pedido falla cerrado («meta»).
 
+El tope es **por portfolio de negocio, no por WABA**. La documentación de la Cloud API
+(https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers) dice: «New
+business portfolios are initially capped at two registered business phone numbers.»
+Veltra es un solo portfolio, así que una WABA nueva dentro de Veltra no suma lugares.
+Además, cada WABA necesita su propio número de la plataforma. Una WABA por ambiente
+espera a la verificación del negocio o a un portfolio aparte (`docs/PUESTA_EN_MARCHA.md`,
+«Después de A5: una WABA y un token por ambiente»).
+
 ### Los topes
 
 | Variable | Por defecto | Rango | Qué limita |
@@ -351,7 +359,8 @@ proveedor, `register` falla y el caso va a revisión.
 ### Prueba real en QA
 
 Hace falta una SIM libre que no esté en la app de WhatsApp. Prender
-`ALTA_NUMERO_AUTOMATICO=1` **sólo en QA** (y la 0049 ya aplicada en esa base).
+`ALTA_NUMERO_AUTOMATICO=1` en QA (y la 0049 ya aplicada en esa base), con el token de
+la WABA propia de QA (después de A5).
 
 1. Crear un espacio por `/alta` con el número de esa SIM.
 2. En Configuración, «Por SMS»; si no llega, «Por llamada».
@@ -366,12 +375,15 @@ Lo que sólo esta prueba aclara: que llegue el SMS o la llamada, el `verify_code
 `register` reales, el formato del número, el idioma, los códigos de error, cómo cuenta
 Meta el tope, la revisión del nombre y que el webhook del número nuevo llegue al
 espacio. Las constantes están juntas en `src/server/whatsapp/alta-de-numero.ts` para
-ajustarlas después. En producción se prende recién cuando QA salga bien.
+ajustarlas después.
 
-Estado al 16/10: en prd la bandera está prendida desde el 09/10 y esta prueba en QA no
-se hizo. La primera alta real en prd hace de prueba: mirar `whatsapp.alta_numero.graph`
-y `alta.numero_en_revision` en los logs. Si el dueño prefiere probar antes, se apaga en
-prd y se prende sólo en QA.
+Estado al 17/10: en prd la bandera está prendida desde el 09/10 y esta prueba en QA no
+se hizo. El dueño eligió (D1, b) prenderla también en dev y en QA, y se carga en el lote
+de A12 de `docs/PUESTA_EN_MARCHA.md`. QA no tiene token de WhatsApp, así que sus altas
+por código van a revisión con `sin_credencial`. El único lugar libre de la WABA actual
+es primero del cliente ficticio de prd, y esa alta es la prueba en vivo: mirar
+`whatsapp.alta_numero.graph` y `alta.numero_en_revision` en los logs. La prueba real en
+QA espera a la WABA y al token propios de QA (después de A5).
 
 
 ## Parte G — WABA propia por cliente (Embedded Signup)

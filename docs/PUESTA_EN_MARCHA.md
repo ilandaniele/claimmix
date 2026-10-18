@@ -384,16 +384,16 @@ dice.
 
 | Variable | Tipo | Igual o excepción | Estado conocido | Cómo comprobarlo |
 |---|---|---|---|---|
-| `ALTA_AUTOMATICA` (`src/lib/auth/registro-permitido.ts:53`) | bandera | igual (D6) | dev y prd en 1 (`docs/PROJECT_STATUS.md:4763-4764`); QA desconocido. `docs/PROMOCION.md:726` todavía dice 0 para prd | Vercel; una autoalta de prueba |
-| `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | igual: 1 en los tres (D1, b); en QA sin token, el alta va a revisión con `sin_credencial` | dev y QA apagada hasta el lote de A12, prd prendida | el aviso del número en `/registro` |
-| Número por código | bandera y Meta | excepción de hecho aunque la bandera sea igual (D1, b): el tope de Meta es de 2 números por portfolio y uno ya es el de la plataforma, así que queda un solo lugar libre para dev y prd juntos, y es primero del cliente ficticio de prd. QA tiene la bandera pero no token, y sus altas por código van a revisión con `sin_credencial`. QA tiene su propia WABA y su propio token recién después de A5 (la verificación la pide el [Dueño] en Meta Business Suite) | prd prendido; dev y QA van en 1 en el lote de A12 | el aviso del número en `/registro`; `docs/whatsapp-setup.md:283-299` |
+| `ALTA_AUTOMATICA` (`src/lib/auth/registro-permitido.ts:53`) | bandera | igual (D6) | dev y prd en 1 (`docs/PROJECT_STATUS.md:4763-4764`); QA en 1 desde el 17/10 (A12). `docs/PROMOCION.md:726` todavía dice 0 para prd | Vercel; una autoalta de prueba |
+| `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | igual: 1 en los tres (D1, b); en QA sin token, el alta va a revisión con `sin_credencial` | 1 en los tres: dev y QA desde el 17/10 (A12) | el aviso del número en `/registro` |
+| Número por código | bandera y Meta | excepción de hecho aunque la bandera sea igual (D1, b): el tope de Meta es de 2 números por portfolio y uno ya es el de la plataforma, así que queda un solo lugar libre para dev y prd juntos, y es primero del cliente ficticio de prd. QA tiene la bandera pero no token, y sus altas por código van a revisión con `sin_credencial`. QA tiene su propia WABA y su propio token recién después de A5 (la verificación la pide el [Dueño] en Meta Business Suite) | prd prendido; dev y QA con la bandera en 1 desde el 17/10 (A12) | el aviso del número en `/registro`; `docs/whatsapp-setup.md:283-299` |
 | `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1` |
 | Entrenamiento del agente (reglas y ejemplos de `/agente`) | datos de cada espacio | excepción hasta que el entrenamiento base viva en el repo, igual en los tres (`docs/PROJECT_STATUS.md:5055-5063`). No existe un script que copie reglas y ejemplos entre ambientes (`scripts/export-training.mjs:11`) | dev 19 reglas y 207 ejemplos en el espacio de prueba; prd ninguno; QA desconocido | `/agente`, solapas «Reglas de prompt» y «Ejemplos aprobados» (`src/lib/i18n/es-AR.ts:844`, `:852`) |
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` (`.env.example:312-313`) | valor y secreto | igual (dev y prd comparten la clave del sitio) | dev y prd cargadas; QA desconocido | el desafío en `/registro` |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` (`.env.example:312-313`) | valor y secreto | igual (dev y prd comparten la clave del sitio) | cargadas en los tres (la CSP de QA trae `challenges.cloudflare.com`) | el desafío en `/registro` |
 | `ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN` (`.env.example:227-228`) | valor y secreto | excepción: un remitente por ambiente | dev y prd cargadas (`docs/PROJECT_STATUS.md:4764`); QA cargada el 15/10 | el bloque de correo en `/registro` |
-| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:207-208`) | valor y secreto | igual (un cliente OAuth compartido) | dev y prd cargadas; QA probablemente vacías | el bloque de correo y «Conectar Gmail» |
-| `GMAIL_TOKEN_ENCRYPTION_KEY` (`.env.example:216`) | secreto | excepción: una por base; no se rota sin volver a cifrar | QA desconocido | error del servidor al volver de Google en «Conectar Gmail»; chequeo `gmail` de `/api/health` |
-| `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | prd 5, 30 y 350 según el plan (`docs/PROMOCION.md:727-728`); dev y QA desconocido | Vercel; contador de `/admin/altas` |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:207-208`) | valor y secreto | igual (un cliente OAuth compartido) | dev y prd cargadas; en QA los nombres existen pero vinieron vacíos del import del 17/09: los pega el [Dueño] en A12 | el bloque de correo y «Conectar Gmail» |
+| `GMAIL_TOKEN_ENCRYPTION_KEY` (`.env.example:216`) | secreto | excepción: una por base; no se rota sin volver a cifrar | cargada en los tres (QA desde el 15/10) | error del servidor al volver de Google en «Conectar Gmail»; chequeo `gmail` de `/api/health` |
+| `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
 | `MONTHLY_BUDGET_USD` (`src/server/ai/tope-mensual.ts:23`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:616`) y con 0 |
@@ -637,9 +637,9 @@ ambiente, la hora, una captura y el número de caso.
     Production.
   - **Qué hacer:** confirmar o cargar, por nombre:
     - `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET`, del mismo cliente OAuth que el de
-      `.env.local`, porque el token del remitente sale de ese cliente. Es la causa más
-      probable de que `/registro` de QA no muestre el correo: el remitente se cargó el 15/10
-      y sin estas dos no hay remitente.
+      `.env.local`, porque el token del remitente sale de ese cliente. Es la causa de que
+      `/registro` de QA no muestre el correo: los dos nombres existen pero vinieron vacíos
+      del import del 17/09, así que el [Dueño] pega los valores.
     - `ALTA_REMITENTE_CORREO` y `ALTA_REMITENTE_REFRESH_TOKEN`. Si faltan, las carga el
       [Dueño] desde su máquina con `pnpm exec tsx --tsconfig tsconfig.rehearsal.json
       scripts/token-remitente.mts --correo <casilla> --vercel claimmix-qa`, autorizando la
@@ -649,8 +649,8 @@ ambiente, la hora, una captura y el número de caso.
     - `ALTA_AUTOMATICA` en `1` (D6), o la dirección de Gonzalo en `SIGNUP_ALLOWED_EMAILS`.
     - `ALTA_NUMERO_AUTOMATICO` en `1` (D1, b), **sin** `WHATSAPP_ACCESS_TOKEN`: el alta que pida
       el celular termina en revisión con `sin_credencial` (paso 7).
-    - `GMAIL_TOKEN_ENCRYPTION_KEY`, propia de QA. No figura en la lista de QA, y sin ella no
-      se puede guardar una casilla.
+    - `GMAIL_TOKEN_ENCRYPTION_KEY`, propia de QA y cargada desde el 15/10. Sin ella no se
+      puede guardar una casilla.
     - `ADMIN_EMAILS` con la dirección del dueño, para que el dueño opere `/admin/altas` en QA.
       Además, la cuenta del dueño tiene que tener rol owner o admin, correo verificado y
       sesión en el espacio casa de QA (`10000000-0000-0000-0000-000000000001`), no en un

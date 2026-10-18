@@ -5189,11 +5189,21 @@ Arregla la regresión que encontró la lectura del transcripto de la segunda pro
 
 ### Puesta en marcha: las decisiones de A1 (17/10)
 
-El dueño eligió las opciones de A1 de `docs/PUESTA_EN_MARCHA.md`. Ninguna bandera está cargada todavía en dev ni en QA: van en el lote de A12.
+El dueño eligió las opciones de A1 de `docs/PUESTA_EN_MARCHA.md`. Las banderas entraron en el lote de A12 (ver la sección siguiente).
 
 - **D1 (b).** `ALTA_NUMERO_AUTOMATICO` en 1 también en dev y QA (prd la tiene desde el 09/10). El único lugar libre de la WABA es primero del cliente ficticio de prd; en dev nadie pide el código hasta que esa alta termine y su número se borre (D5), o hasta A5. QA va sin token de WhatsApp: sus altas por código terminan en revisión con `sin_credencial`.
 - **El resto.** D2: `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada. D3: Gmail de prueba de Gonzalo en QA, sin número de WhatsApp hasta su propia WABA. D4 (a): dominio propio del dueño. D5: borrar el número del cliente ficticio y suspender el espacio. D6: `ALTA_AUTOMATICA` en 1 en QA. D7: topes iguales a prd; `MONTHLY_BUDGET_USD` y `AI_TENANT_DAILY_TOKEN_CAP` más altos en dev y QA. D8: el dueño es operador en los tres, Gonzalo no. D14: sin MCP de WhatsApp. D15: reportes por chat o correo al dueño.
 - **Hallazgo de Meta.** El tope de dos números es por portfolio de negocio, no por WABA (https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers: «New business portfolios are initially capped at two registered business phone numbers.»). Veltra es un solo portfolio y su número de la plataforma ya usa un lugar, así que una WABA nueva dentro de Veltra no suma lugares, y cada WABA necesita su propio número de la plataforma. Una WABA y un token por ambiente esperan a A5: receta en `docs/PUESTA_EN_MARCHA.md`, «Después de A5: una WABA y un token por ambiente».
+
+### Puesta en marcha: el lote de variables de A12 (17–18/10)
+
+Variables de Vercel cargadas y borradas con OK del dueño, sin leer ni copiar ningún valor secreto. Prd no se tocó.
+
+- **Cargadas en dev y QA (17/10).** `ALTA_NUMERO_AUTOMATICO=1`, `ALTA_TOPE_BASES=30`, `ALTA_TOPE_MB=350` y otra vez `ALTA_TOPE_GLOBAL_DIA=5`; en QA también `ALTA_AUTOMATICA=1`. Los topes quedan iguales a prd (D7).
+- **Borradas porque el código no las lee (17/10).** 17 en total. En dev: `OPENAI_API_KEY`, `OPENAI_MODEL` y las cinco `SMTP_*`. En QA: `GEMINI_API_KEY` (muerta desde Vertex), las cuatro `INTEGRATION_*_PASSWORD` (son secretos de GitHub, no de Vercel), `OPENAI_API_KEY`, `STAGING_DATABASE_URL(_APP)` y las dos `UPSTASH_*`.
+- **Borradas para igualar a prd (18/10).** En QA, `SENTRY_DSN` y `NEXT_PUBLIC_SENTRY_DSN`: Sentry es opcional y prd no lo tiene. En dev, `SIMULATE_WORKER_DELAY_MS` y `SIMULATE_WORKER_MAX_DELAY_MS`, con lo que valen los defaults de `simulation-throttle.ts` (5000 y 120000 ms). Quedan 67 variables en dev y 65 en QA, ninguna sobrante.
+- **QA y el correo.** `/registro` de QA no ofrecía el correo porque `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` existen pero vinieron vacíos del import del 17/09. El dueño pega los valores en la pantalla de Vercel. `GMAIL_TOKEN_ENCRYPTION_KEY` y las dos de Turnstile ya tenían valor.
+- **Redeploy.** Dev se redeployó el 18/10 sobre `49c7dc32` para tomar el lote. QA se redeploya después de que el dueño pegue las dos de Gmail; prd no lo necesita.
 
 ### 🙋 Waiting on you (not code)
 

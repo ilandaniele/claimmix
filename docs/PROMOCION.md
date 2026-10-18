@@ -645,8 +645,8 @@ navegador) o el asistente.
 3. Dueño: en Google Cloud, los orígenes y los redirect URIs de `claimmix-dev.vercel.app` y de
    `claimmix-prd.vercel.app` (las mismas rutas que hoy tiene `claimmix.vercel.app`, la del
    callback de las casillas de Gmail incluida), y la pantalla de consentimiento publicada:
-   con los scopes de Gmail sin verificar hay un tope de 100 usuarios, compartido entre dev y
-   prd. En Cloudflare, los dos hostnames en el widget de Turnstile.
+   con los scopes de Gmail sin verificar hay un tope de 100 usuarios, compartido por todos
+   los clientes del proyecto (dev, QA y prd). En Cloudflare, los dos hostnames en Turnstile.
 4. Asistente: el inventario de dev, con SELECT sobre la base de dev: números conectados,
    casillas de Gmail, slugs de formulario, SSO, claves de API v1, invitaciones y
    verificaciones vivas. Llena `SLUGS_DE_DEV`, `NUMEROS_DE_DEV` y `CASILLAS_DE_DEV`.
@@ -673,10 +673,10 @@ navegador) o el asistente.
    limitado a ese bucket, y el topic `gmail-push-prd` con la suscripción `gmail-push-prd-sub`
    empujando a `https://claimmix-prd.vercel.app/api/webhooks/gmail`. Ese alias queda para
    siempre: la suscripción no cambia con el move.
-10. Asistente: las variables de prd. El dueño completa los secretos en `.env.prd.local`
-    (copiando el token de WhatsApp sin el comentario de su línea) y se cargan con
-    `node scripts/sync-vercel-env.mjs --project claimmix-prd --archivo .env.prd.local`; ese script
-    se niega a leer `.env.local` para prd. Qué lleva está en la lista de abajo.
+10. Asistente: las variables de prd. Desde el 17/10 los secretos los pega el dueño en la
+    pantalla de Vercel (Settings > Environment Variables), nunca por chat ni por script, y el
+    asistente carga sólo banderas y topes: `scripts/sync-vercel-env.mjs` no se corre para prd
+    ni para QA. Qué lleva está en la lista de abajo.
 11. Asistente: `gh secret set PRD_CRON_SECRET`, `gh variable set PRD_URL --body
     https://claimmix-prd.vercel.app` y la rama `prd`, creada por API desde el SHA de `main`.
 12. Asistente: el primer deploy de prd (PR de `main` a `prd`), el login del operador en
@@ -723,7 +723,7 @@ detrás de pruebas y de un orden fijo:
 **Lo que lleva `claimmix-prd`:**
 
 - `BASE_POR_CLIENTE`: `0` en la fase 1, `1` en la fase 2.
-- `ALTA_AUTOMATICA`: `0` hasta el paso 10 de la fase 2.
+- `ALTA_AUTOMATICA`: `1` desde que se abrió el alta (paso 10 de la fase 2).
 - `ALTA_TOPE_GLOBAL_DIA=5`, `ALTA_TOPE_BASES=30` y `ALTA_TOPE_MB=350`: el plan Free de Neon
   tiene 500 MB por proyecto.
 - `DEFAULT_TENANT_ID`: el inquilino casa.
@@ -732,7 +732,7 @@ detrás de pruebas y de un orden fijo:
 - `PUBSUB_TOPIC`: el de prd. Vertex con el proveedor del pool `vercel-prd`.
 - Presupuestos de IA: US$ 50 en total, US$ 1 por inquilino de prueba y US$ 30 para todos los
   de prueba juntos.
-- `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` cargadas: las casillas por inquilino las usan.
+- Cargadas: `GMAIL_CLIENT_*`, `ALTA_NUMERO_AUTOMATICO=1`, `ALTA_REMITENTE_*`, `TURNSTILE_*` y `R2_*`.
 - Vacías a propósito: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`,
   `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL` y `DEMO_TENANT_ID`. prd no tiene número ni casilla
   propios hasta que un cliente los conecte.
@@ -804,7 +804,7 @@ que faltan columnas, y la ve el post-deploy: `bases.desfase`.
    la 2).
 2. Meta permite 2 números en la WABA hasta verificar el negocio.
 3. La pantalla de consentimiento de Google tiene que estar publicada, y sus scopes de Gmail
-   sin verificar tienen un tope de 100 usuarios que comparten dev y prd.
+   sin verificar tienen un tope de 100 usuarios que comparten dev, QA y prd.
 4. Hecho el 09/10: Vercel aceptó mover `claimmix.vercel.app` a `claimmix-prd`.
 5. Los términos de Vercel Hobby son de uso no comercial, y prd con clientes que pagan choca
    con eso. El dueño decidió no usar planes pagos; queda señalado.

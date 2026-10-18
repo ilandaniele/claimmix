@@ -11,34 +11,37 @@
  * **El token tiene que salir del mismo cliente OAuth con el que se usa.** El
  * envío refresca con `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET`, y un refresh
  * token sólo lo canjea el cliente que lo emitió. Por eso el script lee esas
- * mismas variables y no pide otras.
+ * mismas variables y no pide otras: del archivo que se le pasa con `--archivo`
+ * y, sin él, de `.env.local`, que es el cliente de dev.
  *
  * Un cliente de tipo «Escritorio» acepta cualquier puerto de loopback. Uno de
  * tipo «Aplicación web» exige la dirección exacta: el puerto por omisión,
  * 53682, es el que está registrado como `http://127.0.0.1:53682/`; para otro,
  * registralo y pasalo con `--puerto`.
  *
- * Uso:  pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts [--puerto N] [--correo casilla@example.com] [--vercel proyecto]
+ * Uso:  pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts [--puerto N] [--correo casilla@example.com] [--vercel proyecto] [--archivo .env.qa.local]
  *
  * Con `--vercel` el token no se imprime: va directo a ese proyecto, en
  * producción, como variable sensible, junto con `ALTA_REMITENTE_CORREO` (por eso
  * pide `--correo`). Viaja por la entrada estándar de la CLI de Vercel, no por la
  * línea de comandos. Pide `vercel` en el PATH con sesión iniciada, y lo prueba
- * antes del consentimiento. claimmix-prd no se carga así: su cliente OAuth sale
- * de su propio archivo, no de `.env.local`. Sin `--vercel`, el token se imprime.
+ * antes del consentimiento. Cada proyecto lleva el cliente de su ambiente:
+ * `claimmix` (dev) sólo acepta el de `.env.local`; cualquier otro pide
+ * `--archivo` con el suyo, que no puede ser `.env.local`. claimmix-prd todavía
+ * no se carga así: se pega a mano. Sin `--vercel`, el token se imprime.
  *
  * Sólo pide el permiso de enviar (`gmail.send`): esta casilla no lee ni borra
  * nada. El flujo es el de loopback con PKCE; el token no se escribe en ningún
  * archivo. Esto no habla con ninguna base.
  */
 import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.local" });
 
 import { execSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 const ALCANCE = "https://www.googleapis.com/auth/gmail.send";
@@ -49,6 +52,7 @@ const { values } = parseArgs({
     puerto: { type: "string", default: "53682" },
     correo: { type: "string" },
     vercel: { type: "string" },
+    archivo: { type: "string" },
   },
 });
 
@@ -57,6 +61,11 @@ if (!Number.isInteger(puerto) || puerto < 0 || puerto > 65535) {
   console.error("--puerto tiene que ser un número entre 0 y 65535 (0 = uno libre).");
   process.exit(2);
 }
+
+// El cliente sale de un solo archivo: el de --archivo o, sin él, .env.local (dev).
+const ruta = values.archivo ?? ".env.local";
+// Windows no distingue mayúsculas: `.ENV.LOCAL` es el mismo archivo.
+const esDeDev = resolve(ruta).toLowerCase() === resolve(".env.local").toLowerCase();
 
 const proyecto = values.vercel;
 if (proyecto !== undefined) {
@@ -68,10 +77,36 @@ if (proyecto !== undefined) {
     console.error("claimmix-prd no se carga desde .env.local: corré sin --vercel y pegalo a mano.");
     process.exit(2);
   }
+  if (proyecto === "claimmix" && !esDeDev) {
+    console.error("--vercel claimmix lleva el cliente de .env.local: es el de dev.");
+    process.exit(2);
+  }
+  if (proyecto !== "claimmix" && esDeDev) {
+    console.error(`--vercel ${proyecto} pide --archivo con el cliente de ese ambiente: el de .env.local es el de dev.`);
+    process.exit(2);
+  }
   if (!values.correo) {
     console.error("--vercel pide --correo: es la casilla que queda como ALTA_REMITENTE_CORREO.");
     process.exit(2);
   }
+}
+
+// Antes de leer .vercel/ y de abrir nada: sin cliente no hay nada que seguir. Los valores no se muestran.
+const cliente = leerCliente();
+function leerCliente(): { id: string; secreto: string } {
+  let fuente: Record<string, string>;
+  try {
+    fuente = dotenv.parse(readFileSync(ruta, "utf8"));
+  } catch {
+    console.error(`${ruta}: no existe o no se puede leer.`);
+    process.exit(2);
+  }
+  const id = fuente.GMAIL_CLIENT_ID?.trim();
+  const secreto = fuente.GMAIL_CLIENT_SECRET?.trim();
+  if (id && secreto) return { id, secreto };
+  const faltan = [id ? "" : "GMAIL_CLIENT_ID", secreto ? "" : "GMAIL_CLIENT_SECRET"].filter(Boolean);
+  console.error(`${ruta}: ${faltan.length === 1 ? "falta" : "faltan"} ${faltan.join(" y ")}.`);
+  process.exit(2);
 }
 
 // Se lee antes del consentimiento: si después la carga no puede salir, el token canjeado se pierde.
@@ -88,15 +123,6 @@ function leerOrgId(): string {
   console.error("No pude leer el orgId de .vercel/repo.json: corré `vercel link --repo` primero.");
   process.exit(2);
 }
-
-const clientId = process.env.GMAIL_CLIENT_ID?.trim();
-const clientSecret = process.env.GMAIL_CLIENT_SECRET?.trim();
-if (!clientId || !clientSecret) {
-  console.error("Faltan GMAIL_CLIENT_ID y GMAIL_CLIENT_SECRET.");
-  process.exit(2);
-}
-// Las funciones de abajo se declaran aparte y ahí TypeScript pierde lo que se descartó arriba.
-const cliente = { id: clientId, secreto: clientSecret };
 
 const verificador = randomBytes(32).toString("base64url");
 const desafio = createHash("sha256").update(verificador).digest("base64url");

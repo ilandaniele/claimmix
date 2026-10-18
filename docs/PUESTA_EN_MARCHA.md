@@ -384,7 +384,7 @@ dice.
 
 | Variable | Tipo | Igual o excepción | Estado conocido | Cómo comprobarlo |
 |---|---|---|---|---|
-| `ALTA_AUTOMATICA` (`src/lib/auth/registro-permitido.ts:53`) | bandera | igual (D6) | dev y prd en 1 (`docs/PROJECT_STATUS.md:4763-4764`); QA en 1 desde el 17/10 (A12). `docs/PROMOCION.md:726` todavía dice 0 para prd | Vercel; una autoalta de prueba |
+| `ALTA_AUTOMATICA` (`src/lib/auth/registro-permitido.ts:53`) | bandera | igual (D6) | dev y prd en 1 (`docs/PROJECT_STATUS.md:4763-4764`); QA en 1 desde el 17/10 (A12) | Vercel; una autoalta de prueba |
 | `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | igual: 1 en los tres (D1, b); en QA sin token, el alta va a revisión con `sin_credencial` | 1 en los tres: dev y QA desde el 17/10 (A12) | el aviso del número en `/registro` |
 | Número por código | bandera y Meta | excepción de hecho aunque la bandera sea igual (D1, b): el tope de Meta es de 2 números por portfolio y uno ya es el de la plataforma, así que queda un solo lugar libre para dev y prd juntos, y es primero del cliente ficticio de prd. QA tiene la bandera pero no token, y sus altas por código van a revisión con `sin_credencial`. QA tiene su propia WABA y su propio token recién después de A5 (la verificación la pide el [Dueño] en Meta Business Suite) | prd prendido; dev y QA con la bandera en 1 desde el 17/10 (A12) | el aviso del número en `/registro`; `docs/whatsapp-setup.md:283-299` |
 | `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1` |
@@ -821,8 +821,8 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
       borrada. Si el archivo trae `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL` o
       `GMAIL_TENANT_ID`, las empuja a prd, donde van vacías; y recrea `CRON_SECRET`, que
       tiene que seguir igual a `PRD_CRON_SECRET`. Sólo rechaza `.env.local`: con `--archivo`
-      y el archivo de prd corre. `docs/PROMOCION.md:676-679` dice que los secretos de prd se
-      cargan así, y [Claude] lo corrige.
+      y el archivo de prd corre. `docs/PROMOCION.md:676-679` decía que los secretos de prd se
+      cargan así; corregido el 18/10.
     - `CRON_SECRET` de prd tiene que ser igual al secreto `PRD_CRON_SECRET` de GitHub.
   - **Salió bien si:** después del redeploy, el log del paso «Smoke de prd» del Post-deploy
     PRD lista cada chequeo sin «sin configurar», salvo `whatsapp` hasta el paso 2. Y
@@ -1348,9 +1348,6 @@ Apenas el dueño avise, Claude puede:
 - Hacer la cuenta del costo por caso de C1.
 - Implementar los ítems del plan en orden, cada uno en su PR a `qa` y el mismo día a main y prd,
   con la revisión de seguridad en Fable (u Opus) para los ítems 3 y 4.
-- Corregir los docs que quedaron viejos: `.env.example` (variables que faltan y sobran);
-  `docs/PROMOCION.md:676-679` (dice que los secretos de prd se cargan con
-  `sync-vercel-env.mjs`), `:726` y `:736-738`.
 
 Claude no carga valores de secretos: el remitente de QA con `token-remitente.mts` lo carga el
 dueño (QA, paso 1). Claude no entra a las consolas de Google, Meta, Cloudflare ni Neon con la

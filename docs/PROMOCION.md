@@ -673,10 +673,10 @@ navegador) o el asistente.
    limitado a ese bucket, y el topic `gmail-push-prd` con la suscripción `gmail-push-prd-sub`
    empujando a `https://claimmix-prd.vercel.app/api/webhooks/gmail`. Ese alias queda para
    siempre: la suscripción no cambia con el move.
-10. Asistente: las variables de prd. El dueño completa los secretos en `.env.prd.local`
-    (copiando el token de WhatsApp sin el comentario de su línea) y se cargan con
-    `node scripts/sync-vercel-env.mjs --project claimmix-prd --archivo .env.prd.local`; ese script
-    se niega a leer `.env.local` para prd. Qué lleva está en la lista de abajo.
+10. Asistente: las variables de prd. Desde el 17/10 los secretos los pega el dueño en la
+    pantalla de Vercel (Settings > Environment Variables), nunca por chat ni por script, y el
+    asistente carga sólo banderas y topes: `scripts/sync-vercel-env.mjs` no se corre para prd
+    ni para QA. Qué lleva está en la lista de abajo.
 11. Asistente: `gh secret set PRD_CRON_SECRET`, `gh variable set PRD_URL --body
     https://claimmix-prd.vercel.app` y la rama `prd`, creada por API desde el SHA de `main`.
 12. Asistente: el primer deploy de prd (PR de `main` a `prd`), el login del operador en
@@ -723,7 +723,7 @@ detrás de pruebas y de un orden fijo:
 **Lo que lleva `claimmix-prd`:**
 
 - `BASE_POR_CLIENTE`: `0` en la fase 1, `1` en la fase 2.
-- `ALTA_AUTOMATICA`: `0` hasta el paso 10 de la fase 2.
+- `ALTA_AUTOMATICA`: `1` desde que se abrió el alta (paso 10 de la fase 2).
 - `ALTA_TOPE_GLOBAL_DIA=5`, `ALTA_TOPE_BASES=30` y `ALTA_TOPE_MB=350`: el plan Free de Neon
   tiene 500 MB por proyecto.
 - `DEFAULT_TENANT_ID`: el inquilino casa.
@@ -732,7 +732,7 @@ detrás de pruebas y de un orden fijo:
 - `PUBSUB_TOPIC`: el de prd. Vertex con el proveedor del pool `vercel-prd`.
 - Presupuestos de IA: US$ 50 en total, US$ 1 por inquilino de prueba y US$ 30 para todos los
   de prueba juntos.
-- `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` cargadas: las casillas por inquilino las usan.
+- Cargadas: `GMAIL_CLIENT_*`, `ALTA_NUMERO_AUTOMATICO=1`, `ALTA_REMITENTE_*`, `TURNSTILE_*` y `R2_*`.
 - Vacías a propósito: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`,
   `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL` y `DEMO_TENANT_ID`. prd no tiene número ni casilla
   propios hasta que un cliente los conecte.

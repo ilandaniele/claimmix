@@ -4779,7 +4779,7 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
      `pnpm bases:probar` salió verde contra la rama `ensayo`.
   2. Meta permite 2 números en la WABA hasta verificar el negocio.
   3. La pantalla de consentimiento de Google tiene que estar publicada; con los scopes de
-     Gmail sin verificar hay un tope de 100 usuarios que comparten dev y prd.
+     Gmail sin verificar hay un tope de 100 usuarios que comparten dev, QA y prd.
   4. ~~Confirmar que Vercel acepta mover un `*.vercel.app` entre proyectos.~~ Resuelto el
      2026-10-09: el move anduvo.
   5. Los términos de Vercel Hobby son de uso no comercial y prd tendría clientes que pagan.
@@ -5202,8 +5202,8 @@ Variables de Vercel cargadas y borradas con OK del dueño, sin leer ni copiar ni
 - **Cargadas en dev y QA (17/10).** `ALTA_NUMERO_AUTOMATICO=1`, `ALTA_TOPE_BASES=30`, `ALTA_TOPE_MB=350` y otra vez `ALTA_TOPE_GLOBAL_DIA=5`; en QA también `ALTA_AUTOMATICA=1`. Los topes quedan iguales a prd (D7).
 - **Borradas porque el código no las lee (17/10).** 17 en total. En dev: `OPENAI_API_KEY`, `OPENAI_MODEL` y las cinco `SMTP_*`. En QA: `GEMINI_API_KEY` (muerta desde Vertex), las cuatro `INTEGRATION_*_PASSWORD` (son secretos de GitHub, no de Vercel), `OPENAI_API_KEY`, `STAGING_DATABASE_URL(_APP)` y las dos `UPSTASH_*`.
 - **Borradas para igualar a prd (18/10).** En QA, `SENTRY_DSN` y `NEXT_PUBLIC_SENTRY_DSN`: Sentry es opcional y prd no lo tiene. En dev, `SIMULATE_WORKER_DELAY_MS` y `SIMULATE_WORKER_MAX_DELAY_MS`, con lo que valen los defaults de `simulation-throttle.ts` (5000 y 120000 ms). Quedan 67 variables en dev y 65 en QA, ninguna sobrante.
-- **QA y el correo.** `/registro` de QA no ofrecía el correo porque `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` existen pero vinieron vacíos del import del 17/09. El dueño pega los valores en la pantalla de Vercel. `GMAIL_TOKEN_ENCRYPTION_KEY` y las dos de Turnstile ya tenían valor.
-- **Redeploy.** Dev se redeployó el 18/10 sobre `49c7dc32` para tomar el lote. QA se redeploya después de que el dueño pegue las dos de Gmail; prd no lo necesita.
+- **QA y el correo.** `/registro` de QA no ofrecía el correo porque `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` existen pero vinieron vacíos del import del 17/09. `GMAIL_TOKEN_ENCRYPTION_KEY` y las dos de Turnstile ya tenían valor. El 18/10 el dueño decidió que QA tenga su propio cliente OAuth de Gmail, `claimmix-qa`, tipo «Aplicación web», en el mismo proyecto de Google Cloud que el de dev y prd y con el mismo tope de 100 usuarios; sus URI de redirección son el callback de Gmail de QA (`https://claimmix-qa.vercel.app/api/admin/gmail-accounts/callback`) y `http://127.0.0.1:53682/` para el script del remitente. El dueño pega el ID y el secreto en `claimmix-qa` (Production, sin el Redeploy que ofrece Vercel) y en `.env.qa.local`, y le dice «listo» a Claude. El remitente de QA del 15/10 salió del cliente de dev y se vuelve a emitir con `token-remitente.mts --archivo .env.qa.local --vercel claimmix-qa`. Dev y prd siguen compartiendo el cliente de hoy; un cliente propio de prd para varias empresas está en estudio aparte.
+- **Redeploy.** Dev se redeployó el 18/10 sobre `49c7dc32` para tomar el lote. QA se redeploya con el merge de #474, después de que el dueño pegue las dos del cliente `claimmix-qa` y vuelva a emitir el remitente; prd no lo necesita.
 
 ### 🙋 Waiting on you (not code)
 
@@ -5500,10 +5500,11 @@ Variables de Vercel cargadas y borradas con OK del dueño, sin leer ni copiar ni
   See "The last metre" below: a real mail, two real WhatsApps and a real photograph,
   all answered. Do it again after the next change to the mailbox, the number or their
   credentials — that is the only part no test can cover.
-- **Rotate the Google OAuth client secret** (`GOCSPX-…`). It was read off a screenshot
-  during the migration, and it now backs four env vars: `GMAIL_CLIENT_ID`/`SECRET` for
-  the mailbox and `GOOGLE_CLIENT_ID`/`SECRET` for logging in. Rotating it forces a
-  reconnect of the mailbox and a re-login, in that order.
+- **Rotate the Google OAuth client secret** (`GOCSPX-…`) of the dev and prd client. It
+  was read off a screenshot during the migration, and it now backs four env vars:
+  `GMAIL_CLIENT_ID`/`SECRET` for the mailbox and `GOOGLE_CLIENT_ID`/`SECRET` for logging
+  in. Rotating it forces a reconnect of the mailbox and a re-login, in that order. QA's
+  Gmail client (`claimmix-qa`, since 18/10) is another one and this rotation does not touch it.
 - **Rotate the WhatsApp system-user token.** Meta echoed it inside an error response
   on 2026-08-23 and it is now in a chat transcript. Same standing as the
   `veltra.soporte` password below: it is not known to be leaked, and it is no longer

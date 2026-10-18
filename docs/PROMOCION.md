@@ -645,8 +645,8 @@ navegador) o el asistente.
 3. Dueño: en Google Cloud, los orígenes y los redirect URIs de `claimmix-dev.vercel.app` y de
    `claimmix-prd.vercel.app` (las mismas rutas que hoy tiene `claimmix.vercel.app`, la del
    callback de las casillas de Gmail incluida), y la pantalla de consentimiento publicada:
-   con los scopes de Gmail sin verificar hay un tope de 100 usuarios, compartido entre dev y
-   prd. En Cloudflare, los dos hostnames en el widget de Turnstile.
+   con los scopes de Gmail sin verificar hay un tope de 100 usuarios, compartido por todos
+   los clientes del proyecto (dev, QA y prd). En Cloudflare, los dos hostnames en Turnstile.
 4. Asistente: el inventario de dev, con SELECT sobre la base de dev: números conectados,
    casillas de Gmail, slugs de formulario, SSO, claves de API v1, invitaciones y
    verificaciones vivas. Llena `SLUGS_DE_DEV`, `NUMEROS_DE_DEV` y `CASILLAS_DE_DEV`.
@@ -804,7 +804,7 @@ que faltan columnas, y la ve el post-deploy: `bases.desfase`.
    la 2).
 2. Meta permite 2 números en la WABA hasta verificar el negocio.
 3. La pantalla de consentimiento de Google tiene que estar publicada, y sus scopes de Gmail
-   sin verificar tienen un tope de 100 usuarios que comparten dev y prd.
+   sin verificar tienen un tope de 100 usuarios que comparten dev, QA y prd.
 4. Hecho el 09/10: Vercel aceptó mover `claimmix.vercel.app` a `claimmix-prd`.
 5. Los términos de Vercel Hobby son de uso no comercial, y prd con clientes que pagan choca
    con eso. El dueño decidió no usar planes pagos; queda señalado.

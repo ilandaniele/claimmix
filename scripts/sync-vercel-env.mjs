@@ -1,8 +1,9 @@
 /**
  * Reads Gmail + cron env vars from an env file and pushes them to Vercel production.
- * Run once: node scripts/sync-vercel-env.mjs [--project <nombre>] [--archivo <ruta>]
+ * Run once: node scripts/sync-vercel-env.mjs [--project <nombre>] [--archivo <ruta>] [--solo <VAR>[,<VAR>]]
  *   --project  proyecto de Vercel (default claimmix, el vinculado en .vercel)
  *   --archivo  archivo de donde leer (default .env.local)
+ *   --solo     sólo esas variables de la lista, separadas por coma (QA: GMAIL_CLIENT_ID,GMAIL_CLIENT_SECRET)
  * claimmix-prd nunca lee .env.local: es el de dev, con las credenciales de dev.
  * Requires: vercel CLI logged in (npx vercel whoami should work)
  */
@@ -32,15 +33,6 @@ if (PROYECTO === "claimmix-prd" && ENV_PATH === resolve(ROOT, ".env.local")) {
   process.exit(1);
 }
 
-// El proyecto vinculado en .vercel es claimmix. Para otro se vincula una carpeta
-// temporal, así no se toca el vínculo del repositorio.
-let CWD = ROOT;
-if (PROYECTO !== "claimmix") {
-  CWD = mkdtempSync(join(tmpdir(), "vercel-env-"));
-  process.on("exit", () => rmSync(CWD, { recursive: true, force: true }));
-  execSync(`vercel link --yes --project ${PROYECTO}`, { stdio: "inherit", cwd: CWD });
-}
-
 const VARS_TO_SYNC = [
   "GMAIL_CLIENT_ID",
   "GMAIL_CLIENT_SECRET",
@@ -50,6 +42,24 @@ const VARS_TO_SYNC = [
   "GMAIL_TENANT_ID",
   "CRON_SECRET",
 ];
+
+// `--solo` sin nombres no puede caer en las siete: subiría la casilla de dev.
+const A_SUBIR = args.some((a) => a === "--solo" || a.startsWith("--solo="))
+  ? [...new Set(flag("solo", "").split(",").map((v) => v.trim()).filter(Boolean))]
+  : VARS_TO_SYNC;
+if (A_SUBIR.length === 0 || A_SUBIR.some((v) => !VARS_TO_SYNC.includes(v))) {
+  console.error(`❌ --solo: nombrá una o más de ${VARS_TO_SYNC.join(", ")}, separadas por coma.`);
+  process.exit(1);
+}
+
+// El proyecto vinculado en .vercel es claimmix. Para otro se vincula una carpeta
+// temporal, así no se toca el vínculo del repositorio.
+let CWD = ROOT;
+if (PROYECTO !== "claimmix") {
+  CWD = mkdtempSync(join(tmpdir(), "vercel-env-"));
+  process.on("exit", () => rmSync(CWD, { recursive: true, force: true }));
+  execSync(`vercel link --yes --project ${PROYECTO}`, { stdio: "inherit", cwd: CWD });
+}
 
 const raw = readFileSync(ENV_PATH, "utf8");
 const parsed = {};
@@ -66,10 +76,10 @@ for (const line of raw.split("\n")) {
 let synced = 0;
 let skipped = 0;
 
-for (const varName of VARS_TO_SYNC) {
+for (const varName of A_SUBIR) {
   const value = parsed[varName];
   if (!value || value.startsWith("<")) {
-    console.log(`⏭  ${varName} — not set in .env.local, skipping`);
+    console.log(`⏭  ${varName} — not set in ${flag("archivo", ".env.local")}, skipping`);
     skipped++;
     continue;
   }

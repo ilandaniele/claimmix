@@ -642,9 +642,9 @@ navegador) o el asistente.
 2. Asistente: el alias `claimmix-dev.vercel.app` en el proyecto `claimmix`, sirviendo el mismo
    deploy de dev. Los workflows ya lo usan como URL por defecto: tiene que existir antes de
    que esos cambios lleguen a `main`.
-3. Dueño: en Google Cloud, los orígenes y los redirect URIs de `claimmix-dev.vercel.app` y de
-   `claimmix-prd.vercel.app` (las mismas rutas que hoy tiene `claimmix.vercel.app`, la del
-   callback de las casillas de Gmail incluida), y la pantalla de consentimiento publicada:
+3. Dueño: en Google Cloud, el origen y las dos redirect URIs de `claimmix-dev.vercel.app` y de
+   `claimmix-prd.vercel.app`, una por cliente OAuth (la lista de cada host, QA incluido, está en
+   «Las URI de Google, una por host», más abajo), y la pantalla de consentimiento publicada:
    con los scopes de Gmail sin verificar hay un tope de 100 usuarios, compartido entre dev y
    prd. En Cloudflare, los dos hostnames en el widget de Turnstile.
 4. Asistente: el inventario de dev, con SELECT sobre la base de dev: números conectados,
@@ -809,6 +809,31 @@ que faltan columnas, y la ve el post-deploy: `bases.desfase`.
 5. Los términos de Vercel Hobby son de uso no comercial, y prd con clientes que pagan choca
    con eso. El dueño decidió no usar planes pagos; queda señalado.
 6. Hecho: `HOST_DE_BASE_PRD` es `ep-sweet-salad` (`scripts/lib/hosts-vetados.mjs`).
+
+### Las URI de Google, una por host
+
+El login con Google (Better Auth) y la conexión de casillas arman su `redirect_uri` con
+`NEXT_PUBLIC_SITE_URL` (`resolveBaseURL()` y `urlDeVueltaDeGmail()` en
+`src/lib/auth/base-url.ts`): una por ambiente, sin importar por qué host entró el navegador.
+Cada URI va en su cliente OAuth; si `GOOGLE_CLIENT_ID` y `GMAIL_CLIENT_ID` son el mismo
+cliente, las dos van en ése.
+
+| Ambiente | Host (`NEXT_PUBLIC_SITE_URL`) | Login, cliente de `GOOGLE_CLIENT_ID` | Casillas, cliente de `GMAIL_CLIENT_ID` |
+|---|---|---|---|
+| prd | `https://claimmix.vercel.app` | `https://claimmix.vercel.app/api/auth/callback/google` | `https://claimmix.vercel.app/api/admin/gmail-accounts/callback` |
+| dev | `https://claimmix-dev.vercel.app` | `https://claimmix-dev.vercel.app/api/auth/callback/google` | `https://claimmix-dev.vercel.app/api/admin/gmail-accounts/callback` |
+| QA | `https://claimmix-qa.vercel.app` | `https://claimmix-qa.vercel.app/api/auth/callback/google` | `https://claimmix-qa.vercel.app/api/admin/gmail-accounts/callback` |
+| local | `http://localhost:3000` | `http://localhost:3000/api/auth/callback/google` | `http://localhost:3000/api/admin/gmail-accounts/callback` |
+
+- `claimmix-prd.vercel.app` queda por la suscripción de Pub/Sub (paso 9), pero no se entra
+  por ahí, porque Better Auth sólo acepta su `NEXT_PUBLIC_SITE_URL`; si sus URI están, no
+  molestan.
+- Las vistas previas (host con hash) no tienen URI: ni el login con Google ni Gmail andan
+  ahí.
+- El cliente de `GMAIL_CLIENT_ID` lleva además `http://127.0.0.1:53682/`, la vuelta de
+  `scripts/token-remitente.mts`.
+- Si falta una URI, Google muestra `redirect_uri_mismatch`. Un `NEXT_PUBLIC_SITE_URL` con
+  barra final deja la de Gmail con `//` y da el mismo error.
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 

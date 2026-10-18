@@ -678,6 +678,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "gmail.accounts.connected": "Connected",
   "gmail.accounts.pending": "Pending",
   "gmail.accounts.error": "Has error",
+  "gmail.accounts.expired": "Expired: Google revoked access and no mail comes in",
+  "gmail.accounts.reconnect": "Reconnect",
   "gmail.accounts.loadError": "Could not load Gmail accounts.",
   "gmail.accounts.saveError": "Could not update the Gmail account.",
   "gmail.accounts.deleteError": "Could not remove the Gmail account.",

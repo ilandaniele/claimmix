@@ -356,4 +356,37 @@ describe("scripts/sync-vercel-env.mjs: prd no se carga con el .env.local de dev"
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("el nombre no es válido");
   });
+
+  it.each([
+    [["--solo"]],
+    [["--solo", "--project", "claimmix-qa"]],
+    [["--project", "claimmix-qa", "--solo"]],
+    [["--solo=GMAIL_CLIENT_ID"]],
+    [["--solo", ","]],
+    [["--solo", "FAKE_VAR"]],
+    [["--solo", "GMAIL_CLIENT_ID,FAKE_VAR"]],
+    [["--solo", "GMAIL_CLIENT_ID;echo fake"]],
+  ])("--solo se niega con %j antes de vincular el proyecto", (args) => {
+    const r = correr(...args);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("--solo: nombrá una o más de");
+  });
+
+  it("--solo no esquiva la guarda de prd", () => {
+    const r = correr("--project", "claimmix-prd", "--solo", "GMAIL_CLIENT_ID");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("claimmix-prd no se carga desde .env.local");
+  });
+
+  it("--solo con nombres de la lista pasa la validación y sigue hasta leer el archivo", () => {
+    const r = correr(
+      "--solo",
+      "GMAIL_CLIENT_ID,GMAIL_CLIENT_SECRET",
+      "--archivo",
+      "tests/fixtures/no-existe-fake.env",
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).not.toContain("--solo:");
+    expect(r.stderr).toContain("ENOENT");
+  });
 });

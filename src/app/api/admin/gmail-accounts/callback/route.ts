@@ -8,15 +8,17 @@ import { esCasillaDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 import { enControl } from "@/data/scope";
 import { codigoPg } from "@/server/core-sync/config";
 import { logger } from "@/lib/observability/logger";
+import { resolveBaseURL, urlDeVueltaDeGmail } from "@/lib/auth/base-url";
 import {
   COOKIE_ESTADO_OAUTH,
+  RUTA_COOKIE_ESTADO_OAUTH,
   decodificarEstado,
   estadoEsValido,
 } from "@/lib/auth/oauth-state";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
-  const origin = requestUrl.origin;
+  const origin = resolveBaseURL();
   const code = requestUrl.searchParams.get("code");
   const state = decodificarEstado(requestUrl.searchParams.get("state"));
 
@@ -42,7 +44,7 @@ export async function GET(request: NextRequest) {
       );
       // Se quema igual: un nonce que no sirvió no puede quedar dando vueltas
       // para un segundo intento.
-      rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+      rechazo.cookies.delete({ name: COOKIE_ESTADO_OAUTH, path: RUTA_COOKIE_ESTADO_OAUTH });
       return rechazo;
     }
 
@@ -52,11 +54,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL("/configuracion?gmail=missing_google_config", origin));
     }
 
-    const oauth = new google.auth.OAuth2(
-      clientId,
-      clientSecret,
-      `${origin}/api/admin/gmail-accounts/callback`
-    );
+    const oauth = new google.auth.OAuth2(clientId, clientSecret, urlDeVueltaDeGmail());
     const { tokens } = await oauth.getToken(code);
     if (!tokens.refresh_token) {
       return NextResponse.redirect(new URL("/configuracion?gmail=missing_refresh_token", origin));
@@ -74,7 +72,7 @@ export async function GET(request: NextRequest) {
     if (esCasillaDeOtroAmbiente(email)) {
       logger.warn({ motivo: "casilla_de_otro_ambiente" }, "gmail_accounts_callback.rechazado");
       const rechazo = NextResponse.redirect(new URL("/configuracion?gmail=otro_ambiente", origin));
-      rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+      rechazo.cookies.delete({ name: COOKIE_ESTADO_OAUTH, path: RUTA_COOKIE_ESTADO_OAUTH });
       return rechazo;
     }
 
@@ -84,7 +82,7 @@ export async function GET(request: NextRequest) {
     if (duena && duena !== userRow.tenant_id) {
       logger.warn({ motivo: "casilla_de_otro_inquilino" }, "gmail_accounts_callback.rechazado");
       const rechazo = NextResponse.redirect(new URL("/configuracion?gmail=mailbox_taken", origin));
-      rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+      rechazo.cookies.delete({ name: COOKIE_ESTADO_OAUTH, path: RUTA_COOKIE_ESTADO_OAUTH });
       return rechazo;
     }
 
@@ -125,7 +123,7 @@ export async function GET(request: NextRequest) {
       if (codigo === "23505") {
         logger.warn({ motivo: "casilla_de_otro_inquilino" }, "gmail_accounts_callback.rechazado");
         const rechazo = NextResponse.redirect(new URL("/configuracion?gmail=mailbox_taken", origin));
-        rechazo.cookies.delete(COOKIE_ESTADO_OAUTH);
+        rechazo.cookies.delete({ name: COOKIE_ESTADO_OAUTH, path: RUTA_COOKIE_ESTADO_OAUTH });
         return rechazo;
       }
       logger.error({ detalle: codigo ?? "unknown" }, "gmail_accounts_callback.upsert");
@@ -160,7 +158,7 @@ export async function GET(request: NextRequest) {
     // Un `state` sirve una sola vez: la cookie se quema al terminar bien, igual
     // que al rechazar.
     const listo = NextResponse.redirect(new URL("/configuracion?gmail=connected", origin));
-    listo.cookies.delete(COOKIE_ESTADO_OAUTH);
+    listo.cookies.delete({ name: COOKIE_ESTADO_OAUTH, path: RUTA_COOKIE_ESTADO_OAUTH });
     return listo;
   } catch (err) {
     const name = err instanceof Error ? err.name : "UnknownError";

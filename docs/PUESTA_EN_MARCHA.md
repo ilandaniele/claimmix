@@ -263,16 +263,18 @@ tarda algo, la guía lo dice así.
 - [ ] **A7. Las URI de redirección de los tres hosts.**
   - **Quién:** [Dueño].
   - **Dónde:** consola de Google Cloud > APIs y servicios > Credenciales.
-  - **Qué hacer:** en el cliente OAuth de `GMAIL_CLIENT_ID`, confirmar
-    `https://<host>/api/admin/gmail-accounts/callback` de los tres hosts. En el cliente de
-    `GOOGLE_CLIENT_ID`, confirmar `<host>/api/auth/callback/google`. Los docs no aclaran si
-    es un cliente OAuth o dos: hay que mirarlo ahí mismo.
-  - **Salió bien si:** las seis URI figuran. Para dev y prd están hechas; para QA, el
-    callback de Gmail no está documentado.
+  - **Qué hacer:** confirmar las URI de la tabla «Las URI de Google, una por host» de
+    `docs/PROMOCION.md`, con `<host>` igual al `NEXT_PUBLIC_SITE_URL` de cada ambiente. En el
+    cliente OAuth de `GMAIL_CLIENT_ID`, `<host>/api/admin/gmail-accounts/callback`; en el de
+    `GOOGLE_CLIENT_ID`, `<host>/api/auth/callback/google`. Los docs no aclaran si es un
+    cliente OAuth o dos: hay que mirarlo ahí mismo.
+  - **Salió bien si:** las seis URI de dev, QA y prd figuran. Para dev y prd están hechas, pero
+    tienen que ser las del host de su `NEXT_PUBLIC_SITE_URL`; para QA falta confirmar la de
+    Gmail.
   - **Si falla:** al conectar Gmail, Google muestra `redirect_uri_mismatch`. Agregar la URI
     que falta.
-  - **Fuentes:** `.env.example:207` (`GMAIL_CLIENT_ID`), `:42-43` (`GOOGLE_CLIENT_ID` y su
-    callback); `src/app/api/admin/gmail-accounts/callback`; `docs/PROMOCION.md:645-649`.
+  - **Fuentes:** `.env.example:245` (`GMAIL_CLIENT_ID`), `:46-47` (`GOOGLE_CLIENT_ID` y su
+    callback); `src/lib/auth/base-url.ts`; `docs/PROMOCION.md:645-649`, `:813-836`.
 - [ ] **A8. El hostname de QA en Turnstile.**
   - **Quién:** [Dueño].
   - **Dónde:** Cloudflare > Turnstile, el widget del alta.
@@ -446,16 +448,17 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
       número borrado (D5), o hasta A5: el único lugar libre de la WABA es primero de prd. Con la
       WABA llena, el pedido de dev va a revisión con `sin_lugar`.
     - `scripts/sync-vercel-env.mjs` sirve sólo para lo suyo, en dev: sube siete variables
-      (las `GMAIL_*` de la casilla de la plataforma y `CRON_SECRET`) desde `.env.local`.
-      Sólo con `.env.local` al día, y nunca para QA ni prd.
+      (las `GMAIL_*` de la casilla de la plataforma y `CRON_SECRET`) desde `.env.local`, que
+      tiene que estar al día. Para QA, sólo con `--solo GMAIL_CLIENT_ID,GMAIL_CLIENT_SECRET`
+      (QA, paso 1). Nunca para prd.
   - **Salió bien si:** `https://claimmix-dev.vercel.app/registro` muestra el bloque «Crear
     cuenta con mi correo» con el desafío de Turnstile.
   - **Si falla:** si no aparece el bloque, falta alguna de las cuatro variables del
     remitente. Toda variable nueva vale recién después del redeploy de A12.
   - **Fuentes:** `src/lib/auth/registro-permitido.ts:53`; `.env.example:312-313`, `:227-228`,
     `:207-208`, `:26`, `:216`, `:327-339`, `:363-378`;
-    `src/server/alta/numero-automatico-activo.ts:10`; `scripts/sync-vercel-env.mjs:1-10`,
-    `:44-52`; `src/lib/i18n/es-AR.servidor.ts:853`;
+    `src/server/alta/numero-automatico-activo.ts:10`; `scripts/sync-vercel-env.mjs:1-9`,
+    `:36-44`, `:46-53`; `src/lib/i18n/es-AR.servidor.ts:853`;
     `src/server/notify/remitente-sistema.ts:94-100`.
 - [ ] **2. El deploy y la salud.**
   - **Quién:** [Claude].
@@ -548,8 +551,8 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
     - `missing_google_config`: faltan `GMAIL_CLIENT_*`.
     - `missing_refresh_token`, `otro_ambiente`, `mailbox_taken`.
     - `save_failed`: no se pudo guardar la casilla.
-    - `invalid_state`: se venció el pedido, o el origen del connect y del callback no
-      coinciden.
+    - `invalid_state`: se venció el pedido, o se abrió el connect desde un host que no es el
+      de `NEXT_PUBLIC_SITE_URL`.
     - Error del servidor a la vuelta: falta `GMAIL_TOKEN_ENCRYPTION_KEY`, porque el token se
       cifra antes de guardar.
   - **Fuentes:** `src/lib/i18n/es-AR.ts:678`; `/api/admin/gmail-accounts/connect`;
@@ -639,7 +642,11 @@ ambiente, la hora, una captura y el número de caso.
     - `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET`, del mismo cliente OAuth que el de
       `.env.local`, porque el token del remitente sale de ese cliente. Es la causa más
       probable de que `/registro` de QA no muestre el correo: el remitente se cargó el 15/10
-      y sin estas dos no hay remitente.
+      y sin estas dos no hay remitente. Si faltan, el [Dueño] las sube desde su máquina con
+      `node scripts/sync-vercel-env.mjs --project claimmix-qa --solo
+      GMAIL_CLIENT_ID,GMAIL_CLIENT_SECRET`. Sin `--solo` subiría también
+      `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL` y `GMAIL_TENANT_ID`, que en QA van vacías
+      (`docs/PROMOCION.md:323-327`).
     - `ALTA_REMITENTE_CORREO` y `ALTA_REMITENTE_REFRESH_TOKEN`. Si faltan, las carga el
       [Dueño] desde su máquina con `pnpm exec tsx --tsconfig tsconfig.rehearsal.json
       scripts/token-remitente.mts --correo <casilla> --vercel claimmix-qa`, autorizando la
@@ -830,9 +837,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Si falla:** [Claude] lee ese log, o pide `GET /api/health` con el `CRON_SECRET` de prd,
     y dice qué variable falta. Si el smoke dice «CRON_SECRET local no coincide», el de Vercel
     y el de GitHub son distintos: el Post-deploy PRD y el barrido quedan en rojo.
-  - **Fuentes:** `docs/PROMOCION.md:723-738`; `scripts/sync-vercel-env.mjs:30-33`, `:44-52`;
-    `.github/workflows/post-deploy.yml:657-669`, `:660`; `scripts/smoke-production.mts:254`,
-    `:265-269`.
+  - **Fuentes:** `docs/PROMOCION.md:723-738`; `scripts/sync-vercel-env.mjs:31-34`,
+    `:36-44`, `:46-53`; `.github/workflows/post-deploy.yml:657-669`, `:660`;
+    `scripts/smoke-production.mts:254`, `:265-269`.
 - [ ] **2. Requisitos del número por código, antes del alta.**
   - **Quién:** [Dueño] lo que está en Meta; [Claude] el resto.
   - **Dónde:** Meta Business Suite y Vercel (`claimmix-prd`).

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import * as google from "@googleapis/gmail";
 import { requireRole, ADMIN_ROLES } from "@/lib/auth/require-role";
+import { resolveBaseURL, urlDeVueltaDeGmail } from "@/lib/auth/base-url";
 import {
   COOKIE_ESTADO_OAUTH,
+  RUTA_COOKIE_ESTADO_OAUTH,
   ESTADO_OAUTH_DURA_SEGUNDOS,
   codificarEstado,
   nuevoNonce,
@@ -16,10 +17,8 @@ const GMAIL_SCOPES = [
 ];
 
 export async function GET() {
-  const headerStore = await headers();
-  const origin =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    `${headerStore.get("x-forwarded-proto") ?? "https"}://${headerStore.get("host")}`;
+  // El mismo origen que el callback y el login: Google exige el redirect_uri idéntico en los dos pasos.
+  const origin = resolveBaseURL();
 
   try {
     const { userRow, user } = await requireRole(...ADMIN_ROLES);
@@ -33,11 +32,7 @@ export async function GET() {
       return NextResponse.redirect(new URL("/configuracion?gmail=missing_google_config", origin));
     }
 
-    const oauth = new google.auth.OAuth2(
-      clientId,
-      clientSecret,
-      `${origin}/api/admin/gmail-accounts/callback`
-    );
+    const oauth = new google.auth.OAuth2(clientId, clientSecret, urlDeVueltaDeGmail());
     /*
      * Un valor al azar que viaja por dos caminos: adentro del `state`, que va y
      * vuelve por Google, y en una cookie propia. El callback exige que
@@ -70,7 +65,7 @@ export async function GET() {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax", // La vuelta de Google es una navegación de primer nivel.
-      path: "/api/admin/gmail-accounts",
+      path: RUTA_COOKIE_ESTADO_OAUTH,
       maxAge: ESTADO_OAUTH_DURA_SEGUNDOS,
     });
     return respuesta;

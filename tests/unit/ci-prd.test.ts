@@ -334,27 +334,49 @@ describe("barrer-trabados.yml: prd tiene su cron, su cola y su secreto", () => {
   });
 });
 
-describe("scripts/sync-vercel-env.mjs: prd no se carga con el .env.local de dev", () => {
+describe("scripts/sync-vercel-env.mjs: sólo carga dev", () => {
   const correr = (...args: string[]) =>
     spawnSync(process.execPath, ["scripts/sync-vercel-env.mjs", ...args], {
       cwd: process.cwd(),
       encoding: "utf8",
     });
+  const SOLO_DEV = "sync-vercel-env sólo carga claimmix (dev)";
 
   it.each([
     [["--project", "claimmix-prd"]],
     [["--project", "claimmix-prd", "--archivo", ".env.local"]],
     [["--project", "claimmix-prd", "--archivo", "./scripts/../.env.local"]],
-  ])("se niega con %j", (args) => {
+    [["--project", "claimmix-prd", "--archivo", "tests/fixtures/no-existe-prd-fake.env"]],
+    [["--project", "claimmix-qa"]],
+    [["--project", "claimmix-qa", "--archivo", ".env.local"]],
+    [["--project", "claimmix-qa", "--archivo", "./scripts/../.env.local"]],
+    [["--project", "claimmix-qa", "--archivo", "tests/fixtures/no-existe-qa-fake.env"]],
+  ])("se niega con %j antes de leer el archivo", (args) => {
     const r = correr(...args);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("claimmix-prd no se carga desde .env.local");
+    expect(r.stderr).toContain(SOLO_DEV);
+    expect(r.stderr).toContain("scripts/token-remitente.mts --vercel <proyecto>");
+    expect(r.stderr).not.toContain("ENOENT");
+  });
+
+  it.each([
+    [["--project=claimmix-prd"]],
+    [["--project=claimmix-qa", "--solo", "GMAIL_CLIENT_ID"]],
+    [["--archivo", ".env.prd.local"]],
+    [["--archivo", ".env.qa.local"]],
+    [["--archivo=.env.prd.local"]],
+    [["--archivo", "tests/fixtures/no-existe-fake.env"]],
+  ])("se niega con %j: sólo dev y sólo .env.local", (args) => {
+    const r = correr(...args);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(SOLO_DEV);
+    expect(r.stderr).not.toContain("ENOENT");
   });
 
   it("se niega a un nombre de proyecto que no es un nombre", () => {
     const r = correr("--project", "claimmix; echo fake");
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("el nombre no es válido");
+    expect(r.stderr).toContain(SOLO_DEV);
   });
 
   it.each([
@@ -366,27 +388,27 @@ describe("scripts/sync-vercel-env.mjs: prd no se carga con el .env.local de dev"
     [["--solo", "FAKE_VAR"]],
     [["--solo", "GMAIL_CLIENT_ID,FAKE_VAR"]],
     [["--solo", "GMAIL_CLIENT_ID;echo fake"]],
-  ])("--solo se niega con %j antes de vincular el proyecto", (args) => {
+  ])("--solo se niega con %j antes de la guarda del proyecto", (args) => {
     const r = correr(...args);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("--solo: nombrá una o más de");
   });
 
-  it("--solo no esquiva la guarda de prd", () => {
-    const r = correr("--project", "claimmix-prd", "--solo", "GMAIL_CLIENT_ID");
+  it.each(["claimmix-prd", "claimmix-qa"])("--solo no esquiva la guarda de %s", (proyecto) => {
+    const r = correr("--project", proyecto, "--solo", "GMAIL_CLIENT_ID");
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("claimmix-prd no se carga desde .env.local");
+    expect(r.stderr).toContain(SOLO_DEV);
   });
 
-  it("--solo con nombres de la lista pasa la validación y sigue hasta leer el archivo", () => {
+  it("--solo con nombres de la lista pasa la validación y llega a la guarda del archivo", () => {
     const r = correr(
       "--solo",
       "GMAIL_CLIENT_ID,GMAIL_CLIENT_SECRET",
       "--archivo",
       "tests/fixtures/no-existe-fake.env",
     );
-    expect(r.status).not.toBe(0);
+    expect(r.status).toBe(1);
     expect(r.stderr).not.toContain("--solo:");
-    expect(r.stderr).toContain("ENOENT");
+    expect(r.stderr).toContain(SOLO_DEV);
   });
 });

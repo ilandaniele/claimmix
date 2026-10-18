@@ -265,13 +265,16 @@ tarda algo, la guía lo dice así.
   - **Dónde:** consola de Google Cloud > APIs y servicios > Credenciales.
   - **Qué hacer:** confirmar las URI de la tabla «Las URI de Google, una por host» de
     `docs/PROMOCION.md`, con `<host>` igual al `NEXT_PUBLIC_SITE_URL` de cada ambiente. Gmail
-    usa dos clientes OAuth. El de dev y prd (el `GMAIL_CLIENT_ID` de esos proyectos): confirmar
-    `<host>/api/admin/gmail-accounts/callback` de sus hosts. El de QA hay que crearlo: tipo
-    «Aplicación web», llamado `claimmix-qa`, en el mismo proyecto (la API de Gmail ya está
+    usa un cliente OAuth por ambiente. El de dev y, hasta que prd tenga el suyo (prd, paso 1),
+    el de prd (el `GMAIL_CLIENT_ID` de esos proyectos): confirmar
+    `<host>/api/admin/gmail-accounts/callback` de sus hosts. El de QA (`claimmix-qa` en esta guía) es
+    un cliente «Aplicación web» propio: sirve «ClaimMix QA», que ya existe (19/09), con un
+    secreto que el dueño tenga o le agregue, o uno nuevo. Va en el mismo proyecto (la API de Gmail ya está
     habilitada, el consentimiento ya está publicado y QA no tiene Pub/Sub), con dos URI de
     redirección: `https://claimmix-qa.vercel.app/api/admin/gmail-accounts/callback` y
-    `http://127.0.0.1:53682/`, la que usa `scripts/token-remitente.mts`. Después, pegar el ID
-    y el secreto nuevos como dice el paso 1 de QA y decirle «listo» a [Claude]. En el cliente
+    `http://127.0.0.1:53682/`, la que usa `scripts/token-remitente.mts`. Después, poner el ID
+    y el secreto nuevos en `.env.qa.local`, correr el script del paso 1 de QA (que los sube a
+    Vercel) y decirle «listo» a [Claude]. En el cliente
     de `GOOGLE_CLIENT_ID` (el login) no cambia nada: confirmar `<host>/api/auth/callback/google`
     de los tres hosts. Los docs no aclaran si ese es otro cliente o el mismo que el de Gmail
     de dev y prd: hay que mirarlo ahí mismo.
@@ -282,7 +285,7 @@ tarda algo, la guía lo dice así.
     que falta.
   - **Fuentes:** `.env.example:245` (`GMAIL_CLIENT_ID`), `:46-48` (`GOOGLE_CLIENT_ID` y su
     callback); `src/app/api/admin/gmail-accounts/callback`; `src/lib/auth/base-url.ts`;
-    `docs/PROMOCION.md:645-649`, `:813-836`.
+    `docs/PROMOCION.md:645-649`, `:813-845`.
 - [ ] **A8. El hostname de QA en Turnstile.**
   - **Quién:** [Dueño].
   - **Dónde:** Cloudflare > Turnstile, el widget del alta.
@@ -336,10 +339,12 @@ tarda algo, la guía lo dice así.
        y los compara con la tabla de abajo y con el paso 1 de cada ambiente. Sólo mira
        nombres. `vercel env pull` no se usa: baja valores a disco y trae vacíos los secretos.
     2. [Dueño] pega en la pantalla de Vercel los secretos que falten. Nunca por chat ni por
-       script. [Claude] puede cargar las banderas y los topes que no son secretos.
+       script. Salvo `GMAIL_CLIENT_*` y el remitente de QA y de prd: esos los carga el dueño con
+       `token-remitente.mts --vercel` (QA y prd, paso 1). [Claude] puede cargar las banderas y
+       los topes que no son secretos.
     3. Un solo redeploy por proyecto, el mismo día (Vercel > Deployments > el último >
-       Redeploy). En prd, uno solo. En QA el redeploy es el merge de #474: al guardar las
-       variables, rechazar el Redeploy que ofrece Vercel.
+       Redeploy). En prd, uno solo. En QA el redeploy es el merge de #474: si se guarda una
+       variable en la pantalla de Vercel, rechazar el Redeploy que ofrece.
   - **Salió bien si:** `/registro` de cada ambiente muestra lo que pide el paso 1 de su
     sección, y el Post-deploy de cada uno queda verde.
   - **Si falla:** [Claude] lee el detalle del chequeo que falló y dice qué nombre falta. Se
@@ -401,8 +406,8 @@ de esta tabla, y de los secretos sólo si están cargados (`docs/TESTING.md`, «
 | `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1` |
 | Entrenamiento del agente (reglas y ejemplos de `/agente`) | datos de cada espacio | excepción hasta que el entrenamiento base viva en el repo, igual en los tres (`docs/PROJECT_STATUS.md:5055-5063`). No existe un script que copie reglas y ejemplos entre ambientes (`scripts/export-training.mjs:11`) | dev 19 reglas y 207 ejemplos en el espacio de prueba; prd ninguno; QA desconocido | `/agente`, solapas «Reglas de prompt» y «Ejemplos aprobados» (`src/lib/i18n/es-AR.ts:844`, `:852`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` (`.env.example:312-313`) | valor y secreto | igual (dev y prd comparten la clave del sitio) | cargadas en los tres (la CSP de QA trae `challenges.cloudflare.com`) | el desafío en `/registro` |
-| `ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN` (`.env.example:265-266`) | valor y secreto | excepción: un remitente por ambiente | dev y prd cargadas (`docs/PROJECT_STATUS.md:4764`); QA cargada el 15/10 con el cliente de dev: no sirve con el de `claimmix-qa` y se vuelve a emitir con `--archivo .env.qa.local` (QA, paso 1) | el bloque de correo en `/registro` |
-| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:245-246`) | valor y secreto | igual entre dev y prd (un cliente OAuth compartido); excepción en QA, que tiene el suyo (`claimmix-qa`, decidido el 18/10). Un cliente propio de prd para varias empresas está en estudio, sin decidir | dev y prd cargadas; en QA los nombres existen pero vinieron vacíos del import del 17/09: el [Dueño] pega en A12 el ID y el secreto de `claimmix-qa`, en Production y en `.env.qa.local` | el bloque de correo y «Conectar Gmail» |
+| `ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN` (`.env.example:265-266`) | valor y secreto | excepción: un remitente por ambiente | dev y prd cargadas (`docs/PROJECT_STATUS.md:4764`); QA cargada el 15/10 con el cliente de dev: no sirve con el de `claimmix-qa` y se vuelve a emitir con `token-remitente.mts --vercel claimmix-qa` (QA, paso 1); prd, con `--vercel claimmix-prd` (prd, paso 1) | el bloque de correo en `/registro` |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:245-246`) | valor y secreto | excepción: un cliente OAuth por ambiente (decidido el 18/10). dev tiene el suyo, QA el suyo (`claimmix-qa`, en el mismo proyecto de Google Cloud) y prd uno propio, en su propio proyecto de Google Cloud, por crear; hasta entonces prd usa el de dev | dev y prd cargadas; en QA los nombres existen pero vinieron vacíos del import del 17/09: el [Dueño] los carga con `token-remitente.mts --vercel claimmix-qa` (QA, paso 1), y los de prd con `--vercel claimmix-prd` (prd, paso 1) | el bloque de correo y «Conectar Gmail» |
 | `GMAIL_TOKEN_ENCRYPTION_KEY` (`.env.example:216`) | secreto | excepción: una por base; no se rota sin volver a cifrar | cargada en los tres (QA desde el 15/10) | error del servidor al volver de Google en «Conectar Gmail»; chequeo `gmail` de `/api/health` |
 | `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
@@ -458,16 +463,16 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
       WABA llena, el pedido de dev va a revisión con `sin_lugar`.
     - `scripts/sync-vercel-env.mjs` sirve sólo para lo suyo, en dev: sube siete variables
       (las `GMAIL_*` de la casilla de la plataforma y `CRON_SECRET`) desde `.env.local`, que
-      tiene que estar al día. Nunca para QA ni para prd: QA lleva su propio cliente OAuth
-      (QA, paso 1).
+      tiene que estar al día. Nunca para QA ni para prd: se niega a esos dos proyectos, que llevan su propio
+      cliente OAuth y se cargan con `token-remitente.mts --vercel` (QA y prd, paso 1).
   - **Salió bien si:** `https://claimmix-dev.vercel.app/registro` muestra el bloque «Crear
     cuenta con mi correo» con el desafío de Turnstile.
   - **Si falla:** si no aparece el bloque, falta alguna de las cuatro variables del
     remitente. Toda variable nueva vale recién después del redeploy de A12.
   - **Fuentes:** `src/lib/auth/registro-permitido.ts:53`; `.env.example:312-313`, `:227-228`,
     `:207-208`, `:26`, `:216`, `:327-339`, `:363-378`;
-    `src/server/alta/numero-automatico-activo.ts:10`; `scripts/sync-vercel-env.mjs:1-9`,
-    `:36-44`, `:46-53`; `src/lib/i18n/es-AR.servidor.ts:853`;
+    `src/server/alta/numero-automatico-activo.ts:10`; `scripts/sync-vercel-env.mjs:1-10`,
+    `:25-33`, `:44-56`; `src/lib/i18n/es-AR.servidor.ts:853`;
     `src/server/notify/remitente-sistema.ts:94-100`.
 - [ ] **2. El deploy y la salud.**
   - **Quién:** [Claude].
@@ -644,24 +649,27 @@ consolas: eso lo hacen el dueño y Claude. Gonzalo reporta por el canal de D15, 
 ambiente, la hora, una captura y el número de caso.
 
 - [ ] **1. Configuración (parte del lote de A12).**
-  - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos.
+  - **Quién:** [Claude] mira los nombres; [Dueño] corre el script del remitente y pega el resto
+    de los secretos.
   - **Dónde:** Vercel, proyecto `claimmix-qa` > Settings > Environment Variables, entorno
     Production.
   - **Qué hacer:** confirmar o cargar, por nombre:
     - `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET`, del cliente OAuth propio de QA
-      (`claimmix-qa`, A7), no del de `.env.local`. El [Dueño] los pega en `claimmix-qa`
-      (Production, rechazando el Redeploy que ofrece Vercel: el merge de #474 es el redeploy
-      de QA) y en `.env.qa.local`, en la raíz del repo (lo cubre `.env.*.local` de
-      `.gitignore`), y le dice «listo» a [Claude]. Es la causa de que `/registro` de QA no
-      muestre el correo: los dos nombres existen pero vinieron vacíos del import del 17/09.
-    - `ALTA_REMITENTE_CORREO` y `ALTA_REMITENTE_REFRESH_TOKEN`. Los del 15/10 salieron del
-      cliente de dev y no sirven: un refresh token sólo anda con el cliente que lo emitió. El
-      [Dueño] los vuelve a emitir desde su máquina, antes del merge, con el cliente nuevo:
-      `pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts --archivo
-      .env.qa.local --correo <casilla> --vercel claimmix-qa`, autorizando la casilla remitente
-      en el navegador. El script toma el cliente OAuth sólo de ese archivo y, con `--vercel`
-      distinto de `claimmix`, exige `--archivo`. Carga el token por la CLI de Vercel.
-      claimmix-prd no se carga así.
+      (`claimmix-qa`, A7), no del de `.env.local`; y `ALTA_REMITENTE_CORREO` y
+      `ALTA_REMITENTE_REFRESH_TOKEN`, emitido con ese mismo cliente. `/registro` de QA no
+      muestra el correo porque los dos nombres de `GMAIL_CLIENT_*` existen pero vinieron
+      vacíos del import del 17/09, y el remitente del 15/10 salió del cliente de dev: un
+      refresh token sólo anda con el cliente que lo emitió. No hay nada que pegar en Vercel.
+      El [Dueño] crea `.env.qa.local` en la raíz del checkout desde el que corre el script
+      (lo cubre `.env.*.local` de `.gitignore`), con `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET`
+      de `claimmix-qa`, y corre, antes del merge de #474:
+      `pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts --vercel
+      claimmix-qa --correo <casilla>`. El script sube a `claimmix-qa` el ID y el secreto (como
+      sensibles, con los ambientes que ya tienen: Production y Preview; si no existen,
+      Production) antes de pedir el consentimiento. Después de autorizar la casilla remitente
+      en el navegador, sube el remitente. Se niega si `.env.qa.local` trae el mismo cliente
+      que `.env.local` o `.env.prd.local`, y con `--vercel` no lee otro archivo. Las variables valen desde el
+      próximo deploy: el merge de #474 es el redeploy de QA.
     - `TURNSTILE_SITE_KEY` y `TURNSTILE_SECRET_KEY`, con el hostname de A8.
     - `ALTA_AUTOMATICA` en `1` (D6), o la dirección de Gonzalo en `SIGNUP_ALLOWED_EMAILS`.
     - `ALTA_NUMERO_AUTOMATICO` en `1` (D1, b), **sin** `WHATSAPP_ACCESS_TOKEN`: el alta que pida
@@ -676,13 +684,12 @@ ambiente, la hora, una captura y el número de caso.
   - **Salió bien si:** después del merge de #474 (el redeploy de QA), `/registro` de QA
     muestra el correo y Turnstile (paso 2).
   - **Si falla:** si `/admin/altas` lleva al dueño a `/bandeja`, falta una de las condiciones
-    de operador. Si el token del remitente salió del cliente de dev (`.env.local`) y no del de
-    `claimmix-qa`, `/registro` muestra el correo pero los mails no salen: volver a emitirlo
-    con `--archivo .env.qa.local`.
+    de operador. Si el token del remitente salió de otro cliente (el de dev, por ejemplo),
+    `/registro` muestra el correo pero los mails no salen: correr de nuevo el mismo comando.
   - **Fuentes:** `docs/PROJECT_STATUS.md:5051`; `.env.example:226`, `:312-313`, `:401`,
-    `:216`; `scripts/token-remitente.mts:1-36`; `docs/PROMOCION.md:236-237`, `:248-266`,
-    `:256`, `:280-281`; `src/lib/auth/require-operator.ts:55-67`;
-    `src/app/(app)/admin/altas/page.tsx:101-105`.
+    `:216`; `scripts/token-remitente.mts:22-37`, `:56-62`, `:79-97`, `:117-132`, `:274-294`,
+    `:296-307`; `docs/PROMOCION.md:236-237`, `:248-266`, `:256`, `:280-281`;
+    `src/lib/auth/require-operator.ts:55-67`; `src/app/(app)/admin/altas/page.tsx:101-105`.
 - [ ] **2. `/registro` de QA.**
   - **Quién:** [Gonzalo].
   - **Dónde:** `https://claimmix-qa.vercel.app/registro`.
@@ -822,7 +829,8 @@ está prendida, falta la prueba de punta a punta y la primera alta real hace de 
 hasta que esta alta termine y su número se borre (D5), o hasta A5.
 
 - [ ] **1. Configuración (parte del lote de A12).**
-  - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos.
+  - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos y corre el script del
+    remitente. [Claude] corre los comandos de Google Cloud, con el OK del dueño.
   - **Dónde:** Vercel, `claimmix-prd` > Settings > Environment Variables.
   - **Qué hacer:** confirmar, por nombre, las variables de la tabla «Lo que tiene que quedar
     igual en los tres» que corresponden a prd: `ALTA_AUTOMATICA`, `BASE_POR_CLIENTE`,
@@ -832,24 +840,84 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_VERIFY_TOKEN`,
     `NUMEROS_DE_DEV` y los topes `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES` y `ALTA_TOPE_MB`.
     Las que falten, el dueño las pega a mano en esa pantalla: nunca por script ni por chat.
-    - **En prd no se usa `scripts/sync-vercel-env.mjs`.** Sube sólo siete variables
-      (`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL`,
-      `GMAIL_FROM_ADDRESS`, `GMAIL_TENANT_ID` y `CRON_SECRET`): la que tiene valor en el
-      archivo la borra y la vuelve a crear, y si la segunda vuelta falla, la variable queda
-      borrada. Si el archivo trae `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL` o
-      `GMAIL_TENANT_ID`, las empuja a prd, donde van vacías; y recrea `CRON_SECRET`, que
-      tiene que seguir igual a `PRD_CRON_SECRET`. Sólo rechaza `.env.local`: con `--archivo`
-      y el archivo de prd corre. `docs/PROMOCION.md:676-679` decía que los secretos de prd se
-      cargan así; corregido el 18/10.
+    Con una excepción: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` y el remitente
+    (`ALTA_REMITENTE_CORREO` y `ALTA_REMITENTE_REFRESH_TOKEN`) los carga el dueño con
+    `pnpm exec tsx --tsconfig tsconfig.rehearsal.json scripts/token-remitente.mts --vercel
+    claimmix-prd --correo <casilla>`, desde `.env.prd.local` (en la raíz del checkout; lo
+    cubre `.env.*.local` de `.gitignore`) y con el cliente del proyecto de Google Cloud propio
+    de prd (decisión del dueño del 18/10: proyecto propio, cargado por el script, con la misma
+    cuenta de facturación). El script sube el ID y el secreto (como sensibles, con los
+    ambientes que ya tienen) antes de pedir el consentimiento, y después el remitente. Se
+    niega si `.env.prd.local` trae el mismo cliente que `.env.local` o `.env.qa.local`. Las variables valen
+    desde el próximo deploy de `claimmix-prd`.
+    - **`scripts/sync-vercel-env.mjs` no se usa en prd:** se niega a `claimmix-prd` y a
+      `claimmix-qa`, y sólo carga `claimmix` (dev).
+    - **Antes: el proyecto de Google Cloud propio de prd.** El cliente de dev no sirve para
+      prd: Gmail registra el aviso en un tema del mismo proyecto que el cliente OAuth, y un
+      refresh token sólo anda con el cliente que lo emitió. En este orden:
+      1. [Claude], con el OK del dueño, una consulta de sólo lectura que confirme que prd no
+         tiene casillas conectadas: `SELECT count(*) FROM gmail_accounts` en `neondb` y en
+         cada base `t_<hex>` (salen de `tenant_bases`; `cadenaConBase` está en
+         `scripts/lib/entorno-de-bases.mjs:38`), con el `DATABASE_URL` de `.env.prd.local`: el
+         de la app pasa por RLS y devolvería 0 aunque haya casillas. Si hay una, el cambio de
+         cliente la rompe: parar y avisar al dueño.
+      2. [Dueño] Crea el proyecto y le asocia la misma cuenta de facturación; publica la
+         pantalla de consentimiento; crea el cliente web `claimmix-prd` con dos URI de
+         redirección, `https://claimmix.vercel.app/api/admin/gmail-accounts/callback` y
+         `http://127.0.0.1:53682/`; y pone su ID y su secreto en `.env.prd.local`.
+      3. [Claude], con el OK explícito del dueño para los permisos de IAM, corre en ese
+         proyecto (`<PROYECTO>` es su ID, `<NÚMERO_DEL_PROYECTO>` su número y
+         `<PUBSUB_AUDIENCE_ACTUAL_DE_PRD>` el valor que hoy tiene `PUBSUB_AUDIENCE` en
+         `claimmix-prd`):
+
+         ```bash
+         gcloud services enable gmail.googleapis.com pubsub.googleapis.com \
+           --project=<PROYECTO>
+
+         gcloud pubsub topics create gmail-push-prd --project=<PROYECTO>
+         gcloud pubsub topics add-iam-policy-binding gmail-push-prd --project=<PROYECTO> \
+           --member=serviceAccount:gmail-api-push@system.gserviceaccount.com \
+           --role=roles/pubsub.publisher
+
+         gcloud iam service-accounts create gmail-push-prd --project=<PROYECTO> \
+           --display-name="Push de Gmail de prd"
+         gcloud iam service-accounts add-iam-policy-binding \
+           gmail-push-prd@<PROYECTO>.iam.gserviceaccount.com --project=<PROYECTO> \
+           --member=serviceAccount:service-<NÚMERO_DEL_PROYECTO>@gcp-sa-pubsub.iam.gserviceaccount.com \
+           --role=roles/iam.serviceAccountTokenCreator
+
+         gcloud pubsub subscriptions create gmail-push-prd-sub --project=<PROYECTO> \
+           --topic=gmail-push-prd \
+           --push-endpoint=https://claimmix.vercel.app/api/webhooks/gmail \
+           --push-auth-service-account=gmail-push-prd@<PROYECTO>.iam.gserviceaccount.com \
+           --push-auth-token-audience=<PUBSUB_AUDIENCE_ACTUAL_DE_PRD>
+
+         gcloud pubsub subscriptions describe gmail-push-prd-sub --project=<PROYECTO> \
+           --format='value(pushConfig.oidcToken.serviceAccountEmail)'
+         ```
+
+         El último comando tiene que imprimir lo mismo que `PUBSUB_SERVICE_ACCOUNT`.
+      4. [Dueño] Corre el script de arriba.
+      5. [Claude] Cambia `PUBSUB_TOPIC` de `claimmix-prd` a
+         `projects/<PROYECTO>/topics/gmail-push-prd` y `PUBSUB_SERVICE_ACCOUNT` a
+         `gmail-push-prd@<PROYECTO>.iam.gserviceaccount.com`. Son nombres, no secretos.
+         `PUBSUB_AUDIENCE` queda como está.
+      6. Un solo redeploy de `claimmix-prd`, que cuenta como la promoción del día. Entre el
+         punto 4 y este redeploy no se promueve nada a prd: cualquier deploy nuevo tomaría el
+         cliente nuevo con el tema viejo.
     - `CRON_SECRET` de prd tiene que ser igual al secreto `PRD_CRON_SECRET` de GitHub.
   - **Salió bien si:** después del redeploy, el log del paso «Smoke de prd» del Post-deploy
     PRD lista cada chequeo sin «sin configurar», salvo `whatsapp` hasta el paso 2. Y
     `https://claimmix.vercel.app/registro` muestra el correo, Turnstile y el aviso del número.
   - **Si falla:** [Claude] lee ese log, o pide `GET /api/health` con el `CRON_SECRET` de prd,
     y dice qué variable falta. Si el smoke dice «CRON_SECRET local no coincide», el de Vercel
-    y el de GitHub son distintos: el Post-deploy PRD y el barrido quedan en rojo.
-  - **Fuentes:** `docs/PROMOCION.md:723-738`; `scripts/sync-vercel-env.mjs:31-34`,
-    `:36-44`, `:46-53`; `.github/workflows/post-deploy.yml:657-669`, `:660`;
+    y el de GitHub son distintos: el Post-deploy PRD y el barrido quedan en rojo. Si `token-remitente.mts` se niega porque
+    `.env.prd.local` trae el mismo cliente que otro ambiente, el archivo quedó con el de dev o
+    el de QA: poner el de `claimmix-prd`.
+  - **Fuentes:** `docs/PROMOCION.md:723-738`, `:813-845`; `scripts/token-remitente.mts:22-37`,
+    `:56-62`, `:79-97`, `:117-132`, `:274-294`, `:296-307`; `scripts/sync-vercel-env.mjs:44-56`;
+    `scripts/lib/entorno-de-bases.mjs:19`, `:38`; `src/app/api/webhooks/gmail/route.ts:94`,
+    `:164`; `.github/workflows/post-deploy.yml:657-669`, `:660`;
     `scripts/smoke-production.mts:254`, `:265-269`.
 - [ ] **2. Requisitos del número por código, antes del alta.**
   - **Quién:** [Dueño] lo que está en Meta; [Claude] el resto.
@@ -878,7 +946,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `:770`; `src/server/whatsapp/numeros.ts:49-54`, `:174-177`, `:409-411`;
     `src/server/alta/numero-automatico.ts:243`; `src/app/api/health/route.ts:412-415`;
     `.github/workflows/post-deploy.yml:657`; `scripts/smoke-production.mts:265-269`;
-    `docs/PROJECT_STATUS.md:5255-5260`.
+    `docs/PROJECT_STATUS.md:5256-5261`.
 - [ ] **3. Antes del alta: salud de las bases.**
   - **Quién:** [Claude].
   - **Dónde:** la terminal.
@@ -1075,7 +1143,7 @@ El pedido 4: correr el prompt de nuevo cada vez que cambia algo del agente.
     y hacer hasta dos reruns. Si sigue rojo, el escenario solo con `pnpm rehearse
     <escenario>` y `pnpm smoke` como evidencia.
   - **Fuentes:** `package.json:22`, `:23`, `:28`; `scripts/check-everything.mts:43-46`;
-    `docs/TESTING.md:186-188`; `docs/PROJECT_STATUS.md:5261`; `AGENTS.md`, «Probar cambios».
+    `docs/TESTING.md:186-188`; `docs/PROJECT_STATUS.md:5262`; `AGENTS.md`, «Probar cambios».
 - [ ] **E2. Leer el transcripto.**
   - **Quién:** [Dueño]; en QA, Gonzalo con el texto del paso 9.
   - **Dónde:** el transcripto que imprime el ensayo.
@@ -1362,14 +1430,18 @@ Apenas el dueño avise, Claude puede:
   y decir qué falta.
 - En prd, listar bases sobrantes y, con el OK explícito del dueño para cada una, reintentar una
   base trabada con `preparar-base.mts` o purgarla (purgar no se deshace).
+- En el proyecto de Google Cloud propio de prd, con el OK explícito del dueño para los
+  permisos de IAM: habilitar las APIs y crear el tema, la cuenta de servicio y la suscripción
+  de Pub/Sub (prd, paso 1).
 - Disparar el barrido de QA desde Actions.
 - Hacer la cuenta del costo por caso de C1.
 - Implementar los ítems del plan en orden, cada uno en su PR a `qa` y el mismo día a main y prd,
   con la revisión de seguridad en Fable (u Opus) para los ítems 3 y 4.
 
-Claude no carga valores de secretos: el remitente de QA con `token-remitente.mts` lo carga el
-dueño (QA, paso 1). Claude no entra a las consolas de Google, Meta, Cloudflare ni Neon con la
-sesión del dueño, y no decide nada de la lista de arriba.
+Claude no carga valores de secretos: el cliente de Gmail y el remitente de QA y de prd los carga
+el dueño con `token-remitente.mts` (QA, paso 1; prd, paso 1). Claude no entra a las consolas
+de Google, Meta, Cloudflare ni Neon con la sesión del dueño, y no decide nada de la lista de
+arriba.
 
 ## Referencias
 
@@ -1386,5 +1458,5 @@ sesión del dueño, y no decide nada de la lista de arriba.
   `/api/health` (`:1068`).
 - `docs/PROJECT_STATUS.md`: estado del alta y de prd (`:4760-4768`), la promoción del 16/10 y lo
   que todavía no es igual (`:5051-5053`), «El agente aprende de la consola» (`:5055`), las
-  decisiones de A1 (`:5190-5196`), lo que espera al dueño (`:5208`) y el número por código
-  (`:5255-5260`).
+  decisiones de A1 (`:5190-5196`), lo que espera al dueño (`:5209`) y el número por código
+  (`:5256-5261`).

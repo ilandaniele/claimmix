@@ -316,7 +316,7 @@ tarda algo, la guía lo dice así.
     migraciones.
   - **Fuentes:** `.github/workflows/deploy-checks.yml:684-688`;
     `.github/workflows/post-deploy.yml:297` (base de DEV), `:520` (base de QA), `:672-680`
-    (PRD); `src/app/api/health/route.ts:20-25`, `:314-317`; `docs/PROMOCION.md:786`
+    (PRD); `src/app/api/health/route.ts:20-25`, `:316-319`; `docs/PROMOCION.md:786`
     («Migrar después de un cambio de esquema»).
 - [ ] **A12. El lote de variables, uno por proyecto.**
   - **Quién:** [Claude] arma la lista, [Dueño] carga los secretos y [Claude] pide el
@@ -379,10 +379,10 @@ y una WABA para cada uno.
 
 ### Lo que tiene que quedar igual en los tres
 
-No existe ningún script ni endpoint que compare las variables de los tres proyectos: hoy se
-comparan a mano, mirando los nombres en Vercel (A12). `/api/health` sólo informa
-`AGENT_COMPOSE_REPLIES` y `AGENT_DELIBERATION`. «Desconocido» quiere decir que ningún doc lo
-dice.
+No existe ningún script que compare las variables de los tres proyectos: hoy se comparan a
+mano (A12). Con `CRON_SECRET`, `/api/health` lista en `banderas` las banderas, topes y modos
+de esta tabla, y de los secretos sólo si están cargados (`docs/TESTING.md`, «`/api/health`»).
+«Desconocido» quiere decir que ningún doc lo dice.
 
 | Variable | Tipo | Igual o excepción | Estado conocido | Cómo comprobarlo |
 |---|---|---|---|---|
@@ -398,7 +398,7 @@ dice.
 | `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | prd 5, 30 y 350 según el plan (`docs/PROMOCION.md:727-728`); dev y QA desconocido | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
-| `MONTHLY_BUDGET_USD` (`src/server/ai/tope-mensual.ts:23`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:616`) y con 0 |
+| `MONTHLY_BUDGET_USD` (`src/server/ai/tope-mensual.ts:23`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
 | `AI_TENANT_DAILY_TOKEN_CAP` (`.env.example:159`) | valor | excepción en dev y QA (D7); en esos dos, igual a la variable del repo (`.github/workflows/deploy-checks.yml:383`) | QA 20 M; dev y prd desconocido | Vercel y Settings > Variables del repo |
 | `ALTA_NUMEROS_MAXIMOS_WABA`, `ALTA_TOPE_NUMEROS_DIA` y los cupos de códigos (`.env.example:246-256`) | valor | igual; se sube recién con Veltra verificada | sin cargar (2, 2, 3, 5, 10, 5) | Vercel |
 | `ALTA_TOPE_IP_DIA` (`src/server/alta/cupo-por-ip.ts:20`), `ALTA_TOPE_CORREO_POR_IP_DIA`, `ALTA_TOPE_CORREOS_DIA`, `ALTA_TOPE_POR_DESTINATARIO_DIA`, `ALTA_TOPE_INVITACIONES_DIA` (`.env.example:232-237`), `ALTA_TOPE_PLANTILLAS_PRUEBA_DIA` (`src/server/whatsapp/cloud-api.ts:783`) | valor | igual | sin cargar (valores por omisión) | Vercel |
@@ -473,7 +473,7 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
     muestran el tope que corta, el mismo que lee `budget.ts`. Con `MONTHLY_BUDGET_USD` en 0 dicen
     «IA frenada» y el chequeo queda amarillo: la IA de los clientes está apagada a propósito.
   - **Fuentes:** `package.json:23`; `docs/TESTING.md:1068`;
-    `src/app/api/health/route.ts:411-414`, `:423`, `:589`, `:608`;
+    `src/app/api/health/route.ts:413-416`, `:425`, `:591`, `:610`;
     `src/server/ai/tope-mensual.ts:23`; `src/app/(app)/configuracion/page.tsx:165-166`.
 - [ ] **3. Alta.**
   - **Quién:** [Dueño].
@@ -538,7 +538,7 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
       permanente, y uno nuevo deja sin servicio a los proyectos que usan el actual. El
       comentario del código que lo llama «long-lived» es viejo y no autoriza a
       regenerarlo.
-  - **Fuentes:** `.env.example:372`; `src/app/api/health/route.ts:405-413`, `:422`;
+  - **Fuentes:** `.env.example:372`; `src/app/api/health/route.ts:407-415`, `:424`;
     `docs/whatsapp-setup.md:46-48`.
 - [ ] **7. Gmail.**
   - **Quién:** [Dueño].
@@ -865,7 +865,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     del token (punto 3). Nunca generar un token nuevo (dev, paso 6).
   - **Fuentes:** `docs/whatsapp-setup.md:178-205`, `:46-48`; `docs/PROMOCION.md:577-600`,
     `:770`; `src/server/whatsapp/numeros.ts:49-54`, `:174-177`, `:409-411`;
-    `src/server/alta/numero-automatico.ts:243`; `src/app/api/health/route.ts:410-413`;
+    `src/server/alta/numero-automatico.ts:243`; `src/app/api/health/route.ts:412-415`;
     `.github/workflows/post-deploy.yml:657`; `scripts/smoke-production.mts:265-269`;
     `docs/PROJECT_STATUS.md:5245-5250`.
 - [ ] **3. Antes del alta: salud de las bases.**

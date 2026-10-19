@@ -849,7 +849,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     cuenta de facturación). El script sube el ID y el secreto (como sensibles, con los
     ambientes que ya tienen) antes de pedir el consentimiento, y después el remitente. Se
     niega si `.env.prd.local` trae el mismo cliente que `.env.local` o `.env.qa.local`. Las variables valen
-    desde el próximo deploy de `claimmix-prd`.
+    desde el próximo deploy de `claimmix-prd`. El script llama a la CLI de Vercel (`vercel api`)
+    con la sesión ya iniciada: si `vercel` no está en el PATH falla con «"vercel" no se
+    reconoce…»; se instala con `npm i -g vercel`.
     - **`scripts/sync-vercel-env.mjs` no se usa en prd:** se niega a `claimmix-prd` y a
       `claimmix-qa`, y sólo carga `claimmix` (dev).
     - **Antes: el proyecto de Google Cloud propio de prd.** El cliente de dev no sirve para
@@ -866,13 +868,13 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
          redirección, `https://claimmix.vercel.app/api/admin/gmail-accounts/callback` y
          `http://127.0.0.1:53682/`; y pone su ID y su secreto en `.env.prd.local`.
       3. [Claude], con el OK explícito del dueño para los permisos de IAM, corre en ese
-         proyecto (`<PROYECTO>` es su ID, `<NÚMERO_DEL_PROYECTO>` su número y
-         `<PUBSUB_AUDIENCE_ACTUAL_DE_PRD>` el valor que hoy tiene `PUBSUB_AUDIENCE` en
-         `claimmix-prd`):
+         proyecto (`<PROYECTO>` es su ID y `<PUBSUB_AUDIENCE_ACTUAL_DE_PRD>` el valor que
+         hoy tiene `PUBSUB_AUDIENCE` en `claimmix-prd`), con la cuenta dueña del proyecto
+         (`gcloud --account <cuenta>`, sin cambiar la configuración global):
 
          ```bash
          gcloud services enable gmail.googleapis.com pubsub.googleapis.com \
-           --project=<PROYECTO>
+           iam.googleapis.com --project=<PROYECTO>
 
          gcloud pubsub topics create gmail-push-prd --project=<PROYECTO>
          gcloud pubsub topics add-iam-policy-binding gmail-push-prd --project=<PROYECTO> \
@@ -881,22 +883,23 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
 
          gcloud iam service-accounts create gmail-push-prd --project=<PROYECTO> \
            --display-name="Push de Gmail de prd"
-         gcloud iam service-accounts add-iam-policy-binding \
-           gmail-push-prd@<PROYECTO>.iam.gserviceaccount.com --project=<PROYECTO> \
-           --member=serviceAccount:service-<NÚMERO_DEL_PROYECTO>@gcp-sa-pubsub.iam.gserviceaccount.com \
-           --role=roles/iam.serviceAccountTokenCreator
 
          gcloud pubsub subscriptions create gmail-push-prd-sub --project=<PROYECTO> \
            --topic=gmail-push-prd \
            --push-endpoint=https://claimmix.vercel.app/api/webhooks/gmail \
            --push-auth-service-account=gmail-push-prd@<PROYECTO>.iam.gserviceaccount.com \
-           --push-auth-token-audience=<PUBSUB_AUDIENCE_ACTUAL_DE_PRD>
+           --push-auth-token-audience=<PUBSUB_AUDIENCE_ACTUAL_DE_PRD> \
+           --ack-deadline=60 --message-retention-duration=7d --expiration-period=never
 
          gcloud pubsub subscriptions describe gmail-push-prd-sub --project=<PROYECTO> \
            --format='value(pushConfig.oidcToken.serviceAccountEmail)'
          ```
 
-         El último comando tiene que imprimir lo mismo que `PUBSUB_SERVICE_ACCOUNT`.
+         El último comando tiene que imprimir la cuenta que el punto 5 pone en
+         `PUBSUB_SERVICE_ACCOUNT`. Sin `--expiration-period=never` la suscripción se borra
+         sola después de 31 días sin actividad. En un proyecto creado después del 8/4/2021 el
+         agente de servicio de Pub/Sub ya puede firmar el token del push, así que no hace falta
+         darle `roles/iam.serviceAccountTokenCreator`.
       4. [Dueño] Corre el script de arriba.
       5. [Claude] Cambia `PUBSUB_TOPIC` de `claimmix-prd` a
          `projects/<PROYECTO>/topics/gmail-push-prd` y `PUBSUB_SERVICE_ACCOUNT` a

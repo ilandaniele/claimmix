@@ -450,6 +450,24 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
     expect(params).not.toContain("procesando");
   });
 
+  // Un siniestro nuevo parte el caso: el mensaje siguiente va al más nuevo, no al viejo.
+  it("sólo el caso más nuevo del teléfono junta mensajes", async () => {
+    setupSelectResults([[], []]);
+    setupInsertResults([{ rows: [{ id: "case-nuevo" }] }, { rows: [] }, { rows: [] }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "Hola",
+    });
+
+    const busqueda = mockDbSelect.mock.results[0].value.where.mock.calls[0][0];
+    const { sql } = new PgDialect().sqlToQuery(busqueda);
+    expect(sql).toContain("not exists (select 1 from cases n");
+    expect(sql).toContain("n.email_thread_id = ");
+    expect(sql).toContain("n.created_at > ");
+  });
+
   it("si el agente ya terminó, lo marca el ingreso antes del worker", async () => {
     setupSelectResults([
       [{ id: "case-listo-001", status: "listo" }],

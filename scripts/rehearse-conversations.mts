@@ -212,6 +212,13 @@ interface TurnDicho {
      */
     tardio?: Tardio;
     /**
+     * Que el mensaje haya pasado a un caso nuevo (B3): un WhatsApp que cuenta otro
+     * siniestro. Con `false` o sin esto, tiene que haber quedado en el mismo caso.
+     */
+    casoNuevo?: boolean;
+    /** Cómo quedó el caso de antes: el que se partió, que el corte no cambia. */
+    anterior?: { status?: string; paraResponder?: boolean };
+    /**
      * Claves que el mensaje NO tiene que haber pedido.
      *
      * Sobre `outbound_messages.asked_keys`, que es la lista que el propio
@@ -447,7 +454,7 @@ const SCENARIOS: Scenario[] = [
 
   {
     id: "tardio-siniestro-nuevo",
-    what: "Derivado, cuenta otro choque en otra fecha: no abre otro caso, queda «Para responder» como siniestro nuevo (B3)",
+    what: "Derivado, cuenta otro choque en otra fecha: abre un caso nuevo que contesta el agente; el derivado no cambia (B3)",
     turns: [
       {
         say: "Se incendió la moto en la ruta 22, mi hermano está internado con quemaduras. Soy Pablo Ortiz, póliza POL-6610-E.",
@@ -455,10 +462,15 @@ const SCENARIOS: Scenario[] = [
       },
       {
         say: "Otra cosa: el sábado 12 de septiembre me chocaron de atrás con el Corsa en Punta Alta. Es otro choque, no tiene nada que ver con el incendio.",
-        expect: { replies: 0, status: "requiere_especialista", paraResponder: true, tardio: "siniestro_nuevo" },
+        expect: {
+          casoNuevo: true,
+          replies: 1,
+          status: "info_faltante",
+          anterior: { status: "requiere_especialista", paraResponder: false },
+        },
       },
     ],
-    finally: { status: "requiere_especialista" },
+    finally: { status: "info_faltante" },
   },
 
   {
@@ -1172,6 +1184,9 @@ async function seedPolicyFor(
   });
 }
 
+/** El id con que el ensayo le entrega el turno `i` al WhatsApp: sirve para saber en qué caso quedó. */
+const providerMessageIdDe = (scenario: Scenario, i: number) => `rehearsal.${RUN}.${scenario.id}.${i}`;
+
 /**
  * Hand one message to the WhatsApp intake, exactly as the webhook does.
  */
@@ -1185,7 +1200,7 @@ async function deliverWhatsApp(
     tenantId: TENANT_ID!,
     from: phone,
     body: turn.say,
-    providerMessageId: `rehearsal.${RUN}.${scenario.id}.${i}`,
+    providerMessageId: providerMessageIdDe(scenario, i),
     simulated: true,
     media: turn.photo
       ? [
@@ -1427,7 +1442,7 @@ async function imprimirSombra(caso: string): Promise<void> {
   }
 }
 
-async function runScenario(scenario: Scenario, actor: PatchActor | null): Promise<string | null> {
+async function runScenario(scenario: Scenario, actor: PatchActor | null): Promise<string[]> {
   console.log(`\n▸ ${scenario.id} — ${scenario.what}`);
 
   // A fresh identity per run, so nothing joins a conversation from an earlier
@@ -1445,6 +1460,8 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
   const address = `ensayo.${RUN}.${index}@example.com`;
   const byEmail = scenario.channel === "email";
   let caseId: string | null = null;
+  // Todos los casos que tocó: un siniestro nuevo por WhatsApp abre uno aparte, y hay que borrarlo también.
+  const casos = new Set<string>();
   let seen = 0;
   // Un estado final que depende de reconocer fotos no se puede exigir con el
   // marcador de 1×1: el CI no tiene los fixtures y el caso queda esperando lo
@@ -1548,7 +1565,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
 
       // Qué estaba cerrado antes de este turno. En el primero no hay caso
       // todavía, y por lo tanto no hay nada cerrado.
-      const cerradosAntes = caseId ? await closedDocKeys(caseId) : new Set<string>();
+      let cerradosAntes = caseId ? await closedDocKeys(caseId) : new Set<string>();
 
       const delivered = byEmail
         ? await deliverEmail(scenario, turn, i, address, caseId)
@@ -1572,11 +1589,37 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         }
         continue;
       }
-      const active: string = delivered;
+      let active: string = delivered;
+      // Un WhatsApp que cuenta otro siniestro pasa a un caso nuevo: el mensaje
+      // quedó en otro caso que el que lo recibió, y la conversación sigue ahí.
+      let anterior: string | null = null;
+      if (!byEmail) {
+        const [movido] = await db
+          .select({ caso: claimMessages.case_id })
+          .from(claimMessages)
+          .where(eq(claimMessages.provider_message_id, providerMessageIdDe(scenario, i)));
+        const partio = movido != null && movido.caso !== delivered;
+        if (partio) {
+          anterior = delivered;
+          active = movido.caso;
+          seen = 0;
+          cerradosAntes = new Set();
+        }
+        if (partio !== (turn.expect?.casoNuevo === true)) {
+          note(
+            scenario.id,
+            i + 1,
+            partio ? "el mensaje pasó a un caso nuevo y no debía" : "el mensaje no pasó a un caso nuevo",
+            "caso-nuevo"
+          );
+        }
+      }
       if (byEmail && caseId && active !== caseId) {
         note(scenario.id, i + 1, "abrió otro caso en vez de sumarse al de la conversación", "mismo-caso");
       }
       caseId = active;
+      casos.add(delivered);
+      casos.add(active);
 
       // Se retoma aunque el turno no cuente respuestas. El de la foto espera que
       // se reconozca el documento, y el reconocedor corre después de una
@@ -1740,6 +1783,9 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         }
       }
       await checkStatusYParaResponder(scenario.id, i + 1, active, want);
+      if (want.anterior && anterior) {
+        await checkStatusYParaResponder(scenario.id, i + 1, anterior, want.anterior);
+      }
 
       /*
        * El reconocimiento de documentos, que estaba declarado y no se miraba.
@@ -1905,7 +1951,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
       );
     }
 
-    return caseId;
+    return [...casos];
   } finally {
     // Cascades to the policy and the insured vehicle.
     if (seeded) await db.delete(customers).where(eq(customers.id, seeded.customerId));
@@ -2225,8 +2271,7 @@ const paraCorrer = chosen.filter((s) => !requiereActor(s) || actorValido);
 const created: string[] = [];
 for (const scenario of paraCorrer) {
   try {
-    const id = await runScenario(scenario, actor);
-    if (id) created.push(id);
+    created.push(...(await runScenario(scenario, actor)));
   } catch (err) {
     note(
       scenario.id,

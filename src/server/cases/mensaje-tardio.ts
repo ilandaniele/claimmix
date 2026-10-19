@@ -7,6 +7,9 @@
  * El texto del mensaje no sale de acá: ni a la auditoría, ni a los registros,
  * ni al aviso, ni a la pantalla. Sólo la clase y un resumen que pasó el filtro.
  *
+ * Un WhatsApp que cuenta otro siniestro no queda acá: abre un caso nuevo
+ * (`siniestro-nuevo`) y se devuelve para que el worker lo atienda.
+ *
  * Nunca tira: el mensaje ya está guardado y el caso ya está marcado.
  */
 
@@ -35,6 +38,7 @@ import { checkBudget, registrarConsumoDelModelo, soltarReserva } from "@/server/
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { avisarMensajeTardio } from "@/server/notify/specialist-alert";
 import { admiteParaResponder } from "@/server/cases/para-responder";
+import { abrirCasoPorSiniestroNuevo } from "@/server/cases/siniestro-nuevo";
 
 type Encabezados = Array<{ name?: string | null; value?: string | null }>;
 
@@ -79,9 +83,9 @@ async function reservar(tenantId: string, caseId: string) {
               and ${cases.mensaje_tardio_reservado_en} < now() - interval '${sql.raw(String(RESERVA_DE_EXTRACCION_MS))} milliseconds'))`
         )
       )
-      .returning({ id: cases.id })
+      .returning({ id: cases.id, canal: cases.channel })
   );
-  return reservado.length ? ultimo : null;
+  return reservado.length ? { ...ultimo, canal: reservado[0].canal } : null;
 }
 
 /**
@@ -137,26 +141,52 @@ async function clasificar(
   };
 }
 
+const NADA = { casoNuevo: null };
+
 export async function atenderMensajeTardio({
   tenantId,
   caseId,
 }: {
   tenantId: string;
   caseId: string;
-}): Promise<void> {
+}): Promise<{ casoNuevo: string | null }> {
   try {
     const mensaje = await reservar(tenantId, caseId);
-    if (!mensaje) return;
+    if (!mensaje) return NADA;
 
     const { tipo, resumen } = await clasificar(tenantId, caseId, stripQuotedReply(mensaje.body ?? ""));
 
+    const porWhatsApp = mensaje.canal === "whatsapp" || mensaje.canal === "whatsapp_sim";
+    if (tipo === "siniestro_nuevo" && porWhatsApp) {
+      const corte = await abrirCasoPorSiniestroNuevo({ tenantId, caseId, messageId: mensaje.id });
+      // El caso nuevo lo atiende el agente: ni clase ni aviso al equipo.
+      if (corte.tipo === "abierto") return { casoNuevo: corte.casoNuevo };
+      if (corte.tipo === "ya_movido") return NADA;
+    }
+
     // Si entró otro mensaje en el medio, la reserva es suya y esto no la pisa.
-    await enTenant({ tenantId }, (db) =>
+    const guardado = await enTenant({ tenantId }, (db) =>
       db
         .update(cases)
         .set({ mensaje_tardio_tipo: tipo, mensaje_tardio_resumen: resumen })
         .where(and(eq(cases.id, caseId), eq(cases.mensaje_tardio_de, mensaje.id)))
+        .returning({ id: cases.id })
     );
+
+    // Si otra corrida lo mudó a un caso nuevo mientras clasificaba, ya no es de este caso.
+    if (porWhatsApp && guardado.length === 0) {
+      const [donde] = await enTenant({ tenantId }, (db) =>
+        db
+          .select({ case_id: claimMessages.case_id })
+          .from(claimMessages)
+          .where(eq(claimMessages.id, mensaje.id))
+          .limit(1)
+      );
+      if (donde && donde.case_id !== caseId) {
+        logger.info({ case_id: caseId, message_id: mensaje.id }, "mensaje_tardio.se_mudo");
+        return NADA;
+      }
+    }
 
     await writeAuditLog({
       tenant_id: tenantId,
@@ -168,7 +198,9 @@ export async function atenderMensajeTardio({
     });
 
     await avisarMensajeTardio({ tenantId, caseId, messageId: mensaje.id, tipo, resumen });
+    return NADA;
   } catch (err) {
     logger.error({ case_id: caseId, error_code: errorCode(err) }, "mensaje_tardio.error");
+    return NADA;
   }
 }

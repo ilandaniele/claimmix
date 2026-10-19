@@ -474,7 +474,11 @@ async function findExistingWhatsAppCase(
               eq(c.email_thread_id, threadId),
               sql`coalesce(${c.updated_at}, ${c.created_at}) > now() - interval '${sql.raw(String(WHATSAPP_THREAD_WINDOW_DAYS))} days'`,
               // Lista y razones en `@/core/case/para-responder`.
-              inArray(c.status, [...ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES])
+              inArray(c.status, [...ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES]),
+              // Sólo el caso más nuevo del teléfono junta mensajes.
+              sql`not exists (select 1 from cases n
+                where n.tenant_id = ${c.tenant_id} and n.channel = ${c.channel}
+                  and n.email_thread_id = ${c.email_thread_id} and n.created_at > ${c.created_at})`
             )
           )
           .orderBy(desc(c.created_at))

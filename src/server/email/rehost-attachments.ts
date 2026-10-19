@@ -22,7 +22,7 @@
  * AC11: Budget exhausted → remaining attachments get reason='rehost_timeout'.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { claimAttachments } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
@@ -321,7 +321,8 @@ export async function rehostAndRecordAttachments(
     try {
       await enTenant({ tenantId }, (db) =>
         db.insert(claimAttachments).values({
-          case_id: caseId,
+          // El caso donde está hoy el mensaje: pudo pasar a otro mientras bajaba la foto.
+          case_id: sql`coalesce((select m.case_id from claim_messages m where m.id = ${messageId}::uuid), ${caseId}::uuid)`,
           tenant_id: tenantId,
           claim_message_id: messageId,
           file_name: attachment.Name,

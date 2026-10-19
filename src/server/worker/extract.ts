@@ -690,6 +690,9 @@ export async function runEmailExtractionWorker(
        * (`@/server/cases/para-responder`): lo marcó el ingreso o, si el mensaje
        * entró mientras corría el worker, la corrida al terminar. No este
        * despacho, que también llega por un re-despacho sin nada nuevo.
+       *
+       * Si el mensaje cuenta otro siniestro, tampoco reabre este caso: pasa a
+       * uno nuevo (`@/server/cases/siniestro-nuevo`) y el agente lo atiende.
        */
       logger.warn({
         case_id: caseId,
@@ -707,7 +710,10 @@ export async function runEmailExtractionWorker(
         payload: { status: caseRow.status, motivo: "estado_no_reanudable" },
       });
       // No lo contesta el agente: sólo se clasifica para quien lo atiende.
-      await atenderMensajeTardio({ tenantId, caseId });
+      const { casoNuevo } = await atenderMensajeTardio({ tenantId, caseId });
+      // Salvo un siniestro nuevo por WhatsApp, que pasó a su propio caso y sí lo
+      // contesta. Sus adjuntos se mudaron con él: acá no queda ninguna carta.
+      if (casoNuevo) return await runEmailExtractionWorker(casoNuevo, tenantId, userId, { hasta });
       // Y si trae la carta de un tercero (B24), se la lee para el equipo, aunque
       // el caso no admita «Para responder»: un caso cerrado o derivado también la recibe.
       await leerCartasDespues(() => atenderCartasDeUnTardio({ tenantId, caseId, hasta }));

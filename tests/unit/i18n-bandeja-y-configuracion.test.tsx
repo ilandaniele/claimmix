@@ -64,6 +64,8 @@ describe("i18n de la bandeja y el shell", () => {
       "tardio.aviso.abrir",
       "audit.claim.late_message_classified",
       "audit.claim.late_message_alerted",
+      "audit.claim.late_message_split",
+      "audit.claim.opened_from_late_message",
       "audit.claim.reminder_sent",
       "audit.claim.reminder_skipped",
       "audit.claim.reminder_failed",

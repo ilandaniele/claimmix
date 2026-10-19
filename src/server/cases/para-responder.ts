@@ -1,7 +1,7 @@
 import "server-only";
 
-import { and, eq, exists, gt, inArray, isNotNull, notExists, notInArray, or, sql } from "drizzle-orm";
-import { enTenant, type TenantContext } from "@/data/scope";
+import { and, eq, exists, gt, inArray, isNotNull, notExists, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { cases, claimMessages, outboundMessages } from "@/lib/db/schema";
 import { ESTADOS_DEL_AGENTE_TERMINADO } from "@/core/case/para-responder";
 import { ETAPA_AVISO_DE_CIERRE } from "@/core/case/recordatorios";
@@ -49,6 +49,29 @@ export function admiteParaResponder() {
  */
 export type SoloSiHay = { sinLeer: string[] } | "sinContestar";
 
+/** El caso tiene un entrante de la persona que cumple `condicion`. Correlacionado con `cases.id`. */
+function hayEntrante(db: ClienteDatos, condicion: SQL): SQL {
+  return exists(
+    db
+      .select({ id: claimMessages.id })
+      .from(claimMessages)
+      .where(
+        and(eq(claimMessages.case_id, cases.id), eq(claimMessages.direction, "inbound"), condicion)
+      )
+  );
+}
+
+/** El caso tiene un entrante posterior a la última respuesta del agente. */
+export function haySinContestar(db: ClienteDatos): SQL {
+  return hayEntrante(
+    db,
+    gt(
+      claimMessages.received_at,
+      sql`coalesce((select max(${outboundMessages.created_at}) from ${outboundMessages} where ${outboundMessages.case_id} = ${cases.id}), '-infinity'::timestamptz)`
+    )
+  );
+}
+
 /** Lo que pone un caso en «Para responder». */
 function marca() {
   return {
@@ -80,25 +103,11 @@ export async function marcarParaResponder(
 ): Promise<void> {
   try {
     await enTenant({ tenantId }, (db) => {
-      const entrante = soloSiHay
-        ? exists(
-            db
-              .select({ id: claimMessages.id })
-              .from(claimMessages)
-              .where(
-                and(
-                  eq(claimMessages.case_id, cases.id),
-                  eq(claimMessages.direction, "inbound"),
-                  soloSiHay === "sinContestar"
-                    ? gt(
-                        claimMessages.received_at,
-                        sql`coalesce((select max(${outboundMessages.created_at}) from ${outboundMessages} where ${outboundMessages.case_id} = ${cases.id}), '-infinity'::timestamptz)`
-                      )
-                    : notInArray(claimMessages.id, soloSiHay.sinLeer)
-                )
-              )
-          )
-        : undefined;
+      const entrante = !soloSiHay
+        ? undefined
+        : soloSiHay === "sinContestar"
+          ? haySinContestar(db)
+          : hayEntrante(db, notInArray(claimMessages.id, soloSiHay.sinLeer));
       return db
         .update(cases)
         .set(marca())

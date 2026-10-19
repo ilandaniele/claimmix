@@ -13,6 +13,9 @@ const m = vi.hoisted(() => ({
   consultas: [] as { sql: string; params: unknown[] }[],
   ultimo: [] as unknown[][],
   reserva: [] as unknown[][],
+  guardado: [] as unknown[][],
+  dondeEsta: [] as unknown[][],
+  cortar: vi.fn(),
   enTenant: vi.fn(),
   motor: vi.fn(),
   presupuesto: vi.fn(),
@@ -46,6 +49,7 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: { LATE_MESSAGE_CLASSIFIED: "claim.late_message_classified", CASE_CLOSED_ABANDONED: "claim.closed_abandoned" },
 }));
 vi.mock("@/server/notify/specialist-alert", () => ({ avisarMensajeTardio: m.avisar }));
+vi.mock("@/server/cases/siniestro-nuevo", () => ({ abrirCasoPorSiniestroNuevo: m.cortar }));
 // Los canales de salida al denunciante: si algo los llamara, el agente habría contestado.
 vi.mock("@/server/email/dispatch", () => ({ dispatchOutboundEmail: m.despacharMail }));
 vi.mock("@/server/whatsapp/cloud-api", () => ({
@@ -62,15 +66,18 @@ import { atenderMensajeTardio } from "@/server/cases/mensaje-tardio";
 const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const MSG_ID = "22222222-2222-2222-2222-222222222222";
+const NUEVO = "33333333-3333-3333-3333-333333333333";
 const CUERPO = "Hola, ¿cómo va mi denuncia? Mi DNI es 30111222 y mi mail juan@correo.test";
 
 const datos = drizzle(async (sql, params) => {
   m.consultas.push({ sql, params });
   if (sql.includes('set "mensaje_tardio_de"')) return { rows: m.reserva };
+  if (sql.includes('set "mensaje_tardio_tipo"')) return { rows: m.guardado };
+  if (sql.startsWith('select "case_id" from "claim_messages"')) return { rows: m.dondeEsta };
   return { rows: sql.includes('from "claim_messages"') ? m.ultimo : [] };
 });
 
-const ultimoSql = () => m.consultas.find((c) => c.sql.includes('from "claim_messages"'));
+const ultimoSql = () => m.consultas.find((c) => c.sql.includes('from "claim_messages"') && !c.sql.startsWith('select "case_id"'));
 const reservaSql = () => m.consultas.find((c) => c.sql.includes('set "mensaje_tardio_de"'));
 const guardadoSql = () => m.consultas.find((c) => c.sql.includes('set "mensaje_tardio_tipo"'));
 
@@ -84,7 +91,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.consultas.length = 0;
   m.ultimo = [[MSG_ID, CUERPO, []]];
-  m.reserva = [[CASE_ID]];
+  m.reserva = [[CASE_ID, "email"]];
+  m.guardado = [[CASE_ID]];
+  m.dondeEsta = [];
   m.enTenant.mockImplementation(async (_ctx: unknown, fn: (db: unknown) => unknown) => fn(datos));
   m.motor.mockResolvedValue("gemini");
   m.presupuesto.mockResolvedValue({ exceeded: false });
@@ -192,7 +201,7 @@ describe("la clasificación", () => {
   it("si Gemini falla no tira, deja la clase en null (no «otro») y avisa igual", async () => {
     m.gemini.mockRejectedValue(new Error("transport_timeout"));
 
-    await expect(atender()).resolves.toBeUndefined();
+    await expect(atender()).resolves.toEqual({ casoNuevo: null });
 
     expect(guardadoSql()!.params.slice(0, 2)).toEqual([null, null]);
     expect(m.auditar.mock.calls[0][0].payload).toEqual({ message_id: MSG_ID, tipo: null });
@@ -342,7 +351,101 @@ describe("lo que no hace", () => {
   it("si la base falla no tira: el mensaje ya está guardado y el caso ya está marcado", async () => {
     m.enTenant.mockRejectedValue(new Error("neon"));
 
-    await expect(atender()).resolves.toBeUndefined();
+    await expect(atender()).resolves.toEqual({ casoNuevo: null });
     expect(m.logError).toHaveBeenCalledWith(expect.objectContaining({ case_id: CASE_ID }), "mensaje_tardio.error");
+  });
+});
+
+// Un WhatsApp que cuenta otro siniestro abre un caso nuevo: ni clase ni aviso al equipo.
+describe("el siniestro nuevo por WhatsApp", () => {
+  const otroChoque = () => respuesta({ tipo: "siniestro_nuevo", resumen: "Cuenta otro choque" });
+
+  it.each(["whatsapp", "whatsapp_sim"])("en %s abre el caso nuevo y lo devuelve, sin clase, sin auditoría y sin aviso", async (canal) => {
+    m.reserva = [[CASE_ID, canal]];
+    otroChoque();
+    m.cortar.mockResolvedValue({ tipo: "abierto", casoNuevo: NUEVO, movidos: 1 });
+
+    await expect(atender()).resolves.toEqual({ casoNuevo: NUEVO });
+
+    expect(m.cortar).toHaveBeenCalledWith({ tenantId: TENANT_ID, caseId: CASE_ID, messageId: MSG_ID });
+    expect(guardadoSql()).toBeUndefined();
+    expect(m.auditar).not.toHaveBeenCalled();
+    expect(m.avisar).not.toHaveBeenCalled();
+  });
+
+  it("si otra corrida ya lo mudó, no hace nada: ni clase, ni auditoría ni aviso", async () => {
+    m.reserva = [[CASE_ID, "whatsapp"]];
+    otroChoque();
+    m.cortar.mockResolvedValue({ tipo: "ya_movido" });
+
+    await expect(atender()).resolves.toEqual({ casoNuevo: null });
+
+    expect(guardadoSql()).toBeUndefined();
+    expect(m.auditar).not.toHaveBeenCalled();
+    expect(m.avisar).not.toHaveBeenCalled();
+  });
+
+  it("si no se pudo abrir, sigue como siempre: guarda la clase, audita y avisa", async () => {
+    m.reserva = [[CASE_ID, "whatsapp"]];
+    otroChoque();
+    m.cortar.mockResolvedValue({ tipo: "sigue" });
+
+    await expect(atender()).resolves.toEqual({ casoNuevo: null });
+
+    expect(guardadoSql()!.params).toEqual(expect.arrayContaining(["siniestro_nuevo", "Cuenta otro choque"]));
+    expect(m.auditar.mock.calls[0][0].payload).toEqual({ message_id: MSG_ID, tipo: "siniestro_nuevo" });
+    expect(m.avisar).toHaveBeenCalledWith(expect.objectContaining({ tipo: "siniestro_nuevo" }));
+  });
+
+  it("por correo no se parte: el hilo es la conversación", async () => {
+    otroChoque();
+
+    await atender();
+
+    expect(m.cortar).not.toHaveBeenCalled();
+    expect(m.avisar).toHaveBeenCalledWith(expect.objectContaining({ tipo: "siniestro_nuevo" }));
+  });
+
+  it("una novedad del mismo siniestro no se parte", async () => {
+    m.reserva = [[CASE_ID, "whatsapp"]];
+    respuesta({ tipo: "novedad_mismo_siniestro", resumen: "Manda otra foto" });
+
+    await atender();
+
+    expect(m.cortar).not.toHaveBeenCalled();
+    expect(m.avisar).toHaveBeenCalledWith(expect.objectContaining({ tipo: "novedad_mismo_siniestro" }));
+  });
+
+  it("sin clase (motor mock) no se parte y el aviso sale sin clase", async () => {
+    m.reserva = [[CASE_ID, "whatsapp"]];
+    m.motor.mockResolvedValue("mock");
+
+    await atender();
+
+    expect(m.cortar).not.toHaveBeenCalled();
+    expect(m.avisar).toHaveBeenCalledWith(expect.objectContaining({ tipo: null }));
+  });
+
+  it("si el guardado no pegó porque el mensaje ya está en otro caso, no audita ni avisa", async () => {
+    m.reserva = [[CASE_ID, "whatsapp"]];
+    m.guardado = [];
+    m.dondeEsta = [["otro-caso"]];
+
+    await expect(atender()).resolves.toEqual({ casoNuevo: null });
+
+    expect(m.auditar).not.toHaveBeenCalled();
+    expect(m.avisar).not.toHaveBeenCalled();
+    expect(m.logInfo).toHaveBeenCalledWith({ case_id: CASE_ID, message_id: MSG_ID }, "mensaje_tardio.se_mudo");
+  });
+
+  it("si el guardado no pegó pero el mensaje sigue acá, audita y avisa como siempre", async () => {
+    m.reserva = [[CASE_ID, "whatsapp"]];
+    m.guardado = [];
+    m.dondeEsta = [[CASE_ID]];
+
+    await atender();
+
+    expect(m.auditar).toHaveBeenCalled();
+    expect(m.avisar).toHaveBeenCalled();
   });
 });

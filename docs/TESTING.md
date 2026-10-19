@@ -130,11 +130,14 @@ dos escenarios se reportan sin ensayar, no en rojo.
 
 `escribe-tarde-pregunta-como-va` y `tardio-siniestro-nuevo` (B3) derivan el
 caso en el primer turno y después escriben otra vez: una pregunta por el estado
-y otro choque con otra fecha. El agente no contesta, el caso queda «Para
-responder» y la comprobación `tardio` lee `mensaje_tardio_tipo` en la misma
-consulta que el estado: `consulta_estado` y `siniestro_nuevo`. Un mensaje
-reservado sin clase se lee como `sin_clasificar`. El siniestro nuevo no abre
-otro caso; eso lo decide una persona desde la bandeja.
+y otro choque con otra fecha. A la pregunta el agente no contesta, el caso queda
+«Para responder» y la comprobación `tardio` lee `mensaje_tardio_tipo` en la
+misma consulta que el estado: `consulta_estado`. Un mensaje reservado sin clase
+se lee como `sin_clasificar`. El otro choque, por WhatsApp, abre un caso nuevo
+que contesta el agente (`casoNuevo: true`) y el derivado no cambia: desde ese
+turno el ensayo sigue el caso nuevo y comprueba el anterior con `anterior`. Por
+mail no se parte: el hilo es la conversación, y la clase y el aviso al equipo
+quedan como estaban.
 `mail-tardio-pregunta-como-va` es la misma pregunta por mail, contestando en el
 hilo: el ingreso marca el caso y el worker lo clasifica. Los contactos son los
 inventados del ensayo (`5490000…` y las direcciones reservadas), como en el

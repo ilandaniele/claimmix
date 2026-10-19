@@ -594,6 +594,8 @@ export async function runEmailExtractionWorker(
     retoma?: boolean;
     /** Cuándo mata Vercel esta invocación (epoch ms): puede haber empezado antes que esta corrida. */
     hasta?: number;
+    /** El reloj de la corrida que llamó: una corrida encadenada no reinicia el presupuesto. */
+    arrancó?: number;
   }
 ): Promise<void> {
   // El contexto se arma una vez, acá, a partir del inquilino que llega en la
@@ -601,7 +603,7 @@ export async function runEmailExtractionWorker(
   // forma de que la base sepa de quién es lo que se está tocando.
   const tenantCtx: TenantContext = { tenantId };
   // El reloj de esta corrida. Ver PRESUPUESTO_DE_CORRIDA_MS.
-  const arrancó = Date.now();
+  const arrancó = opts?.arrancó ?? Date.now();
   const restanteMs = () => PRESUPUESTO_DE_CORRIDA_MS - (Date.now() - arrancó);
   const hasta = opts?.hasta ?? arrancó + FUNCION_MAS_CORTA_MS;
   // Declared before try so the catch block can log them if Gemini fails mid-extraction.
@@ -690,6 +692,9 @@ export async function runEmailExtractionWorker(
        * (`@/server/cases/para-responder`): lo marcó el ingreso o, si el mensaje
        * entró mientras corría el worker, la corrida al terminar. No este
        * despacho, que también llega por un re-despacho sin nada nuevo.
+       *
+       * Si el mensaje cuenta otro siniestro, tampoco reabre este caso: pasa a
+       * uno nuevo (`@/server/cases/siniestro-nuevo`) y el agente lo atiende.
        */
       logger.warn({
         case_id: caseId,
@@ -707,7 +712,10 @@ export async function runEmailExtractionWorker(
         payload: { status: caseRow.status, motivo: "estado_no_reanudable" },
       });
       // No lo contesta el agente: sólo se clasifica para quien lo atiende.
-      await atenderMensajeTardio({ tenantId, caseId });
+      const { casoNuevo } = await atenderMensajeTardio({ tenantId, caseId });
+      // Salvo un siniestro nuevo por WhatsApp, que pasó a su propio caso y sí lo
+      // contesta. Sus adjuntos se mudaron con él: acá no queda ninguna carta.
+      if (casoNuevo) return await runEmailExtractionWorker(casoNuevo, tenantId, userId, { hasta, arrancó });
       // Y si trae la carta de un tercero (B24), se la lee para el equipo, aunque
       // el caso no admita «Para responder»: un caso cerrado o derivado también la recibe.
       await leerCartasDespues(() => atenderCartasDeUnTardio({ tenantId, caseId, hasta }));

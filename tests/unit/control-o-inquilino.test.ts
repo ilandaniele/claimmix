@@ -121,7 +121,7 @@ describe("ningún archivo de control vuelve a enTenant", () => {
   };
 
   it.each([
-    ["src/server/email/gmail/accounts.ts", 1],
+    ["src/server/email/gmail/accounts.ts", 2],
     ["src/app/api/admin/gmail-accounts/route.ts", 3],
     ["src/app/api/admin/gmail-accounts/callback/route.ts", 1],
     ["src/app/api/admin/formulario-web/route.ts", 2],

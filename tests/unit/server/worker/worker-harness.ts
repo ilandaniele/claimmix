@@ -402,6 +402,11 @@ export function registrarMocks(opciones: {
   const espiaDeRetoma = vi.fn().mockResolvedValue(undefined);
   vi.doMock("@/server/intake/programar-retoma", () => ({ programarRetoma: espiaDeRetoma }));
 
+  // El corte de un siniestro nuevo se prueba en `siniestro-nuevo.test.ts`; acá no parte.
+  vi.doMock("@/server/cases/siniestro-nuevo", () => ({
+    abrirCasoPorSiniestroNuevo: vi.fn().mockResolvedValue({ tipo: "sigue" }),
+  }));
+
   return { mockDb, espiaDeAuditoria, espiaDeBusqueda, espiaDeRetoma };
 }
 

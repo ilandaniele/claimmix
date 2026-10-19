@@ -8,6 +8,7 @@ const {
   mockDbInsert,
   mockMarcarParaResponder,
   mockMarcarAunqueSiga,
+  mockDondeEste,
   mockDownloadMedia,
   mockCredenciales,
   mockRehost,
@@ -17,6 +18,7 @@ const {
   mockRehost: vi.fn(),
   mockMarcarParaResponder: vi.fn(),
   mockMarcarAunqueSiga: vi.fn(),
+  mockDondeEste: vi.fn(async (id: string) => id),
   mockRunEmailExtractionWorker: vi.fn(),
   mockWriteAuditLog: vi.fn(),
   // select chain: .select().from().where().orderBy().limit()
@@ -93,6 +95,7 @@ vi.mock("@/lib/db/helpers", () => ({
 vi.mock("@/server/cases/para-responder", () => ({
   marcarParaResponder: mockMarcarParaResponder,
   marcarParaResponderAunqueSigaElAgente: mockMarcarAunqueSiga,
+  marcarParaResponderDondeEste: mockDondeEste,
 }));
 
 vi.mock("@/server/worker/extract", () => ({
@@ -117,6 +120,7 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: {
     EMAIL_RECEIVED: "email.received",
     MESSAGE_NOT_READ: "claim.message_not_read",
+    LATE_MESSAGE_SPLIT: "claim.late_message_split",
   },
 }));
 
@@ -450,6 +454,24 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
     expect(params).not.toContain("procesando");
   });
 
+  // Un siniestro nuevo parte el caso: el caso partido ya no junta mensajes.
+  it("un caso partido por un siniestro nuevo ya no junta mensajes", async () => {
+    setupSelectResults([[], []]);
+    setupInsertResults([{ rows: [{ id: "case-nuevo" }] }, { rows: [] }, { rows: [] }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "Hola",
+    });
+
+    const busqueda = mockDbSelect.mock.results[0].value.where.mock.calls[0][0];
+    const { sql, params } = new PgDialect().sqlToQuery(busqueda);
+    expect(sql).toContain("not exists (select 1 from audit_log p");
+    expect(params).toContain("claim.late_message_split");
+    expect(sql).not.toContain("from cases n");
+  });
+
   it("si el agente ya terminó, lo marca el ingreso antes del worker", async () => {
     setupSelectResults([
       [{ id: "case-listo-001", status: "listo" }],
@@ -469,6 +491,89 @@ describe("createWhatsAppIntakeAndRunAgent", () => {
     expect(mockMarcarParaResponder.mock.invocationCallOrder[0]).toBeLessThan(
       mockRunEmailExtractionWorker.mock.invocationCallOrder[0]
     );
+  });
+
+  // Un corte por siniestro nuevo pudo mudar el mensaje mientras bajaban los adjuntos.
+  it("con el mensaje guardado, marca el caso donde está hoy y no marcarParaResponder", async () => {
+    setupSelectResults([
+      [{ id: "case-listo-001", status: "listo" }],
+      [{ id: "case-listo-001", tenant_id: "tenant-001", channel: "whatsapp", status: "listo" }],
+    ]);
+    setupInsertResults([{ rows: [{ id: "msg-1" }] }, { rows: [] }]);
+
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "¿Y ahora qué hago?",
+      providerMessageId: "wamid-nuevo",
+    });
+
+    expect(mockDondeEste).toHaveBeenCalledWith("case-listo-001", "tenant-001", "msg-1");
+    expect(mockMarcarParaResponder).not.toHaveBeenCalled();
+  });
+
+  it("si el mensaje se mudó, el ingreso sigue al caso nuevo: auditoría, resultado y worker", async () => {
+    setupSelectResults([
+      [{ id: "case-listo-001", status: "listo" }],
+      [{ id: "case-nuevo", tenant_id: "tenant-001", channel: "whatsapp", status: "recibido" }],
+    ]);
+    setupInsertResults([{ rows: [{ id: "msg-1" }] }, { rows: [] }]);
+    mockDondeEste.mockResolvedValueOnce("case-nuevo");
+
+    const r = await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "Choqué de nuevo",
+      providerMessageId: "wamid-nuevo",
+    });
+
+    expect(r.caseId).toBe("case-nuevo");
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ event_type: "email.received", target_id: "case-nuevo" })
+    );
+    expect(mockRunEmailExtractionWorker).toHaveBeenCalledWith(
+      "case-nuevo",
+      "tenant-001",
+      null,
+      { retoma: false }
+    );
+  });
+
+  it("el crudo y el mensaje siguen al caso: el lock del mensaje y el caso partido", async () => {
+    setupSelectResults([[], []]);
+    setupInsertResults([{ rows: [{ id: "case-1" }] }, { rows: [{ id: "msg-1" }] }, { rows: [] }]);
+
+    await createWhatsAppIntake({
+      tenantId: "tenant-001",
+      from: "+5491112345678",
+      body: "Hola",
+    });
+
+    const valores = (i: number) =>
+      mockDbInsert.mock.results[i].value.values.mock.calls[0][0] as { case_id: Parameters<PgDialect["sqlToQuery"]>[0] };
+    const mensaje = new PgDialect().sqlToQuery(valores(1).case_id);
+    expect(mensaje.sql).toContain("'caso_nuevo'");
+    expect(mensaje.params).toContain("claim.late_message_split");
+    const crudo = new PgDialect().sqlToQuery(valores(2).case_id);
+    expect(crudo.sql).toContain("for share)");
+    expect(crudo.sql).toContain("coalesce(");
+    expect(crudo.params).toEqual(["msg-1", "case-1"]);
+  });
+
+  it("si marcar donde está falla, el ingreso tira para que Meta reintente", async () => {
+    setupSelectResults([[{ id: "case-listo-001", status: "listo" }]]);
+    setupInsertResults([{ rows: [{ id: "msg-1" }] }, { rows: [] }]);
+    mockDondeEste.mockRejectedValueOnce(new Error("neon"));
+
+    await expect(
+      createWhatsAppIntakeAndRunAgent({
+        tenantId: "tenant-001",
+        from: "+5491112345678",
+        body: "Hola",
+        providerMessageId: "wamid-x",
+      })
+    ).rejects.toThrow("neon");
+    expect(mockRunEmailExtractionWorker).not.toHaveBeenCalled();
   });
 
   // Meta reentrega el mensaje que cerró el caso: marcarlo sin condición dejaba

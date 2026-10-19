@@ -21,7 +21,6 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("next/headers", () => ({ headers: async () => new Headers({ host: "localhost:3000" }) }));
 vi.mock("@/lib/auth/require-role", () => ({
   requireRole: h.requireRole,
   ADMIN_ROLES: ["owner", "admin"],
@@ -42,6 +41,7 @@ vi.mock("@/lib/security/cifrado", () => ({
 vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 
 import { COOKIE_ESTADO_OAUTH } from "@/lib/auth/oauth-state";
+import { urlDeVueltaDeGmail } from "@/lib/auth/base-url";
 import { GET } from "@/app/api/admin/gmail-accounts/connect/route";
 import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
 
@@ -55,7 +55,8 @@ beforeEach(() => {
   h.baseLista.mockResolvedValue(true);
   vi.stubEnv("GMAIL_CLIENT_ID", "fake-client-id");
   vi.stubEnv("GMAIL_CLIENT_SECRET", "fake-client-secret");
-  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
+  vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://app.example.com");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://otro-ambiente.example.com");
 });
 
 describe("conectar Gmail: login_hint", () => {
@@ -124,6 +125,14 @@ describe("conectar Gmail: lo que se le pide a Google", () => {
       "https://www.googleapis.com/auth/gmail.send",
     ]);
     expect(permisos.join(" ")).not.toContain("readonly");
+  });
+
+  it("vuelve al origen del sitio, no al de NEXT_PUBLIC_APP_URL: el mismo redirect_uri que arma el callback", async () => {
+    const res = await GET();
+
+    const vuelta = new URL(res.headers.get("location") ?? "").searchParams.get("redirect_uri");
+    expect(vuelta).toBe("https://app.example.com/api/admin/gmail-accounts/callback");
+    expect(vuelta).toBe(urlDeVueltaDeGmail());
   });
 });
 

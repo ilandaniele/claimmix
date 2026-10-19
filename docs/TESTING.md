@@ -130,11 +130,14 @@ dos escenarios se reportan sin ensayar, no en rojo.
 
 `escribe-tarde-pregunta-como-va` y `tardio-siniestro-nuevo` (B3) derivan el
 caso en el primer turno y después escriben otra vez: una pregunta por el estado
-y otro choque con otra fecha. El agente no contesta, el caso queda «Para
-responder» y la comprobación `tardio` lee `mensaje_tardio_tipo` en la misma
-consulta que el estado: `consulta_estado` y `siniestro_nuevo`. Un mensaje
-reservado sin clase se lee como `sin_clasificar`. El siniestro nuevo no abre
-otro caso; eso lo decide una persona desde la bandeja.
+y otro choque con otra fecha. A la pregunta el agente no contesta, el caso queda
+«Para responder» y la comprobación `tardio` lee `mensaje_tardio_tipo` en la
+misma consulta que el estado: `consulta_estado`. Un mensaje reservado sin clase
+se lee como `sin_clasificar`. El otro choque, por WhatsApp, abre un caso nuevo
+que contesta el agente (`casoNuevo: true`) y el derivado no cambia: desde ese
+turno el ensayo sigue el caso nuevo y comprueba el anterior con `anterior`. Por
+mail no se parte: el hilo es la conversación, y la clase y el aviso al equipo
+quedan como estaban.
 `mail-tardio-pregunta-como-va` es la misma pregunta por mail, contestando en el
 hilo: el ingreso marca el caso y el worker lo clasifica. Los contactos son los
 inventados del ensayo (`5490000…` y las direcciones reservadas), como en el
@@ -1143,6 +1146,15 @@ base quedó atrás de lo que el código espera. Lo mide con una sola consulta a 
 conectarse a cada base. Un desfase o una base en `creando` hace rato dejan el estado en
 `degraded` (el HTTP sigue en 200); el job `PRD` del post-deploy falla si `desfase` es
 verdadero. Sin la bandera, o sin `deep`, `bases` no existe. Ver `src/app/api/health/bases.ts`.
+
+Con el Bearer, con o sin `deep`, la respuesta trae además `banderas`: un objeto plano que va
+del nombre de cada variable a su valor, siempre con las mismas claves, armado sólo con
+`process.env` (no suma consultas). Las banderas salen como `true` o `false`; los topes, como
+número, o `null` si la variable no tiene un número que el código acepte, y entonces rige su
+valor por omisión; los modos, como uno de sus nombres o `desconocido`; los secretos, las
+direcciones y los textos libres, sólo como `true` o `false` (cargados o no), nunca su valor. Va
+aparte de `checks` porque el smoke imprime el `detail` de cada chequeo en los logs de Actions,
+que son públicos. Sin el Bearer sigue el 401 de siempre. Ver `src/app/api/health/banderas.ts`.
 
 ---
 

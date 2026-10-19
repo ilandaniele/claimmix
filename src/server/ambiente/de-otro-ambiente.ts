@@ -1,11 +1,11 @@
 /**
  * Lo que este ambiente no tiene que tocar porque es del otro.
  *
- * prd y dev comparten la app de Meta, el cliente de Google y, hasta el move, las
- * direcciones públicas: un formulario impreso, un número de WhatsApp o una casilla
- * de dev que caen en prd se pierden sin dar ningún error. Cada lista viene del
- * entorno, separada por comas, y se compara sin blancos ni mayúsculas. Sin la
- * variable (dev, QA, local) la lista está vacía y nada de esto cambia nada.
+ * prd y dev comparten la app de Meta, el cliente de Google (hasta que prd tenga el
+ * suyo) y, hasta el move, las direcciones públicas: un formulario impreso, un número de
+ * WhatsApp o una casilla de dev que caen en prd se pierden sin dar ningún error. Cada
+ * lista viene del entorno, separada por comas, y se compara sin blancos ni mayúsculas.
+ * Sin la variable (dev, QA, local) la lista está vacía y nada de esto cambia nada.
  *
  *   SLUGS_DE_DEV             enlaces de /denuncia/<slug> que viven en dev;
  *   NUMEROS_DE_DEV           `phone_number_id` o E.164 de los números de dev;

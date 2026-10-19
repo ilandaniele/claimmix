@@ -15,3 +15,11 @@ export function resolveBaseURL(): string {
 export function urlDeVueltaDelSso(): string {
   return `${resolveBaseURL()}/api/auth${RUTA_DE_VUELTA_SSO}`;
 }
+
+/**
+ * Dónde vuelve Google al conectar una casilla: la arman igual el connect y el
+ * callback, y es la URI registrada en el cliente de GMAIL_CLIENT_ID.
+ */
+export function urlDeVueltaDeGmail(): string {
+  return `${resolveBaseURL()}/api/admin/gmail-accounts/callback`;
+}

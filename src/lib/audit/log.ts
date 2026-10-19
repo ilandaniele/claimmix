@@ -290,6 +290,19 @@ export const AuditEvent = {
   LATE_MESSAGE_ALERTED: "claim.late_message_alerted",
 
   /**
+   * LATE_MESSAGE_SPLIT: un mensaje que llegó a un caso terminado contaba otro
+   * siniestro y pasó a un caso nuevo. Va en el caso de antes.
+   * Payload: { message_id, caso_nuevo, movidos } — nunca el texto.
+   */
+  LATE_MESSAGE_SPLIT: "claim.late_message_split",
+
+  /**
+   * OPENED_FROM_LATE_MESSAGE: el caso nació de ese corte. Va en el caso nuevo.
+   * Payload: { message_id, caso_anterior, movidos } — nunca el texto.
+   */
+  OPENED_FROM_LATE_MESSAGE: "claim.opened_from_late_message",
+
+  /**
    * WORKSHOP_ESTIMATE_READ: alguien del equipo pidió leer el presupuesto de
    * taller de un adjunto (B21). Payload: { attachment_id, leido, motivo,
    * alertas } — nunca los ítems ni los importes.

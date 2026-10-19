@@ -110,6 +110,20 @@ export function auditoriaSiCambia(
   );
 }
 
+/** Un `audit_log` guardado sólo si el caso `caso`, creado antes en el mismo lote, existe. */
+export function auditoriaSiExiste(
+  db: ClienteDatos,
+  a: FilaDeAuditoria & { payload: SQL<Record<string, unknown>> },
+  caso: string
+) {
+  return auditoriaDesdeElCaso(
+    db,
+    a,
+    a.payload,
+    and(eq(cases.id, a.caseId), sql`exists (select 1 from cases n where n.id = ${caso}::uuid)`)
+  );
+}
+
 /**
  * El momento desde el que una derivación vuelve a ser nueva: el último de los
  * dos, o `-infinity` si el caso nunca salió del agente.

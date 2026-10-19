@@ -398,6 +398,8 @@ export const esAR = {
   "audit.claim.specialist_alerted": "Se avisó al especialista",
   "audit.claim.late_message_classified": "Se clasificó el mensaje que llegó tarde",
   "audit.claim.late_message_alerted": "Se avisó al especialista del mensaje nuevo",
+  "audit.claim.late_message_split": "El mensaje contaba otro siniestro: pasó a un caso nuevo",
+  "audit.claim.opened_from_late_message": "Se abrió por otro siniestro que llegó a un caso terminado",
   "audit.claim.workshop_estimate_read": "Se leyó el presupuesto del taller",
   "audit.policy.conditions_uploaded": "Se subieron las condiciones de la póliza",
   "audit.claim.case_reopened": "Se reabrió",

@@ -85,6 +85,7 @@ vi.mock("@/lib/audit/log", async (importOriginal) => ({
 }));
 
 const CASE = "bbbbbbbb-0000-0000-0000-000000000001";
+const NUEVO = "bbbbbbbb-0000-0000-0000-000000000002";
 const TENANT = "cccccccc-0000-0000-0000-000000000001";
 
 /** El caso, en el estado que se le pase. Es el primer SELECT del worker. */
@@ -108,6 +109,7 @@ let dichos: string[];
 beforeEach(() => {
   vi.clearAllMocks();
   mockAudit.mockResolvedValue(undefined);
+  mockTardio.mockResolvedValue({ casoNuevo: null });
   mockUpdate.mockReturnValue({ set: () => ({ where: () => Promise.resolve([]) }) });
   dichos = [];
   vi.spyOn(console, "warn").mockImplementation((...a) => {
@@ -188,6 +190,22 @@ describe("un mensaje a un caso que no se puede reabrir", () => {
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockAgente).not.toHaveBeenCalled();
     expect(mockMessenger).not.toHaveBeenCalled();
+  });
+
+  // Un WhatsApp que cuenta otro siniestro pasó a su propio caso: el agente lo atiende ahí.
+  it("el siniestro nuevo se contesta en su caso, en la misma corrida", async () => {
+    elCasoEsta("requiere_especialista");
+    mockTardio.mockResolvedValueOnce({ casoNuevo: NUEVO }).mockResolvedValueOnce({ casoNuevo: null });
+
+    await correr();
+
+    expect(mockTardio.mock.calls).toEqual([
+      [{ tenantId: TENANT, caseId: CASE }],
+      [{ tenantId: TENANT, caseId: NUEVO }],
+    ]);
+    // Los adjuntos se mudaron con el mensaje: las cartas se leen en el caso nuevo, una vez.
+    expect(mockCartas).toHaveBeenCalledTimes(1);
+    expect(mockCartas).toHaveBeenCalledWith({ tenantId: TENANT, caseId: NUEVO, hasta: expect.any(Number) });
   });
 
   it("pero un caso en un estado normal NO genera el aviso", async () => {

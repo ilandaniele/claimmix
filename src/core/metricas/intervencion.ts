@@ -59,6 +59,8 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "claim.specialist_alerted": false,
   "claim.late_message_classified": false,
   "claim.late_message_alerted": false,
+  "claim.late_message_split": false,
+  "claim.opened_from_late_message": false,
   // Abrir el presupuesto lo pide una persona, pero es leer, no gestionar.
   "claim.workshop_estimate_read": false,
 

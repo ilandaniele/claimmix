@@ -97,7 +97,7 @@ describe("el worker y el mensaje tardío", () => {
       espiaDeUpdate: vi.fn(),
       espiaDeAuditoria: auditar,
     });
-    const atender = falla ? vi.fn().mockRejectedValue(new Error("neon")) : vi.fn().mockResolvedValue(undefined);
+    const atender = falla ? vi.fn().mockRejectedValue(new Error("neon")) : vi.fn().mockResolvedValue({ casoNuevo: null });
     vi.doMock("@/server/cases/mensaje-tardio", () => ({ atenderMensajeTardio: atender }));
     const cartas = vi.fn().mockResolvedValue(undefined);
     vi.doMock("@/server/cases/lectura-reclamo", () => ({ atenderCartas: vi.fn(), atenderCartasDeUnTardio: cartas }));

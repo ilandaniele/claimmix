@@ -6,9 +6,9 @@
  * vía `puedeDevolverAlAgente`) como el PATCH.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notExists, sql, type SQL } from "drizzle-orm";
 import type { ClienteDatos } from "@/data/scope";
-import { auditLog } from "@/lib/db/schema";
+import { auditLog, cases } from "@/lib/db/schema";
 import { AuditEvent } from "@/lib/audit/log";
 
 export const MOTIVO_DEVOLVER = "devolver_al_agente" as const;
@@ -42,7 +42,7 @@ export type UltimoMovimiento = { event_type: string; payload: unknown } | null |
  * Query builder, sin resolver: se mete en el batch de `leerEstadoDeAcciones`
  * (para el botón) y en el de `patchCase` (para la guarda de verdad).
  */
-export function consultaDelUltimoMovimiento(db: ClienteDatos, caseId: string) {
+export function consultaDelUltimoMovimiento(db: ClienteDatos, caseId: string | SQL) {
   return db
     .select({ event_type: auditLog.event_type, payload: auditLog.payload })
     .from(auditLog)
@@ -62,4 +62,18 @@ export function esDevolvible(ultimo: UltimoMovimiento): boolean {
   if (!ultimo || ultimo.event_type !== AuditEvent.CASE_STATUS_CHANGED) return false;
   const payload = ultimo.payload as { reason?: unknown; new_status?: unknown } | null;
   return payload?.reason === MOTIVO_TOMAR && payload?.new_status === "requiere_especialista";
+}
+
+/** Misma regla que `esDevolvible`, dentro de una sentencia. Correlacionado con `cases.id`. */
+export function noLoTomoUnaPersona(db: ClienteDatos): SQL {
+  const u = consultaDelUltimoMovimiento(db, sql`${cases.id}::text`).as("u");
+  return notExists(
+    db.select({ uno: sql`1` }).from(u).where(
+      and(
+        eq(u.event_type, AuditEvent.CASE_STATUS_CHANGED),
+        sql`${u.payload}->>'reason' = ${MOTIVO_TOMAR}`,
+        sql`${u.payload}->>'new_status' = ${"requiere_especialista"}`
+      )
+    )
+  );
 }

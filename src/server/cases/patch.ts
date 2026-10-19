@@ -36,7 +36,12 @@ import {
   type CriteriosDeTrabajo,
 } from "@/server/cases/efectos-de-transicion";
 import { guardaDeAsignacion } from "@/server/cases/guarda-de-asignacion";
-import { consultaDelUltimoMovimiento, esDevolvible, MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
+import {
+  consultaDelUltimoMovimiento,
+  esDevolvible,
+  MOTIVO_DEVOLVER,
+  MOTIVO_TOMAR,
+} from "@/server/cases/devolver-al-agente";
 import { AppError } from "@/lib/errors";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
@@ -251,7 +256,10 @@ export async function patchCase(
       : AuditEvent.CASE_STATUS_CHANGED;
   if (patch.assigned_to !== undefined) {
     // Un cierre queda como cierre aunque reasigne: el reenvío lee `case.closed`.
-    if (eventType === AuditEvent.CASE_STATUS_CHANGED) eventType = AuditEvent.CASE_ASSIGNED;
+    // Una toma queda como cambio de estado: la guarda del agente lee `case.status_changed`.
+    if (eventType === AuditEvent.CASE_STATUS_CHANGED && patch.reason !== MOTIVO_TOMAR) {
+      eventType = AuditEvent.CASE_ASSIGNED;
+    }
     auditPayload.assigned_to = patch.assigned_to;
     auditPayload.assigned_from = current.assigned_to;
   }
@@ -261,7 +269,7 @@ export async function patchCase(
     hacia !== undefined ? { criterios: criteriosDeTrabajo(current, current.claim_type), actorId: actor.id } : undefined;
 
   // ── 5. Apply update (tenant filter ensures only tenant-matching rows) ──────
-  if (patch.confirmar_listo || salidaAMano) {
+  if (patch.confirmar_listo || salidaAMano || patch.reason === MOTIVO_TOMAR) {
     const updated = await cambiarConAuditoria(
       tenantCtx,
       { caseId, desde, hacia: destino, set: updateData, asignacion, equipo },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CASILLA_VENCIDA } from "@/core/gmail";
 import { useT } from "@/lib/i18n/LocaleContext";
 
 type Account = {
@@ -111,38 +112,51 @@ export function GmailAccountsPanel() {
         </p>
       ) : (
         <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
-          {accounts.map((account) => (
-            <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
-              <div>
-                <p className="text-sm font-medium text-slate-800">{account.email}</p>
-                <p className="text-xs text-slate-500">
-                  {account.last_error
-                    ? t("gmail.accounts.error")
-                    : account.last_connected_at
-                      ? t("gmail.accounts.connected")
-                      : t("gmail.accounts.pending")}
-                </p>
+          {accounts.map((account) => {
+            const vencida = account.last_error === CASILLA_VENCIDA;
+            return (
+              <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{account.email}</p>
+                  <p className={vencida ? "text-xs text-red-700" : "text-xs text-slate-500"}>
+                    {vencida
+                      ? t("gmail.accounts.expired")
+                      : account.last_error
+                        ? t("gmail.accounts.error")
+                        : account.last_connected_at
+                          ? t("gmail.accounts.connected")
+                          : t("gmail.accounts.pending")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {vencida && (
+                    <a
+                      href="/api/admin/gmail-accounts/connect"
+                      className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t("gmail.accounts.reconnect")}
+                    </a>
+                  )}
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={account.enabled}
+                      onChange={(e) => void setEnabled(account.id, e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    {t("gmail.accounts.enabled")}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void removeAccount(account.id)}
+                    className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                  >
+                    {t("gmail.accounts.remove")}
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <label className="inline-flex items-center gap-2 text-xs text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={account.enabled}
-                    onChange={(e) => void setEnabled(account.id, e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300"
-                  />
-                  {t("gmail.accounts.enabled")}
-                </label>
-                <button
-                  type="button"
-                  onClick={() => void removeAccount(account.id)}
-                  className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
-                >
-                  {t("gmail.accounts.remove")}
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

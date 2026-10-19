@@ -45,7 +45,7 @@
 
 import "server-only";
 import { getGmailClient } from "./gmail-client";
-import { getGmailAccountByEmail, listEnabledGmailAccounts, type GmailAccount } from "./accounts";
+import { getGmailAccountByEmail, listEnabledGmailAccounts, marcarCasillaVencida, type GmailAccount } from "./accounts";
 import {
   getOrCreatePollState,
   advancePollState,
@@ -62,6 +62,7 @@ import { dispatchExtractionWorker } from "@/server/worker/despachar-extraccion";
 import { sinLosCuerposYaDecodificados } from "@/server/email/gmail/payload-sin-duplicados";
 import type { gmail_v1 } from "@googleapis/gmail";
 import { logger } from "@/lib/observability/logger";
+import { esPermisoRevocado } from "@/core/gmail";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,11 @@ export interface GmailPollAccount {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Google contestó invalid_grant: el panel tiene que mostrar la casilla vencida. La del entorno no tiene fila. */
+async function anotarSiVencio(err: unknown, account: GmailPollAccount | undefined, tenantId: string, email: string): Promise<void> {
+  if (account?.refreshToken && esPermisoRevocado(err)) await marcarCasillaVencida(tenantId, email);
+}
 
 /**
  * Extract a single header value by name from a Gmail message part's headers.
@@ -524,6 +530,7 @@ export async function pollGmail(
         const code = listErr instanceof Error ? listErr.name : "UnknownError";
         logger.error({ code }, "gmail_poller.messages_list_fallback_error");
         await recordPollError(pollState.id, `messages_list_failed: ${code}`);
+        await anotarSiVencio(listErr, account, tenantId, gmailEmail);
         return {
           processed: 0,
           skipped: 0,
@@ -538,6 +545,7 @@ export async function pollGmail(
       const code = err instanceof Error ? err.name : "UnknownError";
       logger.error({ code }, "gmail_poller.history_list_error");
       await recordPollError(pollState.id, `history_list_failed: ${code}`);
+      await anotarSiVencio(err, account, tenantId, gmailEmail);
       return {
         processed: 0,
         skipped: 0,
@@ -579,6 +587,7 @@ export async function pollGmail(
       const code = listErr instanceof Error ? listErr.name : "UnknownError";
       logger.error({ code }, "gmail_poller.messages_list_first_run_error");
       await recordPollError(pollState.id, `first_run_list_failed: ${code}`);
+      await anotarSiVencio(listErr, account, tenantId, gmailEmail);
       return {
         processed: 0,
         skipped: 0,

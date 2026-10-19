@@ -569,10 +569,10 @@ proyecto de Neon `claimmix-prd`, que sólo usa `pnpm bases:probar` (secretos `PR
 prd tiene todo propio: el bucket `claimmix-prd-attachments` de R2, el pool WIF `vercel-prd`
 (su condición mira el proyecto `claimmix-prd`), el topic de Pub/Sub `gmail-push-prd` con su
 suscripción `gmail-push-prd-sub`, y `CRON_SECRET`, `BETTER_AUTH_SECRET` y clave de cifrado
-nuevos. Comparte con dev la app de Meta, la WABA (con su token) y el cliente OAuth de
-Google. Por eso los webhooks de dev necesitan un override en Meta, y prd lleva las guardas
-«de otro ambiente»: `SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV` y
-`URL_DEL_OTRO_AMBIENTE` (ver `.env.example`).
+nuevos. Comparte con dev la app de Meta, la WABA (con su token) y, hasta que tenga el suyo
+(proyecto de Google Cloud propio, por crear), el cliente OAuth de Google. Por eso los
+webhooks de dev necesitan un override en Meta, y prd lleva las guardas «de otro ambiente»:
+`SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV` y `URL_DEL_OTRO_AMBIENTE` (ver `.env.example`).
 
 ### El camino a prd
 
@@ -642,11 +642,11 @@ navegador) o el asistente.
 2. Asistente: el alias `claimmix-dev.vercel.app` en el proyecto `claimmix`, sirviendo el mismo
    deploy de dev. Los workflows ya lo usan como URL por defecto: tiene que existir antes de
    que esos cambios lleguen a `main`.
-3. Dueño: en Google Cloud, los orígenes y los redirect URIs de `claimmix-dev.vercel.app` y de
-   `claimmix-prd.vercel.app` (las mismas rutas que hoy tiene `claimmix.vercel.app`, la del
-   callback de las casillas de Gmail incluida), y la pantalla de consentimiento publicada:
-   con los scopes de Gmail sin verificar hay un tope de 100 usuarios, compartido por todos
-   los clientes del proyecto (dev, QA y prd). En Cloudflare, los dos hostnames en Turnstile.
+3. Dueño: en Google Cloud, el origen y las dos redirect URIs de `claimmix-dev.vercel.app` y de
+   `claimmix-prd.vercel.app`, una por cliente OAuth (la lista de cada host, QA incluido, está en
+   «Las URI de Google, una por host», más abajo), y la pantalla de consentimiento publicada:
+   con los scopes de Gmail sin verificar hay un tope de 100 usuarios por proyecto, que
+   comparten dev y QA (prd tiene proyecto propio). En Cloudflare, los dos hostnames en Turnstile.
 4. Asistente: el inventario de dev, con SELECT sobre la base de dev: números conectados,
    casillas de Gmail, slugs de formulario, SSO, claves de API v1, invitaciones y
    verificaciones vivas. Llena `SLUGS_DE_DEV`, `NUMEROS_DE_DEV` y `CASILLAS_DE_DEV`.
@@ -675,8 +675,8 @@ navegador) o el asistente.
    siempre: la suscripción no cambia con el move.
 10. Asistente: las variables de prd. Desde el 17/10 los secretos los pega el dueño en la
     pantalla de Vercel (Settings > Environment Variables), nunca por chat ni por script, y el
-    asistente carga sólo banderas y topes: `scripts/sync-vercel-env.mjs` no se corre para prd
-    ni para QA. Qué lleva está en la lista de abajo.
+    asistente carga sólo banderas y topes. Salvo `GMAIL_CLIENT_*` y el remitente: los carga
+    el dueño con `scripts/token-remitente.mts --vercel`. Qué lleva está en la lista de abajo.
 11. Asistente: `gh secret set PRD_CRON_SECRET`, `gh variable set PRD_URL --body
     https://claimmix-prd.vercel.app` y la rama `prd`, creada por API desde el SHA de `main`.
 12. Asistente: el primer deploy de prd (PR de `main` a `prd`), el login del operador en
@@ -804,11 +804,45 @@ que faltan columnas, y la ve el post-deploy: `bases.desfase`.
    la 2).
 2. Meta permite 2 números en la WABA hasta verificar el negocio.
 3. La pantalla de consentimiento de Google tiene que estar publicada, y sus scopes de Gmail
-   sin verificar tienen un tope de 100 usuarios que comparten dev, QA y prd.
+   sin verificar tienen un tope de 100 usuarios por proyecto: dev y QA, y prd aparte.
 4. Hecho el 09/10: Vercel aceptó mover `claimmix.vercel.app` a `claimmix-prd`.
 5. Los términos de Vercel Hobby son de uso no comercial, y prd con clientes que pagan choca
    con eso. El dueño decidió no usar planes pagos; queda señalado.
 6. Hecho: `HOST_DE_BASE_PRD` es `ep-sweet-salad` (`scripts/lib/hosts-vetados.mjs`).
+
+### Las URI de Google, una por host
+
+El login con Google (Better Auth) y la conexión de casillas arman su `redirect_uri` con
+`NEXT_PUBLIC_SITE_URL` (`resolveBaseURL()` y `urlDeVueltaDeGmail()` en
+`src/lib/auth/base-url.ts`): una por ambiente, sin importar por qué host entró el navegador.
+Cada URI va en su cliente OAuth; si `GOOGLE_CLIENT_ID` y `GMAIL_CLIENT_ID` son el mismo
+cliente, las dos van en ése.
+
+Cada ambiente lleva su cliente de Gmail: dev el suyo, QA `claimmix-qa` (en el mismo proyecto
+de Google Cloud que el de dev) y prd, por decisión del dueño del 18/10, uno propio en su propio
+proyecto de Google Cloud, pendiente de crear. Hasta entonces prd usa el de dev.
+
+| Ambiente | Host (`NEXT_PUBLIC_SITE_URL`) | Login, cliente de `GOOGLE_CLIENT_ID` | Casillas, cliente de `GMAIL_CLIENT_ID` |
+|---|---|---|---|
+| prd | `https://claimmix.vercel.app` | `https://claimmix.vercel.app/api/auth/callback/google` | `https://claimmix.vercel.app/api/admin/gmail-accounts/callback` |
+| dev | `https://claimmix-dev.vercel.app` | `https://claimmix-dev.vercel.app/api/auth/callback/google` | `https://claimmix-dev.vercel.app/api/admin/gmail-accounts/callback` |
+| QA | `https://claimmix-qa.vercel.app` | `https://claimmix-qa.vercel.app/api/auth/callback/google` | `https://claimmix-qa.vercel.app/api/admin/gmail-accounts/callback` |
+| local | `http://localhost:3000` | `http://localhost:3000/api/auth/callback/google` | `http://localhost:3000/api/admin/gmail-accounts/callback` |
+
+- `claimmix-prd.vercel.app` queda por la suscripción de Pub/Sub (paso 9), pero no se entra
+  por ahí, porque Better Auth sólo acepta su `NEXT_PUBLIC_SITE_URL`; si sus URI están, no
+  molestan.
+- Las vistas previas (host con hash) no tienen URI: ni el login con Google ni Gmail andan
+  ahí.
+- Cada cliente de `GMAIL_CLIENT_ID` lleva además `http://127.0.0.1:53682/`, la vuelta de
+  `scripts/token-remitente.mts`. Con `--vercel claimmix-qa` o `--vercel claimmix-prd`, el
+  script sube a ese proyecto el cliente de su archivo (`.env.qa.local`, `.env.prd.local`) y el
+  remitente.
+- La URI de Gmail de prd va en el cliente `claimmix-prd`, del proyecto de Google Cloud propio
+  de prd, con su pantalla de consentimiento publicada y su propio tope de 100 usuarios sin
+  verificar. Hasta que exista, va en el de dev.
+- Si falta una URI, Google muestra `redirect_uri_mismatch`. Un `NEXT_PUBLIC_SITE_URL` con
+  barra final deja la de Gmail con `//` y da el mismo error.
 
 ## Dos trampas que ya están resueltas, y conviene no reabrir
 

@@ -25,9 +25,11 @@ const {
   mockGetProfile,
   mockInsert,
   mockRequireRole,
+  mockOAuth2,
   baseSimulada,
 } = vi.hoisted(() => ({
   baseSimulada: { actual: null as unknown },
+  mockOAuth2: vi.fn(),
   mockSetupGmailWatch: vi.fn(),
   mockGetToken: vi.fn(),
   mockGetProfile: vi.fn(),
@@ -66,6 +68,9 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@googleapis/gmail", () => ({
   auth: {
     OAuth2: class {
+      constructor(...args: unknown[]) {
+        mockOAuth2(...args);
+      }
       getToken = mockGetToken;
       setCredentials = vi.fn();
     },
@@ -152,6 +157,7 @@ describe("GET /api/admin/gmail-accounts/callback", () => {
     delete process.env.GMAIL_CLIENT_ID;
     delete process.env.GMAIL_CLIENT_SECRET;
     delete process.env.PUBSUB_TOPIC;
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -161,6 +167,20 @@ describe("GET /api/admin/gmail-accounts/callback", () => {
 
     expect(res.status).toBe(307);
     expect(destino(res)).toBe("connected");
+  });
+
+  it("vuelve al origen del sitio y pide el token con el mismo redirect_uri que armó el connect", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://app.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://otro-ambiente.example.com");
+
+    const res = await GET(makeRequest());
+
+    expect(mockOAuth2).toHaveBeenCalledWith(
+      "client-id",
+      "client-secret",
+      "https://app.example.com/api/admin/gmail-accounts/callback"
+    );
+    expect(new URL(res.headers.get("location") ?? "").origin).toBe("https://app.example.com");
   });
 
   it("vuelve a registrar el aviso de push con el permiso recién emitido", async () => {

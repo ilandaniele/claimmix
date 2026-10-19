@@ -142,8 +142,8 @@ describe("GET /api/admin/gmail-accounts/callback — casilla de otra aseguradora
     expect(destino(res)).toBe("mailbox_taken");
     expect(mockInsert).not.toHaveBeenCalled();
     expect(mockSetupGmailWatch).not.toHaveBeenCalled();
-    // El nonce se quema igual que en invalid_state.
-    expect(res.headers.get("set-cookie")).toMatch(/gmail_oauth_state=;/);
+    // El nonce se quema igual que en invalid_state, en la ruta donde lo puso el connect.
+    expect(res.headers.get("set-cookie")).toMatch(/gmail_oauth_state=;.*Path=\/api\/admin\/gmail-accounts/);
   });
 
   it("rechaza también la casilla apagada de otra aseguradora", async () => {

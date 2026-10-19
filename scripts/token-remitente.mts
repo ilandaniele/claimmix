@@ -25,10 +25,16 @@
  * producción, como variable sensible, junto con `ALTA_REMITENTE_CORREO` (por eso
  * pide `--correo`). Viaja por la entrada estándar de la CLI de Vercel, no por la
  * línea de comandos. Pide `vercel` en el PATH con sesión iniciada, y lo prueba
- * antes del consentimiento. Cada proyecto lleva el cliente de su ambiente:
- * `claimmix` (dev) sólo acepta el de `.env.local`; cualquier otro pide
- * `--archivo` con el suyo, que no puede ser `.env.local`. claimmix-prd todavía
- * no se carga así: se pega a mano. Sin `--vercel`, el token se imprime.
+ * antes del consentimiento. Cada proyecto lleva el cliente de su ambiente, y el
+ * archivo del que sale es el suyo: `claimmix` (dev) `.env.local`, `claimmix-qa`
+ * `.env.qa.local`, `claimmix-prd` `.env.prd.local`. Con `--vercel`, `--archivo`
+ * sólo puede nombrar ese mismo archivo. Fuera de `claimmix`, el cliente no puede
+ * repetir el de otro de esos archivos. Sin `--vercel`, el token se imprime.
+ *
+ * Con `--vercel` distinto de `claimmix` el script también sube `GMAIL_CLIENT_ID`
+ * y `GMAIL_CLIENT_SECRET` del archivo, como sensibles y con el target que ya
+ * tienen en ese proyecto (`production` si no están). Lo hace antes del
+ * consentimiento, para que un error de Vercel salga antes de emitir el token.
  *
  * Sólo pide el permiso de enviar (`gmail.send`): esta casilla no lee ni borra
  * nada. El flujo es el de loopback con PKCE; el token no se escribe en ningún
@@ -47,6 +53,14 @@ import { parseArgs } from "node:util";
 const ALCANCE = "https://www.googleapis.com/auth/gmail.send";
 const ESPERA_MAXIMA_MS = 5 * 60_000;
 
+// Proyecto de Vercel → archivo con el cliente OAuth de su ambiente.
+const ARCHIVO_DE = {
+  claimmix: ".env.local",
+  "claimmix-qa": ".env.qa.local",
+  "claimmix-prd": ".env.prd.local",
+} as const;
+type Proyecto = keyof typeof ARCHIVO_DE;
+
 const { values } = parseArgs({
   options: {
     puerto: { type: "string", default: "53682" },
@@ -62,27 +76,18 @@ if (!Number.isInteger(puerto) || puerto < 0 || puerto > 65535) {
   process.exit(2);
 }
 
-// El cliente sale de un solo archivo: el de --archivo o, sin él, .env.local (dev).
-const ruta = values.archivo ?? ".env.local";
-// Windows no distingue mayúsculas: `.ENV.LOCAL` es el mismo archivo.
-const esDeDev = resolve(ruta).toLowerCase() === resolve(".env.local").toLowerCase();
+const proyecto = values.vercel as Proyecto | undefined;
+if (proyecto !== undefined && !Object.hasOwn(ARCHIVO_DE, proyecto)) {
+  console.error("--vercel: claimmix, claimmix-qa o claimmix-prd.");
+  process.exit(2);
+}
 
-const proyecto = values.vercel;
+// El cliente sale de un solo archivo: el de --archivo o, sin él, el del proyecto (sin --vercel, .env.local).
+const ruta = values.archivo ?? (proyecto === undefined ? ARCHIVO_DE.claimmix : ARCHIVO_DE[proyecto]);
 if (proyecto !== undefined) {
-  if (!/^[a-z0-9-]+$/.test(proyecto)) {
-    console.error(`--vercel ${proyecto}: el nombre no es válido.`);
-    process.exit(2);
-  }
-  if (proyecto === "claimmix-prd") {
-    console.error("claimmix-prd no se carga desde .env.local: corré sin --vercel y pegalo a mano.");
-    process.exit(2);
-  }
-  if (proyecto === "claimmix" && !esDeDev) {
-    console.error("--vercel claimmix lleva el cliente de .env.local: es el de dev.");
-    process.exit(2);
-  }
-  if (proyecto !== "claimmix" && esDeDev) {
-    console.error(`--vercel ${proyecto} pide --archivo con el cliente de ese ambiente: el de .env.local es el de dev.`);
+  // Windows no distingue mayúsculas: `.ENV.LOCAL` es el mismo archivo.
+  if (resolve(ruta).toLowerCase() !== resolve(ARCHIVO_DE[proyecto]).toLowerCase()) {
+    console.error(`--vercel ${proyecto} carga sólo desde ${ARCHIVO_DE[proyecto]}.`);
     process.exit(2);
   }
   if (!values.correo) {
@@ -107,6 +112,23 @@ function leerCliente(): { id: string; secreto: string } {
   const faltan = [id ? "" : "GMAIL_CLIENT_ID", secreto ? "" : "GMAIL_CLIENT_SECRET"].filter(Boolean);
   console.error(`${ruta}: ${faltan.length === 1 ? "falta" : "faltan"} ${faltan.join(" y ")}.`);
   process.exit(2);
+}
+
+// Fuera de dev, el cliente no puede ser el de otro ambiente: el token saldría de uno que este no usa. Los valores no se muestran.
+const repetido = proyecto === undefined || proyecto === "claimmix" ? undefined : clienteRepetidoEn(proyecto);
+if (repetido) {
+  console.error(`${ruta} trae el mismo cliente OAuth que ${repetido}: ${proyecto} lleva el suyo.`);
+  process.exit(2);
+}
+function clienteRepetidoEn(p: Proyecto): string | undefined {
+  return Object.values(ARCHIVO_DE).find((otro) => {
+    if (otro === ARCHIVO_DE[p]) return false;
+    try {
+      return dotenv.parse(readFileSync(otro, "utf8")).GMAIL_CLIENT_ID?.trim() === cliente.id;
+    } catch {
+      return false;
+    }
+  });
 }
 
 // Se lee antes del consentimiento: si después la carga no puede salir, el token canjeado se pierde.
@@ -225,13 +247,19 @@ function vercelApi(ruta: string, motivo: string, cuerpo?: object): string {
   }
 }
 
-/** Crea o reemplaza una variable de producción del proyecto. */
-function cargarEnVercel(destino: string, key: string, value: string, type: "encrypted" | "sensitive") {
+/** Crea o reemplaza una variable del proyecto; sin `target`, la de producción. */
+function cargarEnVercel(
+  destino: string,
+  key: string,
+  value: string,
+  type: "encrypted" | "sensitive",
+  target: string[] = ["production"],
+) {
   const salida = vercelApi(`/v10/projects/${destino}/env?upsert=true`, `Vercel no cargó ${key}`, {
     key,
     value,
     type,
-    target: ["production"],
+    target,
   });
   let respuesta: { error?: { code?: string; message?: string } };
   try {
@@ -243,15 +271,40 @@ function cargarEnVercel(destino: string, key: string, value: string, type: "encr
   if (respuesta.error) throw new Error(`Vercel rechazó ${key}: ${respuesta.error.code ?? respuesta.error.message}`);
 }
 
+/** Sube el cliente OAuth del archivo con el target que esas variables ya tienen en el proyecto. */
+function cargarCliente(destino: string) {
+  const salida = vercelApi(`/v10/projects/${destino}/env`, "No pude listar las variables de Vercel");
+  let lista: { envs?: { key?: string; target?: string[] }[]; error?: { code?: string; message?: string } };
+  try {
+    lista = JSON.parse(salida);
+  } catch {
+    // La lista trae los valores cifrados, y el mensaje de JSON.parse cita un pedazo: no se muestra.
+    throw new Error("Vercel devolvió algo que no es JSON al listar las variables.");
+  }
+  if (lista.error) throw new Error(`Vercel rechazó listar las variables: ${lista.error.code ?? lista.error.message}`);
+  if (!lista.envs) throw new Error("Vercel no devolvió la lista de variables.");
+  for (const [key, valor] of [
+    ["GMAIL_CLIENT_ID", cliente.id],
+    ["GMAIL_CLIENT_SECRET", cliente.secreto],
+  ]) {
+    const target = lista.envs.find((e) => e.key === key && e.target?.includes("production"))?.target ?? ["production"];
+    cargarEnVercel(destino, key, valor, "sensitive", target);
+    console.error(`${key} cargada en ${destino} (${target.join(", ")}).`);
+  }
+}
+
 try {
   // La CLI, la sesión y el nombre del proyecto se prueban antes de pedir el consentimiento.
   if (proyecto) vercelApi(`/v9/projects/${proyecto}`, `No pude ver el proyecto ${proyecto} en Vercel`);
+  // El cliente de dev ya está en su proyecto; el de los otros ambientes se sube antes de emitir el token.
+  if (proyecto && proyecto !== "claimmix") cargarCliente(proyecto);
   const { codigo, redirectUri } = await esperarCodigo();
   const token = await canjear(codigo, redirectUri);
   if (proyecto && values.correo) {
     cargarEnVercel(proyecto, "ALTA_REMITENTE_CORREO", values.correo, "encrypted");
     cargarEnVercel(proyecto, "ALTA_REMITENTE_REFRESH_TOKEN", token, "sensitive");
-    console.error(`\n✓ ALTA_REMITENTE_CORREO y ALTA_REMITENTE_REFRESH_TOKEN cargadas en ${proyecto} (production). Las toma el próximo deploy.`);
+    console.error(`\n✓ ALTA_REMITENTE_CORREO y ALTA_REMITENTE_REFRESH_TOKEN cargadas en ${proyecto} (production).`);
+    console.error(`Las variables valen desde el próximo deploy de ${proyecto}.`);
   } else {
     console.error("\nPegalo en Vercel como ALTA_REMITENTE_REFRESH_TOKEN, junto con ALTA_REMITENTE_CORREO (la casilla con la que entraste):\n");
     console.log(token);

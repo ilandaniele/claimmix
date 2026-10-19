@@ -11,7 +11,11 @@
 import { describe, it, expect } from "vitest";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pg-proxy";
-import { auditoriaSiEsDerivacionNueva, auditoriaSiQuedo } from "@/server/cases/auditoria-si-quedo";
+import {
+  auditoriaSiEsDerivacionNueva,
+  auditoriaSiExiste,
+  auditoriaSiQuedo,
+} from "@/server/cases/auditoria-si-quedo";
 
 const db = drizzle(async () => ({ rows: [] }));
 
@@ -73,5 +77,33 @@ describe("auditoriaSiEsDerivacionNueva", () => {
     expect(texto).toContain("a.event_type in ('case.status_changed'");
     expect(texto).not.toContain("ai.extraction_complete");
     expect(texto).not.toContain("ai.extracted");
+  });
+});
+
+describe("auditoriaSiExiste", () => {
+  const CASO = "00000000-0000-0000-0000-000000000001";
+  const NUEVO = "00000000-0000-0000-0000-000000000009";
+  const consulta = () =>
+    auditoriaSiExiste(
+      db as never,
+      {
+        caseId: CASO,
+        actorId: null,
+        eventType: "claim.late_message_split",
+        payload: sql<Record<string, unknown>>`'{"movidos":2}'::jsonb`,
+      },
+      NUEVO
+    ).toSQL();
+
+  it("arma el INSERT ... SELECT con todas las columnas de audit_log, sin devolver fila", () => {
+    const { sql: texto } = consulta();
+    expect(texto).toMatch(/^insert into "audit_log" \("id", "tenant_id", .*"created_at"\) select /);
+    expect(texto).not.toContain("returning");
+  });
+
+  it("sólo inserta si el caso nuevo del mismo lote existe", () => {
+    const { sql: texto, params } = consulta();
+    expect(texto).toContain("exists (select 1 from cases n where n.id = $");
+    expect(params).toEqual(expect.arrayContaining([CASO, NUEVO, "claim.late_message_split"]));
   });
 });

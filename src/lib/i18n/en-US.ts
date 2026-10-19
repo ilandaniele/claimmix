@@ -381,6 +381,8 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "audit.claim.specialist_alerted": "Specialist notified",
   "audit.claim.late_message_classified": "Late message classified",
   "audit.claim.late_message_alerted": "Specialist notified of the new message",
+  "audit.claim.late_message_split": "The message reported another claim and moved to a new case",
+  "audit.claim.opened_from_late_message": "Opened for another claim sent to a finished case",
   "audit.claim.workshop_estimate_read": "Workshop estimate read",
   "audit.policy.conditions_uploaded": "Policy conditions uploaded",
   "audit.claim.case_reopened": "Reopened",

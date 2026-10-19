@@ -329,7 +329,7 @@ describe("patchCase — tomar el control (D-F2)", () => {
       extraction_lease_at: new Date(Date.now() - 10 * 60_000).toISOString(),
     };
     const updatedCase = { ...infoFaltanteCase, status: "requiere_especialista" };
-    setupPatchMocks([infoFaltanteCase], [updatedCase]);
+    setupConfirmMocks([infoFaltanteCase], [updatedCase]);
 
     const result = await patchCase(
       "case-1",
@@ -344,7 +344,7 @@ describe("patchCase — tomar el control (D-F2)", () => {
   it("sin reserva (extraction_lease_at null), pasar a requiere_especialista da ok", async () => {
     const infoFaltanteCase = { ...listoCase, status: "info_faltante", extraction_lease_at: null };
     const updatedCase = { ...infoFaltanteCase, status: "requiere_especialista" };
-    setupPatchMocks([infoFaltanteCase], [updatedCase]);
+    setupConfirmMocks([infoFaltanteCase], [updatedCase]);
 
     const result = await patchCase(
       "case-1",
@@ -354,6 +354,51 @@ describe("patchCase — tomar el control (D-F2)", () => {
       null
     );
     expect(result.case.status).toBe("requiere_especialista");
+  });
+
+  it("la toma y su auditoría van en un solo lote: nada se escribe aparte", async () => {
+    const infoFaltanteCase = { ...listoCase, status: "info_faltante", extraction_lease_at: null };
+    setupConfirmMocks([infoFaltanteCase], [{ ...infoFaltanteCase, status: "requiere_especialista" }]);
+
+    await patchCase(
+      "case-1",
+      { status: "requiere_especialista", reason: "tomar_el_control" },
+      adminActor,
+      null,
+      null
+    );
+
+    expect(auditoriaSiQuedo).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: "case.status_changed",
+        payload: {
+          reason: "tomar_el_control",
+          old_status: "info_faltante",
+          new_status: "requiere_especialista",
+        },
+      }),
+      "requiere_especialista"
+    );
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("una toma que también reasigna sigue auditada como cambio de estado", async () => {
+    const infoFaltanteCase = { ...listoCase, status: "info_faltante", extraction_lease_at: null };
+    setupConfirmMocks([infoFaltanteCase], [{ ...infoFaltanteCase, status: "requiere_especialista", assigned_to: "analyst-id" }]);
+
+    await patchCase(
+      "case-1",
+      { status: "requiere_especialista", reason: "tomar_el_control", assigned_to: "analyst-id" },
+      adminActor,
+      null,
+      null
+    );
+
+    expect(vi.mocked(auditoriaSiQuedo).mock.calls[0]![1]).toMatchObject({
+      eventType: "case.status_changed",
+      payload: { reason: "tomar_el_control", new_status: "requiere_especialista", assigned_to: "analyst-id" },
+    });
   });
 
   it("rechaza tomar el control con extraction_pending true aunque no haya reserva", async () => {

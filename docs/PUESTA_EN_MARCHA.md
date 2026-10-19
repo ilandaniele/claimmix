@@ -406,8 +406,8 @@ de esta tabla, y de los secretos sólo si están cargados (`docs/TESTING.md`, «
 | `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1` |
 | Entrenamiento del agente (reglas y ejemplos de `/agente`) | datos de cada espacio | excepción hasta que el entrenamiento base viva en el repo, igual en los tres (`docs/PROJECT_STATUS.md:5055-5063`). No existe un script que copie reglas y ejemplos entre ambientes (`scripts/export-training.mjs:11`) | dev 19 reglas y 207 ejemplos en el espacio de prueba; prd ninguno; QA desconocido | `/agente`, solapas «Reglas de prompt» y «Ejemplos aprobados» (`src/lib/i18n/es-AR.ts:844`, `:852`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` (`.env.example:312-313`) | valor y secreto | igual (dev y prd comparten la clave del sitio) | cargadas en los tres (la CSP de QA trae `challenges.cloudflare.com`) | el desafío en `/registro` |
-| `ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN` (`.env.example:265-266`) | valor y secreto | excepción: un remitente por ambiente | dev y prd cargadas (`docs/PROJECT_STATUS.md:4764`); QA cargada el 15/10 con el cliente de dev: no sirve con el de `claimmix-qa` y se vuelve a emitir con `token-remitente.mts --vercel claimmix-qa` (QA, paso 1); prd, con `--vercel claimmix-prd` (prd, paso 1) | el bloque de correo en `/registro` |
-| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:245-246`) | valor y secreto | excepción: un cliente OAuth por ambiente (decidido el 18/10). dev tiene el suyo, QA el suyo (`claimmix-qa`, en el mismo proyecto de Google Cloud) y prd uno propio, en su propio proyecto de Google Cloud, por crear; hasta entonces prd usa el de dev | dev y prd cargadas; en QA los nombres existen pero vinieron vacíos del import del 17/09: el [Dueño] los carga con `token-remitente.mts --vercel claimmix-qa` (QA, paso 1), y los de prd con `--vercel claimmix-prd` (prd, paso 1) | el bloque de correo y «Conectar Gmail» |
+| `ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN` (`.env.example:265-266`) | valor y secreto | excepción: un remitente por ambiente | cargadas en los tres, cada una con el cliente de su ambiente: QA el 18/10 y prd el 19/10 con `token-remitente.mts --vercel <proyecto>` (paso 1 de cada ambiente); la de prd vale desde su próximo deploy | el bloque de correo en `/registro` |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:245-246`) | valor y secreto | excepción: un cliente OAuth por ambiente (decidido el 18/10). dev tiene el suyo, QA el suyo (`claimmix-qa`, en el mismo proyecto de Google Cloud) y prd uno propio (`claimmix-prd`), en su propio proyecto de Google Cloud, `claimmix-prd-veltra` | cargadas en los tres: QA el 18/10 y prd el 19/10 con `token-remitente.mts --vercel <proyecto>` (paso 1 de cada ambiente); las de prd valen desde su próximo deploy | el bloque de correo y «Conectar Gmail» |
 | `GMAIL_TOKEN_ENCRYPTION_KEY` (`.env.example:216`) | secreto | excepción: una por base; no se rota sin volver a cifrar | cargada en los tres (QA desde el 15/10) | error del servidor al volver de Google en «Conectar Gmail»; chequeo `gmail` de `/api/health` |
 | `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
@@ -909,6 +909,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
          punto 4 y este redeploy no se promueve nada a prd: cualquier deploy nuevo tomaría el
          cliente nuevo con el tema viejo.
     - `CRON_SECRET` de prd tiene que ser igual al secreto `PRD_CRON_SECRET` de GitHub.
+  - **Estado (19/10):** puntos 1 a 5 hechos en `claimmix-prd-veltra`, con la app publicada y
+    el remitente emitido con `veltra.claimmix@gmail.com`. Falta el punto 6, que es la
+    promoción a prd (#477).
   - **Salió bien si:** después del redeploy, el log del paso «Smoke de prd» del Post-deploy
     PRD lista cada chequeo sin «sin configurar», salvo `whatsapp` hasta el paso 2. Y
     `https://claimmix.vercel.app/registro` muestra el correo, Turnstile y el aviso del número.
@@ -949,7 +952,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `:770`; `src/server/whatsapp/numeros.ts:49-54`, `:174-177`, `:409-411`;
     `src/server/alta/numero-automatico.ts:243`; `src/app/api/health/route.ts:412-415`;
     `.github/workflows/post-deploy.yml:657`; `scripts/smoke-production.mts:265-269`;
-    `docs/PROJECT_STATUS.md:5256-5261`.
+    `docs/PROJECT_STATUS.md:5267-5272`.
 - [ ] **3. Antes del alta: salud de las bases.**
   - **Quién:** [Claude].
   - **Dónde:** la terminal.
@@ -1146,7 +1149,7 @@ El pedido 4: correr el prompt de nuevo cada vez que cambia algo del agente.
     y hacer hasta dos reruns. Si sigue rojo, el escenario solo con `pnpm rehearse
     <escenario>` y `pnpm smoke` como evidencia.
   - **Fuentes:** `package.json:22`, `:23`, `:28`; `scripts/check-everything.mts:43-46`;
-    `docs/TESTING.md:186-188`; `docs/PROJECT_STATUS.md:5262`; `AGENTS.md`, «Probar cambios».
+    `docs/TESTING.md:186-188`; `docs/PROJECT_STATUS.md:5273`; `AGENTS.md`, «Probar cambios».
 - [ ] **E2. Leer el transcripto.**
   - **Quién:** [Dueño]; en QA, Gonzalo con el texto del paso 9.
   - **Dónde:** el transcripto que imprime el ensayo.

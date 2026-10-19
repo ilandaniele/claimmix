@@ -28,7 +28,10 @@ afterEach(() => {
  * Corre el worker con un reloj que salta `saltoMs` durante el control de
  * presupuesto — la fase justo anterior a la llamada al modelo.
  */
-async function correrConSalto(saltoMs: number) {
+async function correrConSalto(
+  saltoMs: number,
+  opts?: { arrancó?: number }
+) {
   vi.resetModules();
 
   const espiaDeUpdate: Mock<(data: Record<string, unknown>) => void> = vi.fn();
@@ -64,7 +67,7 @@ async function correrConSalto(saltoMs: number) {
   }));
 
   const { runEmailExtractionWorker } = await import("@/server/worker/extract");
-  await runEmailExtractionWorker(CASE_ID, TENANT_ID, null);
+  await runEmailExtractionWorker(CASE_ID, TENANT_ID, null, opts);
 
   const escrito = espiaDeUpdate.mock.calls.map((c) => c[0]);
   return { extractor, escrito };
@@ -83,6 +86,15 @@ describe("el reloj de la corrida", () => {
     expect(escrito).toContainEqual(
       expect.objectContaining({ extraction_pending: true })
     );
+  });
+
+  it("una corrida encadenada hereda el reloj de la que la llamó", async () => {
+    // Sin esto, el caso nuevo de un siniestro partido arranca con 40 s propios
+    // aunque la corrida de origen ya gastó casi todos.
+    const { extractor } = await correrConSalto(1_000, {
+      arrancó: 1_000_000 - 40_000,
+    });
+    expect(extractor).not.toHaveBeenCalled();
   });
 
   it("con tiempo de sobra corre como siempre", async () => {

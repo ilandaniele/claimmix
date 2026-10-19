@@ -92,6 +92,10 @@ vi.mock("@/server/confirmations/orchestrate", () => ({
   orchestratePostExtraction: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/server/cases/siniestro-nuevo", () => ({
+  abrirCasoPorSiniestroNuevo: vi.fn().mockResolvedValue({ tipo: "sigue" }),
+}));
+
 vi.mock("@/core/case/fsm", () => ({
   isValidTransition: vi.fn().mockReturnValue(true),
 }));

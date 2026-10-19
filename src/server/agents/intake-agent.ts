@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, not, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
@@ -12,7 +12,9 @@ import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import {
   marcarParaResponder,
   marcarParaResponderAunqueSigaElAgente,
+  marcarParaResponderDondeEste,
 } from "@/server/cases/para-responder";
+import { casoDondeEstaHoy, casoQueSigue, fuePartido } from "@/server/cases/caso-partido";
 import { downloadWhatsAppMedia, type WhatsAppMediaRef } from "@/server/whatsapp/cloud-api";
 import { avisarSinNumero, credencialesWhatsApp } from "@/server/whatsapp/numeros";
 import { rehostAndRecordAttachments, type EmailAttachment } from "@/server/email/rehost-attachments";
@@ -241,7 +243,7 @@ export async function createWhatsAppIntake(
   const abierto = existente
     ? { id: existente.id, creado: false }
     : await createWhatsAppCase(input.tenantId, threadId, channel);
-  const caseId = abierto.id;
+  let caseId = abierto.id;
 
   const guardado = await insertWhatsAppMessage({
     caseId,
@@ -294,11 +296,12 @@ export async function createWhatsAppIntake(
       },
     });
   } else if (existente && (ESTADOS_DEL_AGENTE_TERMINADO as readonly string[]).includes(existente.status)) {
-    await marcarParaResponder(
-      caseId,
-      input.tenantId,
-      guardado.duplicado ? "sinContestar" : undefined
-    );
+    if (guardado.claimMessageId) {
+      // Un corte por siniestro nuevo pudo mudar el mensaje mientras bajaban los adjuntos.
+      caseId = await marcarParaResponderDondeEste(caseId, input.tenantId, guardado.claimMessageId);
+    } else {
+      await marcarParaResponder(caseId, input.tenantId, guardado.duplicado ? "sinContestar" : undefined);
+    }
   }
 
   await writeAuditLog({
@@ -474,7 +477,9 @@ async function findExistingWhatsAppCase(
               eq(c.email_thread_id, threadId),
               sql`coalesce(${c.updated_at}, ${c.created_at}) > now() - interval '${sql.raw(String(WHATSAPP_THREAD_WINDOW_DAYS))} days'`,
               // Lista y razones en `@/core/case/para-responder`.
-              inArray(c.status, [...ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES])
+              inArray(c.status, [...ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES]),
+              // Un caso partido por un siniestro nuevo ya no junta mensajes.
+              not(fuePartido(c.id))
             )
           )
           .orderBy(desc(c.created_at))
@@ -616,7 +621,7 @@ async function insertWhatsAppMessage(
     const inserted = firstRow(
       await enTenant({ tenantId: input.tenantId }, (db) =>
         db.insert(tables.claimMessages).values({
-        case_id: input.caseId,
+        case_id: casoQueSigue(input.caseId),
         tenant_id: input.tenantId,
         direction: "inbound",
         provider: "whatsapp",
@@ -648,7 +653,7 @@ async function insertWhatsAppMessage(
   try {
     await enTenant({ tenantId: input.tenantId }, (db) =>
       db.insert(tables.rawMessages).values({
-        case_id: input.caseId,
+        case_id: casoDondeEstaHoy(claimMessageId, input.caseId),
         tenant_id: input.tenantId,
         channel: "whatsapp",
         from_addr: input.from,

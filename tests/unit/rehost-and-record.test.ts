@@ -49,6 +49,8 @@ vi.mock("@/lib/audit/log", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import {
   rehostAndRecordAttachments,
   type EmailAttachment,
@@ -90,7 +92,6 @@ describe("rehostAndRecordAttachments", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      case_id: "case-1",
       tenant_id: "tenant-1",
       claim_message_id: "msg-1",
       file_name: "image-abc.jpg",
@@ -98,6 +99,17 @@ describe("rehostAndRecordAttachments", () => {
       storage_path: "tenant-1/case-1/msg-1/image-abc.jpg",
       rejected_reason: null,
     });
+  });
+
+  it("points the row at the case where the message is now, falling back to the one it came with", async () => {
+    // A late message about another claim moves to a new case while the photo downloads.
+    await rehostAndRecordAttachments({ ...OPTS, attachments: [photo()] });
+
+    const { sql, params } = new PgDialect().sqlToQuery(rows[0].case_id as SQL);
+    expect(sql).toContain("select m.case_id from claim_messages m where m.id = $1::uuid");
+    expect(sql).toContain("coalesce(");
+    expect(sql).toContain("for share)");
+    expect(params).toEqual(["msg-1", "case-1"]);
   });
 
   it("records a rejected file with its reason rather than dropping it", async () => {

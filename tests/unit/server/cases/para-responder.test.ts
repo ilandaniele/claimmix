@@ -7,26 +7,30 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { consultas, mockEnTenant, mockLoggerError } = vi.hoisted(() => ({
+const { consultas, mockEnTenant, mockEnTenantVarias, mockLoggerError } = vi.hoisted(() => ({
   consultas: [] as { sql: string; params: unknown[] }[],
   mockEnTenant: vi.fn(),
+  mockEnTenantVarias: vi.fn(),
   mockLoggerError: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/data/scope", () => ({ enTenant: mockEnTenant }));
+vi.mock("@/data/scope", () => ({ enTenant: mockEnTenant, enTenantVarias: mockEnTenantVarias }));
 vi.mock("@/lib/observability/logger", () => ({
   logger: { error: mockLoggerError, warn: vi.fn(), info: vi.fn() },
 }));
 
+import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pg-proxy";
 import {
   marcarParaResponder,
   marcarParaResponderAunqueSigaElAgente,
+  marcarParaResponderDondeEste,
   marcarRespondido,
 } from "@/server/cases/para-responder";
 
 const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
+const MSG = "22222222-2222-2222-2222-222222222222";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const VISTO = "2026-09-25T12:00:00.000Z";
 
@@ -35,12 +39,23 @@ const datos = drizzle(async (sql, params) => {
   consultas.push({ sql, params });
   return { rows: filas };
 });
+const dialecto = new PgDialect();
+
+let lote: { getSQL(): never }[] = [];
+let resultadoDelLote: unknown[] = [];
+const sqlDe = (i: number) => dialecto.sqlToQuery(lote[i].getSQL());
 
 beforeEach(() => {
   vi.clearAllMocks();
   consultas.length = 0;
   filas = [];
   mockEnTenant.mockImplementation(async (_ctx: unknown, fn: (db: unknown) => unknown) => fn(datos));
+  lote = [];
+  resultadoDelLote = [[{ case_id: CASE_ID }], []];
+  mockEnTenantVarias.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => never[]) => {
+    lote = armar(datos);
+    return resultadoDelLote;
+  });
 });
 
 describe("marcarParaResponder", () => {
@@ -137,6 +152,48 @@ describe("marcarParaResponder", () => {
     expect(sql).toMatch(/and exists \(select .* from "claim_messages"/);
     expect(sql).toContain('"claim_messages"."id" not in ($');
     expect(params).toEqual(expect.arrayContaining(["inbound", "m1", "m2"]));
+  });
+});
+
+describe("marcarParaResponderDondeEste", () => {
+  it("manda el lock del mensaje y la marca en el caso donde está, en un solo lote", async () => {
+    await marcarParaResponderDondeEste(CASE_ID, TENANT_ID, MSG);
+
+    expect(mockEnTenantVarias).toHaveBeenCalledWith({ tenantId: TENANT_ID }, expect.any(Function));
+    expect(lote).toHaveLength(2);
+    const lock = sqlDe(0);
+    expect(lock.sql).toContain("for share");
+    expect(lock.params).toEqual([MSG]);
+
+    const marca = sqlDe(1);
+    expect(marca.sql).toContain(
+      '"cases"."id" = (select m.case_id from claim_messages m where m.id = $'
+    );
+    expect(marca.sql).toContain('select max("outbound_messages"."created_at")');
+    expect(marca.sql).toContain('"cases"."status" in (');
+    expect(marca.params).toEqual(expect.arrayContaining([MSG, CASE_ID]));
+  });
+
+  it("devuelve el caso donde está el mensaje", async () => {
+    resultadoDelLote = [[{ case_id: "caso-nuevo" }], []];
+
+    await expect(marcarParaResponderDondeEste(CASE_ID, TENANT_ID, MSG)).resolves.toBe("caso-nuevo");
+  });
+
+  it("si el mensaje no aparece, devuelve el caso de entrada", async () => {
+    resultadoDelLote = [[], []];
+
+    await expect(marcarParaResponderDondeEste(CASE_ID, TENANT_ID, MSG)).resolves.toBe(CASE_ID);
+  });
+
+  it("si el lote falla, lo deja en el log y tira", async () => {
+    mockEnTenantVarias.mockRejectedValue(new Error("neon"));
+
+    await expect(marcarParaResponderDondeEste(CASE_ID, TENANT_ID, MSG)).rejects.toThrow("neon");
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ case_id: CASE_ID }),
+      "para_responder.no_se_pudo_marcar"
+    );
   });
 });
 

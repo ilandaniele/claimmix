@@ -3,6 +3,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enControl, type TenantContext } from "@/data/scope";
+import { CASILLA_VENCIDA } from "@/core/gmail";
 import { gmailAccounts, tenants } from "@/lib/db/schema";
 import { SIN_SERVICIO } from "@/lib/billing/plans";
 import { firstRow } from "@/lib/db/helpers";
@@ -202,6 +203,20 @@ export async function getGmailAccountByEmail(
     refreshToken: decryptRefreshToken(data.refresh_token_encrypted),
     enabled: data.enabled,
   };
+}
+
+/** Google dio por revocado el permiso: la casilla queda vencida hasta que se reconecte (el callback limpia last_error). Nunca tira. */
+export async function marcarCasillaVencida(tenantId: string, email: string): Promise<void> {
+  try {
+    await enControl({ tenantId }, (db) =>
+      db
+        .update(gmailAccounts)
+        .set({ last_error: CASILLA_VENCIDA, updated_at: new Date().toISOString() })
+        .where(eq(gmailAccounts.email, email.toLowerCase()))
+    );
+  } catch (err) {
+    logger.error({ detalle: (err as { code?: string })?.code ?? "unknown" }, "gmail_accounts.marcar_vencida_error");
+  }
 }
 
 /** Qué inquilino tiene conectada la casilla, apagada o no. Sólo el id: el token no hace falta. */

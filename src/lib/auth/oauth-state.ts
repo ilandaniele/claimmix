@@ -34,6 +34,7 @@ import { randomBytes } from "crypto";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 
 export const COOKIE_ESTADO_OAUTH = "gmail_oauth_state";
+export const RUTA_COOKIE_ESTADO_OAUTH = "/api/admin/gmail-accounts";
 
 /**
  * Diez minutos.

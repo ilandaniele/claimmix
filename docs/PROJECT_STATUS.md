@@ -4779,7 +4779,7 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
      `pnpm bases:probar` salió verde contra la rama `ensayo`.
   2. Meta permite 2 números en la WABA hasta verificar el negocio.
   3. La pantalla de consentimiento de Google tiene que estar publicada; con los scopes de
-     Gmail sin verificar hay un tope de 100 usuarios que comparten dev y prd.
+     Gmail sin verificar hay un tope de 100 usuarios que comparten dev, QA y prd.
   4. ~~Confirmar que Vercel acepta mover un `*.vercel.app` entre proyectos.~~ Resuelto el
      2026-10-09: el move anduvo.
   5. Los términos de Vercel Hobby son de uso no comercial y prd tendría clientes que pagan.
@@ -5189,11 +5189,22 @@ Arregla la regresión que encontró la lectura del transcripto de la segunda pro
 
 ### Puesta en marcha: las decisiones de A1 (17/10)
 
-El dueño eligió las opciones de A1 de `docs/PUESTA_EN_MARCHA.md`. Ninguna bandera está cargada todavía en dev ni en QA: van en el lote de A12.
+El dueño eligió las opciones de A1 de `docs/PUESTA_EN_MARCHA.md`. Las banderas entraron en el lote de A12 (ver la sección siguiente).
 
 - **D1 (b).** `ALTA_NUMERO_AUTOMATICO` en 1 también en dev y QA (prd la tiene desde el 09/10). El único lugar libre de la WABA es primero del cliente ficticio de prd; en dev nadie pide el código hasta que esa alta termine y su número se borre (D5), o hasta A5. QA va sin token de WhatsApp: sus altas por código terminan en revisión con `sin_credencial`.
 - **El resto.** D2: `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada. D3: Gmail de prueba de Gonzalo en QA, sin número de WhatsApp hasta su propia WABA. D4 (a): dominio propio del dueño. D5: borrar el número del cliente ficticio y suspender el espacio. D6: `ALTA_AUTOMATICA` en 1 en QA. D7: topes iguales a prd; `MONTHLY_BUDGET_USD` y `AI_TENANT_DAILY_TOKEN_CAP` más altos en dev y QA. D8: el dueño es operador en los tres, Gonzalo no. D14: sin MCP de WhatsApp. D15: reportes por chat o correo al dueño.
 - **Hallazgo de Meta.** El tope de dos números es por portfolio de negocio, no por WABA (https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers: «New business portfolios are initially capped at two registered business phone numbers.»). Veltra es un solo portfolio y su número de la plataforma ya usa un lugar, así que una WABA nueva dentro de Veltra no suma lugares, y cada WABA necesita su propio número de la plataforma. Una WABA y un token por ambiente esperan a A5: receta en `docs/PUESTA_EN_MARCHA.md`, «Después de A5: una WABA y un token por ambiente».
+
+### Puesta en marcha: el lote de variables de A12 (17–18/10)
+
+Variables de Vercel cargadas y borradas con OK del dueño, sin leer ni copiar ningún valor secreto. Prd no se tocó.
+
+- **Cargadas en dev y QA (17/10).** `ALTA_NUMERO_AUTOMATICO=1`, `ALTA_TOPE_BASES=30`, `ALTA_TOPE_MB=350` y otra vez `ALTA_TOPE_GLOBAL_DIA=5`; en QA también `ALTA_AUTOMATICA=1`. Los topes quedan iguales a prd (D7).
+- **Borradas porque el código no las lee (17/10).** 17 en total. En dev: `OPENAI_API_KEY`, `OPENAI_MODEL` y las cinco `SMTP_*`. En QA: `GEMINI_API_KEY` (muerta desde Vertex), las cuatro `INTEGRATION_*_PASSWORD` (son secretos de GitHub, no de Vercel), `OPENAI_API_KEY`, `STAGING_DATABASE_URL(_APP)` y las dos `UPSTASH_*`.
+- **Borradas para igualar a prd (18/10).** En QA, `SENTRY_DSN` y `NEXT_PUBLIC_SENTRY_DSN`: Sentry es opcional y prd no lo tiene. En dev, `SIMULATE_WORKER_DELAY_MS` y `SIMULATE_WORKER_MAX_DELAY_MS`, con lo que valen los defaults de `simulation-throttle.ts` (5000 y 120000 ms). Quedan 67 variables en dev y 65 en QA, ninguna sobrante.
+- **QA y el correo.** `/registro` de QA no ofrecía el correo porque `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` existen pero vinieron vacíos del import del 17/09. `GMAIL_TOKEN_ENCRYPTION_KEY` y las dos de Turnstile ya tenían valor. El 18/10 el dueño decidió que QA tenga su propio cliente OAuth de Gmail, `claimmix-qa`, tipo «Aplicación web», en el mismo proyecto de Google Cloud que el de dev y prd y con el mismo tope de 100 usuarios; sus URI de redirección son el callback de Gmail de QA (`https://claimmix-qa.vercel.app/api/admin/gmail-accounts/callback`) y `http://127.0.0.1:53682/` para el script del remitente. El dueño pone el ID y el secreto en `.env.qa.local` y corre `token-remitente.mts --vercel claimmix-qa --correo <casilla>`, que los sube a `claimmix-qa` y vuelve a emitir el remitente: el del 15/10 salió del cliente de dev. Después le dice «listo» a Claude. Hecho el 18/10: el script cargó el cliente y el remitente en `claimmix-qa`, el merge de #474 (`32c65a14`) fue el redeploy, y `/registro` de QA muestra el correo, Turnstile y el aviso del número por código. El secreto viejo de «ClaimMix QA» (del 19/09) no lo usa nadie.
+- **Gmail por ambiente, cargado por script (18/10).** `scripts/token-remitente.mts --vercel <proyecto>` sube, en QA y en prd, el cliente de Gmail del archivo del ambiente (`.env.qa.local`, `.env.prd.local`) y después el remitente; se niega si el cliente repite el de otro ambiente. `scripts/sync-vercel-env.mjs` sólo carga dev, desde `.env.local`. El dueño decidió que prd tenga su propio cliente, en su propio proyecto de Google Cloud y con la misma cuenta de facturación: en curso el 18/10, con el tema, la suscripción y la cuenta de servicio de Pub/Sub en ese proyecto (OK del dueño para los permisos de IAM, sólo ahí). prd no tenía casillas conectadas, así que el cambio de cliente no rompe ninguna. Dev se queda con el cliente original. La receta está en `docs/PUESTA_EN_MARCHA.md` (prd, paso 1). Hasta entonces prd usa el cliente de dev.
+- **Redeploy.** Dev se redeployó el 18/10 sobre `49c7dc32` para tomar el lote. QA se redeployó con el merge de #474 (`32c65a14`) el 18/10. prd se redeploya una sola vez, con la promoción, después de cargar el cliente propio y el Pub/Sub nuevo.
 
 ### 🙋 Waiting on you (not code)
 
@@ -5490,10 +5501,11 @@ El dueño eligió las opciones de A1 de `docs/PUESTA_EN_MARCHA.md`. Ninguna band
   See "The last metre" below: a real mail, two real WhatsApps and a real photograph,
   all answered. Do it again after the next change to the mailbox, the number or their
   credentials — that is the only part no test can cover.
-- **Rotate the Google OAuth client secret** (`GOCSPX-…`). It was read off a screenshot
-  during the migration, and it now backs four env vars: `GMAIL_CLIENT_ID`/`SECRET` for
-  the mailbox and `GOOGLE_CLIENT_ID`/`SECRET` for logging in. Rotating it forces a
-  reconnect of the mailbox and a re-login, in that order.
+- **Rotate the Google OAuth client secret** (`GOCSPX-…`) of the dev and prd client. It
+  was read off a screenshot during the migration, and it now backs four env vars:
+  `GMAIL_CLIENT_ID`/`SECRET` for the mailbox and `GOOGLE_CLIENT_ID`/`SECRET` for logging
+  in. Rotating it forces a reconnect of the mailbox and a re-login, in that order. QA's
+  Gmail client (`claimmix-qa`, since 18/10) is another one and this rotation does not touch it.
 - **Rotate the WhatsApp system-user token.** Meta echoed it inside an error response
   on 2026-08-23 and it is now in a chat transcript. Same standing as the
   `veltra.soporte` password below: it is not known to be leaked, and it is no longer

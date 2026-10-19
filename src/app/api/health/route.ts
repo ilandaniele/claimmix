@@ -41,6 +41,7 @@ import { enControl, enTenant } from "@/data/scope";
 
 const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
 import { medirBases } from "./bases";
+import { leerBanderas } from "./banderas";
 import {
   chequearAdjuntos,
   chequearCasosTrabados,
@@ -112,6 +113,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       environment: process.env.VERCEL_ENV ?? "local",
       checked_at: new Date().toISOString(),
       checks,
+      banderas: leerBanderas(process.env),
       ...(medida?.bases ? { bases: medida.bases } : {}),
     },
     // 503 so anything watching a URL notices without parsing the body.

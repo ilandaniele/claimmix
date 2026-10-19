@@ -641,3 +641,88 @@ describe("cuánto queda del presupuesto de IA", () => {
     expect(p.detail).toContain("no se pudo consultar");
   });
 });
+
+/**
+ * Las banderas del ambiente salen como clave de primer nivel, junto a `checks`
+ * y nunca adentro: el smoke imprime el `detail` de cada chequeo en los logs
+ * públicos de Actions. El Bearer es el mismo de siempre; sin él no cambia nada.
+ */
+describe("GET /api/health — banderas", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const leer = async () => (await GET(request(`Bearer ${SECRET}`))).json();
+
+  it("sin el Bearer la respuesta pública no cambia", async () => {
+    for (const auth of [undefined, "Bearer otra-cosa-cualquiera"]) {
+      const res = await GET(request(auth));
+      expect(res.status).toBe(401);
+
+      const body = await res.json();
+      expect(body).toEqual({ error: { code: "UNAUTHORIZED", message: "Bearer CRON_SECRET requerido." } });
+
+      const text = JSON.stringify(body);
+      expect(text).not.toContain("banderas");
+      expect(text).not.toContain("ALTA_");
+    }
+  });
+
+  it("con el Bearer trae banderas, aparte de checks", async () => {
+    const res = await GET(request(`Bearer ${SECRET}`));
+    expect(res.status).toBeLessThan(500);
+
+    const body = await res.json();
+    expect(body.banderas).not.toBeNull();
+    expect(typeof body.banderas).toBe("object");
+    expect(Array.isArray(body.banderas)).toBe(false);
+    expect(Object.keys(body.banderas)).toHaveLength(46);
+    expect(body.checks.some((c: { name: string }) => c.name === "banderas")).toBe(false);
+
+    const modos = ["vertex", "ai-studio", "apagado", "simular", "borrar", "desconocido"];
+    for (const [nombre, valor] of Object.entries(body.banderas)) {
+      const valido =
+        typeof valor === "boolean" ||
+        typeof valor === "number" ||
+        valor === null ||
+        (typeof valor === "string" && modos.includes(valor));
+      expect(valido, nombre).toBe(true);
+    }
+  });
+
+  it("lee el entorno del deploy", async () => {
+    vi.stubEnv("ALTA_TOPE_GLOBAL_DIA", "5");
+    vi.stubEnv("ALTA_AUTOMATICA", "1");
+    vi.stubEnv("ALTA_TOPE_MB", "3500");
+    vi.stubEnv("RETENCION_MODO", "borrarr");
+
+    const { banderas } = await leer();
+    expect([
+      banderas.ALTA_TOPE_GLOBAL_DIA,
+      banderas.ALTA_AUTOMATICA,
+      banderas.ALTA_TOPE_MB,
+      banderas.RETENCION_MODO,
+    ]).toEqual([5, true, null, "desconocido"]);
+  });
+
+  it("ningún secreto sale como texto", async () => {
+    const valores = [
+      "fake-turnstile-secret",
+      "fake-remitente-refresh-token",
+      "remitente@example.com",
+      "fake-gmail-client-secret",
+    ];
+    vi.stubEnv("TURNSTILE_SECRET_KEY", valores[0]);
+    vi.stubEnv("ALTA_REMITENTE_REFRESH_TOKEN", valores[1]);
+    vi.stubEnv("ALTA_REMITENTE_CORREO", valores[2]);
+    vi.stubEnv("GMAIL_CLIENT_SECRET", valores[3]);
+
+    const body = await leer();
+    const text = JSON.stringify(body);
+    for (const prohibido of [...valores, SECRET, CONFIGURED.GMAIL_TOKEN_ENCRYPTION_KEY]) {
+      expect(text).not.toContain(prohibido);
+    }
+
+    expect(body.banderas.TURNSTILE_SECRET_KEY).toBe(true);
+    expect(body.banderas.ALTA_REMITENTE_CORREO).toBe(true);
+    expect(body.banderas.GMAIL_TOKEN_ENCRYPTION_KEY).toBe(true);
+  });
+});

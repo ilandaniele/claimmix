@@ -704,6 +704,8 @@ export const esAR = {
   "gmail.accounts.connected": "Conectada",
   "gmail.accounts.pending": "Pendiente",
   "gmail.accounts.error": "Con error",
+  "gmail.accounts.expired": "Vencida: Google retiró el permiso y no entra correo",
+  "gmail.accounts.reconnect": "Reconectar",
   "gmail.accounts.loadError": "No se pudieron cargar las cuentas Gmail.",
   "gmail.accounts.saveError": "No se pudo actualizar la cuenta Gmail.",
   "gmail.accounts.deleteError": "No se pudo eliminar la cuenta Gmail.",

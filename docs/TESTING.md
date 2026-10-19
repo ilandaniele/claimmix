@@ -1144,6 +1144,15 @@ conectarse a cada base. Un desfase o una base en `creando` hace rato dejan el es
 `degraded` (el HTTP sigue en 200); el job `PRD` del post-deploy falla si `desfase` es
 verdadero. Sin la bandera, o sin `deep`, `bases` no existe. Ver `src/app/api/health/bases.ts`.
 
+Con el Bearer, con o sin `deep`, la respuesta trae además `banderas`: un objeto plano que va
+del nombre de cada variable a su valor, siempre con las mismas claves, armado sólo con
+`process.env` (no suma consultas). Las banderas salen como `true` o `false`; los topes, como
+número, o `null` si la variable no tiene un número que el código acepte, y entonces rige su
+valor por omisión; los modos, como uno de sus nombres o `desconocido`; los secretos, las
+direcciones y los textos libres, sólo como `true` o `false` (cargados o no), nunca su valor. Va
+aparte de `checks` porque el smoke imprime el `detail` de cada chequeo en los logs de Actions,
+que son públicos. Sin el Bearer sigue el 401 de siempre. Ver `src/app/api/health/banderas.ts`.
+
 ---
 
 ## Lo que sigue sin estar cubierto

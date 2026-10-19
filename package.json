@@ -80,7 +80,7 @@
     "next": "16.4.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "workflow": "^5.2.0",
+    "workflow": "^5.2.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -94,7 +94,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "^5.0.4",
-    "@workflow/vitest": "^5.0.3",
+    "@workflow/vitest": "^5.0.5",
     "dotenv": "^18.0.8",
     "drizzle-kit": "^0.31.11",
     "eslint": "^10.12.0",

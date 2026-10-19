@@ -250,13 +250,13 @@ tarda algo, la guía lo dice así.
   - **Fuentes:** `docs/whatsapp-setup.md:435-436`.
 - [ ] **A6. La pantalla de consentimiento de Google, publicada.**
   - **Quién:** [Dueño].
-  - **Dónde:** consola de Google Cloud, el proyecto de los clientes OAuth (los de dev, prd y QA
-    están en el mismo) > APIs y servicios > Pantalla de consentimiento de OAuth.
-  - **Qué hacer:** confirmar que está publicada («In production»).
+  - **Dónde:** consola de Google Cloud, en los dos proyectos de los clientes OAuth (dev y QA
+    comparten uno; prd tiene el suyo, prd paso 1) > APIs y servicios > Pantalla de consentimiento de OAuth.
+  - **Qué hacer:** confirmar que las dos están publicadas («In production»).
   - **Salió bien si:** dice publicada, sin verificar. Por eso Google muestra la pantalla de
     app no verificada al conectar Gmail, y hay un tope de 100 usuarios que es del proyecto y
-    comparten todos sus clientes (dev, QA y prd). Cada cuenta de prueba de esta guía, la
-    casilla de Gonzalo y la del remitente de QA cuentan para ese tope.
+    comparten todos sus clientes: dev y QA uno, prd el suyo. Las cuentas de prueba de dev y QA,
+    la casilla de Gonzalo y la del remitente de QA cuentan para el primero.
   - **Si falla:** si dice «Testing», Google vence el permiso de cada casilla a los siete días.
     Publicarla.
   - **Fuentes:** `docs/PROJECT_STATUS.md:517-524`; `docs/PROMOCION.md:645-649`, `:806-807`.

@@ -461,7 +461,7 @@ const SCENARIOS: Scenario[] = [
         expect: { replies: 1, status: "requiere_especialista" },
       },
       {
-        say: "Otra cosa: el sábado 12 de septiembre me chocaron de atrás con el Corsa en Punta Alta. Es otro choque, no tiene nada que ver con el incendio.",
+        say: "Otra cosa: el sábado 12 de septiembre me chocaron de atrás con el Corsa en Punta Alta. Es otro choque, no tiene nada que ver con lo de la moto.",
         expect: {
           casoNuevo: true,
           replies: 1,

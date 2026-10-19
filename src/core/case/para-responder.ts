@@ -11,8 +11,8 @@
  *   `ESTADOS_WHATSAPP_QUE_SUMAN_MENSAJES`; si no, abre un caso nuevo que el
  *   agente contesta. `procesando`, `cerrado`, `no_relevante`, `esperando` y
  *   `escalado` abren uno nuevo. Un mensaje que el clasificador da como siniestro
- *   nuevo pasa a un caso nuevo (`@/server/cases/siniestro-nuevo`), y sólo el caso
- *   más nuevo del teléfono junta mensajes.
+ *   nuevo pasa a un caso nuevo (`@/server/cases/siniestro-nuevo`), y el caso de
+ *   antes ya no junta mensajes.
  * - En el correo el hilo es la conversación: la respuesta cae en el caso esté
  *   como esté. Va a «Para responder» si el caso está en
  *   `ESTADOS_DEL_AGENTE_TERMINADO` o si lo cerró el barrido por silencio y le

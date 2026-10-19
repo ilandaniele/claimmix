@@ -67,6 +67,8 @@ const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const MSG_ID = "22222222-2222-2222-2222-222222222222";
 const NUEVO = "33333333-3333-3333-3333-333333333333";
+const M1 = "44444444-4444-4444-4444-444444444441";
+const M0 = "44444444-4444-4444-4444-444444444440";
 const CUERPO = "Hola, ¿cómo va mi denuncia? Mi DNI es 30111222 y mi mail juan@correo.test";
 
 const datos = drizzle(async (sql, params) => {
@@ -108,6 +110,8 @@ describe("la reserva", () => {
     await atender();
 
     expect(ultimoSql()!.sql).toContain('order by "claim_messages"."received_at" desc');
+    expect(ultimoSql()!.sql).toContain('"outbound_messages"');
+    expect(ultimoSql()!.sql).toMatch(/limit \$\d+/);
     expect(ultimoSql()!.params).toContain("inbound");
     const { sql, params } = reservaSql()!;
     expect(sql).toContain('update "cases" set "mensaje_tardio_de" = $');
@@ -196,6 +200,57 @@ describe("la clasificación", () => {
     const usuario = m.gemini.mock.calls[0][1] as string;
     expect(usuario).toContain("¿Cómo va?");
     expect(usuario).not.toContain("Recibimos tu denuncia");
+  });
+
+  describe("el episodio", () => {
+    // Lo último que mandó la persona sin que le contestaran, en orden; lo de antes de la última respuesta queda afuera.
+    const filas = () => [
+      [MSG_ID, "[Imagen adjunta sin texto]", {}, true],
+      [M1, "Choqué recién en Alem", {}, true],
+      [M0, "Gracias", {}, false],
+    ];
+
+    it("por WhatsApp el modelo ve todo lo que mandó desde la última respuesta, en orden", async () => {
+      m.ultimo = filas();
+      m.reserva = [[CASE_ID, "whatsapp"]];
+      respuesta({ tipo: "siniestro_nuevo", resumen: "Cuenta otro choque" });
+      m.cortar.mockResolvedValue({ tipo: "abierto", casoNuevo: NUEVO, movidos: 2 });
+
+      await atender();
+
+      const usuario = m.gemini.mock.calls[0][1] as string;
+      expect(usuario.indexOf("Choqué recién en Alem")).toBeGreaterThan(-1);
+      expect(usuario.indexOf("Choqué recién en Alem")).toBeLessThan(usuario.indexOf("[Imagen adjunta sin texto]"));
+      expect(usuario).not.toContain("Gracias");
+      expect(reservaSql()!.params).toContain(MSG_ID);
+      expect(m.cortar).toHaveBeenCalledWith({ tenantId: TENANT_ID, caseId: CASE_ID, messageId: MSG_ID });
+    });
+
+    it("por correo sólo ve el último mensaje: el hilo es la conversación", async () => {
+      m.ultimo = filas();
+      m.reserva = [[CASE_ID, "email"]];
+
+      await atender();
+
+      const usuario = m.gemini.mock.calls[0][1] as string;
+      expect(usuario).toContain("[Imagen adjunta sin texto]");
+      expect(usuario).not.toContain("Choqué recién en Alem");
+      expect(usuario).not.toContain("Gracias");
+    });
+
+    it("sin respuesta previa en el caso, el episodio es sólo el último mensaje", async () => {
+      m.ultimo = [
+        [MSG_ID, "Choqué otra vez", {}, null],
+        [M1, "Hola", {}, null],
+      ];
+      m.reserva = [[CASE_ID, "whatsapp"]];
+
+      await atender();
+
+      const usuario = m.gemini.mock.calls[0][1] as string;
+      expect(usuario).toContain("Choqué otra vez");
+      expect(usuario).not.toContain("Hola");
+    });
   });
 
   it("si Gemini falla no tira, deja la clase en null (no «otro») y avisa igual", async () => {

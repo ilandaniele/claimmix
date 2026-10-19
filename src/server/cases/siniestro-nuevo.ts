@@ -12,6 +12,13 @@
  * que se fue y, si no le queda ningún entrante sin contestar, la marca de
  * «Para responder».
  *
+ * El corte arranca en el primer entrante sin contestar del episodio, no en el
+ * mensaje clasificado: lo que la persona mandó junto es una sola denuncia.
+ *
+ * No parte un caso que tomó una persona, un caso ya partido, ni un caso al que
+ * una persona contestó por WhatsApp en las últimas 24 h. Todo eso se decide en
+ * el INSERT, después del lock. `assigned_to` no pasa al caso nuevo.
+ *
  * Todo va en un lote, una transacción. Lo primero es un lock por caso: dos
  * corridas sobre el mismo mensaje (una reentrega de Meta, el barrido) verían las
  * dos «el mensaje sigue acá» y abrirían dos casos. La segunda espera, y su
@@ -25,15 +32,18 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 
-import { enTenant, enTenantVarias } from "@/data/scope";
+import { enTenantVarias } from "@/data/scope";
+import { PLANTILLA_RESPUESTA_HUMANA } from "@/core/whatsapp/plantillas";
+import { VENTANA_WHATSAPP_MS } from "@/core/whatsapp/puede-responder";
 import { cases, claimAttachments, claimMessages, rawMessages } from "@/lib/db/schema";
 import { AuditEvent } from "@/lib/audit/log";
 import { filasDe } from "@/lib/db/filas";
 import { logger } from "@/lib/observability/logger";
 import { errorCode } from "@/lib/observability/error-code";
 import { auditoriaSiExiste } from "@/server/cases/auditoria-si-quedo";
-import { consultaDelUltimoMovimiento, esDevolvible } from "@/server/cases/devolver-al-agente";
-import { admiteParaResponder, haySinContestar } from "@/server/cases/para-responder";
+import { fuePartido } from "@/server/cases/caso-partido";
+import { noLoTomoUnaPersona } from "@/server/cases/devolver-al-agente";
+import { admiteParaResponder, haySinContestar, ultimaRespuesta } from "@/server/cases/para-responder";
 
 export type CorteDeSiniestro =
   | { tipo: "abierto"; casoNuevo: string; movidos: number }
@@ -48,13 +58,6 @@ export async function abrirCasoPorSiniestroNuevo(o: {
   const { tenantId, caseId, messageId } = o;
   const ctx = { tenantId };
   try {
-    // Una persona tomó el control: lo que llega lo lee ella, no se parte.
-    const [ultimo] = await enTenant(ctx, (db) => consultaDelUltimoMovimiento(db, caseId));
-    if (esDevolvible(ultimo)) {
-      logger.info({ case_id: caseId }, "siniestro_nuevo.caso_tomado");
-      return { tipo: "sigue" };
-    }
-
     // Lo genera la app para que todo el lote pueda nombrar el caso nuevo.
     const nuevo = randomUUID();
     const hayNuevo = sql`exists (select 1 from cases n where n.id = ${nuevo}::uuid)`;
@@ -73,9 +76,11 @@ export async function abrirCasoPorSiniestroNuevo(o: {
           and ${admiteParaResponder()}
           and exists (select 1 from claim_messages m
                       where m.id = ${messageId}::uuid and m.case_id = cases.id and m.direction = 'inbound')
-          and not exists (select 1 from cases n
-                          where n.tenant_id = cases.tenant_id and n.channel = cases.channel
-                            and n.email_thread_id = cases.email_thread_id and n.created_at > cases.created_at)
+          and not ${fuePartido(cases.id)}
+          and ${noLoTomoUnaPersona(db)}
+          and not exists (select 1 from outbound_messages o
+                          where o.case_id = cases.id and o.template = ${PLANTILLA_RESPUESTA_HUMANA}
+                            and o.created_at > now() - interval '${sql.raw(String(VENTANA_WHATSAPP_MS))} milliseconds')
         returning id
       `),
       db
@@ -85,7 +90,11 @@ export async function abrirCasoPorSiniestroNuevo(o: {
           and(
             eq(claimMessages.case_id, caseId),
             eq(claimMessages.direction, "inbound"),
-            sql`${claimMessages.received_at} >= (select m.received_at from claim_messages m where m.id = ${messageId}::uuid)`,
+            sql`${claimMessages.received_at} >= least(
+              (select m.received_at from claim_messages m where m.id = ${messageId}::uuid),
+              (select min(m.received_at) from claim_messages m
+                where m.case_id = ${caseId}::uuid and m.direction = 'inbound'
+                  and m.received_at > ${ultimaRespuesta(sql`${caseId}::uuid`)}))`,
             hayNuevo
           )
         )
@@ -154,7 +163,9 @@ export async function abrirCasoPorSiniestroNuevo(o: {
 
     // Otra corrida ya lo mudó: el mensaje no está donde lo dejó el ingreso.
     const [donde] = filasDe<{ case_id: string }>(r[8]);
-    return donde && donde.case_id !== caseId ? { tipo: "ya_movido" } : { tipo: "sigue" };
+    if (donde && donde.case_id !== caseId) return { tipo: "ya_movido" };
+    logger.info({ case_id: caseId }, "siniestro_nuevo.no_corresponde");
+    return { tipo: "sigue" };
   } catch (err) {
     logger.warn({ case_id: caseId, error_code: errorCode(err) }, "siniestro_nuevo.no_se_pudo");
     return { tipo: "sigue" };

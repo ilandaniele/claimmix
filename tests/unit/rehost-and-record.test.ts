@@ -108,6 +108,7 @@ describe("rehostAndRecordAttachments", () => {
     const { sql, params } = new PgDialect().sqlToQuery(rows[0].case_id as SQL);
     expect(sql).toContain("select m.case_id from claim_messages m where m.id = $1::uuid");
     expect(sql).toContain("coalesce(");
+    expect(sql).toContain("for share)");
     expect(params).toEqual(["msg-1", "case-1"]);
   });
 

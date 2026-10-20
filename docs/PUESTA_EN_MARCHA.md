@@ -280,9 +280,13 @@ tarda algo, la guía lo dice así.
     de dev y prd: hay que mirarlo ahí mismo.
   - **Salió bien si:** las siete URI figuran: las de Gmail de dev y prd en su cliente, las dos
     de arriba en `claimmix-qa` y las tres del login.
-  - **Estado (19/10):** las URI de Gmail de los tres ambientes están: una sonda sin login
-    contra Google, con el cliente de cada ambiente, las dio por aceptadas a todas. Falta
-    confirmar las tres del login en el cliente de `GOOGLE_CLIENT_ID`.
+  - **Estado (20/10):** las URI de Gmail de los tres ambientes están: una sonda sin login
+    contra Google, con el cliente de cada ambiente, las dio por aceptadas a todas. La misma
+    sonda, con el cliente de login (`GOOGLE_CLIENT_ID`) que manda cada host, aceptó
+    `<host>/api/auth/callback/google` en dev y en QA. Dev y QA usan clientes de login
+    distintos, cada uno con la URI de su host, así que en dev y QA no falta nada. prd tiene
+    su propio cliente de login en su proyecto de GCP y la sonda no lo toca: falta que el
+    dueño entre una vez con Google en `https://claimmix.vercel.app`.
   - **Si falla:** al conectar Gmail, Google muestra `redirect_uri_mismatch`. Agregar la URI
     que falta.
   - **Fuentes:** `.env.example:245` (`GMAIL_CLIENT_ID`), `:46-48` (`GOOGLE_CLIENT_ID` y su
@@ -1266,7 +1270,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Los ítems 1, 5, 6 y 12 entraron por #461. El resto no existe todavía: sus nombres de
+Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484. El resto no existe todavía: sus nombres de
 archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre
@@ -1275,18 +1279,18 @@ que tenía en la versión anterior de esta guía.
 | # | Ítem | Qué gana el dueño | Qué cambia para el cliente | Hecho cuando | Tamaño | Depende de |
 |---|---|---|---|---|---|---|
 | 1 | Enlace a `/admin/altas` en el menú del operador (P12) | No tiene que tipear la URL | Nada | El operador ve el enlace en el menú lateral y un admin de un cliente no lo ve. **Hecho en #461** | chico | nada |
-| 2 | Gmail: mismo origen en el connect y el callback, casilla vencida visible en el panel, `--solo` en `sync-vercel-env.mjs` y una URI de redirección por host en PROMOCION (P10) | Deja de ver «conectada» con un token revocado; sincroniza una variable sin copiar la casilla de dev | Ve que su casilla venció y la reconecta | Una casilla con el permiso revocado aparece vencida en `/configuracion`, y un test fija el origen | mediano | nada |
-| 3 | Banderas del alta en `/api/health`, detrás de `CRON_SECRET`: sólo booleanos, números y nombres de modo (P1) | Sabe qué está prendido en cada ambiente sin abrir Vercel | Nada | `/api/health` de los tres lista las banderas, y la revisión de seguridad (Fable u Opus) la aprueba | mediano | nada |
-| 4 | El número conectado a mano desde `/admin/altas` también fija su webhook, y el panel muestra los lugares libres de la WABA (P9) | Conectar un número a mano deja de depender de la Callback URL de la app de Meta | Su número recibe mensajes en el ambiente correcto | Un número conectado a mano recibe un mensaje en su espacio, y el panel muestra los lugares libres; revisión de seguridad aprobada | mediano | nada |
+| 2 | Gmail: mismo origen en el connect y el callback, casilla vencida visible en el panel, `--solo` en `sync-vercel-env.mjs` y una URI de redirección por host en PROMOCION (P10) | Deja de ver «conectada» con un token revocado; sincroniza una variable sin copiar la casilla de dev | Ve que su casilla venció y la reconecta | Una casilla con el permiso revocado aparece vencida en `/configuracion`, y un test fija el origen. **Hecho en #475** | mediano | nada |
+| 3 | Banderas del alta en `/api/health`, detrás de `CRON_SECRET`: sólo booleanos, números y nombres de modo (P1) | Sabe qué está prendido en cada ambiente sin abrir Vercel | Nada | `/api/health` de los tres lista las banderas, y la revisión de seguridad (Fable u Opus) la aprueba. **Hecho en #475** | mediano | nada |
+| 4 | El número conectado a mano desde `/admin/altas` también fija su webhook, y el panel muestra los lugares libres de la WABA (P9) | Conectar un número a mano deja de depender de la Callback URL de la app de Meta | Su número recibe mensajes en el ambiente correcto | Un número conectado a mano recibe un mensaje en su espacio, y el panel muestra los lugares libres; revisión de seguridad aprobada. **Hecho en #484**, con la revisión de Fable sin hallazgos. Falta probarlo con una persona: un número con lugar libre en la WABA, conectado a mano, recibe un mensaje. Hasta A5, no conectar a mano en dev un número de prd: dev le pondría su webhook | mediano | nada |
 | 5 | Tiempos del alta en `/admin/altas`: mediana y p95 de 30 días, desde `tenant_bases` (P6) | Ve cuánto tarda la base sin pedir SQL | Nada | `/admin/altas` de prd muestra los dos números. **Hecho en #461** | chico | nada |
 | 6 | `/configuracion` y `/api/health` muestran el tope real de `MONTHLY_BUDGET_USD` (nuevo) | El semáforo y la pantalla dicen la cifra que corta | Ve su tope real | Con `MONTHLY_BUDGET_USD` en 50, las dos muestran 50; con 0, dicen «IA frenada», porque el guardia frena. **Hecho en #461.** Que 0 quiera decir «sin tope» lo decide el dueño | chico | nada |
 | 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
 | 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador recibe un mail al llegar a 80 usuarios y cuando la WABA se llena | mediano | 4 y 7 |
 | 9 | Prueba automática del alta de punta a punta, a partir de `pnpm onboard` (`package.json:39`), que hoy sólo prueba la creación del espacio (nuevo) | Cada deploy de QA prueba `/registro`, el correo, la base y Gmail sin una persona | Menos altas rotas | La prueba corre en el Post-deploy de QA y queda roja si el alta se rompe | grande | 3 |
 | 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones | mediano | 3. Decisión: qué puede quedar distinto y si bloquea o sólo avisa (supuesto: avisa la primera semana) |
-| 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio | mediano | nada |
+| 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio. **Hecho en #484** | mediano | nada |
 | 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |
-| 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
+| 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo. **Hecho en #484**; `tests/unit/lib/topes-unico.test.ts` lo fija | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
 | 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions | chico | Decisión: la cadencia (supuesto: cada 2 h, como prd) |
 | 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso | grande | Decisión: si vale una migración en todas las bases (receta de pausa para migrar) |
 | 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte `src/app/alta/page.tsx:19-23` |

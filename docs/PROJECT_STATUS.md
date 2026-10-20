@@ -5218,13 +5218,23 @@ El 19/10 el dueño mandó una denuncia nueva por WhatsApp a dev y no tuvo respue
 - **Probado.** `pnpm check --local` en verde con las 26 conversaciones del ensayo, entre ellas la nueva `tardio-siniestro-nuevo`, con el transcripto leído. El `FOR SHARE` sobre `claim_messages` pide UPDATE y la política RLS de UPDATE: verificado para el rol de la app en dev, QA y la base del inquilino de prd.
 - **En los tres ambientes (19/10).** qa por #479 (`c1b548be`), main por #480 (`4b9fc723`, con el `pnpm check` completo en verde) y prd por #477 (`48fb6cd6`), con el Post-deploy de QA, DEV y PRD en verde. El árbol es el mismo en los tres.
 
+### Alta automática, lote 2 (20/10, #484)
+
+Tres ítems más del «Plan para que el alta sea automática» que no esperaban una decisión del dueño. Sin migración ni variables nuevas. Los ítems 2 y 3 (Gmail por origen y casilla vencida; banderas del alta en `/api/health`) ya habían entrado por #475.
+
+- **Ítem 4.** «Conectar a mano» en `/admin/altas` le pone al número el webhook del ambiente (override por número) y lo vuelve a leer antes de anotarlo (`src/server/alta/panel-operador.ts`, `ponerElWebhook` en `pasos-del-numero.ts`). Si el número ya tiene un webhook propio de otro ambiente contesta `webhook_ajeno` y no lo toca; si Meta lo rechaza, `sin_webhook`; sin credencial, WABA o URL https, `sin_credencial`. El número de la plataforma no se toca.
+- **Ítem 11.** `/admin/altas` muestra los lugares libres de la WABA del ambiente (`src/server/alta/lugares-de-la-waba.ts`). `/admin/cartera` suma prueba, estado y MB de la base propia y costo de IA por denuncia, en la misma consulta.
+- **Ítem 13.** `src/lib/topes.ts` es el único lugar donde se leen los topes del entorno; `entero()` sale y `tests/unit/lib/topes-unico.test.ts` lo fija.
+- **Límites.** Hasta A5, dev y prd comparten app y WABA: conectar a mano en dev un número de prd sin override le pondría el webhook de dev. Si la anotación rechaza el número después de poner el override, el override queda, igual que en el camino automático. La tarjeta cuenta números de la WABA, no el tope de Meta por portfolio.
+- **Probado.** tsc, lint y 15.425 tests unitarios en verde; la revisión de seguridad de Fable no encontró nada. Falta la prueba con una persona del ítem 4.
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
   QA (cuenta de Gonzalo) y prd (cliente ficticio) completos e iguales, con quién hace cada
   paso, las decisiones D1 a D15 y el plan para que el alta sea automática, está en
   `docs/PUESTA_EN_MARCHA.md`. Hechos al 19/10: A1, A2, A6, A10, A11 y A12. Faltan A3, A4,
-  A5, A7, A8 y A9 (de A7 sólo las URI del login), y las decisiones D10 a D13.
+  A5, A7, A8 y A9 (de A7 sólo entrar una vez con Google en prd), y las decisiones D10 a D13.
 - **Tono de los mails (del transcripto del 17/10).** Cuatro cosas que son copia del producto y
   quedan como están hasta que decidas: el mail no saluda por el nombre (`05-canal-mail.md`), la
   referencia es el UUID entero y no una corta, los mails firman como ClaimMix frente al

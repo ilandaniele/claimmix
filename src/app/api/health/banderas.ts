@@ -13,25 +13,18 @@
  * `"desconocido"` en un modo, que el valor escrito no es uno que el código reconozca.
  *
  * Es una lista explícita, una clave por variable: no recorre el entorno, así una
- * variable nueva no se filtra sola. Los rangos de los topes copian los de cada
- * `entero(...)` del código, y un test los ata hasta que el ítem 13 los comparta.
+ * variable nueva no se filtra sola. Los rangos de los topes salen de
+ * `src/lib/topes.ts`, la misma lista que lee el código que decide con ellos.
  */
 
 import "server-only";
 
 import { leerModo, type ModoDeBorrado } from "@/core/retencion";
-import { enteroDe } from "@/lib/entero";
-import { readCap } from "@/server/ai/tope-mensual";
+import { topeDecimalEscrito, topeEnteroEscrito } from "@/lib/topes";
 
 type Entorno = Readonly<Record<string, string | undefined>>;
 
 const cargada = (v: string | undefined): boolean => Boolean(v?.trim());
-
-/** El tope decimal escrito, o null si rige el valor por omisión. */
-function tope(v: string | undefined): number | null {
-  const n = readCap(v, Number.NaN);
-  return Number.isNaN(n) ? null : n;
-}
 
 /** Sin poner es `apagado`; un valor que `leerModo` no reconoce es `desconocido`. */
 function modoDeBorrado(v: string | undefined): ModoDeBorrado | "desconocido" {
@@ -63,28 +56,28 @@ export function leerBanderas(env: Entorno) {
     GEMINI_TRANSPORT: transporte(env.GEMINI_TRANSPORT),
     RETENCION_MODO: modoDeBorrado(env.RETENCION_MODO),
     PURGA_ADJUNTOS_MODO: modoDeBorrado(env.PURGA_ADJUNTOS_MODO),
-    ALTA_TOPE_GLOBAL_DIA: enteroDe(env.ALTA_TOPE_GLOBAL_DIA, 0, 500),
-    ALTA_TOPE_BASES: enteroDe(env.ALTA_TOPE_BASES, 0, 500),
-    ALTA_TOPE_MB: enteroDe(env.ALTA_TOPE_MB, 0, 500),
-    ALTA_TOPE_IP_DIA: enteroDe(env.ALTA_TOPE_IP_DIA, 1, 100),
-    ALTA_PRUEBA_DIAS: enteroDe(env.ALTA_PRUEBA_DIAS, 1, 90),
-    AI_PILOTO_DAILY_TOKEN_CAP: enteroDe(env.AI_PILOTO_DAILY_TOKEN_CAP, 1, Number.MAX_SAFE_INTEGER),
-    AI_PRUEBA_MONTHLY_USD_POR_INQUILINO: enteroDe(env.AI_PRUEBA_MONTHLY_USD_POR_INQUILINO, 0, 100_000),
-    AI_PRUEBAS_MONTHLY_BUDGET_USD: enteroDe(env.AI_PRUEBAS_MONTHLY_BUDGET_USD, 0, 1_000_000),
-    ALTA_NUMEROS_MAXIMOS_WABA: enteroDe(env.ALTA_NUMEROS_MAXIMOS_WABA, 1, 1000),
-    ALTA_TOPE_NUMEROS_DIA: enteroDe(env.ALTA_TOPE_NUMEROS_DIA, 0, 50),
-    ALTA_TOPE_CODIGOS_INQUILINO_DIA: enteroDe(env.ALTA_TOPE_CODIGOS_INQUILINO_DIA, 0, 20),
-    ALTA_TOPE_CODIGOS_IP_DIA: enteroDe(env.ALTA_TOPE_CODIGOS_IP_DIA, 0, 50),
-    ALTA_TOPE_CODIGOS_DIA: enteroDe(env.ALTA_TOPE_CODIGOS_DIA, 0, 500),
-    ALTA_TOPE_VERIFICACIONES_HORA: enteroDe(env.ALTA_TOPE_VERIFICACIONES_HORA, 0, 20),
-    ALTA_TOPE_CORREOS_DIA: enteroDe(env.ALTA_TOPE_CORREOS_DIA, 1, 10_000),
-    ALTA_TOPE_POR_DESTINATARIO_DIA: enteroDe(env.ALTA_TOPE_POR_DESTINATARIO_DIA, 1, 100),
-    ALTA_TOPE_CORREO_POR_IP_DIA: enteroDe(env.ALTA_TOPE_CORREO_POR_IP_DIA, 1, 1000),
-    ALTA_TOPE_INVITACIONES_DIA: enteroDe(env.ALTA_TOPE_INVITACIONES_DIA, 1, 1000),
-    ALTA_TOPE_WABAS_SEMANA: enteroDe(env.ALTA_TOPE_WABAS_SEMANA, 0, 1000),
-    ALTA_TOPE_PLANTILLAS_PRUEBA_DIA: enteroDe(env.ALTA_TOPE_PLANTILLAS_PRUEBA_DIA, 0, 1000),
-    MONTHLY_BUDGET_USD: tope(env.MONTHLY_BUDGET_USD),
-    AI_TENANT_DAILY_TOKEN_CAP: tope(env.AI_TENANT_DAILY_TOKEN_CAP),
+    ALTA_TOPE_GLOBAL_DIA: topeEnteroEscrito("ALTA_TOPE_GLOBAL_DIA", env),
+    ALTA_TOPE_BASES: topeEnteroEscrito("ALTA_TOPE_BASES", env),
+    ALTA_TOPE_MB: topeEnteroEscrito("ALTA_TOPE_MB", env),
+    ALTA_TOPE_IP_DIA: topeEnteroEscrito("ALTA_TOPE_IP_DIA", env),
+    ALTA_PRUEBA_DIAS: topeEnteroEscrito("ALTA_PRUEBA_DIAS", env),
+    AI_PILOTO_DAILY_TOKEN_CAP: topeEnteroEscrito("AI_PILOTO_DAILY_TOKEN_CAP", env),
+    AI_PRUEBA_MONTHLY_USD_POR_INQUILINO: topeEnteroEscrito("AI_PRUEBA_MONTHLY_USD_POR_INQUILINO", env),
+    AI_PRUEBAS_MONTHLY_BUDGET_USD: topeEnteroEscrito("AI_PRUEBAS_MONTHLY_BUDGET_USD", env),
+    ALTA_NUMEROS_MAXIMOS_WABA: topeEnteroEscrito("ALTA_NUMEROS_MAXIMOS_WABA", env),
+    ALTA_TOPE_NUMEROS_DIA: topeEnteroEscrito("ALTA_TOPE_NUMEROS_DIA", env),
+    ALTA_TOPE_CODIGOS_INQUILINO_DIA: topeEnteroEscrito("ALTA_TOPE_CODIGOS_INQUILINO_DIA", env),
+    ALTA_TOPE_CODIGOS_IP_DIA: topeEnteroEscrito("ALTA_TOPE_CODIGOS_IP_DIA", env),
+    ALTA_TOPE_CODIGOS_DIA: topeEnteroEscrito("ALTA_TOPE_CODIGOS_DIA", env),
+    ALTA_TOPE_VERIFICACIONES_HORA: topeEnteroEscrito("ALTA_TOPE_VERIFICACIONES_HORA", env),
+    ALTA_TOPE_CORREOS_DIA: topeEnteroEscrito("ALTA_TOPE_CORREOS_DIA", env),
+    ALTA_TOPE_POR_DESTINATARIO_DIA: topeEnteroEscrito("ALTA_TOPE_POR_DESTINATARIO_DIA", env),
+    ALTA_TOPE_CORREO_POR_IP_DIA: topeEnteroEscrito("ALTA_TOPE_CORREO_POR_IP_DIA", env),
+    ALTA_TOPE_INVITACIONES_DIA: topeEnteroEscrito("ALTA_TOPE_INVITACIONES_DIA", env),
+    ALTA_TOPE_WABAS_SEMANA: topeEnteroEscrito("ALTA_TOPE_WABAS_SEMANA", env),
+    ALTA_TOPE_PLANTILLAS_PRUEBA_DIA: topeEnteroEscrito("ALTA_TOPE_PLANTILLAS_PRUEBA_DIA", env),
+    MONTHLY_BUDGET_USD: topeDecimalEscrito("MONTHLY_BUDGET_USD", env),
+    AI_TENANT_DAILY_TOKEN_CAP: topeDecimalEscrito("AI_TENANT_DAILY_TOKEN_CAP", env),
     TURNSTILE_SITE_KEY: cargada(env.TURNSTILE_SITE_KEY),
     TURNSTILE_SECRET_KEY: cargada(env.TURNSTILE_SECRET_KEY),
     ALTA_REMITENTE_CORREO: cargada(env.ALTA_REMITENTE_CORREO),

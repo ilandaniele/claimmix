@@ -32,7 +32,6 @@ import { altaAbierta } from "@/lib/auth/registro-permitido";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { db } from "@/lib/db";
 import { authUsers } from "@/lib/db/schema";
-import { entero } from "@/lib/entero";
 import { getT, type Locale } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { logger } from "@/lib/observability/logger";
@@ -44,6 +43,7 @@ import {
   topePorIp,
 } from "@/lib/rate-limit/index";
 import { SignUpSchema } from "@/lib/schemas/auth";
+import { topeEntero } from "@/lib/topes";
 import { PARAMETRO_DE_VUELTA, ponerCookieDeAlta } from "@/server/alta/cookie";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { DURACION_DEL_TOKEN_MS, sellarToken } from "@/server/alta/token-de-registro";
@@ -152,7 +152,7 @@ async function destinoDelCorreo(formData: FormData): Promise<string> {
    * de alta de todos a razón de `auth:up` por minuto.
    */
   const delDia = await rateLimit(claveDeCupo("alta:correo-ip", ip), {
-    limit: entero("ALTA_TOPE_CORREO_POR_IP_DIA", 10, 1, 1000),
+    limit: topeEntero("ALTA_TOPE_CORREO_POR_IP_DIA"),
     windowMs: DIA_MS,
     fallaCerrada: true,
   });

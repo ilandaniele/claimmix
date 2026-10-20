@@ -40,11 +40,10 @@ import {
   topeDiarioDelPlan,
 } from "@/lib/billing/plans";
 import { db, tables } from "@/lib/db";
-import { entero } from "@/lib/entero";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit, resolveProvider } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
-import { readCap, topeMensualDelProyecto } from "./tope-mensual";
+import { topeAnonimo, topeDecimal, topeEntero, topeMensualDelProyecto } from "@/lib/topes";
 import { inquilinoDeLaPlataforma } from "@/server/whatsapp/numeros";
 import { CENTINELA, basePorCliente } from "@/data/bases";
 import {
@@ -185,8 +184,8 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
   // Este contexto es lo único que le dice de quién son los datos.
   const tenantCtx: TenantContext = { tenantId: demoTenantId };
 
-  const dailyTokenCap = readCap(process.env.AI_DEMO_DAILY_TOKEN_CAP, 300_000);
-  const monthlyCapUsd = readCap(process.env.DEMO_MONTHLY_BUDGET_USD, 10);
+  const dailyTokenCap = topeDecimal("AI_DEMO_DAILY_TOKEN_CAP");
+  const monthlyCapUsd = topeDecimal("DEMO_MONTHLY_BUDGET_USD");
 
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
@@ -279,34 +278,8 @@ export async function checkBudget(
   const tenantCtx: TenantContext = { tenantId };
   const llamadas = Math.max(0, Math.trunc(opciones.llamadas ?? 1));
   const monthlyCapUsd = topeMensualDelProyecto();
-  const tenantDailyTokenCap = readCap(process.env.AI_TENANT_DAILY_TOKEN_CAP, 5_000_000);
-  /*
-   * Dos millones, y el número está medido, no elegido.
-   *
-   * Era 100.000, y ese valor nunca se ejerció: `gemini-extractor` grababa
-   * `user_id: null`, así que el cupo sumaba sobre un conjunto vacío y no cortaba
-   * nunca. Al arreglar eso, el tope se PRENDE — y prenderlo en un número que
-   * nadie validó contra el uso real es la forma cara de arreglar esto.
-   *
-   * Medido sobre las 7.554 llamadas que hay en la base:
-   *
-   *   promedio por llamada    11.771 tokens
-   *   p95                     12.730
-   *   máximo                  34.798
-   *
-   * O sea que 100.000 son OCHO extracciones por persona por día. Un analista
-   * que re-analiza un puñado de casos lo agotaba antes del mediodía, y una
-   * tanda de los 108 escenarios de `/api/admin/batch-simulate` —unos 1,27
-   * millones— lo reventaba de entrada.
-   *
-   * Dos millones son ~170 extracciones: por encima de cualquier día de trabajo
-   * de una persona y de una tanda entera, y por debajo del tope del inquilino,
-   * que en producción está en 20 millones. Sigue frenando lo que este cupo
-   * existe para frenar: un bucle.
-   *
-   * `AI_USER_DAILY_TOKEN_CAP` lo baja cuando haga falta.
-   */
-  const userDailyTokenCap = readCap(process.env.AI_USER_DAILY_TOKEN_CAP, 2_000_000);
+  const tenantDailyTokenCap = topeDecimal("AI_TENANT_DAILY_TOKEN_CAP");
+  const userDailyTokenCap = topeDecimal("AI_USER_DAILY_TOKEN_CAP");
   /*
    * Lo que gastan los canales sin persona —mail, WhatsApp, formulario— no puede
    * quedarse con todo el cupo del inquilino.
@@ -319,10 +292,7 @@ export async function checkBudget(
    * 20 M. Derivado y no fijo a propósito, así producción no se frena por una
    * variable que falta.
    */
-  const anonimoDailyTokenCap = readCap(
-    process.env.AI_ANONIMO_DAILY_TOKEN_CAP,
-    Math.floor(tenantDailyTokenCap * 0.6)
-  );
+  const anonimoDailyTokenCap = topeAnonimo();
 
   // ── Los cupos: mensual del proyecto, diario del inquilino, diario sin persona y diario de la persona ──
   const monthStart = new Date();
@@ -445,7 +415,7 @@ async function topesDeLaPrueba(
   mensual: { pruebas: number },
   llamadas: number
 ): Promise<BudgetCheckResult> {
-  const techoUsd = entero("AI_PRUEBA_MONTHLY_USD_POR_INQUILINO", 1, 0, 100_000);
+  const techoUsd = topeEntero("AI_PRUEBA_MONTHLY_USD_POR_INQUILINO");
   if (delDia.pruebaUsd >= techoUsd) {
     return {
       exceeded: true,
@@ -455,7 +425,7 @@ async function topesDeLaPrueba(
   }
 
   // Sin cifras: el pozo es la suma de todas las pruebas y `reason` llega a quien preguntó.
-  if (mensual.pruebas >= entero("AI_PRUEBAS_MONTHLY_BUDGET_USD", 30, 0, 1_000_000)) {
+  if (mensual.pruebas >= topeEntero("AI_PRUEBAS_MONTHLY_BUDGET_USD")) {
     return {
       exceeded: true,
       motivo: "pozo_de_pruebas",

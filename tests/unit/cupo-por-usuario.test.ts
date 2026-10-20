@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { topeDecimal } from "@/lib/topes";
 
 const EXTRACTOR = readFileSync("src/server/ai/gemini-extractor.ts", "utf8");
 const BUDGET = readFileSync("src/server/ai/budget.ts", "utf8");
@@ -32,7 +33,7 @@ describe("el uso se graba con el usuario que lo gastó", () => {
 
 describe("el tope por usuario es alcanzable y no estorba", () => {
   it("el default es 2.000.000", () => {
-    expect(BUDGET).toContain("AI_USER_DAILY_TOKEN_CAP, 2_000_000");
+    expect(topeDecimal("AI_USER_DAILY_TOKEN_CAP", {})).toBe(2_000_000);
   });
 
   it("deja lugar a más de cien extracciones de tamaño real", () => {
@@ -55,7 +56,8 @@ describe("el tope por usuario es alcanzable y no estorba", () => {
 
   it("se puede bajar por variable de entorno", () => {
     // La decisión de cuánto es de quien opera, no del default.
-    expect(BUDGET).toContain("process.env.AI_USER_DAILY_TOKEN_CAP");
+    expect(topeDecimal("AI_USER_DAILY_TOKEN_CAP", { AI_USER_DAILY_TOKEN_CAP: "7" })).toBe(7);
+    expect(BUDGET).toContain('topeDecimal("AI_USER_DAILY_TOKEN_CAP")');
   });
 });
 

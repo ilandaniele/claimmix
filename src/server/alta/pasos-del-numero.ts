@@ -162,15 +162,29 @@ export interface Entorno {
 
 /**
  * Le pone al número el webhook de este ambiente y lo lee de Graph. null si quedó; si
- * no, qué contestar. Poner no alcanza: lo que Graph devuelve es lo único que vale.
- * Sin webhook en el entorno no hay nada que poner y no se llama a Graph.
+ * no, la falla de Graph o «no_quedo». Poner no alcanza: lo que Graph devuelve es lo
+ * único que vale. Quien llama decide qué contestar.
+ */
+export async function ponerElWebhook(
+  cred: Entorno["cred"],
+  id: string,
+  webhook: NonNullable<Entorno["webhook"]>
+): Promise<FallaDeGraph | "no_quedo" | null> {
+  const puesto = await fijarWebhookDelNumero(cred, id, webhook);
+  if (!puesto.ok) return puesto.falla;
+  const leido = await webhookPropioEs(cred, id, webhook.url);
+  if (!leido.ok) return leido.falla;
+  return leido.valor ? null : "no_quedo";
+}
+
+/**
+ * Lo mismo, con la salida que ve la persona. Sin webhook en el entorno no hay nada
+ * que poner y no se llama a Graph.
  */
 export async function fijarElWebhook(tenantId: string, id: string, entorno: Entorno): Promise<ResultadoDelNumero | null> {
   const { webhook } = entorno;
   if (!webhook) return null;
-  const puesto = await fijarWebhookDelNumero(entorno.cred, id, webhook);
-  if (!puesto.ok) return deFalla(puesto.falla, tenantId);
-  const leido = await webhookPropioEs(entorno.cred, id, webhook.url);
-  if (!leido.ok) return deFalla(leido.falla, tenantId);
-  return leido.valor ? null : aRevision("sin_webhook", tenantId);
+  const falla = await ponerElWebhook(entorno.cred, id, webhook);
+  if (falla === null) return null;
+  return falla === "no_quedo" ? aRevision("sin_webhook", tenantId) : deFalla(falla, tenantId);
 }

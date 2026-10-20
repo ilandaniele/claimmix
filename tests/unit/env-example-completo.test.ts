@@ -43,7 +43,6 @@ const esDeLaPlataforma = (nombre: string) =>
 
 /** Funciones del repo que leen una variable por el nombre que reciben como primer argumento. */
 const LECTORES = [
-  "entero",
   "getNumberEnv",
   "numberEnv",
   "clavePara",
@@ -56,7 +55,7 @@ const LECTORES = [
  * - lista: `x` sale de una lista de nombres en el propio archivo.
  */
 const DINAMICAS: Record<string, "lector" | "lista"> = {
-  "src/lib/entero.ts": "lector",
+  "src/lib/topes.ts": "lista",
   "src/server/ai/gemini-extractor.ts": "lector",
   "src/app/api/admin/provider-usage/route.ts": "lector",
   "src/server/intake/simulation-throttle.ts": "lector",

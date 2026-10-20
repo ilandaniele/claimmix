@@ -17,7 +17,7 @@ import { ALL_ROLES } from "@/lib/auth/roles";
 import { resolveBaseURL } from "@/lib/auth/base-url";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { enPrueba, SIN_SERVICIO } from "@/lib/billing/plans";
-import { entero } from "@/lib/entero";
+import { topeEntero } from "@/lib/topes";
 import { getT } from "@/lib/i18n";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -80,7 +80,7 @@ const InviteUserSchema = SignUpSchema.extend({ role: z.enum(ALL_ROLES) }).strict
 
 const DIA_MS = 24 * 60 * 60_000;
 /** Cuántas invitaciones, de las que no sean pruebas, por día y por espacio. */
-const topeDeInvitaciones = () => entero("ALTA_TOPE_INVITACIONES_DIA", 20, 1, 1000);
+const topeDeInvitaciones = () => topeEntero("ALTA_TOPE_INVITACIONES_DIA");
 /** Una prueba invita a lo sumo a cinco personas por día. */
 const TOPE_EN_PRUEBA = 5;
 

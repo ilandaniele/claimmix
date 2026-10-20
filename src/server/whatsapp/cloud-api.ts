@@ -22,7 +22,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { timingSafeStringEqual } from "@/lib/security/compare";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/server/email/attachment-validator";
 import { logger } from "@/lib/observability/logger";
-import { entero } from "@/lib/entero";
+import { topeEntero } from "@/lib/topes";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
@@ -780,7 +780,7 @@ const DIA_MS = 24 * 60 * 60_000;
 
 /** Plantillas por día que puede mandar un espacio en prueba; 0 las corta del todo. */
 export function topeDePlantillasDePrueba(): number {
-  return entero("ALTA_TOPE_PLANTILLAS_PRUEBA_DIA", 3, 0, 1000);
+  return topeEntero("ALTA_TOPE_PLANTILLAS_PRUEBA_DIA");
 }
 
 function cupoDePlantillas(vencida: boolean) {

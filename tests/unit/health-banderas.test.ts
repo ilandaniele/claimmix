@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "fs";
+import { readFileSync } from "fs";
 import { join, resolve } from "path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { leerModo } from "@/core/retencion";
 import { basePorCliente } from "@/data/bases";
 import { altaAbierta } from "@/lib/auth/registro-permitido";
 import { diasDePrueba, topeDiarioDelPlan } from "@/lib/billing/plans";
+import { TOPES_ENTEROS, topeDecimalEscrito } from "@/lib/topes";
 import { resolverAiMode } from "@/server/ai/ai-mode";
 import { topeMensualDelProyecto } from "@/server/ai/tope-mensual";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
@@ -254,41 +255,20 @@ describe("leerBanderas contra los lectores que no se importan", () => {
 });
 
 describe("los rangos de los topes", () => {
-  type Rango = { nombre: string; min: string; max: string };
-
-  const normalizar = (s: string) => s.trim().replace(/(?<=\d)_(?=\d)/g, "");
-
-  const rangos = (texto: string, patron: RegExp): Rango[] =>
-    [...texto.matchAll(patron)].map((m) => ({
-      nombre: m[1],
-      min: normalizar(m[2]),
-      max: normalizar(m[3]),
-    }));
-
-  const enBanderas = rangos(
-    readFileSync(join(ROOT, "src/app/api/health/banderas.ts"), "utf8"),
-    /enteroDe\(env\.([A-Z][A-Z0-9_]*),\s*([^,]+?),\s*([^)]+?)\)/g
-  );
-
-  const archivos = readdirSync(join(ROOT, "src"), { recursive: true, encoding: "utf8" }).filter((f) => /\.tsx?$/.test(f));
-  const enElCodigo = archivos.flatMap((f) =>
-    rangos(
-      readFileSync(join(ROOT, "src", f), "utf8"),
-      /\bentero\(\s*["']([A-Z][A-Z0-9_]*)["'],\s*[^,]+,\s*([^,]+?),\s*([^)]+?)\)/g
-    )
-  );
-
-  it("cada tope leído con entero() está en banderas.ts, y al revés", () => {
-    expect(enElCodigo.length).toBeGreaterThan(0);
-    expect(
-      enBanderas.map((r) => r.nombre).sort(),
-      "un tope nuevo leído con entero() también va en banderas.ts"
-    ).toEqual(enElCodigo.map((r) => r.nombre).sort());
+  it("cada tope entero está en las claves", () => {
+    for (const { nombre } of TOPES_ENTEROS) expect(CLAVES, nombre).toContain(nombre);
   });
 
-  it("cada uno tiene el mismo piso y techo que en el código", () => {
-    for (const llamada of enElCodigo) {
-      expect(enBanderas.find((r) => r.nombre === llamada.nombre), llamada.nombre).toEqual(llamada);
+  it.each(TOPES_ENTEROS)("$nombre acepta el piso y el techo y rechaza lo de afuera", ({ nombre, min, max }) => {
+    expect(leerBanderas({ [nombre]: String(min) })[nombre]).toBe(min);
+    expect(leerBanderas({ [nombre]: String(max) })[nombre]).toBe(max);
+    expect(leerBanderas({ [nombre]: String(max + 1) })[nombre]).toBeNull();
+    expect(leerBanderas({ [nombre]: String(min - 1) })[nombre]).toBeNull();
+  });
+
+  it.each(["MONTHLY_BUDGET_USD", "AI_TENANT_DAILY_TOKEN_CAP"] as const)("%s lee igual que topeDecimalEscrito", (nombre) => {
+    for (const crudo of ["0", "12.5", "-1", ""]) {
+      expect(leerBanderas({ [nombre]: crudo })[nombre], JSON.stringify(crudo)).toBe(topeDecimalEscrito(nombre, { [nombre]: crudo }));
     }
   });
 });

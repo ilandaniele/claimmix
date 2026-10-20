@@ -12,7 +12,7 @@
  * change retroactively because we edited a price here.
  */
 
-import { entero } from "@/lib/entero";
+import { topeEntero } from "@/lib/topes";
 
 export const PLANS = ["piloto", "operativo", "profesional", "corporativo", "enterprise"] as const;
 
@@ -176,8 +176,7 @@ export const TOKENS_P95_POR_LLAMADA = 12_730;
 /** Un plan que no está en el catálogo cae al tope más chico, el del piloto. */
 export function topeDiarioDelPlan(plan: string): number {
   if (isPlan(plan) && plan !== "piloto") return TOPE_DIARIO_TOKENS[plan];
-  const { piloto } = TOPE_DIARIO_TOKENS;
-  return entero("AI_PILOTO_DAILY_TOKEN_CAP", piloto, 1, Number.MAX_SAFE_INTEGER);
+  return topeEntero("AI_PILOTO_DAILY_TOKEN_CAP");
 }
 
 /** Cuántas llamadas al modelo caben en un tope diario de tokens (39 para el piloto). */
@@ -187,7 +186,7 @@ export function llamadasDiariasDePrueba(tope: number): number {
 
 /** Días que dura la prueba de un espacio que se dio de alta solo. */
 export function diasDePrueba(): number {
-  return entero("ALTA_PRUEBA_DIAS", 30, 1, 90);
+  return topeEntero("ALTA_PRUEBA_DIAS");
 }
 
 /** Las columnas del inquilino que deciden si está en prueba (`autoalta` existe desde la 0048). */

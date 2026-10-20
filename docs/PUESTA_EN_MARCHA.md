@@ -1286,7 +1286,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 con el lote 1 de la prueba del alta. El resto no existe todavía: sus nombres de
+Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta). El resto no existe todavía: sus nombres de
 archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre

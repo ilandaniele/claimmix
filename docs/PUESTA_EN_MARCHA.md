@@ -48,9 +48,10 @@ y `docs/PROJECT_STATUS.md` se corrigieron en este mismo cambio.
 
 ## Lo que hoy no es igual
 
-- QA no muestra Turnstile, el alta con correo ni el aviso del número por código: le faltan
-  `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET` de su propio cliente OAuth (`claimmix-qa`) y el
-  remitente emitido con ese cliente; se ve tras el merge de #474 (`docs/PROJECT_STATUS.md:5053`).
+- Lo que muestra `/registro` en cada ambiente (el correo, Turnstile) sale de las banderas que
+  informa `/api/health` con el `Authorization: Bearer` de `CRON_SECRET` de ese ambiente. En QA,
+  el job «Alta automática en QA» del Post-deploy comprueba en cada deploy que `/registro`
+  coincide con ellas (`docs/TESTING.md`, capa 11); dev y prd no tienen esa comprobación.
 - QA no tiene token de WhatsApp ni casilla de la plataforma, a propósito
   (`docs/PROMOCION.md:323-327`). Sigue así hasta que QA tenga su propia WABA y su propio token
   (después de A5; ver «Después de A5: una WABA y un token por ambiente»).
@@ -1285,7 +1286,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484. El resto no existe todavía: sus nombres de
+Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 con el lote 1 de la prueba del alta. El resto no existe todavía: sus nombres de
 archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre
@@ -1301,7 +1302,7 @@ que tenía en la versión anterior de esta guía.
 | 6 | `/configuracion` y `/api/health` muestran el tope real de `MONTHLY_BUDGET_USD` (nuevo) | El semáforo y la pantalla dicen la cifra que corta | Ve su tope real | Con `MONTHLY_BUDGET_USD` en 50, las dos muestran 50; con 0, dicen «IA frenada», porque el guardia frena. **Hecho en #461.** Que 0 quiera decir «sin tope» lo decide el dueño | chico | nada |
 | 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
 | 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador recibe un mail al llegar a 80 usuarios y cuando la WABA se llena | mediano | 4 y 7 |
-| 9 | Prueba automática del alta de punta a punta, a partir de `pnpm onboard` (`package.json:39`), que hoy sólo prueba la creación del espacio (nuevo) | Cada deploy de QA prueba `/registro`, el correo, la base y Gmail sin una persona | Menos altas rotas | La prueba corre en el Post-deploy de QA y queda roja si el alta se rompe | grande | 3 |
+| 9 | Prueba automática del alta por el enlace del correo, de punta a punta, en QA: `pnpm alta:probar` (`scripts/probar-alta.mts`), un guión nuevo. No parte de `pnpm onboard`, que prueba el alta de un inquilino por el operador y no la autoalta (nuevo) | Cada deploy de QA prueba `/registro`, el alta por el enlace del correo y la base (la función de la 0048 y los cupos por red) sin una persona. No prueba Turnstile, Gmail ni el alta con Google: siguen a mano | Menos altas rotas | El job «Alta automática en QA» corre en el Post-deploy de QA y queda rojo si el alta se rompe o QA queda sucia. Si no puede probar (red, tope de QA lleno, otro commit, candado ocupado) sale verde y el resumen del run dice «corrió SIN PODER PROBAR». **Hecho con el merge del lote 1** (`docs/TESTING.md`, capa 11). El lote 2 queda pendiente del dueño | grande | 3 |
 | 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones | mediano | 3. Decisión: qué puede quedar distinto y si bloquea o sólo avisa (supuesto: avisa la primera semana) |
 | 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio. **Hecho en #484** | mediano | nada |
 | 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |

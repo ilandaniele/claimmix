@@ -199,11 +199,11 @@ tarda algo, la guía lo dice así.
     [accounts.google.com/signup](https://accounts.google.com/signup); los alias no se crean en
     ningún lado.
   - **Qué hacer:** tener tres direcciones en cada ambiente.
-    - **Administrador:** un alias `+` de una Gmail, como `<cuenta>+dev-admin@gmail.com`. Gmail
+    - **Administrador:** un alias `+` de una Gmail: la dirección con `+dev-admin` antes de la arroba. Gmail
       lo entrega en la bandeja de la cuenta sin configurar nada. Hace la autoalta en
       `/registro` por el camino del correo. `ADMIN_EMAILS` compara la dirección exacta, así
       que el alias de una cuenta de operador no cuenta como operador.
-    - **Analista:** otro alias `+`, como `<cuenta>+dev-analista@gmail.com`. Se invita desde
+    - **Analista:** otro alias `+`, con `+dev-analista` antes de la arroba. Se invita desde
       `/admin/users` después de que el dueño active el espacio con cuota 0 (D4). En prueba
       la invitación a gmail.com se rechaza por dominio.
     - **Mail agente:** una cuenta de Gmail propia, no un alias, porque Google conecta la

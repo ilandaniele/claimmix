@@ -5235,6 +5235,9 @@ Tres ítems más del «Plan para que el alta sea automática» que no esperaban 
   paso, las decisiones D1 a D15 y el plan para que el alta sea automática, está en
   `docs/PUESTA_EN_MARCHA.md`. Hechos al 19/10: A1, A2, A6, A10, A11 y A12. Faltan A3, A4,
   A5, A7, A8 y A9 (de A7 sólo entrar una vez con Google en prd), y las decisiones D10 a D13.
+  A3 son tres direcciones por ambiente: administrador y analista como alias `+` de Gmail, y
+  el mail agente como una Gmail propia. D4 se corrigió el 20/10 a (b), porque no hay dominio
+  propio: el analista se invita después de activar el espacio con cuota 0.
 - **Tono de los mails (del transcripto del 17/10).** Cuatro cosas que son copia del producto y
   quedan como están hasta que decidas: el mail no saluda por el nombre (`05-canal-mail.md`), la
   referencia es el UUID entero y no una corta, los mails firman como ClaimMix frente al

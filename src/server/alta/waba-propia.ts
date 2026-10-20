@@ -46,13 +46,13 @@ import { after } from "next/server.js";
 import { enControl } from "@/data/scope";
 import { filasDe } from "@/lib/db/filas";
 import { tenants, whatsappNumeros, whatsappWabas } from "@/lib/db/schema";
-import { entero } from "@/lib/entero";
 import { getT } from "@/lib/i18n";
 import { ID_DE_USUARIO_DE_META } from "@/lib/meta-ids";
 import { nombreDelError } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { cifrar } from "@/lib/security/cifrado";
+import { topeEntero } from "@/lib/topes";
 import { CATEGORIA_INICIAL, categoriaDePerfil, type CategoriaDePerfil } from "@/lib/whatsapp-categorias";
 import { avisarNumeroEnRevision, type MotivoDeRevision } from "@/server/alta/aviso-operador";
 import { topesDelNumero } from "@/server/alta/numero-automatico";
@@ -137,7 +137,7 @@ const EVENTO_SOLO_WABA = "FINISH_ONLY_WABA";
 const EVENTO_APP_DE_WHATSAPP = "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING";
 
 /** Cuántas WABAs nuevas de portfolios distintos se aceptan por semana, de todos los espacios juntos. */
-const topeSemanal = () => entero("ALTA_TOPE_WABAS_SEMANA", 10, 0, 1000);
+const topeSemanal = () => topeEntero("ALTA_TOPE_WABAS_SEMANA");
 
 /* ── Tipos ────────────────────────────────────────────────────────────────── */
 

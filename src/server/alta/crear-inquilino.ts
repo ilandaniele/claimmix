@@ -25,9 +25,9 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 
 import { enControl } from "@/data/scope";
-import { entero } from "@/lib/entero";
 import { diasDePrueba } from "@/lib/billing/plans";
 import { filasDe } from "@/lib/db/filas";
+import { topeEntero } from "@/lib/topes";
 import { codigoPg } from "@/server/core-sync/config";
 
 export type ResultadoDeAlta =
@@ -49,17 +49,17 @@ export interface AltaCreada {
 
 /** Cuántos espacios por día. 0 cierra el alta; la base lo acota a 500. */
 export function topeGlobalDelDia(): number {
-  return entero("ALTA_TOPE_GLOBAL_DIA", 20, 0, 500);
+  return topeEntero("ALTA_TOPE_GLOBAL_DIA");
 }
 
 /** Cuántas bases de cliente puede haber. 0 no pone tope. */
 export function topeDeBases(): number {
-  return entero("ALTA_TOPE_BASES", 0, 0, 500);
+  return topeEntero("ALTA_TOPE_BASES");
 }
 
 /** Cuántos MB puede pesar el proyecto entero. 0 no pone tope. */
 export function topeDeMb(): number {
-  return entero("ALTA_TOPE_MB", 0, 0, 500);
+  return topeEntero("ALTA_TOPE_MB");
 }
 
 /**

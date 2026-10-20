@@ -179,6 +179,15 @@ export async function fijarWebhookDelNumero(
   });
 }
 
+/** Los webhooks propios del número que Graph devuelve: `phone_number` y `override_callback_uri`, los que son texto. */
+function webhooksDelNumero(conf: unknown): string[] {
+  if (typeof conf !== "object" || conf === null || Array.isArray(conf)) return [];
+  const { phone_number: propio, override_callback_uri: puesto } = conf as Record<string, unknown>;
+  return [propio, puesto].filter((visto): visto is string => typeof visto === "string");
+}
+
+const esLaUrl = (visto: string, url: string) => visto === url || visto === `${url}/`;
+
 /**
  * ¿El webhook propio del número es `url`? Cuenta lo que Graph devuelve, no lo que se
  * mandó: la `application` y la de la WABA no valen, porque son las que se quiere evitar.
@@ -187,9 +196,17 @@ export async function webhookPropioEs(cred: CredencialDeAlta, phoneNumberId: str
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
   const r = await llamar("leer_webhook", `${phoneNumberId}?fields=webhook_configuration`, cred);
   if (!r.ok) return r;
-  const conf = r.valor.webhook_configuration;
-  if (typeof conf !== "object" || conf === null || Array.isArray(conf)) return { ok: true, valor: false };
-  const { phone_number: propio, override_callback_uri: puesto } = conf as Record<string, unknown>;
-  const esUrl = (visto: unknown) => visto === url || visto === `${url}/`;
-  return { ok: true, valor: esUrl(propio) || esUrl(puesto) };
+  return { ok: true, valor: webhooksDelNumero(r.valor.webhook_configuration).some((visto) => esLaUrl(visto, url)) };
+}
+
+/**
+ * ¿El número tiene un webhook propio que no es `url`, el de otro ambiente? Sin override,
+ * o con el nuestro, no: el número cae en el de la app y no hay nada ajeno que pisar.
+ */
+export async function webhookAjenoEs(cred: CredencialDeAlta, phoneNumberId: string, url: string): Promise<RespuestaDeAlta<boolean>> {
+  if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
+  const r = await llamar("leer_webhook", `${phoneNumberId}?fields=webhook_configuration`, cred);
+  if (!r.ok) return r;
+  const propios = webhooksDelNumero(r.valor.webhook_configuration);
+  return { ok: true, valor: propios.length > 0 && !propios.some((visto) => esLaUrl(visto, url)) };
 }

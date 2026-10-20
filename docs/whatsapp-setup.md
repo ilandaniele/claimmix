@@ -298,6 +298,14 @@ Además, cada WABA necesita su propio número de la plataforma. Una WABA por amb
 espera a la verificación del negocio o a un portfolio aparte (`docs/PUESTA_EN_MARCHA.md`,
 «Después de A5: una WABA y un token por ambiente»).
 
+La tarjeta «Lugares en la WABA de la plataforma» de `/admin/altas` muestra «N libres de
+M», donde M es `ALTA_NUMEROS_MAXIMOS_WABA` y N lo que queda después de contar las filas
+de `/phone_numbers` (una sola recorrida de Graph, sin consulta a la base). Compara con
+ese tope por WABA, el mismo que dispara `sin_lugar`, y **no** con el tope de Meta por
+portfolio de arriba. En 0 libres se pone en rojo. Si falta la credencial, Meta no
+contesta o no se pudieron contar las filas enteras, muestra «—» y «Meta no contestó: sin
+dato».
+
 ### Los topes
 
 | Variable | Por defecto | Rango | Qué limita |
@@ -331,7 +339,7 @@ El mail dice sólo el motivo; qué espacio fue queda en el log `alta.numero_en_r
 
 | Motivo | Qué pasó | Qué hacer |
 |---|---|---|
-| `sin_lugar` | La WABA llegó a `ALTA_NUMEROS_MAXIMOS_WABA`, o se agotó `ALTA_TOPE_NUMEROS_DIA`. | Mirar WhatsApp Manager y borrar a mano los números sobrantes, o verificar la empresa en Meta y subir el tope. Mientras, conectar el espacio desde `/admin/altas`. |
+| `sin_lugar` | La WABA llegó a `ALTA_NUMEROS_MAXIMOS_WABA`, o se agotó `ALTA_TOPE_NUMEROS_DIA`. | Mirar WhatsApp Manager y borrar a mano los números sobrantes, o verificar la empresa en Meta y subir el tope. Mientras, conectar el espacio desde `/admin/altas`: ahora fija el webhook propio del número, ya no hace falta ponerlo a mano. |
 | `ya_en_la_waba` | El número ya estaba en la WABA; no se adopta solo. | Ver de quién es. Si es del cliente, conectarlo desde `/admin/altas` (se comprueba contra Meta); si no, aclararlo con quien lo agregó. |
 | `rechazo` | Meta dijo que no (el número está en la app de WhatsApp, nombre rechazado, PIN de otro proveedor…). | Leer el `code` en el log `whatsapp.alta_numero.graph` (trae el paso). Si es la app de WhatsApp, el cliente borra esa cuenta; si no, `/admin/altas`. |
 | `sin_dueno` | Meta tiene el número, pero la base no pudo asignárselo al espacio. | Ver `alta.numero_automatico_no_guardado` (dice el resultado de la función) y conectarlo desde `/admin/altas`. Mientras la fila siga en `pedido`, el webhook descarta lo que entre. |
@@ -342,11 +350,30 @@ El mail dice sólo el motivo; qué espacio fue queda en el log `alta.numero_en_r
 | `sin_fila` | Un espacio pidió el código y no tiene un número en trámite (`pedido`); no se llamó a Meta. | Ver el espacio en `/admin/altas`: puede ser un número ya tomado por otro al darse de alta. |
 | `sin_credencial` | Falta el token, la WABA o el número de la plataforma en el entorno, o el sitio no es https o no hay token del apretón de manos; no se llamó a Meta. | Revisar `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_PHONE_NUMBER_ID`, `NEXT_PUBLIC_SITE_URL` y `WHATSAPP_VERIFY_TOKEN`. |
 | `de_otro_ambiente` | Un espacio pidió un número de la lista `NUMEROS_DE_DEV`; no se llamó a Meta. | Ver cómo llegó ese número a este ambiente y conectarlo en el que corresponde. |
-| `sin_webhook` | El número quedó registrado pero Graph no devolvió el webhook propio de este ambiente: lo que le escriban puede caer en el otro. | Mirar el número en WhatsApp Manager. El espacio puede reintentar (repite el webhook sin registrar de nuevo); si no alcanza, ponerlo a mano y conectar desde `/admin/altas`. |
+| `sin_webhook` | El número quedó registrado pero Graph no devolvió el webhook propio de este ambiente: lo que le escriban puede caer en el otro. | Mirar el número en WhatsApp Manager. El espacio puede reintentar (repite el webhook sin registrar de nuevo); si no alcanza, conectar desde `/admin/altas`, que fija el webhook propio del número: ya no hace falta ponerlo a mano. |
 
 Los números sobrantes se borran **a mano en WhatsApp Manager**: ClaimMix no borra nada
 de la WABA. Lo mismo vale para un flujo abandonado (se agregó el número y nadie
 escribió el código).
+
+### Conectar a mano: qué contesta
+
+Conectar desde `/admin/altas` comprueba el número contra Meta y, antes de escribir en la
+base, le fija su webhook propio (el mismo del paso 4 de arriba) y lo vuelve a leer de
+Graph. El número de la plataforma no se toca: usa el webhook de la app. La pantalla
+contesta con un resultado de una lista cerrada, y no escribe nada en la base si no es
+`ok`:
+
+- `sin_credencial`: falta la credencial de Meta de la plataforma, su WABA,
+  `NEXT_PUBLIC_SITE_URL` con https o `WHATSAPP_VERIFY_TOKEN`. Falla cerrado: no se llamó
+  a Meta.
+- `webhook_ajeno`: el número ya tiene el webhook de otro ambiente. No se toca ni se
+  conecta; hay que conectarlo en el ambiente que corresponde.
+- `sin_webhook`: Meta no dejó el webhook de este ambiente en el número. No se conectó;
+  mirar el número en WhatsApp Manager y repetir. (Es el resultado de la pantalla, no el
+  aviso por mail del mismo nombre.)
+- `meta_no_responde`: Meta no contestó o contestó algo que no se entiende. Repetir en un
+  rato.
 
 ### El PIN de dos pasos
 
@@ -529,7 +556,8 @@ la plantilla.
   de la WABA, pero **no llama a Meta**. Para soltar la app en Meta hay que usar «Desvincular
   la WABA».
 - **Conectar a mano** (el formulario del operador) sigue siendo solo sobre la WABA de la
-  plataforma. No hay «conectar por el cliente».
+  plataforma, y ahora también le fija el webhook propio al número (ver «Conectar a mano:
+  qué contesta», en la Parte F). No hay «conectar por el cliente».
 - **Ayuda del cliente:** el enlace «Ayuda» de `/conectar-whatsapp` es un `mailto:` a la misma
   dirección a la que escribe `aviso-operador.ts`, con el espacio y la WABA en el cuerpo.
 

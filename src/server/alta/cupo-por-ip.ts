@@ -9,15 +9,15 @@
 
 import "server-only";
 
-import { entero } from "@/lib/entero";
 import { logger } from "@/lib/observability/logger";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { liberarCupo, rateLimit, type RateLimitResult } from "@/lib/rate-limit/index";
+import { topeEntero } from "@/lib/topes";
 
 const DIA_MS = 24 * 60 * 60_000;
 
 /** Cuántos espacios por día y por red (/56 en IPv6). */
-const topeDeAltaPorIp = () => entero("ALTA_TOPE_IP_DIA", 3, 1, 100);
+const topeDeAltaPorIp = () => topeEntero("ALTA_TOPE_IP_DIA");
 
 export async function tomarCupoDeAlta(ip: string): Promise<{ clave: string; cupo: RateLimitResult }> {
   const clave = claveDeCupo("alta:ip", ip);

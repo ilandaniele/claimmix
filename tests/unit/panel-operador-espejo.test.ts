@@ -67,16 +67,24 @@ const filas = (...rows: Array<Record<string, unknown>>) => ({ rows });
 const espejoCaido = () =>
   h.espejar.mockRejectedValue(Object.assign(new Error("falló la fila de ana@example.com"), { code: "08006" }));
 
-/** Un Graph de juguete que confirma el número y su lugar en la WABA. */
+/** Un Graph de juguete que confirma el número y su lugar en la WABA, y guarda el webhook que le ponen. */
 function graphConfirma() {
   const respuesta = (cuerpo: unknown) => ({ ok: true, status: 200, json: async () => cuerpo }) as Response;
+  let guardado: string | undefined;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) =>
-      url.includes("/phone_numbers")
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        guardado = JSON.parse(String(init.body)).webhook_configuration.override_callback_uri;
+        return respuesta({ success: true });
+      }
+      if (url.includes("fields=webhook_configuration")) {
+        return respuesta(guardado ? { webhook_configuration: { phone_number: guardado } } : {});
+      }
+      return url.includes("/phone_numbers")
         ? respuesta({ data: [{ id: ID_DEL_CLIENTE }] })
-        : respuesta({ display_phone_number: "+54 9 11 0000-0000", verified_name: "Seguros Fake" })
-    )
+        : respuesta({ display_phone_number: "+54 9 11 0000-0000", verified_name: "Seguros Fake" });
+    })
   );
 }
 
@@ -90,6 +98,8 @@ beforeEach(() => {
   process.env.WHATSAPP_PHONE_NUMBER_ID = ID_PLATAFORMA;
   process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = WABA;
   process.env.WHATSAPP_TENANT_ID = PLATAFORMA;
+  process.env.NEXT_PUBLIC_SITE_URL = "https://claimmix.test";
+  process.env.WHATSAPP_VERIFY_TOKEN = "fake-verify-token";
 });
 
 afterEach(() => {

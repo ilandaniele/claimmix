@@ -42,6 +42,7 @@ import {
   aRevision,
   deFalla,
   fijarElWebhook,
+  ponerElWebhook,
   sinDueno,
   soltar,
   tomar,
@@ -164,6 +165,40 @@ describe("las salidas", () => {
       "alta.numero_automatico_no_guardado"
     );
     expect(h.aviso).toHaveBeenCalledWith("sin_dueno", TENANT);
+  });
+});
+
+describe("ponerElWebhook", () => {
+  it("lo pone, lo lee de Graph y, si quedó, devuelve null", async () => {
+    h.fijarWebhook.mockResolvedValue({ ok: true, valor: true });
+    h.leerWebhook.mockResolvedValue({ ok: true, valor: true });
+
+    await expect(ponerElWebhook(ENTORNO.cred, ID, WEBHOOK)).resolves.toBeNull();
+
+    expect(h.fijarWebhook).toHaveBeenCalledWith(ENTORNO.cred, ID, WEBHOOK);
+    expect(h.leerWebhook).toHaveBeenCalledWith(ENTORNO.cred, ID, WEBHOOK.url);
+  });
+
+  it("una falla al ponerlo sale tal cual y no lee", async () => {
+    h.fijarWebhook.mockResolvedValue({ ok: false, falla: "meta", codigo: null });
+
+    await expect(ponerElWebhook(ENTORNO.cred, ID, WEBHOOK)).resolves.toBe("meta");
+
+    expect(h.leerWebhook).not.toHaveBeenCalled();
+  });
+
+  it("una falla al leerlo sale tal cual", async () => {
+    h.fijarWebhook.mockResolvedValue({ ok: true, valor: true });
+    h.leerWebhook.mockResolvedValue({ ok: false, falla: "esperar", codigo: 4 });
+
+    await expect(ponerElWebhook(ENTORNO.cred, ID, WEBHOOK)).resolves.toBe("esperar");
+  });
+
+  it("si Graph devuelve otro, dice «no_quedo»", async () => {
+    h.fijarWebhook.mockResolvedValue({ ok: true, valor: true });
+    h.leerWebhook.mockResolvedValue({ ok: true, valor: false });
+
+    await expect(ponerElWebhook(ENTORNO.cred, ID, WEBHOOK)).resolves.toBe("no_quedo");
   });
 });
 

@@ -45,6 +45,7 @@ import { db } from "@/lib/db";
 import { ID_DE_META } from "@/lib/meta-ids";
 import { conteoDe, filasDe } from "@/lib/db/filas";
 import { topeGlobalDelDia } from "@/server/alta/crear-inquilino";
+import { ponerElWebhook } from "@/server/alta/pasos-del-numero";
 import { continuarWaba, soltarEnMeta, type Almacen, type FilaDeWaba, type GuardadoDeWaba } from "@/server/alta/waba-propia";
 import { FALLAS_DE_WABA, type FallaDeWaba, type ResultadoDeApp } from "@/server/alta/waba-resultados";
 import { esNumeroDeOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
@@ -52,7 +53,14 @@ import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { nombreDelError } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { codigoPg } from "@/server/core-sync/config";
-import { idDeLaPlataforma, inquilinoDeLaPlataforma, wabaDeLaPlataforma } from "@/server/whatsapp/numeros";
+import { webhookAjenoEs } from "@/server/whatsapp/alta-de-numero";
+import {
+  credencialDelEntorno,
+  idDeLaPlataforma,
+  inquilinoDeLaPlataforma,
+  wabaDeLaPlataforma,
+  webhookDelEntorno,
+} from "@/server/whatsapp/numeros";
 import { aadDelPin, aadDelSecreto, aadDelToken, abrirSobre, pruebaDelSecreto } from "@/server/whatsapp/sobres-del-cliente";
 import { verificarEnMeta, type MotivoDeMeta } from "@/server/whatsapp/verificar-en-meta";
 
@@ -72,7 +80,9 @@ export type ResultadoDeConexion =
   | "de_otro_ambiente"
   | "en_cuarentena"
   | "numero_duplicado"
-  | "id_ocupado";
+  | "id_ocupado"
+  | "sin_webhook"
+  | "webhook_ajeno";
 
 /** Lo que la pantalla puede mostrar tras una acción; es la lista cerrada que acepta `?r=`. */
 export const RESULTADOS_DEL_PANEL = [
@@ -91,6 +101,8 @@ export const RESULTADOS_DEL_PANEL = [
   "sin_credencial",
   "waba_distinta",
   "meta_no_responde",
+  "sin_webhook",
+  "webhook_ajeno",
   "id_inexistente",
   "numero_distinto",
   "fuera_de_la_waba",
@@ -470,6 +482,24 @@ function esLaPlataforma(tenantId: string): boolean {
 }
 
 /**
+ * Le deja al número el webhook de este ambiente, como el camino automático. Falla cerrado:
+ * sin credencial, WABA o webhook del entorno no se conecta. Un número que ya tiene el
+ * webhook de otro ambiente no se toca, y lo que Graph no confirma no cuenta. null si quedó.
+ */
+async function webhookDelNumero(id: string): Promise<"sin_credencial" | "meta_no_responde" | "sin_webhook" | "webhook_ajeno" | null> {
+  const cred = credencialDelEntorno();
+  const webhook = webhookDelEntorno();
+  if (!cred?.wabaId || !webhook) return "sin_credencial";
+  const c = { accessToken: cred.accessToken, wabaId: cred.wabaId };
+  const ajeno = await webhookAjenoEs(c, id, webhook.url);
+  if (!ajeno.ok) return ajeno.falla === "rechazo" ? "sin_webhook" : "meta_no_responde";
+  if (ajeno.valor) return "webhook_ajeno";
+  const puesto = await ponerElWebhook(c, id, webhook);
+  if (puesto === null) return null;
+  return puesto === "esperar" || puesto === "meta" ? "meta_no_responde" : "sin_webhook";
+}
+
+/**
  * Conecta el número que un inquilino pidió, con el `phone_number_id` y la WABA
  * que el operador copió del panel de Meta.
  *
@@ -486,6 +516,9 @@ function esLaPlataforma(tenantId: string): boolean {
  *   - otro inquilino ya tiene ese número vivo;
  *   - el índice único dice que el id ya es de otro (23505), aunque dos
  *     operadores lo carguen a la vez.
+ *
+ * Antes de escribir también se le fija al número el webhook de este ambiente
+ * (`webhookDelNumero`), salvo al de la plataforma, que usa el callback de la app.
  *
  * La cuarentena y el repetido se miran DENTRO de la sentencia que escribe, no
  * antes: así no hay un hueco entre mirar y escribir.
@@ -511,6 +544,11 @@ export async function conectarNumero(
 
   const enMeta = await verificarEnMeta({ phoneNumberId, wabaId, numeroE164: fila.numeroE164 });
   if (!enMeta.ok) return enMeta.motivo;
+
+  if (phoneNumberId !== idDeLaPlataforma()) {
+    const webhook = await webhookDelNumero(phoneNumberId);
+    if (webhook !== null) return webhook;
+  }
 
   const payload = json({ phone_number_id: phoneNumberId, waba_id: wabaId, prueba_de_control: true });
   try {

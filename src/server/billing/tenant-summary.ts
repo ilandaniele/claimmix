@@ -46,6 +46,12 @@ async function enCadaBase<T>(consulta: (db: DbDueno) => PromiseLike<T[]>): Promi
   return resultados.flat();
 }
 
+const ESTADOS_DE_BASE = ["creando", "lista", "fallida", "borrada"] as const;
+export type EstadoDeBase = (typeof ESTADOS_DE_BASE)[number];
+
+const estadoDeBase = (v: unknown): EstadoDeBase | null =>
+  ESTADOS_DE_BASE.find((e) => e === v) ?? null;
+
 export interface TenantSummary {
   id: string;
   name: string;
@@ -64,6 +70,13 @@ export interface TenantSummary {
   invoice_total_usd: number;
   ai_cost_usd: number;
   margin_pct: number | null;
+  /** Nació por el alta automática: su prueba tiene tope de IA propio. */
+  autoalta: boolean;
+  base_estado: EstadoDeBase | null;
+  /** Peso de su base propia; null sin base o sin permiso para medirla. */
+  base_mb: number | null;
+  /** IA del mes por denuncia facturable; null sin denuncias. */
+  costo_medio_usd: number | null;
 }
 
 /**
@@ -94,6 +107,11 @@ export async function listTenantSummaries(month?: string | null): Promise<{
       contact_email: tables.tenants.contact_email,
       trial_ends_at: tables.tenants.trial_ends_at,
       created_at: tables.tenants.created_at,
+      // `to_jsonb` y no la columna: antes de la 0048 `tenants.autoalta` tira 42703.
+      autoalta: sql<boolean | null>`coalesce((to_jsonb(${tables.tenants}.*) ->> 'autoalta')::boolean, false)`,
+      base_estado: sql<string | null>`(select b.estado from public.tenant_bases b where b.tenant_id = ${tables.tenants.id})`,
+      // El nombre es el de `nombreDeBase`. Sin CONNECT sobre la base, `pg_database_size` tiraría.
+      base_mb: sql<number | null>`(select round(pg_database_size(d.oid) / 1048576.0)::int from pg_database d where d.datname = 't_' || replace(${tables.tenants.id}::text, '-', '') and has_database_privilege(d.oid, 'CONNECT'))`,
     })
     .from(tables.tenants)
     .where(demoTenantId ? ne(tables.tenants.id, demoTenantId) : undefined)
@@ -176,6 +194,9 @@ export async function listTenantSummaries(month?: string | null): Promise<{
 
       // Los términos guardados del tenant mandan sobre el catálogo: un contrato
       // firmado no cambia porque alguien haya editado la lista de precios.
+      const billable = facturada ? Number(facturada.billable_claims) : counts?.billable ?? 0;
+      const aiCost = Math.round(cost * 10000) / 10000;
+      const baseMb = t.base_mb == null ? null : Number(t.base_mb);
       const invoice = computeInvoice({
         claims: counts?.billable ?? 0,
         monthly_fee_usd: Number(t.monthly_fee_usd ?? fallback.monthly_fee_usd),
@@ -197,19 +218,21 @@ export async function listTenantSummaries(month?: string | null): Promise<{
         included_claims: invoice.included_claims,
         overage_price_usd: invoice.overage_price_usd,
         // Si el mes ya se facturó, lo que vale es lo que dice la factura.
-        billable_claims: facturada
-          ? Number(facturada.billable_claims)
-          : counts?.billable ?? 0,
+        billable_claims: billable,
         total_cases: counts?.total ?? 0,
         invoice_total_usd: facturada
           ? Number(facturada.total_usd)
           : invoice.total_usd,
-        ai_cost_usd: Math.round(cost * 10000) / 10000,
+        ai_cost_usd: aiCost,
         // El margen, contra el total que de verdad se cobró.
         margin_pct: computeMargin(
           facturada ? Number(facturada.total_usd) : invoice.total_usd,
           cost
         ).margin_pct,
+        autoalta: t.autoalta === true,
+        base_estado: estadoDeBase(t.base_estado),
+        base_mb: baseMb !== null && Number.isFinite(baseMb) && baseMb >= 0 ? baseMb : null,
+        costo_medio_usd: billable > 0 ? Math.round((aiCost / billable) * 10_000) / 10_000 : null,
       };
     });
 

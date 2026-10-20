@@ -21,10 +21,11 @@ import { getT, type TranslationKey } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { requireOperator } from "@/lib/auth/require-operator";
 import { AppError } from "@/lib/errors";
-import { listTenantSummaries } from "@/server/billing/tenant-summary";
+import { listTenantSummaries, type TenantSummary } from "@/server/billing/tenant-summary";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { mesDeParametro } from "@/core/billing/mes-de-parametro";
 import { nombreDePlan } from "@/lib/billing/plan-label";
+import { topeEntero } from "@/lib/topes";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,13 @@ const STATUS_LABELS: Record<string, TranslationKey> = {
   trial: "cartera.estado.trial",
   suspended: "cartera.estado.suspended",
   churned: "cartera.estado.churned",
+};
+
+const BASE_LABELS: Record<NonNullable<TenantSummary["base_estado"]>, TranslationKey> = {
+  creando: "cartera.base.creando",
+  lista: "cartera.base.lista",
+  fallida: "cartera.base.fallida",
+  borrada: "cartera.base.borrada",
 };
 
 export default async function CarteraPage({
@@ -113,6 +121,10 @@ export default async function CarteraPage({
               <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.denuncias")}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t("cartera.aFacturar")}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.costoIa")}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.prueba")}</th>
+              <th className="px-4 py-2.5 font-medium">{t("cartera.col.base")}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.mb")}</th>
+              <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.costoMedio")}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t("cartera.col.margen")}</th>
             </tr>
           </thead>
@@ -170,6 +182,22 @@ export default async function CarteraPage({
                   {money(fila.ai_cost_usd)}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                  {fila.autoalta && fila.billing_status === "trial"
+                    ? t("cartera.prueba.gasto")
+                        .replace("{gasto}", money(fila.ai_cost_usd))
+                        .replace("{techo}", money(topeEntero("AI_PRUEBA_MONTHLY_USD_POR_INQUILINO")))
+                    : "—"}
+                </td>
+                <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                  {fila.base_estado === null ? "—" : t(BASE_LABELS[fila.base_estado])}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                  {fila.base_mb ?? "—"}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                  {fila.costo_medio_usd === null ? "—" : formatUsd(fila.costo_medio_usd, 4)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">
                   {fila.margin_pct === null ? "—" : `${fila.margin_pct}%`}
                 </td>
               </tr>
@@ -177,7 +205,7 @@ export default async function CarteraPage({
 
             {tenants.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                <td colSpan={11} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
                   {t("cartera.empty")}
                 </td>
               </tr>

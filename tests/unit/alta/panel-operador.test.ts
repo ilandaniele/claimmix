@@ -96,6 +96,8 @@ beforeEach(() => {
   process.env.WHATSAPP_PHONE_NUMBER_ID = ID_PLATAFORMA;
   process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = WABA;
   process.env.WHATSAPP_TENANT_ID = PLATAFORMA;
+  process.env.NEXT_PUBLIC_SITE_URL = "https://claimmix.test";
+  process.env.WHATSAPP_VERIFY_TOKEN = "fake-verify-token";
 });
 
 afterEach(() => {
@@ -110,15 +112,44 @@ interface Graph {
   idsDeLaWaba?: string[];
   estadoDelNumero?: number;
   estadoDeLaWaba?: number;
+  /** El webhook propio que el número ya trae, de otro ambiente. */
+  webhookAjeno?: string;
+  /** La lectura del webhook contesta con este status y sin cuerpo. */
+  lecturaFalla?: number;
+  /** El POST del webhook contesta con este status y sin `success`. */
+  postFalla?: number;
+  /** El POST dice `success` pero Graph no guarda nada. */
+  noGuarda?: boolean;
 }
 
-/** Un Graph de juguete: contesta el número y la lista de números de la WABA, y deja las URLs que le pidieron. */
+/**
+ * Un Graph de juguete: contesta el número, la lista de números de la WABA y el webhook propio del
+ * número (el que le fijaron o el ajeno), y deja las URLs que le pidieron, los cuerpos de los POST
+ * y el método y la URL de cada pedido de webhook.
+ */
 function graph(cfg: Graph = {}) {
   const pedidos: string[] = [];
+  const posts: unknown[] = [];
+  const webhook: string[] = [];
+  let guardado: string | undefined;
   const respuesta = (cuerpo: unknown, status = 200) =>
     ({ ok: status >= 200 && status < 300, status, json: async () => cuerpo }) as Response;
-  const fetchFalso = vi.fn(async (url: string) => {
+  const fetchFalso = vi.fn(async (url: string, init?: RequestInit) => {
     pedidos.push(url);
+    const cuerpo = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    if (init?.method === "POST" && cuerpo?.webhook_configuration) {
+      webhook.push(`POST ${url}`);
+      posts.push(cuerpo);
+      if (cfg.postFalla) return respuesta({}, cfg.postFalla);
+      if (!cfg.noGuarda) guardado = cuerpo.webhook_configuration.override_callback_uri;
+      return respuesta({ success: true });
+    }
+    if (url.includes("fields=webhook_configuration")) {
+      webhook.push(`GET ${url}`);
+      if (cfg.lecturaFalla) return respuesta({}, cfg.lecturaFalla);
+      const propio = guardado ?? cfg.webhookAjeno;
+      return respuesta(propio ? { webhook_configuration: { phone_number: propio } } : {});
+    }
     if (url.includes("/phone_numbers")) {
       return respuesta({ data: (cfg.idsDeLaWaba ?? [ID_DEL_CLIENTE]).map((id) => ({ id })) }, cfg.estadoDeLaWaba ?? 200);
     }
@@ -128,7 +159,7 @@ function graph(cfg: Graph = {}) {
     );
   });
   vi.stubGlobal("fetch", fetchFalso);
-  return { pedidos, fetchFalso };
+  return { pedidos, posts, webhook, fetchFalso };
 }
 
 /** La base: primero devuelve el número pedido y luego lo que diga `escritura` (una fila, o un error). */
@@ -157,7 +188,7 @@ describe("conectarNumero", () => {
 
     expect(await pedirConexion()).toBe("ok");
 
-    expect(g.pedidos).toHaveLength(2);
+    expect(g.pedidos).toHaveLength(5);
     expect(h.execute).toHaveBeenCalledTimes(2);
     const q = consulta();
     expect(q.sql).toContain("insert into public.audit_log");
@@ -209,11 +240,12 @@ describe("conectarNumero", () => {
     expect(h.execute).toHaveBeenCalledTimes(1);
   });
 
-  it("el id de la plataforma sí puede ir al espacio de la plataforma", async () => {
-    graph({ idsDeLaWaba: [ID_PLATAFORMA] });
+  it("el id de la plataforma sí puede ir al espacio de la plataforma, y su webhook no se toca", async () => {
+    const g = graph({ idsDeLaWaba: [ID_PLATAFORMA] });
     base({ pedido: { tenant_id: PLATAFORMA.toUpperCase(), numero_e164: E164_DEL_CLIENTE } });
 
     expect(await pedirConexion({ phoneNumberId: ID_PLATAFORMA })).toBe("ok");
+    expect(g.webhook).toEqual([]);
   });
 
   it("un id que figura en NUMEROS_DE_DEV es del otro ambiente: denegado antes de preguntarle a Meta ni escribir", async () => {
@@ -330,6 +362,106 @@ describe("conectarNumero", () => {
     graph({ estadoDeLaWaba: 500 });
     base();
     expect(await pedirConexion()).toBe("meta_no_responde");
+  });
+
+  it("le fija al número el webhook de este ambiente antes de escribir: lee, pone y relee", async () => {
+    const g = graph();
+    base();
+
+    expect(await pedirConexion()).toBe("ok");
+
+    expect(g.webhook.map((w) => w.split(" ")[0])).toEqual(["GET", "POST", "GET"]);
+    expect(g.webhook.every((w) => w.includes(`/${ID_DEL_CLIENTE}`))).toBe(true);
+    expect(h.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("el POST lleva la ruta del webhook de este ambiente y su token del apretón de manos", async () => {
+    const g = graph();
+    base();
+
+    await pedirConexion();
+
+    expect(g.posts).toEqual([
+      {
+        webhook_configuration: {
+          override_callback_uri: "https://claimmix.test/api/webhooks/whatsapp",
+          verify_token: "fake-verify-token",
+        },
+      },
+    ]);
+  });
+
+  it("un número que ya tiene el webhook de este ambiente no es ajeno: se conecta", async () => {
+    graph({ webhookAjeno: "https://claimmix.test/api/webhooks/whatsapp/" });
+    base();
+
+    expect(await pedirConexion()).toBe("ok");
+  });
+
+  it("un número con el webhook de otro ambiente no se toca ni se conecta: sin POST y sin escribir", async () => {
+    const g = graph({ webhookAjeno: "https://otro.test/api/webhooks/whatsapp" });
+    base();
+
+    expect(await pedirConexion()).toBe("webhook_ajeno");
+
+    expect(g.posts).toEqual([]);
+    expect(g.webhook).toHaveLength(1);
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("Meta rechaza el POST del webhook: sin_webhook, sin escribir", async () => {
+    graph({ postFalla: 400 });
+    base();
+
+    expect(await pedirConexion()).toBe("sin_webhook");
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("Meta pide esperar, no contesta (5xx) o contesta sin `success` en el POST: meta_no_responde, sin escribir", async () => {
+    for (const postFalla of [429, 503, 200]) {
+      h.execute.mockReset();
+      graph({ postFalla });
+      base();
+      expect(await pedirConexion(), String(postFalla)).toBe("meta_no_responde");
+      expect(h.execute).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("si la relectura no trae el webhook de este ambiente: sin_webhook, sin escribir", async () => {
+    const g = graph({ noGuarda: true });
+    base();
+
+    expect(await pedirConexion()).toBe("sin_webhook");
+
+    expect(g.posts).toHaveLength(1);
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("la lectura previa del webhook falla: un rechazo es sin_webhook, esperar o no contestar es meta_no_responde; no se pone nada", async () => {
+    for (const [lecturaFalla, esperado] of [[400, "sin_webhook"], [429, "meta_no_responde"], [503, "meta_no_responde"]] as const) {
+      h.execute.mockReset();
+      const g = graph({ lecturaFalla });
+      base();
+      expect(await pedirConexion(), String(lecturaFalla)).toBe(esperado);
+      expect(g.posts).toEqual([]);
+      expect(h.execute).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it.each([
+    ["falta NEXT_PUBLIC_SITE_URL", "NEXT_PUBLIC_SITE_URL", undefined],
+    ["NEXT_PUBLIC_SITE_URL es http", "NEXT_PUBLIC_SITE_URL", "http://claimmix.test"],
+    ["falta WHATSAPP_VERIFY_TOKEN", "WHATSAPP_VERIFY_TOKEN", undefined],
+  ])("%s: sin_credencial, sin pedidos de webhook y sin escribir", async (_caso, variable, valor) => {
+    if (valor === undefined) delete process.env[variable];
+    else process.env[variable] = valor;
+    const g = graph();
+    base();
+
+    expect(await pedirConexion()).toBe("sin_credencial");
+
+    expect(g.webhook).toEqual([]);
+    expect(h.execute).toHaveBeenCalledTimes(1);
   });
 
   it("sin la 0048 avisa que falta, al leer o al escribir", async () => {
@@ -1727,6 +1859,13 @@ describe("resultadoDelPanel", () => {
     for (const raro of [undefined, null, "", "<script>", "OK", "ok ", ["ok"], 7]) expect(resultadoDelPanel(raro)).toBeNull();
   });
 
+  it("el webhook del número tiene sus dos códigos en la lista cerrada", () => {
+    for (const r of ["sin_webhook", "webhook_ajeno"]) {
+      expect(RESULTADOS_DEL_PANEL).toContain(r);
+      expect(resultadoDelPanel(r)).toBe(r);
+    }
+  });
+
   it("bajar las páginas legales tiene su código", () => {
     expect(RESULTADOS_DEL_PANEL).toContain("legales_despublicadas");
     expect(resultadoDelPanel("legales_despublicadas")).toBe("legales_despublicadas");
@@ -1744,7 +1883,7 @@ describe("resultadoDelPanel", () => {
     const devueltos = [
       "ok", "no_aplica", "migracion_pendiente", "datos_invalidos", "id_de_la_plataforma", "en_cuarentena",
       "numero_duplicado", "id_ocupado", "sin_credencial", "waba_distinta", "meta_no_responde", "id_inexistente",
-      "numero_distinto", "fuera_de_la_waba", "de_otro_ambiente",
+      "numero_distinto", "fuera_de_la_waba", "de_otro_ambiente", "sin_webhook", "webhook_ajeno",
     ];
     for (const r of devueltos) expect(resultadoDelPanel(r), r).toBe(r);
   });

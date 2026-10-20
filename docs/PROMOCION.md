@@ -567,10 +567,10 @@ proyecto de Neon `claimmix-prd`, que sólo usa `pnpm bases:probar` (secretos `PR
 (`STAGING_DATABASE_URL`), que sólo usa `ci.yml`.
 
 prd tiene todo propio: el bucket `claimmix-prd-attachments` de R2, el pool WIF `vercel-prd`
-(su condición mira el proyecto `claimmix-prd`), el topic de Pub/Sub `gmail-push-prd` con su
-suscripción `gmail-push-prd-sub`, y `CRON_SECRET`, `BETTER_AUTH_SECRET` y clave de cifrado
-nuevos. Comparte con dev la app de Meta, la WABA (con su token) y, hasta que tenga el suyo
-(proyecto de Google Cloud propio, por crear), el cliente OAuth de Google. Por eso los
+(su condición mira el proyecto `claimmix-prd`), el proyecto de Google Cloud
+`claimmix-prd-veltra` con su cliente OAuth de Gmail, el topic de Pub/Sub `gmail-push-prd` y la
+suscripción `gmail-push-prd-sub` (desde el 19/10), y `CRON_SECRET`, `BETTER_AUTH_SECRET` y clave
+de cifrado nuevos. Comparte con dev la app de Meta y la WABA (con su token). Por eso los
 webhooks de dev necesitan un override en Meta, y prd lleva las guardas «de otro ambiente»:
 `SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV` y `URL_DEL_OTRO_AMBIENTE` (ver `.env.example`).
 

@@ -207,7 +207,7 @@ tarda algo, la guía lo dice así.
     - En un espacio en prueba sólo se invita a direcciones del mismo dominio que quien
       invita, nunca de un proveedor abierto como gmail.com. Por eso la segunda dirección
       depende de D4.
-    - Cada casilla de Gmail se conecta en un solo ambiente. dev y prd comparten el cliente
+    - Cada casilla de Gmail se conecta en un solo ambiente. Cada ambiente tiene su cliente
       OAuth, y prd rechaza las casillas de `CASILLAS_DE_DEV` con `otro_ambiente`. La casilla
       de la plataforma de dev no se conecta en ningún otro lado.
   - **Salió bien si:** hay seis direcciones (dos por ambiente) y ninguna está en
@@ -279,8 +279,10 @@ tarda algo, la guía lo dice así.
     de los tres hosts. Los docs no aclaran si ese es otro cliente o el mismo que el de Gmail
     de dev y prd: hay que mirarlo ahí mismo.
   - **Salió bien si:** las siete URI figuran: las de Gmail de dev y prd en su cliente, las dos
-    de arriba en `claimmix-qa` y las tres del login. Para dev y prd están hechas; el cliente
-    de QA y sus dos URI no existen todavía.
+    de arriba en `claimmix-qa` y las tres del login.
+  - **Estado (19/10):** las URI de Gmail de los tres ambientes están: una sonda sin login
+    contra Google, con el cliente de cada ambiente, las dio por aceptadas a todas. Falta
+    confirmar las tres del login en el cliente de `GOOGLE_CLIENT_ID`.
   - **Si falla:** al conectar Gmail, Google muestra `redirect_uri_mismatch`. Agregar la URI
     que falta.
   - **Fuentes:** `.env.example:245` (`GMAIL_CLIENT_ID`), `:46-48` (`GOOGLE_CLIENT_ID` y su
@@ -909,9 +911,12 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
          punto 4 y este redeploy no se promueve nada a prd: cualquier deploy nuevo tomaría el
          cliente nuevo con el tema viejo.
     - `CRON_SECRET` de prd tiene que ser igual al secreto `PRD_CRON_SECRET` de GitHub.
-  - **Estado (19/10):** puntos 1 a 5 hechos en `claimmix-prd-veltra`, con la app publicada y
-    el remitente emitido con `veltra.claimmix@gmail.com`. Falta el punto 6, que es la
-    promoción a prd (#477).
+  - **Estado (19/10):** hecho. Puntos 1 a 5 en `claimmix-prd-veltra`, con la app publicada y
+    el remitente emitido con `veltra.claimmix@gmail.com`; el punto 6 fue la promoción a prd
+    #477 (`48fb6cd6`), con el Post-deploy de PRD en verde. Con OK del dueño, el 19/10 se
+    borraron el tema `gmail-push-prd` y la suscripción `gmail-push-prd-sub` viejos del
+    proyecto de dev. La cuenta de servicio `pubsub-push-gmail` de ese proyecto queda: también
+    la usa la suscripción de dev, `gmail-inbound-push`.
   - **Salió bien si:** después del redeploy, el log del paso «Smoke de prd» del Post-deploy
     PRD lista cada chequeo sin «sin configurar», salvo `whatsapp` hasta el paso 2. Y
     `https://claimmix.vercel.app/registro` muestra el correo, Turnstile y el aviso del número.

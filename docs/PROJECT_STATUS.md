@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-19. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-21. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5228,6 +5228,25 @@ Tres ítems más del «Plan para que el alta sea automática» que no esperaban 
 - **Límites.** Hasta A5, dev y prd comparten app y WABA: conectar a mano en dev un número de prd sin override le pondría el webhook de dev. Si la anotación rechaza el número después de poner el override, el override queda, igual que en el camino automático. La tarjeta cuenta números de la WABA, no el tope de Meta por portfolio.
 - **Probado.** tsc, lint y 15.425 tests unitarios en verde; la revisión de seguridad de Fable no encontró nada. Falta la prueba con una persona del ítem 4.
 
+### Promoción del 20/10 a prd y #487 en QA (#486, #488)
+
+- **A prd.** #486 llevó qa a main (`10e3770a`) y #488 llevó main a prd (`2e5d7eed`): el lote 2 del alta automática (#484) y la guía con A3 de tres direcciones por ambiente y D4 en (b) (#485). main y prd tienen el mismo árbol, `c988cd18`. El Post-deploy de PRD sobre `2e5d7eed` salió en verde (run 39520796397).
+- **En QA, todavía no en main ni en prd.** #487 (`ec21f4a5`, árbol `e8f50f0d`): el ítem 9 del plan, lote 1, la prueba del alta de punta a punta en cada deploy de QA. Sigue a main y a prd con la próxima promoción.
+
+### D4 automático: el analista como alias de la Gmail del administrador (21/10, #489)
+
+No hay dominio propio, así que en un espacio de prueba ninguna invitación pasaba el filtro de dominio, y D4 (b) pedía que el dueño activara a mano cada espacio con cuota 0 antes de invitar al analista. #489 lo resuelve sin activar nada y sin escribir en el espacio: D4 (d), la opción B del diseño, aprobada con cambios de seguridad. Sin migración ni variables nuevas.
+
+- **Qué cambia.** En `POST /api/admin/users`, con el espacio en prueba (`enPrueba`: autoalta y prueba), además de una dirección del dominio del administrador se acepta un alias `+` de su propia casilla de Gmail (`aSuPropiaCasilla`, `src/app/api/admin/users/route.ts:134-153`). `casillaDeGmail` (`src/lib/email/reserved.ts:86-98`) reduce `local[+alias]@gmail.com` a la casilla de fondo, sin puntos ni alias, y no cruza gmail.com con googlemail.com: la invitada y la del administrador tienen que dar la misma. La casilla del administrador tiene que tener el correo verificado (`user.emailVerified === true`); si no, la invitación se rechaza por dominio.
+- **Qué no cambia.** El orden del endpoint: cupo (cinco por día), dominio, dirección de operador (202 sin enviar), asiento `USER_INVITED`, sello y envío. Las direcciones de `ADMIN_EMAILS` siguen bloqueadas aunque lleguen por un alias, porque se comparan exactas (`isOperatorEmail`). El botón «activar» de `/admin/altas` queda como estaba. No hay activación automática ni escrituras nuevas en el espacio.
+- **Qué queda asentado.** El asiento de `USER_INVITED` lleva `{ rol, alias: true }` cuando la invitación salió por la casilla propia, sin la dirección; `{ rol, bloqueada: true }` para un operador; `{ rol }` en el resto.
+- **El texto del rechazo.** `usuarios.error.dominio` (`src/lib/i18n/es-AR.servidor.ts:397`) ahora dice que en la prueba se puede invitar a personas del propio dominio o a un alias `+` de la misma casilla de Gmail.
+- **La aceptación.** `/invitacion` no ofrece Google para una dirección Gmail con `+` (`src/app/invitacion/page.tsx:162`): Google devuelve la casilla base, que no coincide con la invitada. Queda la contraseña.
+- **Límites.** No sirve para invitar a un compañero con su propia Gmail: para eso, la activación a mano (b) o un dominio propio (a). Pasa también la casilla base sin alias o con otros puntos, porque es la misma bandeja. La pantalla de aceptación sólo oculta Google cuando la dirección lleva `+`.
+- **Tests.** `tests/unit/admin-users-invitacion.test.ts`, `tests/unit/reserved-vedadas.test.ts` y `tests/unit/invitacion-page.test.tsx`.
+- **Ambientes.** Entra por #489 a qa y sigue a main y a prd por la regla de ambientes iguales; hasta entonces, el analista se invita como en D4 (b).
+- **Guía.** `docs/PUESTA_EN_MARCHA.md` pasa a D4 (d): A1, A3, dev paso 8, QA paso 8, prd pasos 10 y 14, «Si prueban otros en prd», C1, «Cuando entra un cliente real» y «Decisiones pendientes». De paso corrige restos viejos de la guía: el número por código figuraba apagado en dev y QA (está en 1 en los tres desde el 17/10), `/admin/altas` figuraba fuera del menú lateral (está en el menú del operador desde #461) y el texto del rechazo se citaba en `es-AR.servidor.ts:387`, que es `:397`.
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
@@ -5236,8 +5255,9 @@ Tres ítems más del «Plan para que el alta sea automática» que no esperaban 
   `docs/PUESTA_EN_MARCHA.md`. Hechos al 19/10: A1, A2, A6, A10, A11 y A12. Faltan A3, A4,
   A5, A7, A8 y A9 (de A7 sólo entrar una vez con Google en prd), y las decisiones D10 a D13.
   A3 son tres direcciones por ambiente: administrador y analista como alias `+` de Gmail, y
-  el mail agente como una Gmail propia. D4 se corrigió el 20/10 a (b), porque no hay dominio
-  propio: el analista se invita después de activar el espacio con cuota 0.
+  el mail agente como una Gmail propia. D4 pasó el 21/10 a (d) (#489): no hay dominio propio,
+  y el analista se invita como un alias `+` de la misma Gmail que el administrador, sin
+  activar el espacio.
 - **Tono de los mails (del transcripto del 17/10).** Cuatro cosas que son copia del producto y
   quedan como están hasta que decidas: el mail no saluda por el nombre (`05-canal-mail.md`), la
   referencia es el UUID entero y no una corta, los mails firman como ClaimMix frente al

@@ -96,6 +96,27 @@ describe("/invitacion sin sesión y con un enlace bueno", () => {
     }
   });
 
+  it("con un alias «+» de Gmail no ofrece Google, que volvería con la casilla base: sólo la contraseña y rechazar", async () => {
+    const { container } = await pintar(sellarInvitacion({ ...base, e: "jefa+analista@googlemail.com" }, Date.now()));
+
+    expect(screen.getByText("Invitación para jefa+analista@googlemail.com")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Aceptar con Google" })).toBeNull();
+    expect(screen.queryByText("o con una contraseña")).toBeNull();
+    expect(screen.getByRole("button", { name: "Aceptar con contraseña" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rechazar" })).toBeInTheDocument();
+    expect(container.querySelector('input[name="password"]')).toBeRequired();
+  });
+
+  it.each(["jefa@googlemail.com", "jefa+analista@example.com"])(
+    "con %s, sin alias de Gmail, sigue ofreciendo Google",
+    async (direccion) => {
+      await pintar(sellarInvitacion({ ...base, e: direccion }, Date.now()));
+
+      expect(screen.getByRole("button", { name: "Aceptar con Google" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Aceptar con contraseña" })).toBeInTheDocument();
+    }
+  );
+
   it("lleva el enlace en un campo oculto de cada formulario para que la acción lo vuelva a abrir", async () => {
     const t = enlace();
     const { container } = await pintar(t);

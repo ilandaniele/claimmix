@@ -95,7 +95,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   IA_NO_DISPONIBLE: "El asistente no está disponible en este momento. Probá de nuevo en unos minutos.",
   ARCHIVO_DEMASIADO_GRANDE: "El archivo es demasiado grande.",
   ARCHIVO_NO_VALIDO: "El archivo no es del tipo esperado.",
-  DOMINIO_NO_PERMITIDO: "Durante la prueba sólo podés invitar a personas de tu propio dominio de correo.",
+  DOMINIO_NO_PERMITIDO: "Durante la prueba sólo podés invitar a personas de tu propio dominio de correo o a un alias + de tu misma casilla de Gmail.",
   MIGRACION_PENDIENTE: "Falta aplicar una migración de la base.",
 };
 

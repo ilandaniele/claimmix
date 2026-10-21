@@ -416,4 +416,85 @@ describe("una prueba gratuita", () => {
 
     expect(res.status).toBe(202);
   });
+
+  describe("un alias + de la propia casilla de Gmail", () => {
+    const quienInvita = (user: Record<string, unknown>) =>
+      h.requireAdmin.mockResolvedValue({ ...prueba(), user: { id: ADMIN_ID, ...user } });
+    const propia = { email: "jefa+admin@googlemail.com", emailVerified: true };
+
+    it("entra: sale un solo mail a esa dirección, gasta cupo y el asiento lo marca sin la dirección", async () => {
+      quienInvita(propia);
+
+      const res = await POST(pedido({ email: "jefa+analista@googlemail.com" }));
+
+      expect(res.status).toBe(202);
+      expect(h.enviar).toHaveBeenCalledOnce();
+      expect(h.enviar.mock.calls[0][0].to).toBe("jefa+analista@googlemail.com");
+      expect(invitacionEnviada()?.e).toBe("jefa+analista@googlemail.com");
+      expect(h.rateLimit).toHaveBeenCalledOnce();
+      expect(h.rateLimit.mock.calls[0][1]).toMatchObject({ limit: 5 });
+      expect(h.writeAuditLog).toHaveBeenCalledOnce();
+      const asiento = h.writeAuditLog.mock.calls[0][0];
+      expect(asiento).toMatchObject({ event_type: "auth.user_invited", payload: { rol: "analyst", alias: true } });
+      expect(asiento.payload).toEqual({ rol: "analyst", alias: true });
+      expect(JSON.stringify(asiento)).not.toContain("jefa");
+    });
+
+    it.each([
+      ["mayúsculas y puntos de quien invita", "Je.Fa+Admin@googlemail.com", "jefa+analista@googlemail.com"],
+      ["un alias de un alias", "jefa+admin@googlemail.com", "jefa+analista+2@googlemail.com"],
+      ["la base, desde un alias", "jefa+admin@googlemail.com", "jefa@googlemail.com"],
+      ["un alias, desde la base", "jefa@googlemail.com", "jefa+admin@googlemail.com"],
+    ])("entra: %s", async (_caso, quien, invitado) => {
+      quienInvita({ email: quien, emailVerified: true });
+
+      const res = await POST(pedido({ email: invitado }));
+
+      expect(res.status).toBe(202);
+      expect(h.enviar).toHaveBeenCalledOnce();
+      expect(h.enviar.mock.calls[0][0].to).toBe(invitado);
+    });
+
+    it.each([
+      ["otra casilla", propia, "lucia+analista@googlemail.com"],
+      ["una casilla que sólo empieza igual", propia, "jefa2+analista@googlemail.com"],
+      ["una casilla que sólo es prefijo", propia, "jef+analista@googlemail.com"],
+      ["el mismo alias en otro proveedor", propia, "jefa+analista@icloud.com"],
+      ["el mismo alias en otro dominio", propia, "jefa+analista@seguros.com.ar"],
+      ["un alias entre dos casillas de un proveedor abierto", { email: "jefa+a@icloud.com", emailVerified: true }, "jefa+b@icloud.com"],
+      ["un alias de Gmail desde una casilla de empresa", { email: "jefa@seguros.com.ar", emailVerified: true }, "jefa+x@googlemail.com"],
+      ["quien invita sin dirección", { emailVerified: true }, "jefa+analista@googlemail.com"],
+      ["quien invita con la dirección sin verificar", { email: propia.email, emailVerified: false }, "jefa+analista@googlemail.com"],
+      ["quien invita sin saber si está verificada", { email: propia.email }, "jefa+analista@googlemail.com"],
+    ])("no entra: %s", async (_caso, quien, invitado) => {
+      quienInvita(quien);
+
+      const res = await POST(pedido({ email: invitado }));
+
+      expect(res.status).toBe(422);
+      expect((await res.json()).error.code).toBe("DOMINIO_NO_PERMITIDO");
+      expect(h.enviar).not.toHaveBeenCalled();
+      expect(h.writeAuditLog).not.toHaveBeenCalled();
+      expect(h.rateLimit).toHaveBeenCalledOnce();
+    });
+
+    it("una invitación por dominio propio no lleva la marca de alias", async () => {
+      const res = await POST(pedido({ email: "lucia@seguros.com.ar" }));
+
+      expect(res.status).toBe(202);
+      expect(h.writeAuditLog.mock.calls[0][0].payload).toEqual({ rol: "analyst" });
+    });
+
+    it("la dirección exacta de un operador sigue bloqueada: 202 sin envío y asiento de bloqueo", async () => {
+      process.env.ADMIN_EMAILS = "operador@googlemail.com";
+      quienInvita({ email: "operador+admin@googlemail.com", emailVerified: true });
+
+      const res = await POST(pedido({ email: "operador@googlemail.com" }));
+
+      expect(res.status).toBe(202);
+      expect(h.enviar).not.toHaveBeenCalled();
+      expect(h.writeAuditLog).toHaveBeenCalledOnce();
+      expect(h.writeAuditLog.mock.calls[0][0].payload).toEqual({ rol: "analyst", bloqueada: true });
+    });
+  });
 });

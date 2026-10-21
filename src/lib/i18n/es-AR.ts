@@ -549,6 +549,8 @@ export const esAR = {
   "filter.limpiar": "Limpiar",
   "filter.limpiarTodo": "Limpiar todo",
   "filter.quitar": "Quitar filtro",
+  // La pista del panel: varios valores de un mismo filtro se pueden marcar a la vez.
+  "filter.variosALaVez": "Podés marcar varios a la vez: por ejemplo, choque y robo.",
   // Rótulo de la marca removible de la búsqueda libre, en MarcasDeFiltros.
   "filter.busqueda": "Búsqueda",
   // B10 y B13: plazo y complejidad, sólo para el equipo.
@@ -1183,7 +1185,7 @@ export const esAR = {
   "ayuda.paso1.titulo": "1. El siniestro llega solo",
   "ayuda.paso1.texto": "Los siniestros llegan solos por mail o WhatsApp y el agente completa los datos.",
   "ayuda.paso2.titulo": "2. La bandeja",
-  "ayuda.paso2.texto": "En la bandeja filtrás por situación, tipo, severidad y canal. «Escalados», «Para responder» y «No relevantes» de la barra son atajos a esos filtros.",
+  "ayuda.paso2.texto": "En la bandeja filtrás por situación, tipo, severidad y canal, y de cada filtro podés marcar varios valores a la vez. «Escalados», «Para responder» y «No relevantes» de la barra son atajos a esos filtros.",
   "ayuda.paso3.titulo": "3. Confirmar un dato",
   "ayuda.paso3.texto": "Si un dato tiene confianza media o no coincide con lo que ya teníamos, el caso te pide confirmarlo: lo confirmás, corregís o rechazás desde el detalle.",
   "ayuda.paso4.titulo": "4. Derivar a un especialista",

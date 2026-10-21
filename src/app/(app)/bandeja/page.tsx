@@ -25,6 +25,7 @@ import { esRamoNativo, FORMATO_DE_CLAVE_DE_RAMO, nombreDeRamoPropio } from "@/co
 import type { ClaveDeEstado } from "@/core/case/filtro-de-estado";
 import { OPCIONES_DE_ESCENARIO } from "@/server/intake/scenarios";
 import { DashboardClient } from "./DashboardClient";
+import { normalizarBusqueda } from "./normalizar-busqueda";
 import { PER_PAGE_OPTIONS } from "./per-page";
 import {
   CaseStatusSchema,
@@ -63,6 +64,9 @@ const VALID_PERIODOS: Periodo[] = PeriodoSchema.options;
 export const VALID_VENCIMIENTOS = VencimientoFiltroSchema.options;
 export const VALID_COMPLEJIDADES = ComplejidadFiltroSchema.options;
 
+// Vive en su propio módulo para que el sondeo del cliente la use; se reexporta para quien la importaba de acá.
+export { normalizarBusqueda };
+
 /**
  * Normaliza un parámetro multi-valor (`status`, `type`, `severity`,
  * `channel`): junta lo que haya —cero, uno o varios—, descarta lo que no esté
@@ -82,28 +86,6 @@ function valores<T extends string>(
     (lista as readonly string[]).includes(v)
   );
   return filtrados.length > 0 ? (filtrados as [T, ...T[]]) : undefined;
-}
-
-/**
- * El texto de la caja de búsqueda, recortado.
- *
- * Ochenta caracteres alcanza y sobra para un nombre, una póliza o un número
- * de caso; más que eso es un enlace armado a mano, no algo que alguien tipeó
- * en el campo. Vacío, sólo espacios o menos de tres caracteres da
- * `undefined`, igual que `valores()` con el resto de los filtros.
- *
- * El piso de tres espeja el `q.min(3)` de `CaseQuerySchema` (ver
- * src/lib/schemas/cases.ts): con uno o dos caracteres pg_trgm no tiene un
- * grupo de tres para buscar y el planificador descarta el índice, así que
- * `listCases`/`contarPorEstado` recorrerían la tabla entera del inquilino en
- * cada pausa de tipeo. `CampoDeBusqueda` debounca por TIEMPO, no por
- * longitud, así que esos estados intermedios de uno o dos caracteres pasan
- * de verdad.
- */
-export function normalizarBusqueda(raw: string | string[] | undefined): string | undefined {
-  const valor = Array.isArray(raw) ? raw[0] : raw;
-  const recortado = valor?.trim().slice(0, 80);
-  return recortado && recortado.length >= 3 ? recortado : undefined;
 }
 
 interface BandejaPageProps {

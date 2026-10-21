@@ -520,6 +520,10 @@ interactivo.
 Los que sí van a aparecer son de plan y de cuota, y son escalones, no curvas:
 el mes que Vercel o Neon lleguen a su tope no se pone lento, se corta.
 
+#### Setecientas personas con k6: `pnpm carga:aseguradoras`
+
+Los perfiles de k6 comparten una o pocas sesiones, o sea una o pocas aseguradoras; éste mide lo que ninguno: 20 aseguradoras de 35 personas (`ASEGURADORAS`, `USUARIOS_POR_ASEGURADORA` y `DURACION` lo cambian), cada una con su cuenta, su balde de `CASES_API` y su espacio, que es lo que pone a trabajar la separación por inquilino bajo carga. Cada persona abre la bandeja, la filtra (con selección múltiple: `type=choque&type=robo`), abre un caso y busca, con una pausa de 15 a 30 s entre acciones; el p95 de lectura, el 1 % de errores, los checks y los rechazos por cupo tienen los mismos umbrales que los otros perfiles, más un tope de 2 % de logins fallidos. Como el login tiene tope de 30 por minuto por IP (`AUTH_POR_IP`), la subida dura unos 28 minutos (`LOGINS_POR_MIN`, nunca más de 30) y la corrida entera, 40. El escenario se niega a correr contra algo que no sea localhost, 127.0.0.1 o un host con `-qa` o `-dev`, y no hay variable para saltearlo (`tests/load/config/destino.js`, con su test en `tests/unit/carga-aseguradoras-destino.test.ts`). **Cómo correrlo barato:** `next start` local contra la base de QA o contra una rama de Neon descartable, nunca contra prd; `CARGA_PASSWORD=… SEED_DATABASE_URL=<QA o la rama> pnpm sembrar --carga` crea las 700 cuentas `carga-aNN-uNN@example.com` y 60 casos por espacio (se niega contra cualquier base con datos reales, la de dev incluida, y la clave sale del entorno: no se escribe en ningún lado), y después `CARGA_PASSWORD=… BASE_URL=http://localhost:3000 pnpm carga:aseguradoras`; para probar el escenario en un minuto, `ASEGURADORAS=2 USUARIOS_POR_ASEGURADORA=5 DURACION=1m` con `--aseguradoras 2 --usuarios 5` al sembrar. **Cuánto tráfico genera:** 700 personas con 15 a 30 s de pausa son entre 23 y 47 acciones por segundo (31 de media), y como abrir un caso son dos pedidos, unos 40 pedidos por segundo en la meseta; la corrida completa suma unos 60 mil pedidos más 700 logins. **Qué cuota gasta:** contra un deploy, cerca del 6 % del millón de invocaciones mensuales de Vercel Hobby, más la CPU activa de esos 60 mil pedidos, que no está medida y es la cuota más chica (4 h por mes); se corre local porque así no gasta nada de Vercel y porque prd queda fuera; contra Neon Free, 40 minutos con la base despierta y la transferencia de unas 60 mil respuestas, cuyos listados de 50 casos pesan decenas de KB cada uno, así que conviene mirar el consumo en la consola de Neon antes y después en vez de confiar en este cálculo, que no está medido. Desde Actions se puede elegir `aseguradoras` en `load-tests.yml`, pero el flujo no siembra las cuentas: tienen que estar en la base del destino y el secreto `CARGA_PASSWORD` cargado, o el escenario corta al arrancar.
+
 ### 6. `pnpm knock` — que un mensaje de verdad se convierta en un caso
 
 Todo lo anterior entra por los canales simulados, y eso es una decisión, no una
@@ -1069,7 +1073,7 @@ en cada PR pero no bloquean el merge.
 | `post-deploy.yml` | Post-deploy · DEV, QA y PRD | cada deploy de Vercel | DEV, QA o PRD, según el proyecto |
 | `deploy-checks.yml` | Chequeos de un deploy (lo llama Post-deploy) | sólo desde post-deploy | DEV o QA |
 | `load-tests.yml` | Post-deploy · Carga k6 de vistas previas y QA | vistas previas de claimmix y claimmix-qa, deploy de QA, a mano; nunca PRD | la URL del deploy |
-| `barrer-trabados.yml` | Programado · Barrer trabados en DEV y PRD | cada 15 min DEV, cada 2 h PRD, a mano | DEV y PRD |
+| `barrer-trabados.yml` | Programado · Barrer trabados en DEV, QA y PRD | cada 15 min DEV, cada 2 h QA y PRD, a mano | DEV, QA y PRD |
 
 `ci.yml`:
 

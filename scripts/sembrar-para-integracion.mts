@@ -71,6 +71,131 @@ process.env.DATABASE_URL_APP = destino;
 process.env.BETTER_AUTH_SECRET ??= "sembrado-".padEnd(40, "x");
 
 /*
+ * `--carga [--aseguradoras N] [--usuarios N]`: las cuentas de la prueba de carga
+ * de `tests/load/scenarios/aseguradoras.js`. Sin la bandera, nada de esto corre y
+ * el script hace lo de siempre.
+ */
+if (process.argv.includes("--carga")) {
+  await sembrarCarga(destino);
+  process.exit(0);
+}
+
+function enteroDeBandera(nombre: string, porOmision: number): number {
+  const i = process.argv.findIndex((a) => a === nombre || a.startsWith(`${nombre}=`));
+  if (i === -1) return porOmision;
+  const crudo = process.argv[i].includes("=") ? process.argv[i].split("=")[1] : process.argv[i + 1];
+  const n = Number(crudo);
+  if (!Number.isInteger(n) || n < 1 || n > 99) {
+    console.error(`✗ ${nombre} ${crudo ?? ""}: tiene que ser un entero entre 1 y 99.`);
+    process.exit(2);
+  }
+  return n;
+}
+
+/**
+ * N cuentas de analista en M espacios de prueba, con casos para que la bandeja,
+ * los filtros y la búsqueda devuelvan filas. Todo `example.com` y todo idempotente.
+ *
+ * La contraseña sale de `CARGA_PASSWORD` y no se escribe en ningún lado, ni en el
+ * repositorio ni en la salida. A diferencia del resto del script, acá tampoco
+ * rige la base de CI: se niega contra cualquier base con datos reales (`vetadoBase`).
+ */
+async function sembrarCarga(cadena: string) {
+  const { vetadoBase } = await import("./lib/hosts-vetados.mjs");
+  const cuentas = await import("../tests/load/config/cuentas.js");
+
+  if (vetadoBase(cadena)) {
+    console.error("✗ Esa base tiene datos reales (producción o la base viva de dev).");
+    console.error("  Son cientos de cuentas con una contraseña compartida: sólo en QA o en una rama de Neon.");
+    process.exit(2);
+  }
+  const clave = process.env.CARGA_PASSWORD;
+  if (!clave) {
+    console.error("✗ Falta CARGA_PASSWORD. No hay valor por omisión: es la clave de cientos de cuentas.");
+    process.exit(2);
+  }
+
+  const aseguradoras = enteroDeBandera("--aseguradoras", cuentas.ASEGURADORAS_POR_OMISION);
+  const usuarios = enteroDeBandera("--usuarios", cuentas.USUARIOS_POR_OMISION);
+
+  const { Pool, neonConfig } = await import("@neondatabase/serverless");
+  neonConfig.webSocketConstructor = globalThis.WebSocket as never;
+  const pool = new Pool({ connectionString: cadena });
+  const cx = await pool.connect();
+  const { auth } = await import("@/lib/auth");
+  const { enAlta } = await import("@/lib/auth/registro-permitido");
+  const ctx = await auth.$context;
+
+  console.log(`SEMBRADO DE CARGA — ${aseguradoras} aseguradoras x ${usuarios} = ${aseguradoras * usuarios} cuentas`);
+  try {
+    for (let a = 1; a <= aseguradoras; a++) {
+      const inquilino = cuentas.inquilinoDe(a);
+      await cx.query(
+        `insert into tenants (id, name, created_at)
+         values ($1, $2, now() - interval '30 days')
+         on conflict (id) do nothing`,
+        [inquilino, `Carga A${String(a).padStart(2, "0")}`]
+      );
+
+      for (let u = 1; u <= usuarios; u++) {
+        const correo = cuentas.correoDe(a, u);
+        const nombre = `Analista A${String(a).padStart(2, "0")} U${String(u).padStart(2, "0")}`;
+
+        const { rows: yaEsta } = await cx.query(`select id from "user" where email = $1`, [correo]);
+        let id: string;
+        if (yaEsta.length > 0) {
+          id = yaEsta[0].id;
+          await ctx.internalAdapter.updatePassword(id, await ctx.password.hash(clave));
+        } else {
+          const r = await enAlta("correo", () =>
+            auth.api.signUpEmail({ body: { name: nombre, email: correo, password: clave }, headers: new Headers() })
+          );
+          id = r.user.id;
+        }
+        // El alta no escribe perfil para una dirección fuera de la lista blanca: lo pone el sembrado.
+        await cx.query(
+          `insert into users (id, tenant_id, full_name, role)
+           values ($1, $2, $3, 'analyst')
+           on conflict (id) do update set tenant_id = excluded.tenant_id, role = excluded.role`,
+          [id, inquilino, nombre]
+        );
+      }
+
+      // Completa hasta CASOS_POR_ASEGURADORA. Tipo, estado y canal giran con períodos
+      // de 6, 5 y 12: en 60 casos aparece cada combinación una vez.
+      const { rows: hay } = await cx.query(`select count(*)::int as n from cases where tenant_id = $1`, [inquilino]);
+      if (hay[0].n < cuentas.CASOS_POR_ASEGURADORA) {
+        await cx.query(
+          `insert into cases (tenant_id, policyholder_name, policy_number, claim_type, status, channel, created_at)
+           select $1::uuid, ($5::text[])[1 + g % cardinality($5::text[])] || ' ' || g,
+                  'POL-' || lpad($6::text, 2, '0') || '-' || lpad(g::text, 4, '0'),
+                  ($2::text[])[1 + g % cardinality($2::text[])],
+                  ($3::text[])[1 + g % cardinality($3::text[])],
+                  ($4::text[])[1 + (g / 6) % cardinality($4::text[])],
+                  now() - make_interval(hours => g)
+           from generate_series($7::int, $8::int) g`,
+          [
+            inquilino,
+            cuentas.TIPOS,
+            cuentas.ESTADOS,
+            cuentas.CANALES,
+            cuentas.APELLIDOS,
+            String(a),
+            hay[0].n + 1,
+            cuentas.CASOS_POR_ASEGURADORA,
+          ]
+        );
+      }
+      console.log(`   ✓ A${String(a).padStart(2, "0")}: ${usuarios} cuentas, ${cuentas.CASOS_POR_ASEGURADORA} casos`);
+    }
+    console.log(`✓ Listo. Cuentas ${cuentas.correoDe(1, 1)} … ${cuentas.correoDe(aseguradoras, usuarios)}, clave: CARGA_PASSWORD.`);
+  } finally {
+    cx.release();
+    await pool.end();
+  }
+}
+
+/*
  * En CI no hay contraseña por omisión.
  *
  * `Analyst123!` está escrita en este repositorio, y la base de ensayo también

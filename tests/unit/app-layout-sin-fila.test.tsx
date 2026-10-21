@@ -21,7 +21,7 @@ vi.mock("@/lib/auth/session", () => ({
   getSessionContext: async () => ({ user: { id: "u-1", email: "v@ejemplo.com" } }),
 }));
 vi.mock("@/lib/auth/user-row", () => ({ getUserRowOrThrow: mockGetUserRowOrThrow }));
-vi.mock("@/lib/auth/require-operator", () => ({ isOperatorEmail: () => false }));
+vi.mock("@/lib/auth/require-operator", () => ({ esOperadorDe: () => false }));
 vi.mock("@/lib/i18n/locale", () => ({
   getServerLocale: async () => "es-AR",
   resolveAccountLocale: async (accountLocale?: string | null) =>

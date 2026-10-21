@@ -304,6 +304,7 @@ export const esARServidor = {
   "facturacion.periodoInvalido": "no es un período válido.",
   "facturacion.plan": "plan {n}",
   "facturacion.porDenunciaFacturable": "Por denuncia facturable",
+  "facturacion.sinEstado": "Todavía no hay datos de facturación para este espacio. Si recién se creó, probá de nuevo en unos minutos.",
   "facturacion.sinIngresos": "sin ingresos este mes",
   "facturacion.total": "Total",
   "facturacion.verMesEnCurso": "Ver el mes en curso",

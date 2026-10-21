@@ -17,7 +17,7 @@ import { type NextRequest } from "next/server";
 import { ALL_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { entrar } from "@/lib/api/entrada";
 import { CaseQuerySchema } from "@/lib/schemas/cases";
-import { listCases } from "@/server/cases/list";
+import { desdeDePeriodo, listCases } from "@/server/cases/list";
 import { remitenteYAsuntoParaElRol } from "@/server/cases/pii";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
@@ -68,6 +68,9 @@ export async function GET(request: NextRequest) {
     status: searchParams.getAll("status"),
     type: searchParams.getAll("type"),
     q: searchParams.get("q") ?? undefined,
+    // El sondeo de la bandeja lo reenvía: sin esto, a los pocos segundos la
+    // lista volvía a traer casos de fuera del período elegido.
+    periodo: searchParams.get("periodo") ?? undefined,
     page: searchParams.get("page") ?? undefined,
     per_page: searchParams.get("per_page") ?? undefined,
     sort: searchParams.get("sort") ?? undefined,
@@ -102,7 +105,11 @@ export async function GET(request: NextRequest) {
 
   // ── 4. Fetch data (explicit tenant_id filter, backed by RLS) ───────────────
   try {
-    const result = await listCases({ tenantId: userRow.tenant_id }, parsed.data, userRow.id);
+    const result = await listCases(
+      { tenantId: userRow.tenant_id },
+      { ...parsed.data, desde: desdeDePeriodo(parsed.data.periodo) },
+      userRow.id
+    );
     // Drizzle numeric columns surface as strings — convert at the boundary so
     // the JSON shape matches the previous PostgREST response (numbers).
     return ok({

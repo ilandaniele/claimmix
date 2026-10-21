@@ -66,8 +66,11 @@ function cuentas() {
   return correos.map((correo, i) => ({ correo, clave: claves[i] }));
 }
 
-/** Entra con una cuenta y devuelve la cabecera `Cookie` armada. */
-function entrar({ correo, clave }) {
+/**
+ * El POST del login, sin juzgarlo: devuelve la respuesta y la cookie armada.
+ * `entrar` aborta la corrida si falla; la de las aseguradoras reintenta.
+ */
+export function pedirSesion({ correo, clave }) {
   const res = http.post(
     `${BASE_URL}/api/auth/sign-in/email`,
     JSON.stringify({ email: correo, password: clave }),
@@ -84,6 +87,18 @@ function entrar({ correo, clave }) {
       tags: { escenario: "login" },
     }
   );
+
+  const cookies = res.cookies || {};
+  const cookie = Object.keys(cookies)
+    .filter((nombre) => cookies[nombre].length > 0)
+    .map((nombre) => `${nombre}=${cookies[nombre][0].value}`)
+    .join("; ");
+  return { res, cookie };
+}
+
+/** Entra con una cuenta y devuelve la cabecera `Cookie` armada. */
+export function entrar(cuenta) {
+  const { res, cookie } = pedirSesion(cuenta);
 
   if (res.status !== 200) {
     /*
@@ -122,12 +137,8 @@ function entrar({ correo, clave }) {
     );
   }
 
-  const cookies = res.cookies || {};
-  const armada = Object.keys(cookies)
-    .map((nombre) => `${nombre}=${cookies[nombre][0].value}`)
-    .join("; ");
-  if (!armada) fail("El login contestó 200 pero no dejó cookie.");
-  return armada;
+  if (!cookie) fail("El login contestó 200 pero no dejó cookie.");
+  return cookie;
 }
 
 /**

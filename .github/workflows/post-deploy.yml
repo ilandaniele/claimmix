@@ -471,10 +471,11 @@ jobs:
   #
   # Corre el smoke, las dos comparaciones contra el catálogo, el pen test —con
   # la pared armada con un inquilino propio y los ataques al agente— y, cuando
-  # QA tiene lo suyo, el ensayo. No corre el timbre (QA no lleva Gmail ni
-  # WhatsApp: no le escribe a nadie, a propósito), ni la carga (cuatrocientos
-  # casos contra los cientos de miles de producción no comparan con el mismo
-  # presupuesto).
+  # QA tiene lo suyo, el ensayo. También el alta automática de punta a punta
+  # (`probar_alta`), que no corre en ningún otro entorno. No corre el timbre
+  # (QA no lleva Gmail ni WhatsApp: no le escribe a nadie, a propósito), ni la
+  # carga (cuatrocientos casos contra los cientos de miles de producción no
+  # comparan con el mismo presupuesto).
   #
   # El smoke va liviano: `--deep` sube un archivo a R2 y llama al modelo, y eso
   # no es lo que este run viene a probar. Hasta el 20/09 además toleraba
@@ -514,6 +515,7 @@ jobs:
       pared_propia: true
       atacar_agente: true
       medir_carga: false
+      probar_alta: true
     # Uno por uno y con el nombre de QA de cada lado. `secrets: inherit` acá
     # sería apuntar cinco chequeos a la base de DEV, que tiene datos reales;
     # está contado arriba, en `qa_secretos`, y también en deploy-checks.yml

@@ -5,7 +5,11 @@ import {
   HOSTS_DE_BASE_REALES,
   HOSTS_WEB,
   HOST_DE_BASE_PRD,
+  HOST_DE_BASE_QA,
+  HOST_QA,
   conocido,
+  endpointDe,
+  esUrlDeQa,
   hostNormalizado,
   motivoDeVetoDeBases,
   vetadoBase,
@@ -113,6 +117,53 @@ describe("conocido: los hosts de ClaimMix", () => {
   });
 });
 
+describe("esUrlDeQa: el único origen contra el que se prueba el alta", () => {
+  it("HOST_QA es el alias de QA", () => {
+    expect(HOST_QA).toBe("claimmix-qa.vercel.app");
+  });
+
+  it.each(["https://claimmix-qa.vercel.app", "https://claimmix-qa.vercel.app/", "https://CLAIMMIX-QA.vercel.app."])(
+    "%s lo es",
+    (url) => {
+      expect(esUrlDeQa(url)).toBe(true);
+    },
+  );
+
+  it.each([
+    ["https://claimmix.vercel.app", "prd"],
+    ["https://claimmix-dev.vercel.app", "dev"],
+    ["https://claimmix-prd.vercel.app", "alias de prd"],
+    ["https://claimmix-qa-git-x-ilandaniele-3471s-projects.vercel.app", "una vista previa"],
+    ["https://claimmix-qa.vercel.app.example.com", "otro dominio que empieza igual"],
+    ["http://claimmix-qa.vercel.app", "sin https"],
+    ["https://claimmix-qa.vercel.app:8443", "con puerto"],
+    ["https://usuario:fake-clave@claimmix-qa.vercel.app", "con credenciales"],
+    ["http://", "sin host"],
+    ["claimmix-qa.vercel.app", "sin esquema"],
+    ["", "vacía"],
+    [undefined as unknown as string, "sin texto"],
+  ])("%s no lo es (%s)", (url) => {
+    expect(esUrlDeQa(url)).toBe(false);
+  });
+
+  it("el host de PRD_URL no es QA aunque sea de ClaimMix", () => {
+    process.env.PRD_URL = "https://prd.example.com";
+    expect(esUrlDeQa("https://prd.example.com")).toBe(false);
+    expect(esUrlDeQa("https://claimmix-qa.vercel.app")).toBe(true);
+  });
+});
+
+describe("endpointDe: la primera etiqueta del host, sin -pooler", () => {
+  it.each([
+    ["postgresql://u:fake-clave@ep-wispy-flower-abc123.us-east-2.aws.neon.tech/neondb", "ep-wispy-flower-abc123"],
+    ["postgresql://u:fake-clave@ep-wispy-flower-abc123-pooler.us-east-2.aws.neon.tech/neondb", "ep-wispy-flower-abc123"],
+    ["postgres://u:fake-clave@EP-Wispy-Flower-ABC123.us-east-2.aws.neon.tech/neondb", "ep-wispy-flower-abc123"],
+    ["no-es-una-url", ""],
+  ])("%s -> %s", (cadena, esperado) => {
+    expect(endpointDe(cadena)).toBe(esperado);
+  });
+});
+
 describe("vetadoBase: qué cadenas de Postgres son las de datos reales", () => {
   it("la lista trae la base viva", () => {
     expect(HOSTS_DE_BASE_REALES.has("ep-proud-resonance")).toBe(true);
@@ -201,6 +252,90 @@ describe("motivoDeVetoDeBases: dónde pueden correr los scripts de bases por cli
   it("un ambiente que no existe se rechaza", () => {
     expect(motivoDeVetoDeBases("produccion", ENSAYO, {})).toContain("desconocido");
   });
+
+  describe("qa: lista blanca de un solo endpoint", () => {
+    const deQa = (host: string, resto = "") => `postgres://u:fake-clave@${host}/neondb${resto}`;
+    const QA = deQa("ep-wispy-flower-abc123.us-east-2.aws.neon.tech");
+    const QA_POOLER = deQa("ep-wispy-flower-abc123-pooler.us-east-2.aws.neon.tech");
+
+    it("HOST_DE_BASE_QA es el endpoint de QA", () => {
+      expect(HOST_DE_BASE_QA).toBe("ep-wispy-flower");
+    });
+
+    it.each([
+      ["el endpoint de QA", QA],
+      ["su forma -pooler", QA_POOLER],
+      ["sin sufijo", deQa("ep-wispy-flower.us-east-2.aws.neon.tech")],
+      ["con mayúsculas", deQa("EP-WISPY-FLOWER-ABC123.us-east-2.aws.neon.tech")],
+      ["con ?sslmode", `${QA_POOLER}?sslmode=require`],
+      [
+        "con ?host= del mismo endpoint",
+        deQa("ep-wispy-flower-abc123-pooler.us-east-2.aws.neon.tech", "?host=ep-wispy-flower-abc123.us-east-2.aws.neon.tech"),
+      ],
+    ])("acepta %s", (_nombre, cadena) => {
+      expect(motivoDeVetoDeBases("qa", cadena, {})).toBeNull();
+    });
+
+    it.each([
+      ["prd", deQa("ep-sweet-salad-abc123.us-east-2.aws.neon.tech")],
+      ["prd con -pooler", deQa("ep-sweet-salad-abc123-pooler.us-east-2.aws.neon.tech")],
+      ["dev", deQa("ep-proud-resonance-abc123.us-east-2.aws.neon.tech")],
+      ["dev con -pooler", deQa("ep-proud-resonance-abc123-pooler.us-east-2.aws.neon.tech")],
+      ["staging", deQa("ep-damp-meadow-abc123.us-east-2.aws.neon.tech")],
+      ["staging con -pooler", deQa("ep-damp-meadow-abc123-pooler.us-east-2.aws.neon.tech")],
+      ["otro endpoint cualquiera", deQa("ep-ensayo-bases-123.us-east-2.aws.neon.tech")],
+      ["un endpoint que sólo empieza igual", deQa("ep-wispy-flowerx-abc123.us-east-2.aws.neon.tech")],
+      ["QA como subdominio de otro host", deQa("evil.ep-wispy-flower-abc123.us-east-2.aws.neon.tech")],
+      ["QA en un dominio que no es de Neon", deQa("ep-wispy-flower-abc123.example.com")],
+      ["QA con puerto", deQa("ep-wispy-flower-abc123.us-east-2.aws.neon.tech:5432")],
+      [
+        "?host= a otro endpoint",
+        deQa("ep-wispy-flower-abc123.us-east-2.aws.neon.tech", "?host=ep-damp-meadow-abc123.us-east-2.aws.neon.tech"),
+      ],
+      [
+        "?host= a prd",
+        deQa("ep-wispy-flower-abc123.us-east-2.aws.neon.tech", "?host=ep-sweet-salad-abc123.us-east-2.aws.neon.tech"),
+      ],
+      [
+        "?host= a dev",
+        deQa("ep-wispy-flower-abc123.us-east-2.aws.neon.tech", "?host=ep-proud-resonance-abc123.us-east-2.aws.neon.tech"),
+      ],
+      ["QA sólo en la contraseña", "postgres://u:ep-wispy-flower-abc123@ep-damp-meadow-abc123.us-east-2.aws.neon.tech/neondb"],
+      ["un host suelto", "ep-wispy-flower-abc123.us-east-2.aws.neon.tech"],
+    ])("rechaza %s", (_nombre, cadena) => {
+      expect(motivoDeVetoDeBases("qa", cadena, {})).not.toBeNull();
+    });
+
+    it.each(["", "no-es-una-url", undefined])("una cadena que no se lee (%s) se rechaza", (cadena) => {
+      expect(motivoDeVetoDeBases("qa", cadena, {})).toContain("no se lee");
+    });
+
+    it("ignora el entorno: QA_DATABASE_URL igual a la cadena no la vuelve ajena", () => {
+      const entorno = { QA_DATABASE_URL: QA, QA_DATABASE_URL_APP: QA_POOLER, STAGING_DATABASE_URL: QA };
+      expect(motivoDeVetoDeBases("qa", QA, entorno)).toBeNull();
+      expect(motivoDeVetoDeBases("qa", QA_POOLER, entorno)).toBeNull();
+      expect(motivoDeVetoDeBases("qa", deQa("ep-damp-meadow-abc123.us-east-2.aws.neon.tech"), entorno)).not.toBeNull();
+    });
+
+    it("el motivo no lleva la contraseña ni la cadena", () => {
+      for (const cadena of [
+        QA,
+        deQa("ep-damp-meadow-abc123.us-east-2.aws.neon.tech"),
+        deQa("ep-proud-resonance-abc123.example.com"),
+      ]) {
+        const motivo = motivoDeVetoDeBases("qa", cadena, {}) ?? "";
+        expect(motivo).not.toContain("fake-clave");
+        expect(motivo).not.toContain("neon.tech");
+        expect(motivo).not.toContain("example.com");
+      }
+    });
+
+    it("no cambia a prd ni a ensayo: QA sigue siendo de otro ambiente para ellos", () => {
+      for (const ambiente of ["prd", "ensayo"]) {
+        expect(motivoDeVetoDeBases(ambiente, QA, {})).toContain("otro ambiente");
+      }
+    });
+  });
 });
 
 describe("la CLI de los workflows", () => {
@@ -222,12 +357,31 @@ describe("la CLI de los workflows", () => {
     ["--conocido", "https://claimmix-dev.vercel.app", 0],
     ["--conocido", "https://claimmix-dev.vercel.app:8443", 1],
     ["--conocido", "https://example.com", 1],
+    ["--qa", "https://claimmix-qa.vercel.app", 0],
+    ["--qa", "https://CLAIMMIX-qa.vercel.app/", 0],
+    ["--qa", "https://claimmix.vercel.app", 1],
+    ["--qa", "https://claimmix-dev.vercel.app", 1],
+    ["--qa", "https://claimmix-prd.vercel.app", 1],
+    ["--qa", "https://claimmix-qa-git-x-ilandaniele-3471s-projects.vercel.app", 1],
+    ["--qa", "http://", 1],
+    ["--qa", "http://claimmix-qa.vercel.app", 1],
+    ["--qa", "https://claimmix-qa.vercel.app:8443", 1],
+    ["--qa", "https://usuario:fake-clave@claimmix-qa.vercel.app", 1],
+    ["--qa", "no-es-una-url", 1],
   ])("%s %s sale con %i", (modo, url, esperado) => {
     expect(correr(modo, url).status).toBe(esperado);
   });
 
+  it("--qa explica el rechazo en stderr sin repetir la URL", () => {
+    const r = correr("--qa", "https://usuario:fake-clave@claimmix-dev.vercel.app");
+    expect(r.status).toBe(1);
+    expect(r.stderr).not.toBe("");
+    expect(r.stderr).not.toContain("fake-clave");
+    expect(r.stderr).not.toContain("claimmix-dev");
+  });
+
   it("sin argumentos o con un modo desconocido, sale con 2 y explica el uso", () => {
-    for (const args of [[], ["--veto"], ["--otro", "https://claimmix-qa.vercel.app"]]) {
+    for (const args of [[], ["--veto"], ["--qa"], ["--otro", "https://claimmix-qa.vercel.app"]]) {
       const r = correr(...args);
       expect(r.status).toBe(2);
       expect(r.stderr).toContain("Uso:");

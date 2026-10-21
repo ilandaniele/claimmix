@@ -24,6 +24,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
 import { accepted, ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { casillaDeGmail } from "@/lib/email/reserved";
 import { logger } from "@/lib/observability/logger";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
@@ -134,11 +135,19 @@ export async function POST(request: NextRequest) {
      * En una prueba sólo se invita a gente del dominio de quien invita, y nunca de
      * un proveedor abierto: si no, una prueba gratuita sirve para mandar mails con
      * nuestro remitente a cualquier dirección. Habla del espacio de quien pide,
-     * no de la dirección de un tercero.
+     * no de la dirección de un tercero. Única excepción: un alias «+» de la
+     * propia casilla de Gmail de quien invita (verificada), porque Gmail entrega
+     * el alias en esa casilla y no llega a un tercero.
      */
+    let aSuPropiaCasilla = false;
     if (prueba) {
+      const casilla = casillaDeGmail(email);
+      aSuPropiaCasilla = user.emailVerified === true && casilla !== null && casilla === casillaDeGmail(user.email);
       const dominio = dominioDelMail(email);
-      if (!dominio || esDominioPublico(dominio) || dominio !== dominioDelMail(user.email ?? "")) {
+      if (
+        !aSuPropiaCasilla &&
+        (!dominio || esDominioPublico(dominio) || dominio !== dominioDelMail(user.email ?? ""))
+      ) {
         throw new AppError("DOMINIO_NO_PERMITIDO", t("usuarios.error.dominio"));
       }
     }
@@ -159,7 +168,11 @@ export async function POST(request: NextRequest) {
       event_type: AuditEvent.USER_INVITED,
       target_type: "invitacion",
       // Sin el mail: el asiento queda en el registro del espacio y no es de quien lo lee.
-      payload: delOperador ? { rol: role, bloqueada: true } : { rol: role },
+      payload: delOperador
+        ? { rol: role, bloqueada: true }
+        : aSuPropiaCasilla
+          ? { rol: role, alias: true }
+          : { rol: role },
       ip: getClientIp(request),
       ua: request.headers.get("user-agent") ?? undefined,
     });

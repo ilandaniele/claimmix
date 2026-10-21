@@ -384,7 +384,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "usuarios.subtitle": "Invite users and assign operator or administrator roles.",
   "usuarios.error.soloOwner": "Only an owner can invite owner users.",
   "usuarios.error.suspendido": "This workspace is suspended and cannot invite anyone.",
-  "usuarios.error.dominio": "During the trial you can only invite people from your own email domain.",
+  "usuarios.error.dominio": "During the trial you can only invite people from your own email domain or a + alias of your own Gmail address.",
   "usuarios.error.envio": "The invitation email could not be sent.",
 
   // ── La consola del agente — /agente, la pantalla entera ───────────

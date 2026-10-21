@@ -394,7 +394,7 @@ export const esARServidor = {
   "usuarios.subtitle": "Invitá usuarios y asigná roles operativos o administradores.",
   "usuarios.error.soloOwner": "Solo un owner puede invitar usuarios owner.",
   "usuarios.error.suspendido": "Este espacio está suspendido y no puede invitar a nadie.",
-  "usuarios.error.dominio": "Durante la prueba sólo podés invitar a personas de tu propio dominio de correo.",
+  "usuarios.error.dominio": "Durante la prueba sólo podés invitar a personas de tu propio dominio de correo o a un alias + de tu misma casilla de Gmail.",
   "usuarios.error.envio": "No se pudo enviar la invitación por correo.",
 
   // ── La consola del agente — /agente, la pantalla entera ───────────

@@ -906,6 +906,117 @@ pnpm sombra:evaluar --reporte ruta.json      # ids, claves, enums, conteo, versi
 - **Qué imprime.** Una línea por escenario con los mismos tramos que las `◐` del ensayo (ver arriba), `sin sombra (no es denuncia)` si el modelo no lo tomó como denuncia, y el mismo resumen al final. Los errores técnicos se cuentan aparte; sale con 0 salvo que alguna extracción falle (1) o los argumentos sean inválidos (2).
 - **Qué no lee.** Sólo escenarios sintéticos: ni las corridas reales de `agent_runs` ni la capa de base. Un test lo vigila (`tests/unit/eval-sombra.test.ts`).
 
+### 11. Alta automática en QA (`pnpm alta:probar`)
+
+¿Anda el alta por el enlace del correo, de punta a punta? Es el job **Alta automática en QA** de `deploy-checks.yml`, que sólo el job `qa` de `post-deploy.yml` enciende (`probar_alta: true`). Corre en cada deploy de QA, también en los que sólo tocan docs, sin una persona, después del ensayo y del pen test y sólo si el smoke pasó. Un rojo del job deja rojo el estado «Post-deploy QA» del commit.
+
+**Escribe en la base de QA y en ninguna otra, y no le manda un correo ni un WhatsApp a nadie.** Los correos son `@example.com`, los números son del bloque `5490000…` y las IPs son de TEST-NET-3 (`203.0.113.x`). Al deploy sólo le hace tres GETs de lectura; el resto corre en el runner, con el código del commit contra la base de QA.
+
+**Qué prueba.**
+
+- **Tres GETs al deploy de QA.**
+  - `/api/health` con el Bearer de `CRON_SECRET`: lee las banderas y el commit. Exige `ALTA_AUTOMATICA` prendida, que `BASE_POR_CLIENTE` no lo esté y, en Actions, que el commit sea el del deploy que disparó el job. Un 503 con banderas se acepta: quiere decir «alguna dependencia caída», no «sin configuración».
+  - `/registro`: el HTML del servidor trae `name="empresa"` y `name="whatsapp"`; el campo `id="registro-correo"` aparece si y sólo si las cuatro banderas del remitente (`ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`) están cargadas, y el widget `class="cf-turnstile"` aparece si y sólo si además están las dos claves de Turnstile. No envía el formulario.
+  - `/alta/correo` con un enlace sellado con un secreto al azar, que el deploy no tiene: tiene que decir «vencido», con el enlace a `/registro` y sin el campo de la clave.
+- **El recorrido en proceso.** Una copia de `destinoDelEnlace` (`src/app/alta/correo/actions.ts`), corrida en el runner con Better Auth de verdad (`signUpEmail`, `marcarCorreoVerificado`, `signInEmail`), los cupos de verdad (`rate_limit_counters`) y `claimmix_crear_inquilino` (la 0048) con el rol de la app. Es una copia porque ese archivo es `"use server"`: exportar la función la volvería una acción pública. `tests/unit/probar-alta-orden.test.ts` la ata al original —las mismas llamadas en el mismo orden—, pero no ata cada condición: si cambiás la acción, cambiá también la copia en `scripts/probar-alta.mts`. Antes de crear nada mira que haya margen en el tope de altas de 24 horas (esta corrida más un alta de verdad que llegue a la vez, sin pasar del 80 % que avisa al operador) y que los números de la corrida estén libres. Después, tres escenarios:
+  - **g, el alta.** Sella el enlace y lo recorre. Comprueba la cuenta con el correo verificado, el perfil de dueño, el espacio (`autoalta`, plan `piloto`, `trial` y su fin de prueba), el número de WhatsApp, la auditoría `tenant.created` con origen `autoalta` y la IP, y la sesión. Después abre el mismo enlace otra vez: tiene que ir a `ya_tenes_cuenta` sin crear nada. Los contadores `auth:ip` y `alta:ip` tienen que subir 1 y 1 con la primera apertura, y 2 y 1 con las dos.
+  - **a, el cupo devuelto.** Pedir un espacio a quien ya tiene uno (`ya_tiene_espacio`) toma el cupo de `alta:ip` y lo suelta: el contador queda como estaba.
+  - **b, el tope por red.** Llena `ALTA_TOPE_IP_DIA` y abre un enlace más: la cuenta queda con sesión y sin espacio, el destino es el aviso de «demasiados intentos» y `alta:ip` queda en tope + 1.
+  - Si el alta del escenario g se cierra sin conteos, averigua por qué antes de reintentar: falta una migración, tope de bases o tope de MB. Sólo si no encuentra causa reintenta una vez, por si fueron dos altas pisándose (23505).
+- **El barrido.** Al empezar borra lo que haya dejado una corrida cortada, y al terminar —siempre, también si algo falló— borra lo de esta corrida y cuenta lo que queda. Todo bajo un candado de la base propio de la prueba (`claimmix_alta_probar`), así que corre una a la vez. Elige por doble coincidencia: el espacio se llama `zz-alta-probar-…` **y** su dueño es `alta-probar-…@example.com`; de `rate_limit_counters` sólo borra claves de `203.0.113.x`, nunca el cupo de una persona.
+
+**Qué no prueba.**
+
+- **Turnstile.** Nadie lo resuelve ni lo esquiva, y no hay claves de prueba que siempre pasan. Sólo se mira que el widget aparezca cuando las banderas dicen que está cargado.
+- **La entrega por Gmail.** El remitente del guión es falso (`fake-…`): no sale ningún correo. Que el refresh token del remitente de QA siga vivo y que el correo llegue es la prueba manual del dueño.
+- **El alta con Google.** Pide un OAuth de verdad.
+- **El número por código** (`ALTA_NUMERO_AUTOMATICO`): ocurre antes de sellar el enlace.
+- **El aviso al operador al 80 %.** `avisarSiLlegoAlTope` usa `after()` de Next, que no anda fuera de un pedido. En su lugar la prueba exige margen para no dispararlo.
+- **La base por cliente.** El guión fuerza `BASE_POR_CLIENTE=0`. Si QA la prende, el resultado es inconcluso.
+- **El runtime de Vercel.** El recorrido corre en el runner. Una variable de QA mal cargada en Vercel sólo se ve en lo que alcanzan los tres GETs.
+- **El cierre del alta por tope.** El tope global de 24 horas sólo se lee y se usa como precondición. Las puertas de la función de la 0048 —un id que no es el del contexto, un usuario que no existe y el tope en 0— las prueba `pnpm tenancy`, en un rollback. Los topes de bases y de MB sólo se miran para explicar un cierre que ocurrió solo.
+
+**Tres resultados.** El job imprime una línea por cosa que miró, `alta: <código> — <texto>`, y al final `alta: resultado=<probado|inconcluso|rojo> corrida=<hex>`. Los logs de Actions son públicos: sólo salen códigos de una tabla cerrada con un texto fijo (`scripts/lib/probar-alta-reglas.mts`), nunca banderas, conteos, correos, ids, el enlace, la clave ni las cadenas.
+
+- **Probado** — verde. Todas las líneas son de las que anduvieron (sin `::warning::` ni `::error::`): `salud_ok`, `registro_ok`, `enlace_ajeno_rechazado`, `margen_ok`, `alta_ok`, `segunda_vez_ok`, `contadores_ok`, `cupo_devuelto`, `tope_por_ip_ok` y `barrido_ok`.
+- **Inconcluso** — verde, a propósito (`::warning::`). No se pudo probar, y eso no quiere decir que el alta se rompió: un parpadeo de la red, el tope de QA lleno, otro commit desplegado en el medio, el candado ocupado. El resumen del run lo dice: la fila «Alta automática (QA)» sale **corrió SIN PODER PROBAR: mirá el log del job**. Un inconcluso no es un probado: si se repite deploy tras deploy, mirá el código.
+- **Rojo** — el job falla (`::error::`). Quiere decir que el alta se rompió o que QA quedó sucia. Un parpadeo de la red no lo pone rojo: los errores pasajeros (SQLSTATE `08…`, `53300`, `57P01` a `57P03`, `57014`, `40001`, `40P01`, `55P03` y los de transporte) son inconclusos. Para repetir sólo este job: `gh run rerun <id> --failed`.
+
+**Qué mirar según el código.** Cada línea del log dice un código y nada más. Los inconclusos:
+
+| Código | Qué mirar |
+|---|---|
+| `no_contesta` | `/api/health` de QA no contestó, ni con un reintento a los 5 s. ¿El deploy está vivo? Repetí el job. |
+| `salud_ilegible` | Contestó algo que no es 200, 503 ni 401. Mirá el deploy en Vercel y repetí. |
+| `otro_commit` | QA ya sirve otro commit que el del deploy que disparó el job: se promovió otro en el medio, y lo probado no es lo desplegado. Mirá el run de ese deploy. |
+| `base_por_cliente_prendida` | QA tiene `BASE_POR_CLIENTE` en 1 y esta prueba no cubre ese camino. |
+| `registro_no_contesta` | `GET /registro` no dio 200. Abrilo en el navegador. |
+| `enlace_no_contesta` | `GET /alta/correo` con el enlace ajeno no dio 200. Abrilo en el navegador. |
+| `candado_ocupado` | Otra corrida —el job de otro deploy o una a mano— tiene el candado; esperó hasta tres minutos. `gh run list --workflow=post-deploy.yml --limit 3`. |
+| `tope_lleno` | Las altas de las últimas 24 horas ya llenan `ALTA_TOPE_GLOBAL_DIA`: crear una más lo cerraría para una persona. Se destraba solo, a medida que salen de la ventana. |
+| `cerca_del_aviso` | Una alta de más pasaría el 80 % del tope y dispararía el aviso al operador. Se destraba igual que `tope_lleno`. |
+| `numero_ocupado` | Un número del bloque `5490000…` de esta corrida ya estaba en uso en QA. Repetí: la corrida siguiente sortea otros. |
+| `contador_movido` | La ventana de un cupo cambió en medio de la prueba (cruzó el borde del día): no se comparó. Repetí. |
+| `contador_sin_respuesta` | El contador de cupos no contestó. Si se repite, mirá `rate_limit_counters` y Neon. |
+| `pasajero` | Falló la red o la conexión con la base. Repetí. |
+| `barrido_sin_candado` | El barrido no consiguió el candado en 60 s y puede haber quedado un espacio `zz-alta-probar-…`. Lo limpia la próxima corrida o `--solo-barrer`. |
+| `barrido_pasajero` | El barrido falló por la red. Lo mismo. |
+
+Los rojos:
+
+| Código | Qué mirar |
+|---|---|
+| `sin_permiso` | `/api/health` contestó 401: el `CRON_SECRET` del job (el `QA_CRON_SECRET` del repo) no es el que tiene el deploy de QA. ¿Se rotó uno solo? |
+| `sin_banderas` | Contestó 200 o 503 sin `banderas`. Mirá `src/app/api/health/banderas.ts` y qué build sirve QA. |
+| `alta_apagada` | `ALTA_AUTOMATICA` no está en 1 en QA. Si el dueño la apagó a propósito, poné `probar_alta: false` en el job `qa` de `post-deploy.yml` hasta que se vuelva a prender. |
+| `registro_sin_formulario` | El HTML de `/registro` no trae `name="empresa"` o `name="whatsapp"`. `src/app/registro/SignUpForm.tsx`. |
+| `registro_correo_incoherente` | El campo `registro-correo` aparece sin las cuatro banderas del remitente, o falta con ellas. `src/app/registro/page.tsx` y `src/server/notify/remitente-sistema.ts`. |
+| `registro_turnstile_incoherente` | El widget de Turnstile aparece sin las dos claves, o falta con ellas. `src/app/registro/page.tsx` y `src/app/registro/DesafioTurnstile.tsx`. |
+| `token_ajeno_aceptado` | El deploy pidió la clave para un enlace sellado con otro secreto. Es lo más grave de la tabla: `src/server/alta/token-de-registro.ts` y `src/app/alta/correo/page.tsx`. |
+| `enlace_ilegible` | `/alta/correo` no mostró ni el formulario ni el aviso de «vencido». `src/app/alta/correo/page.tsx`. |
+| `tope_0` | `ALTA_TOPE_GLOBAL_DIA` en 0 cierra el alta en QA. |
+| `destino_inesperado` | El recorrido terminó donde no corresponde. `src/app/alta/correo/actions.ts` y `src/server/alta/destinos.ts`. |
+| `correo_sin_verificar` | La cuenta quedó sin el correo verificado. `marcarCorreoVerificado` (`src/lib/auth/on-password-reset.ts`). |
+| `sin_perfil_de_dueno`, `inquilino_mal_creado`, `sin_numero`, `sin_auditoria` | Una fila de lo que crea `claimmix_crear_inquilino` no es la que promete la 0048: el perfil de dueño, el espacio, el número o la auditoría. `neon/migrations/0048_alta_automatica.sql`. |
+| `sin_sesion` | La persona quedó sin sesión después del alta. `signInEmail` en `src/app/alta/correo/actions.ts`. |
+| `cupos_mal_contados` | Los contadores `auth:ip` o `alta:ip` no subieron lo que tenían que subir, o el cupo del escenario a no se pudo tomar. `src/server/alta/cupo-por-ip.ts` y `src/lib/rate-limit`. |
+| `segunda_vez_creo_algo` | Abrir de nuevo el mismo enlace creó una cuenta, un espacio o una sesión. La salida `ya_tenes_cuenta` de `src/app/alta/correo/actions.ts`. |
+| `cupo_no_devuelto` | Un alta que no creó nada dejó gastado el cupo de la red. `soltarCupoDeAlta` en `src/server/alta/cupo-por-ip.ts`. |
+| `tope_por_ip_no_corta` | Con el cupo de la red lleno, el enlace no terminó sin espacio y con el aviso de «demasiados intentos», o `alta:ip` no quedó en tope + 1. `topePorIp` y `tomarCupoDeAlta`. |
+| `migracion_pendiente` | Falta una migración del alta en la base de QA (la 0048, la 0050 o la 0051). Las de QA se aplican a mano: el job «Migraciones y permisos de la base» del mismo run dice cuál. |
+| `tope_de_bases`, `tope_de_mb` | `ALTA_TOPE_BASES` o `ALTA_TOPE_MB` cierran el alta: ya hay tantas bases de cliente, o pesan tanto, como dice el tope. Hay que limpiar bases o subir el tope. |
+| `alta_cerrada_sin_conteo` | El alta se cerró sin conteos, sin migración pendiente ni tope y también tras el reintento. `claimmix_crear_inquilino` y `src/server/alta/crear-inquilino.ts`. |
+| `resultado_inesperado` | `crearInquilino` dio un resultado que la prueba no conoce. ¿Se sumó un resultado nuevo en `src/server/alta/crear-inquilino.ts`? |
+| `error_pg` | La base devolvió un error de Postgres que no es de red. Reproducilo a mano (más abajo). |
+| `error` | Un error inesperado que no es de la base ni de la red. Reproducilo a mano. |
+| `residuo` | Después del barrido quedaron datos de la prueba. Corré `--solo-barrer`; si sigue, entrá a `/admin/altas` y buscá los `zz-alta-probar-…`. |
+| `barrido_fallo` | El barrido falló con un error que no es de red. Puede haber quedado un espacio `zz-alta-probar-…`: `--solo-barrer`. |
+
+El guión nunca imprime el mensaje de un error, ni siquiera a mano. Para verlo, agregá un `console.error(e)` en `deError` de tu copia de `scripts/probar-alta.mts` y no lo subas.
+
+**Correrlo a mano.**
+
+```bash
+export BETTER_AUTH_SECRET="$(openssl rand -hex 32)"   # uno al azar: nunca el de QA ni el de otro ambiente
+CRON_SECRET=<el de QA> pnpm alta:probar --url https://claimmix-qa.vercel.app
+```
+
+- `CRON_SECRET` es el de QA y se pasa por el entorno: el guión no lo lee de `.env.local`, donde podría estar el de otro ambiente.
+- `QA_DATABASE_URL` y `QA_DATABASE_URL_APP` se toman del entorno y, si no están, de `.env.local`.
+- `--corrida <hex6>` fija la identidad de la corrida (seis dígitos hexadecimales); sin ella se sortea una. `--resultado <archivo>` escribe `probado`, `inconcluso` o `rojo`: así lo lee el workflow.
+- Una corrida a la vez. Si el job de un deploy está corriendo, la tuya espera hasta tres minutos el candado y sale `candado_ocupado`. Mientras corre, la prueba suma un alta al tope de 24 horas; el barrido la borra.
+- Sale con **0** si probó o no pudo probar (un aviso), con **1** si el alta se rompió o QA quedó sucia, y con **2** si se negó a correr.
+
+**`--solo-barrer`.** Barre lo que haya dejado una corrida cortada y no toca el deploy, ni pide `CRON_SECRET` ni `BETTER_AUTH_SECRET`:
+
+```bash
+pnpm alta:probar --url https://claimmix-qa.vercel.app --solo-barrer
+```
+
+Es el paso `always()` del job, así que corre aunque la prueba o el job se hayan cortado. Sale con 0 si la red falló o no consiguió el candado —lo que quede lo barre la próxima corrida, y un parpadeo no pone rojo el job— y con 1 si quedó residuo o el barrido falló por un error de la base. Si la corrida y el barrido fallan los dos por la red, queda un espacio `zz-alta-probar-…` hasta el próximo deploy de QA: se ve en `/admin/altas`, cuenta para el tope de 24 horas y el pen test podría elegirlo como víctima.
+
+**Se niega a correr con 2, sin tocar nada, ante cualquier URL o base que no sea QA.** La URL tiene que ser `https://claimmix-qa.vercel.app` y nada más: ni dev, ni prd, ni una vista previa (`claimmix-qa-git-…`), ni `http`. Las dos cadenas de la base pasan por la lista blanca de `motivoDeVetoDeBases("qa", …)` en `scripts/lib/hosts-vetados.mjs`: sólo el endpoint `ep-wispy-flower` sobre `.neon.tech`, en el host y en el `?host=`; dev, prd, staging o una cadena que no se lee, no. Además tienen que ser del mismo endpoint, y la de la app tiene que entrar como `claimmix_app`. También sale con 2 si falta una variable o si `--corrida` no son seis dígitos hexadecimales. El paso «¿Es QA?» del workflow hace la misma comprobación de la URL (`node scripts/lib/hosts-vetados.mjs --qa <url>`) antes de instalar nada.
+
 ---
 
 ## Cuándo correr qué
@@ -929,6 +1040,7 @@ pnpm sombra:evaluar --reporte ruta.json      # ids, claves, enums, conteo, versi
 | Dudás de si una consulta filtra por inquilino | `pnpm arquitectura` |
 | Después de tocar el alta, la capa de bases o las migraciones de una base por cliente | `pnpm bases:probar` (y `pnpm bases:empaquetar` si sumaste una migración) |
 | Después de migrar la base de control o la de un cliente de prd | `pnpm permisos --perfil control` y `pnpm permisos --perfil cliente --base t_<hex>` |
+| Después de tocar el alta por el enlace del correo, sus cupos o la 0048 (corre sola en cada deploy de QA) | `pnpm alta:probar --url https://claimmix-qa.vercel.app`, con el entorno de la capa 11 |
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.
@@ -1006,6 +1118,8 @@ en cada PR pero no bloquean el merge.
    `pnpm tenancy` en el mismo job: que el rol no tenga `BYPASSRLS` ni `SUPERUSER`
    y que toda tabla con `tenant_id` tenga RLS, `FORCE` y política. Las migraciones
    de QA y de producción se aplican a mano, y un `ALTER ROLE` no deja registro.
+
+Sólo en QA hay un séptimo, **Alta automática en QA**: el alta por el enlace del correo, de punta a punta (capa 11).
 
 Hay un trabajo más que no verifica nada, `alcance` («Resumen de lo que corrió»). Corre con `if: always()`
 y escribe en el resumen del run una fila por chequeo: **corrió**, **corrió y

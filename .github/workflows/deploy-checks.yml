@@ -95,6 +95,11 @@ on:
         required: false
         type: boolean
         default: false
+      probar_alta:
+        description: "Si corre el job `alta`: el alta automática de punta a punta contra la base de QA. Sólo QA: el job rechaza cualquier otra URL."
+        required: false
+        type: boolean
+        default: false
     # ── Por qué los secretos van declarados y no heredados ────────────────────
     #
     # `secrets: inherit` le pasaría al workflow los secretos del caller con SU
@@ -554,7 +559,7 @@ jobs:
     name: Carga del tablero
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [smoke, rehearse, timbre, pentest, permisos]
+    needs: [smoke, rehearse, timbre, pentest, permisos, alta]
     if: always() && needs.smoke.result == 'success' && inputs.medir_carga
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -834,6 +839,104 @@ jobs:
           echo ""
           echo "Reproducilo con: pnpm pentest"
 
+  # ── El alta automática, de punta a punta, sólo en QA ─────────────────────────
+  #
+  # `pnpm alta:probar` recorre el alta por el enlace del correo dentro del
+  # runner, con el código de este commit contra la base de QA: Better Auth, los
+  # cupos y la función `claimmix_crear_inquilino` de verdad. Al deploy sólo le
+  # hace GETs de lectura. No manda un correo ni un WhatsApp a nadie: los datos
+  # son @example.com y del bloque 5490000. Qué cubre y qué no, en
+  # docs/TESTING.md.
+  #
+  # Va después del ensayo y del pen test, y sólo si pasó el smoke: arma un
+  # espacio `zz-alta-probar-…` que el pen test podría elegir como víctima, y
+  # suma una alta al tope de 24 horas mientras corre.
+  #
+  # El primer paso rechaza toda URL que no sea la de QA: el guion lo repite,
+  # pero acá se frena antes de instalar nada. Los secretos son los de QA que ya
+  # mapea el caller, ninguno nuevo; el de sesión se genera como en el ensayo.
+  #
+  # Rojo quiere decir que el alta se rompió o que QA quedó sucia. Lo que no se
+  # pudo probar (red, tope de QA lleno, otro commit, candado ocupado) sale
+  # verde, y `alcance` lo escribe como «corrió SIN PODER PROBAR».
+  alta:
+    name: Alta automática en QA
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [smoke, rehearse, pentest]
+    # `!cancelled()` por lo mismo que el pen test: esto es orden y no
+    # dependencia. Lo que sí se exige es el smoke.
+    if: ${{ !cancelled() && inputs.probar_alta && needs.smoke.result == 'success' }}
+    permissions:
+      contents: read
+    outputs:
+      resultado: ${{ steps.probar.outputs.resultado }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: ¿Es QA?
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          node scripts/lib/hosts-vetados.mjs --qa "$URL" ||
+            { echo "::error::El alta automática sólo se prueba contra QA."; exit 1; }
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # Cada corrida arma sus nombres con esto, y el barrido de abajo reconoce
+      # lo que dejó una corrida que se murió a mitad de camino.
+      - name: Número de la corrida
+        id: corrida
+        run: echo "corrida=$(openssl rand -hex 3)" >> "$GITHUB_OUTPUT"
+
+      # Secreto de sesión propio de la corrida: ver el ensayo.
+      - name: Recorrer el alta
+        id: probar
+        env:
+          URL: ${{ inputs.url }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          QA_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          QA_DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
+          ALTA_CORRIDA: ${{ steps.corrida.outputs.corrida }}
+          ALTA_RESULTADO: ${{ runner.temp }}/alta-resultado
+        run: |
+          export BETTER_AUTH_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$BETTER_AUTH_SECRET"
+          pnpm alta:probar --url "$URL" --corrida "$ALTA_CORRIDA" --resultado "$ALTA_RESULTADO"
+          echo "resultado=$(cat "$ALTA_RESULTADO")" >> "$GITHUB_OUTPUT"
+
+      # `always()`: si la corrida o el job se cortaron, lo que dejaron en QA se
+      # barre igual. El guion sale 0 si la red falló (la próxima corrida lo
+      # barre) y 1 si queda residuo.
+      - name: Barrer lo que haya quedado
+        if: always()
+        env:
+          URL: ${{ inputs.url }}
+          QA_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          QA_DATABASE_URL_APP: ${{ secrets.DATABASE_URL_APP }}
+        run: pnpm alta:probar --url "$URL" --solo-barrer
+
+      - name: Qué significa que esto falle
+        if: failure()
+        run: |
+          echo "::error::El alta automática se rompió, o QA quedó sucia."
+          echo ""
+          echo "  · el log trae un código por falla y nunca datos: la tabla está en"
+          echo "                          docs/TESTING.md."
+          echo "  · rojo es alta rota o QA sucia, no un parpadeo de la red: mirá el"
+          echo "                          código antes de repetir."
+          echo "  · para repetir sólo este job: gh run rerun <id> --failed"
+          echo ""
+          echo "Reproducilo con: pnpm alta:probar --url https://claimmix-qa.vercel.app"
+
   # ── El alcance: qué se preguntó de verdad ───────────────────────────
   #
   # Un caller puede apagar los chequeos que su entorno no puede correr. Eso está
@@ -849,7 +952,7 @@ jobs:
     name: Resumen de lo que corrió
     runs-on: ubuntu-slim
     timeout-minutes: 5
-    needs: [smoke, rehearse, timbre, carga, permisos, pentest]
+    needs: [smoke, rehearse, timbre, carga, permisos, pentest, alta]
     if: always()
     steps:
       - name: Escribir el alcance en el resumen
@@ -863,6 +966,8 @@ jobs:
           CARGA: ${{ needs.carga.result }}
           PERMISOS: ${{ needs.permisos.result }}
           PENTEST: ${{ needs.pentest.result }}
+          ALTA: ${{ needs.alta.result }}
+          ALTA_RESULTADO: ${{ needs.alta.outputs.resultado }}
           PROFUNDO: ${{ inputs.smoke_profundo }}
           TOLERA: ${{ inputs.smoke_tolera }}
         run: |
@@ -905,6 +1010,13 @@ jobs:
             fila "Ataques al agente (pen test)" "skipped" "atacar_agente"
           fi
           fila "Migraciones y permisos de la base" "$PERMISOS" "-"
+          # Pasó pero no pudo probar (red, tope de QA lleno, otro commit): verde
+          # a propósito, y por eso se dice acá.
+          if [ "$ALTA" = success ] && [ "$ALTA_RESULTADO" = inconcluso ]; then
+            echo "| Alta automática (QA) | corrió SIN PODER PROBAR: mirá el log del job |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            fila "Alta automática (QA)" "$ALTA" "probar_alta"
+          fi
           fila "Carga del tablero" "$CARGA" "medir_carga"
           {
             echo ""

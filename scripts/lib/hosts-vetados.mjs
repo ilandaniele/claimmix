@@ -6,6 +6,7 @@
  *
  *   node scripts/lib/hosts-vetados.mjs --veto <url>       sale 1 si está vetado
  *   node scripts/lib/hosts-vetados.mjs --conocido <url>   sale 0 si es de ClaimMix
+ *   node scripts/lib/hosts-vetados.mjs --qa <url>         sale 0 sólo si es el origen de QA
  *
  * Se compara el HOSTNAME normalizado y no el texto de la URL: una barra final,
  * una mayúscula o un punto al final del host (`claimmix.vercel.app.`) son el
@@ -23,7 +24,7 @@ export const HOSTS_WEB = new Set(
 );
 
 // QA es de ClaimMix pero no está vetado: ahí sí se ataca y se escribe.
-const HOST_QA = "claimmix-qa.vercel.app";
+export const HOST_QA = "claimmix-qa.vercel.app";
 
 /**
  * Endpoint de la base de control de claimmix-prd (proyecto Neon `claimmix-prd`).
@@ -38,6 +39,12 @@ export const HOST_DE_BASE_PRD = "ep-sweet-salad";
  * lleva un sufijo (`-acbz9jqu`) y a veces `-pooler`.
  */
 export const HOSTS_DE_BASE_REALES = new Set(["ep-proud-resonance", HOST_DE_BASE_PRD].filter(Boolean));
+
+/**
+ * Endpoint de la base de QA (rama de Neon de claimmix-qa). El ambiente `qa` de
+ * `motivoDeVetoDeBases` es una lista blanca: sólo acepta este.
+ */
+export const HOST_DE_BASE_QA = "ep-wispy-flower";
 
 // Dev (la base viva) y QA: ningún script de bases de prd ni del ensayo los toca.
 const HOSTS_DE_OTROS_AMBIENTES = ["ep-proud-resonance", "ep-wispy-flower"];
@@ -107,6 +114,17 @@ export function conocido(url) {
 }
 
 /**
+ * ¿Es el origen de QA y nada más? Misma exigencia que `conocido`, pero sólo QA:
+ * ni los alias vetados ni una vista previa (`claimmix-qa-git-x`) pasan.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function esUrlDeQa(url) {
+  return conocido(url) && hostNormalizado(url) === HOST_QA;
+}
+
+/**
  * ¿La cadena de Postgres apunta a una base con datos reales? Mira el host y el
  * `?host=` que el driver de Neon prefiere, nunca la contraseña. Una cadena que
  * no se lee se busca entera: así sirve también con un host suelto.
@@ -137,7 +155,7 @@ function hostsDe(cadena) {
 }
 
 // El endpoint de Neon: la primera etiqueta del host, sin `-pooler`.
-function endpointDe(cadena) {
+export function endpointDe(cadena) {
   return hostsDe(cadena).split(" ")[0].split(".")[0].replace(/-pooler$/, "");
 }
 
@@ -148,10 +166,13 @@ function endpointDe(cadena) {
  *   QA o staging.
  * - `prd`: la base de control de `claimmix-prd`. Exige su endpoint (`HOST_DE_BASE_PRD`)
  *   y rechaza los de otros ambientes. No usa `vetadoBase`: ese veta justamente prd.
+ * - `qa`: lista blanca. Exige `HOST_DE_BASE_QA` sobre `.neon.tech` en el host y en el
+ *   `?host=`; cualquier otro endpoint, staging incluido, o una cadena ilegible, se rechaza.
+ *   No mira `entorno`: las variables de QA son justamente las que se quieren aceptar.
  *
  * Nunca devuelve la cadena ni su contraseña: el motivo se imprime tal cual.
  *
- * @param {"prd" | "ensayo" | string} ambiente
+ * @param {"prd" | "ensayo" | "qa" | string} ambiente
  * @param {string | undefined} cadena
  * @param {Record<string, string | undefined>} [entorno]
  * @returns {string | null}
@@ -159,6 +180,16 @@ function endpointDe(cadena) {
 export function motivoDeVetoDeBases(ambiente, cadena, entorno = process.env) {
   const hosts = hostsDe(cadena);
   if (hosts === "") return "la cadena de conexión no se lee";
+
+  if (ambiente === "qa") {
+    if (vetadoBase(cadena)) return "es una base con datos reales";
+    const deQa = (h) => {
+      const e = h.split(".")[0].replace(/-pooler$/, "");
+      return h.endsWith(".neon.tech") && (e === HOST_DE_BASE_QA || e.startsWith(`${HOST_DE_BASE_QA}-`));
+    };
+    const partes = hosts.split(" ").filter(Boolean);
+    return partes.length > 0 && partes.every(deQa) ? null : "no es el endpoint de QA";
+  }
 
   const ajenos = VARIABLES_DE_OTROS_AMBIENTES.map((n) => endpointDe(entorno[n])).filter(Boolean);
   if (HOSTS_DE_OTROS_AMBIENTES.some((h) => hosts.includes(h)) || ajenos.includes(endpointDe(cadena))) {
@@ -173,11 +204,12 @@ export function motivoDeVetoDeBases(ambiente, cadena, entorno = process.env) {
 
 const [, archivo, modo, destino] = process.argv;
 if (archivo && import.meta.url === pathToFileURL(resolve(archivo)).href) {
-  if ((modo === "--veto" || modo === "--conocido") && destino) {
-    const sale = modo === "--veto" ? vetadoWeb(destino) : !conocido(destino);
+  if ((modo === "--veto" || modo === "--conocido" || modo === "--qa") && destino) {
+    const sale = modo === "--veto" ? vetadoWeb(destino) : modo === "--qa" ? !esUrlDeQa(destino) : !conocido(destino);
+    if (modo === "--qa" && sale) console.error("La URL no es el origen de QA.");
     process.exitCode = sale ? 1 : 0;
   } else {
-    console.error("Uso: node scripts/lib/hosts-vetados.mjs --veto|--conocido <url>");
+    console.error("Uso: node scripts/lib/hosts-vetados.mjs --veto|--conocido|--qa <url>");
     process.exitCode = 2;
   }
 }

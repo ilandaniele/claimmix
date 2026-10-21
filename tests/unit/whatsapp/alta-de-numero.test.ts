@@ -28,6 +28,7 @@ import {
   pedirCodigoAMeta,
   registrarNumero,
   verificarCodigoEnMeta,
+  webhookAjenoEs,
   webhookPropioEs,
   type CredencialDeAlta,
 } from "@/server/whatsapp/alta-de-numero";
@@ -398,6 +399,85 @@ describe("webhookPropioEs", () => {
   });
 });
 
+describe("webhookAjenoEs", () => {
+  const OTRA = "https://dev.example.com/api/webhooks/whatsapp";
+
+  it("pregunta lo mismo que webhookPropioEs: un GET de webhook_configuration sin cuerpo", async () => {
+    const fetchFalso = graphContesta({ webhook_configuration: { phone_number: OTRA }, id: ID });
+
+    expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: true });
+
+    const { url, init } = unicaLlamada(fetchFalso);
+    expect(url).toBe(`${BASE}/${ID}?fields=webhook_configuration`);
+    expect(init.method).toBe("GET");
+    expect(init.headers).toEqual(SIN_CUERPO);
+    expect(init.body).toBeUndefined();
+  });
+
+  it("sin override del número no hay nada ajeno: ni sin webhook_configuration, ni con sólo la de la app o la de la WABA, ni con una config que no es objeto", async () => {
+    for (const conf of [
+      { application: OTRA },
+      { whatsapp_business_account: OTRA },
+      { phone_number: 1 },
+      {},
+      null,
+      "x",
+      [OTRA],
+    ]) {
+      graphContesta({ webhook_configuration: conf });
+      expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: false });
+    }
+    graphContesta({ id: ID });
+    expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: false });
+  });
+
+  it("si el override es el nuestro, con o sin barra al final, no es ajeno", async () => {
+    for (const conf of [
+      { phone_number: WEBHOOK.url },
+      { phone_number: `${WEBHOOK.url}/` },
+      { override_callback_uri: WEBHOOK.url },
+      { override_callback_uri: `${WEBHOOK.url}/` },
+      { application: OTRA, phone_number: WEBHOOK.url },
+    ]) {
+      graphContesta({ webhook_configuration: conf });
+      expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: false });
+    }
+  });
+
+  it("otra URL en phone_number o en override_callback_uri es ajena", async () => {
+    for (const conf of [
+      { phone_number: OTRA },
+      { phone_number: `${WEBHOOK.url}/otro` },
+      { override_callback_uri: OTRA },
+      { application: WEBHOOK.url, override_callback_uri: OTRA },
+    ]) {
+      graphContesta({ webhook_configuration: conf });
+      expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: true, valor: true });
+    }
+  });
+
+  it("si Graph no contesta bien devuelve la falla tal cual: 5xx es «meta», 429 es «esperar», 400 es «rechazo»", async () => {
+    graphContesta({}, 500);
+    expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: false, falla: "meta", codigo: null });
+
+    graphContesta({}, 429);
+    expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: false, falla: "esperar", codigo: null });
+
+    graphContesta({ error: { code: 100 } }, 400);
+    expect(await webhookAjenoEs(CRED, ID, WEBHOOK.url)).toEqual({ ok: false, falla: "rechazo", codigo: 100 });
+  });
+
+  it("un id de forma rara o el de la plataforma no sale", async () => {
+    const fetchFalso = graphContesta({ webhook_configuration: { phone_number: OTRA } });
+    const sin = { ok: false, falla: "rechazo", codigo: null };
+
+    for (const raro of ["../me", "1234/x", "", PLATAFORMA]) {
+      expect(await webhookAjenoEs(CRED, raro, WEBHOOK.url)).toEqual(sin);
+    }
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
+});
+
 describe("lo que no llega al log ni a quien llama", () => {
   it("de un error de Graph queda el paso, el status y el code, y nada del cuerpo", async () => {
     graphContesta(
@@ -551,6 +631,7 @@ describe("el appsecret_proof de la app propia (R5)", () => {
     ["codigoYaVerificado", (c) => codigoYaVerificado(c, ID), `${ID}?fields=code_verification_status`, { code_verification_status: "VERIFIED" }],
     ["numeroYaRegistrado", (c) => numeroYaRegistrado(c, ID), `${ID}?fields=status,platform_type`, { status: "CONNECTED" }],
     ["webhookPropioEs", (c) => webhookPropioEs(c, ID, WEBHOOK.url), `${ID}?fields=webhook_configuration`, { webhook_configuration: {} }],
+    ["webhookAjenoEs", (c) => webhookAjenoEs(c, ID, WEBHOOK.url), `${ID}?fields=webhook_configuration`, { webhook_configuration: {} }],
   ];
 
   it.each(llamadas)("%s sin prueba pide la URL de siempre", async (_nombre, llamar, ruta, cuerpo) => {

@@ -44,10 +44,10 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { entero } from "@/lib/entero";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { topeEntero } from "@/lib/topes";
 import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
 
@@ -146,12 +146,12 @@ export async function enviarCorreoDelSistema(
   const cupos = [
     {
       clave: claveDeCupo("alta:correos", tipo),
-      limit: entero("ALTA_TOPE_CORREOS_DIA", 50, 1, 10_000),
+      limit: topeEntero("ALTA_TOPE_CORREOS_DIA"),
       cual: "global",
     },
     {
       clave: claveDeCupo("alta:destinatario", tipo, ...porIp, huellaDelDestinatario(destinatario)),
-      limit: entero("ALTA_TOPE_POR_DESTINATARIO_DIA", 3, 1, 100),
+      limit: topeEntero("ALTA_TOPE_POR_DESTINATARIO_DIA"),
       cual: "destinatario",
     },
   ];

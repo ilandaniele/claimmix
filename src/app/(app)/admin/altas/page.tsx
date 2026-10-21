@@ -25,6 +25,7 @@ import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { llegoAlAviso } from "@/server/alta/aviso-operador";
+import { lugaresDeLaWaba } from "@/server/alta/lugares-de-la-waba";
 import {
   DIAS_MAXIMOS_DE_PRUEBA,
   listarAltas,
@@ -91,6 +92,9 @@ const BOTON =
 const BOTON_PELIGRO =
   "rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40";
 
+const TARJETA = "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900";
+const TARJETA_ROJA = "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30";
+
 const dia = { hour: undefined, minute: undefined } as const;
 
 export default async function AltasPage({
@@ -111,7 +115,7 @@ export default async function AltasPage({
 
   const crudo = (await searchParams).r;
   const resultado = resultadoDelPanel(typeof crudo === "string" ? crudo : null);
-  const panel = await listarAltas();
+  const [panel, lugares] = await Promise.all([listarAltas(), lugaresDeLaWaba()]);
 
   return (
     <div className="px-6 py-8 max-w-6xl">
@@ -126,12 +130,10 @@ export default async function AltasPage({
         <p className="text-sm text-amber-700">{t("migracion.pendiente")}</p>
       ) : (
         <>
-          <div className="mb-6 grid max-w-xl gap-3 sm:grid-cols-2">
+          <div className="mb-6 grid max-w-3xl gap-3 sm:grid-cols-3">
             <div
               className={`rounded-lg border px-4 py-3 ${
-                llegoAlAviso(panel.creadas24h, panel.tope)
-                  ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30"
-                  : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+                llegoAlAviso(panel.creadas24h, panel.tope) ? TARJETA_ROJA : TARJETA
               }`}
             >
               <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-100">
@@ -151,6 +153,17 @@ export default async function AltasPage({
                   .replace("{p95}", duracionLegible(panel.demoraDeAlta.p95, locale))}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">{t("altas.stat.demora30d")}</p>
+            </div>
+            <div className={`rounded-lg border px-4 py-3 ${lugares?.libres === 0 ? TARJETA_ROJA : TARJETA}`}>
+              <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                {lugares
+                  ? t("altas.stat.lugares")
+                      .replace("{libres}", String(lugares.libres))
+                      .replace("{tope}", String(lugares.tope))
+                  : "—"}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{t("altas.stat.lugaresWaba")}</p>
+              {!lugares && <p className="mt-0.5 text-xs text-slate-500">{t("altas.stat.lugaresSinDato")}</p>}
             </div>
           </div>
 

@@ -45,11 +45,11 @@ import { enControl } from "@/data/scope";
 import { pruebaVencida } from "@/lib/billing/plans";
 import { filasDe } from "@/lib/db/filas";
 import { tenants, whatsappNumeros } from "@/lib/db/schema";
-import { entero } from "@/lib/entero";
 import { ID_DE_META } from "@/lib/meta-ids";
 import { nombreDelError } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { topeEntero } from "@/lib/topes";
 import { avisarNumeroEnRevision } from "@/server/alta/aviso-operador";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import type { ResultadoDelNumero } from "@/server/alta/numero-resultados";
@@ -90,17 +90,17 @@ import { recorrerLaWaba } from "@/server/whatsapp/verificar-en-meta";
 
 export type { QuienPide };
 
-/** Los topes del número automático, leídos del entorno cada vez (cada uno acotado, ver `entero`). */
+/** Los topes del número automático, leídos del entorno cada vez (cada uno acotado, ver `topeEntero`). */
 export function topesDelNumero() {
   return {
     /** Números en total de la WABA, el de la plataforma y cualquier estado incluidos. */
-    numerosWaba: entero("ALTA_NUMEROS_MAXIMOS_WABA", 2, 1, 1000),
+    numerosWaba: topeEntero("ALTA_NUMEROS_MAXIMOS_WABA"),
     /** Números nuevos por día, de todos los espacios juntos. */
-    numerosDia: entero("ALTA_TOPE_NUMEROS_DIA", 2, 0, 50),
-    codigosInquilino: entero("ALTA_TOPE_CODIGOS_INQUILINO_DIA", 3, 0, 20),
-    codigosIp: entero("ALTA_TOPE_CODIGOS_IP_DIA", 5, 0, 50),
-    codigosDia: entero("ALTA_TOPE_CODIGOS_DIA", 10, 0, 500),
-    verificacionesHora: entero("ALTA_TOPE_VERIFICACIONES_HORA", 5, 0, 20),
+    numerosDia: topeEntero("ALTA_TOPE_NUMEROS_DIA"),
+    codigosInquilino: topeEntero("ALTA_TOPE_CODIGOS_INQUILINO_DIA"),
+    codigosIp: topeEntero("ALTA_TOPE_CODIGOS_IP_DIA"),
+    codigosDia: topeEntero("ALTA_TOPE_CODIGOS_DIA"),
+    verificacionesHora: topeEntero("ALTA_TOPE_VERIFICACIONES_HORA"),
   };
 }
 

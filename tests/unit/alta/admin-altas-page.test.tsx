@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   operador: vi.fn(),
   locale: vi.fn(),
   listar: vi.fn(),
+  lugares: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -26,6 +27,8 @@ vi.mock("@/lib/auth/require-operator", () => ({ requireOperator: h.operador }));
 vi.mock("@/server/i18n/idioma-de-la-cuenta", () => ({ getAccountLocale: h.locale }));
 // El aviso de cupo tiene su propio test (arrastra el correo del sistema y el límite de pedidos).
 vi.mock("@/server/alta/aviso-operador", () => ({ llegoAlAviso: () => false }));
+// El conteo sale de una recorrida de Graph; tiene su propio test.
+vi.mock("@/server/alta/lugares-de-la-waba", () => ({ lugaresDeLaWaba: h.lugares }));
 vi.mock("@/server/alta/panel-operador", () => ({
   DIAS_MAXIMOS_DE_PRUEBA: 90,
   listarAltas: h.listar,
@@ -113,6 +116,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.operador.mockResolvedValue({ userRow: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
   h.listar.mockResolvedValue(panel(alta()));
+  h.lugares.mockResolvedValue({ usados: 1, tope: 2, libres: 1 });
 });
 
 afterEach(cleanup);
@@ -123,6 +127,7 @@ describe("antes de mostrar nada", () => {
 
     await expect(pintar()).rejects.toThrow("REDIRECT:/login");
     expect(h.listar).not.toHaveBeenCalled();
+    expect(h.lugares).not.toHaveBeenCalled();
   });
 
   it("sin ser operador va a /bandeja y no lee las altas", async () => {
@@ -130,6 +135,7 @@ describe("antes de mostrar nada", () => {
 
     await expect(pintar()).rejects.toThrow("REDIRECT:/bandeja");
     expect(h.listar).not.toHaveBeenCalled();
+    expect(h.lugares).not.toHaveBeenCalled();
   });
 
   it("sin la migración avisa que falta y no pinta la tabla", async () => {
@@ -365,6 +371,52 @@ describe("la demora de las altas", () => {
 
     expect(screen.getByText(texto(en["altas.stat.demora"], "2.5 min", "10 min"))).toBeTruthy();
     expect(screen.getByText(en["altas.stat.demora30d"])).toBeTruthy();
+  });
+});
+
+describe("los lugares de la WABA de la plataforma", () => {
+  const tarjeta = (etiqueta: string) => screen.getByText(etiqueta).closest("div") as HTMLElement;
+
+  it("muestra cuántos lugares libres quedan de cuántos, en español", async () => {
+    await pintar();
+
+    expect(screen.getByText("1 libres de 2")).toBeTruthy();
+    expect(screen.getByText(es["altas.stat.lugaresWaba"])).toBeTruthy();
+    expect(screen.queryByText(es["altas.stat.lugaresSinDato"])).toBeNull();
+    expect(tarjeta(es["altas.stat.lugaresWaba"]).className).not.toContain("border-red-300");
+  });
+
+  it("y en inglés", async () => {
+    await pintar(undefined, "en-US");
+
+    expect(screen.getByText("1 free of 2")).toBeTruthy();
+    expect(screen.getByText(en["altas.stat.lugaresWaba"])).toBeTruthy();
+  });
+
+  it("lee las dos cosas a la vez, sin otra consulta que la de la lista", async () => {
+    await pintar();
+
+    expect(h.listar).toHaveBeenCalledTimes(1);
+    expect(h.lugares).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin dato de Meta muestra un guion y lo dice, sin inventar un número", async () => {
+    h.lugares.mockResolvedValue(null);
+
+    await pintar();
+
+    expect(screen.getByText("—", { selector: "p.text-lg" })).toBeTruthy();
+    expect(screen.getByText(es["altas.stat.lugaresSinDato"])).toBeTruthy();
+    expect(tarjeta(es["altas.stat.lugaresWaba"]).className).not.toContain("border-red-300");
+  });
+
+  it("sin lugares libres la tarjeta va en rojo", async () => {
+    h.lugares.mockResolvedValue({ usados: 2, tope: 2, libres: 0 });
+
+    await pintar();
+
+    expect(screen.getByText("0 libres de 2")).toBeTruthy();
+    expect(tarjeta(es["altas.stat.lugaresWaba"]).className).toContain("border-red-300");
   });
 });
 

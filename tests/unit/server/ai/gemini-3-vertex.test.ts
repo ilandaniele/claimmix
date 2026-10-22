@@ -17,7 +17,8 @@ vi.mock("@/server/ai/provider", () => ({
   getTenantGeminiKey: vi.fn(async () => null),
 }));
 
-import { callGemini } from "@/server/ai/gemini-extractor";
+import { callGemini, esPasajero } from "@/server/ai/gemini-extractor";
+import { tokenDeGcp } from "@/server/gcp/credenciales";
 
 const VARIABLES = [
   "GEMINI_TRANSPORT",
@@ -128,5 +129,12 @@ describe("extracción por Vertex con Gemini 3", () => {
     );
     const r = await callGemini("sistema", "mensaje");
     expect(r.usage).toMatchObject({ promptTokens: 100, completionTokens: 65 });
+  });
+
+  it("un token que no se pudo pedir es pasajero: no hubo pedido que corregir", async () => {
+    vi.mocked(tokenDeGcp).mockRejectedValueOnce(new Error("invalid_grant"));
+    const err = await callGemini("sistema", "mensaje").catch((e: unknown) => e);
+    expect(esPasajero(err)).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

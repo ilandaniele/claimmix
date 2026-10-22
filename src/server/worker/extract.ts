@@ -410,7 +410,7 @@ async function releaseExtractionLease(
 
     return filas[0]?.pending === true;
   } catch (err) {
-    logger.error({ code: errorCode(err) }, "email_worker.lease_release_error");
+    logger.error({ case_id: caseId, tenant_id: tenantCtx.tenantId, code: errorCode(err) }, "email_worker.lease_release_error");
     return false;
   }
 }
@@ -438,7 +438,7 @@ async function devolverReservaHeredada(
         .where(eq(cases.id, caseId))
     );
   } catch (err) {
-    logger.error({ code: errorCode(err) }, "email_worker.devolver_heredada_fallo");
+    logger.error({ case_id: caseId, tenant_id: tenantCtx.tenantId, code: errorCode(err) }, "email_worker.devolver_heredada_fallo");
   }
 }
 
@@ -529,7 +529,7 @@ async function redispatchExtraction(
     );
   } catch (err) {
     // Si ni esto se puede escribir, queda el log de arriba y nada más.
-    logger.error({ code: errorCode(err) }, "email_worker.no_se_pudo_remarcar_pendiente");
+    logger.error({ case_id: caseId, tenant_id: tenantId, code: errorCode(err) }, "email_worker.no_se_pudo_remarcar_pendiente");
   }
 }
 
@@ -541,6 +541,20 @@ async function redispatchExtraction(
  * a esa altura no es el proveedor, es este mensaje.
  */
 const MAX_REINTENTOS_POR_TIMEOUT = 3;
+
+/**
+ * Un corte de red con Neon: un NeonDbError sin SQLSTATE no llegó a Postgres
+ * (`fetch failed`, ECONNRESET) o es un 5xx del proxy. Drizzle puede envolverlo.
+ */
+function esCorteDeLaBase(err: unknown): boolean {
+  return [err, (err as { cause?: unknown } | null)?.cause].some(
+    (e) =>
+      e instanceof Error &&
+      e.name === "NeonDbError" &&
+      !(e as { code?: unknown }).code &&
+      ((e as { sourceError?: unknown }).sourceError !== undefined || /\(HTTP status 5\d\d\)/.test(e.message))
+  );
+}
 
 /**
  * Marca el caso para que lo retome `retomarTrasCorte` (o el barrido), si le quedan intentos.
@@ -619,10 +633,13 @@ export async function runEmailExtractionWorker(
   // ya haber contestado. El orquestador lo usa para no mandar lo mismo dos veces.
   let heredadaEn: string | undefined;
   // Salió sin contestar y vuelve a la cola. `sin_tiempo` se redespacha como
-  // siempre; `reintento` (TIMEOUT o 429) vuelve por el flujo durable a los 45 s,
+  // siempre; `reintento` (algo pasajero) vuelve por el flujo durable a los 45 s,
   // no en el acto: redespacharlo ya gasta los tres intentos contra el mismo
   // proveedor saturado.
   let diferida: "sin_tiempo" | "reintento" | null = null;
+  // Desde que descarta el caso o empieza a contestar, un corte de la base ya no
+  // vuelve a la cola: la retoma repetiría lo hecho.
+  let sinVuelta = false;
   // Los entrantes que esta corrida leyó. Lo que entre después no lo contesta.
   let leidos: string[] | null = null;
   // Los archivos que van al modelo; el catch los marca si la llamada agota el plazo.
@@ -799,8 +816,9 @@ export async function runEmailExtractionWorker(
     // decided it was not a claim, and killed a case that was three lines from
     // complete. The conversation fix built for email never reached WhatsApp
     // because of which table each channel happens to write.
-    const rawMsg = firstRow(
-      await enTenant(tenantCtx, (db) =>
+    // Las dos lecturas no dependen una de la otra: van juntas.
+    const [rawMsg, leida] = await Promise.all([
+      enTenant(tenantCtx, (db) =>
         db
           .select({
             body: rawMessages.body,
@@ -811,10 +829,11 @@ export async function runEmailExtractionWorker(
           .where(eq(rawMessages.case_id, caseId))
           .orderBy(desc(rawMessages.received_at))
           .limit(1)
-      )
-    );
+      ).then(firstRow),
+      loadInboundConversation(caseId, tenantCtx, caseRow.channel),
+    ]);
 
-    let conversation = await loadInboundConversation(caseId, tenantCtx, caseRow.channel);
+    let conversation = leida;
     leidos = conversation?.entrantes.map((m) => m.id) ?? null;
 
     if (conversation) {
@@ -836,19 +855,26 @@ export async function runEmailExtractionWorker(
       return;
     }
 
-    // ── b) Load memory hints from claim_memory ───────────────────────────────
-    let memoryHints: ReturnType<typeof toPromptMemoryHints> = [];
-    if (conversation?.remitenteAutenticado === false) {
+    // ── b) Memoria, prompt, presupuesto y motor: ninguno depende de otro ─────
+    // Van juntos. El presupuesto espera a saber que hay mensaje, y su corte
+    // sigue antes de transcribir y de llamar al modelo.
+    const sinMemoria = conversation?.remitenteAutenticado === false;
+    if (sinMemoria) {
       // El remitente no está verificado (SPF/DKIM/DMARC): con su dirección no se hereda nada.
       logger.warn({ case_id: caseId }, "email_worker.memoria_omitida_remitente_sin_autenticar");
-    } else {
-      memoryHints = toPromptMemoryHints(await loadClaimMemoryHints(tenantId, senderEmail, undefined, caseId));
     }
+    const [pistas, loDelPrompt, budgetResult, engine] = await Promise.all([
+      sinMemoria ? [] : loadClaimMemoryHints(tenantId, senderEmail, undefined, caseId),
+      cargarLoDelPrompt(tenantId, tenantCtx, caseId, caseRow.claim_type),
+      checkBudget(tenantId, userId),
+      resolveExtractionEngine(tenantId, userId),
+    ]);
+    const memoryHints = toPromptMemoryHints(pistas);
     const memoryApplied = memoryHints.length > 0;
 
     // ── c) Todo lo que arma el prompt, en un solo viaje ──────────────────────
     const { knownPatterns, agentTraining, promptRules, approvedExamples, promptVersion, customFields, adjuntos, ramosDelInquilino } =
-      await cargarLoDelPrompt(tenantId, tenantCtx, caseId, caseRow.claim_type);
+      loDelPrompt;
 
     // Las mismas reglas que lee la extracción, sin consulta nueva: lo que ven deliberate y compose.
     const indicaciones = aprendidoEnConversacion() ? indicacionesDelEquipo(promptRules) : undefined;
@@ -862,7 +888,6 @@ export async function runEmailExtractionWorker(
     };
 
     // ── d) Budget check ───────────────────────────────────────────────────────
-    const budgetResult = await checkBudget(tenantId, userId);
     if (budgetResult.exceeded) {
       logger.warn({
         case_id: caseId,
@@ -893,7 +918,6 @@ export async function runEmailExtractionWorker(
     // queda en el mensaje: la conversación se rearma sin volver a la base.
     // Con el mock no se transcribe ni se mandan archivos: quedarían dados por
     // leídos sin que ningún modelo los haya mirado.
-    const engine = await resolveExtractionEngine(tenantId, userId);
     if (conversation && engine !== "mock") {
       const nuevos = await transcribirNotasDeVoz({
         caseId,
@@ -965,10 +989,12 @@ export async function runEmailExtractionWorker(
       learning,
       channel: caseRow.channel,
       ...(vistos.media.length > 0 ? { media: vistos.media } : {}),
-      // Una extracción anterior de este caso falló por algo pasajero (plazo, 429 o red): esta sale concisa y a 0,3.
+      // Una extracción anterior de este caso falló por algo pasajero (plazo, 429, 5xx, red o la base): esta sale concisa y a 0,3.
       // El contador no se reinicia, así que también vale para los turnos que lleguen después.
       ...(caseRow.intentos_de_extraccion > 0 ? { trasCorte: true } : {}),
     };
+    // No depende de lo que conteste el modelo: se lee mientras tanto. Nunca tira.
+    const pedidoEnCurso = ultimoPedido(caseId, tenantId);
     extractedClaim = await runEmailClaimAgent({
       payload: emailPayload,
       tenantId,
@@ -1024,7 +1050,7 @@ export async function runEmailExtractionWorker(
     };
 
     const fullText = `${emailSubject}\n\n${emailBody}`;
-    const pedido = await ultimoPedido(caseId, tenantId);
+    const pedido = await pedidoEnCurso;
     const preguntadas = pedido.claves;
     const contesto = loQueContesto(conversation, pedido.enviado, latestInboundText);
     extractedClaim = sinHeridosSupuestos(
@@ -1136,6 +1162,7 @@ export async function runEmailExtractionWorker(
         logger.warn({ case_id: caseId }, "email_worker.not_relevant_not_applied");
         return;
       }
+      sinVuelta = true;
 
       // `reason` es un código fijo, nunca el texto del modelo: el payload de
       // auditoría no se redacta por campo y ese texto puede traer datos personales.
@@ -1174,7 +1201,7 @@ export async function runEmailExtractionWorker(
       try {
         await upsertExtractedFields(caseId, tenantCtx, fieldsToWrite);
       } catch (err) {
-        logger.error({ code: errorCode(err) }, "email_worker.extracted_fields_upsert_error");
+        logger.error({ case_id: caseId, tenant_id: tenantId, code: errorCode(err) }, "email_worker.extracted_fields_upsert_error");
       }
     }
 
@@ -1193,7 +1220,7 @@ export async function runEmailExtractionWorker(
       try {
         await insertMissingDocsIfAbsent(caseId, tenantCtx, missingFieldKeys);
       } catch (err) {
-        logger.error({ code: errorCode(err) }, "email_worker.missing_docs_upsert_error");
+        logger.error({ case_id: caseId, tenant_id: tenantId, code: errorCode(err) }, "email_worker.missing_docs_upsert_error");
       }
     }
 
@@ -1517,7 +1544,10 @@ export async function runEmailExtractionWorker(
         return;
       }
     } catch (err) {
-      logger.error({ code: errorCode(err) }, "email_worker.case_update_error");
+      // Sin el caso guardado no se contesta: la respuesta hablaría de un estado
+      // y de campos que no quedaron. Lo atiende el catch de afuera.
+      logger.error({ case_id: caseId, tenant_id: tenantId, code: errorCode(err) }, "email_worker.case_update_error");
+      throw err;
     }
 
     // ── n) Memory applied audit log — AC13 groundwork ────────────────────────
@@ -1552,6 +1582,7 @@ export async function runEmailExtractionWorker(
     ) {
       // Lo que el agente habría pedido y respondido: pedir y responder se anotan en la fila de la corrida.
       const parte: ParteDeSombra = {};
+      sinVuelta = true;
       await orchestratePostExtraction(
         caseId,
         tenantId,
@@ -1659,7 +1690,8 @@ export async function runEmailExtractionWorker(
        * cupo compartido y dinámico entre todos los proyectos, así que un 429
        * es tan transitorio como un TIMEOUT — no «se te acabó la cuota del
        * día», sino que en ESE instante no había lugar. Mismo tope de por
-       * vida. Un 400 sigue escalando: reintentar eso no cambia nada.
+       * vida. Un 5xx o un token que no salió, también. Un 400 sigue
+       * escalando: reintentar eso no cambia nada.
        *
        * Y con tope, porque `extraction_pending` no distingue «se cayó una vez»
        * de «este caso rompe siempre»: un mensaje que agota el plazo SIEMPRE se
@@ -1670,7 +1702,7 @@ export async function runEmailExtractionWorker(
         if (reintentado) {
           logger.warn({
         case_id: caseId,
-        motivo: errCode === "TIMEOUT" ? "timeout" : errStatus === 429 ? "429" : "red",
+        motivo: errCode === "TIMEOUT" ? "timeout" : errStatus !== null ? String(errStatus) : "red",
         code: errCode,
       }, "email_worker.timeout_a_la_cola");
           diferida = "reintento";
@@ -1703,9 +1735,19 @@ export async function runEmailExtractionWorker(
       }
     }
 
+    // Un corte con la base es tan pasajero como uno con Vertex: vuelve a la
+    // cola, con el mismo tope.
+    if (leaseHeld && !sinVuelta && esCorteDeLaBase(err) && (await reintentarPorTimeout(caseId, tenantCtx))) {
+      logger.warn({ case_id: caseId, motivo: "base", code: errorCode(err) }, "email_worker.timeout_a_la_cola");
+      diferida = "reintento";
+      return;
+    }
+
     logger.error({
         case_id: caseId,
+        tenant_id: tenantId,
         error_name: errName,
+        code: errorCode(err),
         is_provider_error: err instanceof GeminiExtractionError,
       }, "email_worker.unhandled_error");
     // Do not rethrow — fire-and-forget callers must not crash.
@@ -1872,6 +1914,8 @@ async function cargarLoDelPrompt(
     };
   } catch (err) {
     logger.error({
+        case_id: caseId,
+        tenant_id: tenantId,
         code: errorCode(err),
         nota: "Se vuelve al camino de a uno, donde cada carga degrada sola.",
       }, "email_worker.lote_del_prompt_fallo");
@@ -1940,7 +1984,7 @@ async function loadKnownPatterns(tenantCtx: TenantContext): Promise<KnownPattern
   try {
     return deKnownPatterns(await enTenant(tenantCtx, consultaKnownPatterns));
   } catch (err) {
-    logger.error({ code: errorCode(err) }, "email_worker.known_claim_patterns_load_error");
+    logger.error({ tenant_id: tenantCtx.tenantId, code: errorCode(err) }, "email_worker.known_claim_patterns_load_error");
     return [];
   }
 }
@@ -2173,7 +2217,7 @@ async function anotarPolizaEncontrada(
      * `policy_id` y el agente vuelve a pedir el número. Molesto, no roto — y no
      * es motivo para tirar abajo la extracción entera.
      */
-    logger.error({ code: errorCode(err) }, "email_worker.no_se_pudo_anotar_la_poliza");
+    logger.error({ case_id: caseId, tenant_id: tenantCtx.tenantId, code: errorCode(err) }, "email_worker.no_se_pudo_anotar_la_poliza");
   }
 }
 

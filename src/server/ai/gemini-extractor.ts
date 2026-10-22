@@ -367,7 +367,8 @@ async function getVertexToken(): Promise<string> {
   try {
     return await tokenDeGcp();
   } catch (err) {
-    throw new GeminiExtractionError(`Vertex: ${err instanceof Error ? err.message : String(err)}`);
+    // Sin token no hubo pedido: es pasajero como una conexión que no abrió.
+    throw new GeminiExtractionError(`Vertex: ${err instanceof Error ? err.message : String(err)}`, { red: true });
   }
 }
 
@@ -601,8 +602,8 @@ export function errMeta(e: unknown): { name: string; status: number | null; code
 }
 
 /**
- * Un TIMEOUT, un 429 o una conexión que no abrió: «probá de nuevo», no un
- * pedido roto.
+ * Un TIMEOUT, un 429, un 5xx o una conexión (o un token) que no abrió: «probá
+ * de nuevo», no un pedido roto. Los mismos estados que reintenta el transporte.
  *
  * El único criterio con el que un turno vuelve a la cola: lo usan el catch del
  * worker y el reconocedor de negativas. El instanceof no sobra: un
@@ -616,7 +617,11 @@ export function errMeta(e: unknown): { name: string; status: number | null; code
 export function esPasajero(e: unknown): boolean {
   if (!(e instanceof GeminiExtractionError)) return false;
   const { status, code } = errMeta(e);
-  return code === "TIMEOUT" || status === 429 || (e.cause as { red?: unknown })?.red === true;
+  return (
+    code === "TIMEOUT" ||
+    (status !== null && isRetryableGeminiStatus(status)) ||
+    (e.cause as { red?: unknown })?.red === true
+  );
 }
 
 /** La frase que comparten la corrección de MAX_TOKENS y la de la retoma tras un corte. */
@@ -624,7 +629,7 @@ const SE_CONCISO =
   "Be concise: emit each field once, do not repeat yourself, and omit fields you have no value for. Return ONLY valid JSON matching the schema.";
 
 /**
- * Para un caso que ya tuvo una extracción sin terminar (plazo, 429 o red; el
+ * Para un caso que ya tuvo una extracción sin terminar (plazo, 429, 5xx o red; el
  * contador no distingue cuál ni se reinicia): el mismo prompt a temperatura 0
  * repite la misma secuencia, y si se desbocó la primera vez se desboca igual.
  * Las extracciones siguientes del caso salen concisas y, con 2.5, a 0,3.
@@ -753,6 +758,7 @@ export async function extractEmailClaimGemini(
     logger.error({
         provider: "gemini",
         case_id: logCaseId,
+        tenant_id: logTenantId,
         error_name: meta.name,
         status: meta.status,
         code: meta.code,
@@ -796,6 +802,7 @@ export async function extractEmailClaimGemini(
     logger.error({
         provider: "gemini",
         case_id: logCaseId,
+        tenant_id: logTenantId,
         timeout_ms: DEFAULT_GEMINI_TIMEOUT_MS,
       }, "ai.email_extraction.timeout_sin_reintento");
   } else if (!result) {
@@ -880,6 +887,7 @@ export async function extractEmailClaimGemini(
       logger.error({
         provider: "gemini",
         case_id: logCaseId,
+        tenant_id: logTenantId,
         error_name: meta.name,
         status: meta.status,
         code: meta.code,
@@ -932,6 +940,7 @@ export async function extractEmailClaimGemini(
   logger.error({
         provider: "gemini",
         case_id: logCaseId,
+        tenant_id: logTenantId,
         status: causa?.status ?? null,
         code: causa?.code ?? null,
       }, "ai.email_extraction.both_attempts_failed.provider_error");

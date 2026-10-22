@@ -676,8 +676,10 @@ describe("resolveDeclinedDocs — un reconocedor caído no es un «no negó nada
     expect(db.select).toHaveBeenCalledTimes(1);
   });
 
-  it("un TIMEOUT se comporta igual", async () => {
-    const err = new GeminiExtractionError("plazo", { code: "TIMEOUT" });
+  it.each([
+    ["un TIMEOUT", new GeminiExtractionError("plazo", { code: "TIMEOUT" })],
+    ["un 503 agotado", new GeminiExtractionError("503", { status: 503, code: "UNAVAILABLE" })],
+  ])("%s se comporta igual", async (_nombre, err) => {
     caeCon(err);
 
     await expect(resolveDeclinedDocs(CASE, TENANT, DICHO, ASKED, true)).rejects.toBe(err);
@@ -697,7 +699,6 @@ describe("resolveDeclinedDocs — un reconocedor caído no es un «no negó nada
   it.each<[string, () => void]>([
     ["un 400", () => caeCon(new GeminiExtractionError("400", { status: 400, code: "INVALID_ARGUMENT" }))],
     ["un MAX_TOKENS", () => caeCon(new GeminiExtractionError("max", { status: 200, code: "MAX_TOKENS" }))],
-    ["un 503 agotado", () => caeCon(new GeminiExtractionError("503", { status: 503, code: "UNAVAILABLE" }))],
     ["un GeminiExtractionError sin causa", () => caeCon(new GeminiExtractionError("sin clave"))],
     [
       "un JSON inválido",

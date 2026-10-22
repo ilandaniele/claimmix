@@ -228,11 +228,11 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
     mockLogAgentRunError.mockResolvedValue("err-run-id");
     mockLogAgentRun.mockResolvedValue(undefined);
 
-    // Un error del proveedor que no se reintenta: el 429 va a la cola (abajo).
+    // Un error del proveedor que no se reintenta: el 429 y el 5xx van a la cola (abajo).
     mockExtractEmailClaimGemini.mockRejectedValue(
-      new GeminiExtractionError("500 INTERNAL: backend error", {
-        status: 500,
-        code: "INTERNAL",
+      new GeminiExtractionError("400 INVALID_ARGUMENT: bad request", {
+        status: 400,
+        code: "INVALID_ARGUMENT",
       })
     );
   });
@@ -309,7 +309,7 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
     expect(escalado).toBeDefined();
     const payload = escalado!.payload as Record<string, unknown>;
     expect(payload.reason).toBe("provider_error");
-    expect(payload.error_status).toBe(500);
+    expect(payload.error_status).toBe(400);
     expect(payload.error_name).toBeDefined();
   });
 
@@ -320,7 +320,10 @@ describe("GEMINI-ERR: logAgentRunError is called when GeminiExtractionError is t
   });
 });
 
-describe("un 429 de cupo no escala: vuelve a la cola como un TIMEOUT", () => {
+describe.each([
+  ["un 429 de cupo", 429, "RESOURCE_EXHAUSTED"],
+  ["un 503 de Vertex", 503, "UNAVAILABLE"],
+])("%s no escala: vuelve a la cola como un TIMEOUT", (_, status, code) => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.MOCK_AI;
@@ -329,10 +332,7 @@ describe("un 429 de cupo no escala: vuelve a la cola como un TIMEOUT", () => {
     mockFindCustomerMatches.mockResolvedValue([]);
     mockFindPolicyMatches.mockResolvedValue([]);
     mockExtractEmailClaimGemini.mockRejectedValue(
-      new GeminiExtractionError("429 RESOURCE_EXHAUSTED: quota exceeded", {
-        status: 429,
-        code: "RESOURCE_EXHAUSTED",
-      })
+      new GeminiExtractionError(`${status} ${code}`, { status, code })
     );
   });
 
@@ -546,5 +546,90 @@ describe("un reconocedor caído en la orquestación devuelve el turno a la cola"
     await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
 
     expect(vi.mocked(orchestratePostExtraction).mock.calls[0][2].sePuedeRetomar).toBe(esperado);
+  });
+});
+
+/*
+ * Un corte con Neon al guardar el caso: antes se registraba y el agente
+ * contestaba igual, hablando de un estado y de campos que no habían quedado.
+ */
+describe("un corte de la base antes de contestar vuelve a la cola", () => {
+  const RECLAMO = extraccion({
+    extraction_model: "gemini-2.5-flash",
+    fields: [],
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    cost_usd: 0,
+    is_claim: true,
+    missing_fields: ["dni"],
+    severity: "medium",
+    requires_specialist: false,
+  });
+  const corte = () =>
+    Object.assign(new Error("Error connecting to database: fetch failed"), {
+      name: "NeonDbError",
+      sourceError: new TypeError("fetch failed"),
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.MOCK_AI;
+    setupDbMock();
+    mockCheckBudget.mockResolvedValue({ exceeded: false });
+    mockFindCustomerMatches.mockResolvedValue([]);
+    mockFindPolicyMatches.mockResolvedValue([]);
+    mockExtractEmailClaimGemini.mockResolvedValue(RECLAMO);
+    vi.mocked(requiresSpecialist).mockReturnValue(false);
+  });
+
+  /** El UPDATE principal del caso (el único que escribe el monto) falla con `error`. */
+  function fallaAlGuardar(error: Error) {
+    type Cadena = { set: (datos: Record<string, unknown>) => unknown };
+    const actualizar = db.update as unknown as ReturnType<typeof vi.fn>;
+    const armar = actualizar.getMockImplementation() as (...a: unknown[]) => Cadena;
+    actualizar.mockImplementation((...a: unknown[]) => {
+      const cadena = armar(...a);
+      return {
+        set: (datos: Record<string, unknown>) =>
+          "monto_estimado" in datos
+            ? { where: () => ({ returning: () => Promise.reject(error) }) }
+            : cadena.set(datos),
+      };
+    });
+  }
+
+  const reencolado = () =>
+    capturedCaseUpdates.some((u) => "intentos_de_extraccion" in u && (u as Record<string, unknown>).extraction_pending === true);
+
+  it("no contesta, no escala y lo retoma el flujo durable", async () => {
+    fallaAlGuardar(corte());
+
+    await expect(
+      runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001")
+    ).resolves.toBeUndefined();
+
+    expect(orchestratePostExtraction).not.toHaveBeenCalled();
+    expect(reencolado()).toBe(true);
+    expect(capturedCaseUpdates.find((u) => u.status === "escalado")).toBeUndefined();
+    expect(mockProgramarRetoma).toHaveBeenCalledWith("case-gemini-err", "tenant-001");
+  });
+
+  it("un error de Postgres (con SQLSTATE) no es un corte: no contesta ni vuelve a la cola", async () => {
+    fallaAlGuardar(Object.assign(new Error("violates foreign key"), { name: "NeonDbError", code: "23503" }));
+
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    expect(orchestratePostExtraction).not.toHaveBeenCalled();
+    expect(reencolado()).toBe(false);
+  });
+
+  it("ya contestando, un corte no vuelve a la cola: la retoma repetiría la respuesta", async () => {
+    vi.mocked(orchestratePostExtraction).mockRejectedValueOnce(corte());
+
+    await runEmailExtractionWorker("case-gemini-err", "tenant-001", "user-001");
+
+    expect(orchestratePostExtraction).toHaveBeenCalledTimes(1);
+    expect(reencolado()).toBe(false);
+    expect(mockProgramarRetoma).not.toHaveBeenCalled();
   });
 });

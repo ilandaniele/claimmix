@@ -153,10 +153,6 @@ export const RESULTADOS_DE_APP = [
 
 export type ResultadoDeApp = ResultadoDeWaba | (typeof RESULTADOS_DE_APP)[number];
 
-export function esResultadoDeApp(valor: unknown): valor is ResultadoDeApp {
-  return esResultadoDeWaba(valor) || (typeof valor === "string" && (RESULTADOS_DE_APP as readonly string[]).includes(valor));
-}
-
 /** La versión del anexo de tratamiento de datos que el cliente acepta al abrir el alta con su app (año y mes). La comparan el servidor y la pantalla. */
 export const VERSION_DEL_ANEXO = "2026-10";
 

@@ -2,9 +2,15 @@
  * Las banderas, los modos y los topes que rigen en este ambiente.
  *
  * Es lo que el dueño mira para saber si dev, QA y prd están igualados, y lo que
- * compara la paridad automática. Sale en `/api/health` con el Bearer, aparte de
- * `checks`: el smoke imprime el `detail` de cada chequeo en los logs públicos de
- * Actions, y esto no tiene que llegar ahí.
+ * compara la paridad automática (`pnpm paridad` y el job `paridad` del
+ * Post-deploy, scripts/lib/paridad.mjs). Sale en `/api/health` con el Bearer,
+ * aparte de `checks`: el smoke imprime el `detail` de cada chequeo en los logs
+ * públicos de Actions, y esto no tiene que llegar ahí.
+ *
+ * Agregar, quitar o renombrar una clave cambia ese contrato: el comparador la
+ * marca como `falta` mientras un ambiente tenga código viejo. Lo que dev, QA y
+ * prd pueden tener distinto a propósito va en `EXCEPCIONES` de
+ * scripts/lib/paridad.mjs, con su motivo.
  *
  * Lo que sale es un booleano, un número o un modo de una lista cerrada. Los
  * secretos, las direcciones y los textos libres salen sólo como cargada sí o no,

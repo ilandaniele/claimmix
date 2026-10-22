@@ -1,8 +1,11 @@
 /**
- * Qué significa lo que contestó `/api/health`.
+ * `/api/health`: el pedido (`pedirSalud`) y qué significa lo que contestó
+ * (`interpretarSalud`).
  *
- * Vive aparte del guión que la llama porque es la decisión que se equivoca
- * sola, y no se puede comprobar pegándole a producción desde una prueba.
+ * Viven aparte de los guiones que las usan (`mirar-salud.mjs`, `paridad.mjs`): el
+ * pedido, para que los dos hagan los mismos reintentos y plazos; la interpretación,
+ * porque es la decisión que se equivoca sola y no se puede comprobar pegándole a
+ * producción desde una prueba.
  *
  * La ruta contesta 503 SÓLO cuando algo está `down`; todo lo `degraded` sale
  * 200. Un centinela que mirara nada más el código HTTP habría dado verde la
@@ -19,6 +22,48 @@
 // Las mismas marcas que imprime `pnpm smoke`, para que quien mire las dos
 // corridas lea lo mismo.
 const MARCA = { ok: "✓", degraded: "!", down: "✗" };
+
+/**
+ * `GET <origen>/api/health` con el Bearer, para `mirar-salud.mjs` y `paridad.mjs`.
+ *
+ * Tres intentos: la red de un runner se corta sola. Un 401 no se repite. Un 200 o
+ * un 503 sólo valen con un JSON objeto: el 503 de la plataforma (FUNCTION_THROTTLED,
+ * un deploy pausado) trae HTML, y un 200 cuyo cuerpo cortó el plazo no se puede
+ * leer; los dos son cortes pasajeros y se reintentan.
+ *
+ * @param {string} origen
+ * @param {string} secreto
+ * @param {{ etiqueta?: string, estricto?: boolean, esperaMs?: number }} [opciones]
+ *   `etiqueta` encabeza cada línea del log. `estricto` es para quien lleva varios secretos
+ *   en un log público: no sigue redirecciones y no imprime nada del error. `esperaMs` es la
+ *   pausa entre intentos.
+ * @returns {Promise<{ codigo: number, cuerpo: unknown }>} el último código visto (0 si no
+ *   hubo respuesta) y el cuerpo, o null si nunca llegó uno legible
+ */
+export async function pedirSalud(origen, secreto, { etiqueta = "", estricto = false, esperaMs = 10_000 } = {}) {
+  const marca = etiqueta ? `${etiqueta}: ` : "";
+  let codigo = 0;
+  for (let intento = 1; intento <= 3; intento++) {
+    try {
+      const res = await fetch(`${origen}/api/health`, {
+        headers: { Authorization: `Bearer ${secreto}` },
+        redirect: estricto ? "error" : "follow",
+        // La ruta declara maxDuration 60 y en frío se toma varios segundos: un
+        // plazo más corto convertiría un arranque en frío en un rojo.
+        signal: AbortSignal.timeout(70_000),
+      });
+      codigo = res.status;
+      const cuerpo = await res.json().catch(() => null);
+      const informe = typeof cuerpo === "object" && cuerpo !== null && !Array.isArray(cuerpo);
+      if (codigo === 401 || ((codigo === 200 || codigo === 503) && informe)) return { codigo, cuerpo };
+      console.log(`${marca}intento ${intento}: HTTP ${codigo}`);
+    } catch (err) {
+      console.log(`${marca}intento ${intento}: ${!estricto && err instanceof Error ? err.message : "sin respuesta"}`);
+    }
+    if (intento < 3) await new Promise((r) => setTimeout(r, esperaMs));
+  }
+  return { codigo, cuerpo: null };
+}
 
 /**
  * @param {number} codigo   el código HTTP; 0 si no contestó

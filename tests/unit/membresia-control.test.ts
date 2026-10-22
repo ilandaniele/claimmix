@@ -120,6 +120,39 @@ describe("espejarSinFallar", () => {
     expect(h.warn).toHaveBeenCalledWith({ tenantId: ESPACIO, detalle: "08006" }, "bases.espejo_pendiente");
     expect(JSON.stringify(h.warn.mock.calls)).not.toContain("ana@example.com");
   });
+
+  it("si la copia falla una vez y la segunda entra, devuelve true y no anota nada", async () => {
+    h.espejar.mockRejectedValueOnce(Object.assign(new Error("falló la fila de ana@example.com"), { code: "08006" }));
+
+    expect(await espejarSinFallar(ESPACIO)).toBe(true);
+
+    expect(h.espejar).toHaveBeenCalledTimes(2);
+    expect(h.espejar).toHaveBeenNthCalledWith(2, ESPACIO);
+    expect(h.warn).not.toHaveBeenCalled();
+  });
+
+  it("si falla las dos veces devuelve false con un solo aviso, y el aviso no lleva el mensaje", async () => {
+    espejoCaido();
+
+    expect(await espejarSinFallar(ESPACIO)).toBe(false);
+
+    expect(h.espejar).toHaveBeenCalledTimes(2);
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    expect(h.warn).toHaveBeenCalledWith({ tenantId: ESPACIO, detalle: "08006" }, "bases.espejo_pendiente");
+    expect(JSON.stringify(h.warn.mock.calls)).not.toContain("ana@example.com");
+  });
+
+  it.each([
+    ["en el error", { code: "3D000" }],
+    ["en su causa", { cause: { code: "3D000" } }],
+  ])("con la base inexistente (3D000 %s) no reintenta", async (_donde, extra) => {
+    h.espejar.mockRejectedValue(Object.assign(new Error("database does not exist"), extra));
+
+    expect(await espejarSinFallar(ESPACIO)).toBe(false);
+
+    expect(h.espejar).toHaveBeenCalledTimes(1);
+    expect(h.warn).toHaveBeenCalledWith({ tenantId: ESPACIO, detalle: "3D000" }, "bases.espejo_pendiente");
+  });
 });
 
 describe("la invitación", () => {

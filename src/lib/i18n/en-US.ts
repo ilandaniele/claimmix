@@ -755,6 +755,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "agente.descargarJson": "Download extracted JSON",
   "agente.emailOriginal": "Original email analyzed",
   "agente.errorCarga": "Couldn't load the agent analysis. Reload the page to try again.",
+  "agente.cargaParcial": "Part of the analysis couldn't load: what looks empty may not be. Reload the page to try again.",
   "agente.faltantes": "Missing fields",
   "agente.jsonCrudo": "Extracted JSON (raw)",
   "agente.noSugerido": "Not suggested as an example",

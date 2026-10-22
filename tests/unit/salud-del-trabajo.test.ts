@@ -23,6 +23,7 @@ import {
   chequearCasosTrabados,
   chequearEnvios,
   chequearExtraccion,
+  chequearPendientesSinLeer,
 } from "@/app/api/health/trabajo";
 
 const filas = (rows: Record<string, number>[]) => Promise.resolve({ rows });
@@ -55,6 +56,39 @@ describe("casos trabados", () => {
     const consulta = new PgDialect().sqlToQuery(mockExecute.mock.calls[0][0]).sql;
     expect(consulta).toContain("(status = 'procesando' or para_responder_desde is null)");
     expect(consulta).toContain("'recibido'");
+  });
+
+  it("mide con el reloj del barredor: un caso viejo reabierto no está trabado", async () => {
+    // Por `created_at`, reabrir o re-analizar un caso de ayer daba 503 al instante.
+    mockExecute.mockReturnValue(filas([{ n: 0 }]));
+    await chequearCasosTrabados();
+
+    const consulta = new PgDialect().sqlToQuery(mockExecute.mock.calls[0][0]).sql;
+    expect(consulta).toContain("coalesce(updated_at, created_at) < now()");
+  });
+});
+
+describe("respuestas sin leer", () => {
+  it("ninguna es ok", async () => {
+    mockExecute.mockReturnValue(filas([{ n: 0 }]));
+    expect((await chequearPendientesSinLeer()).status).toBe("ok");
+  });
+
+  it("una respuesta marcada y sin leer baja la salud, sin tirarla", async () => {
+    mockExecute.mockReturnValue(filas([{ n: 2 }]));
+    const c = await chequearPendientesSinLeer();
+    expect(c.status).toBe("degraded");
+    expect(c.detail).toContain("2 caso");
+  });
+
+  it("mira los estados desde los que el worker lee, no sólo recibido y procesando", async () => {
+    mockExecute.mockReturnValue(filas([{ n: 0 }]));
+    await chequearPendientesSinLeer();
+
+    const { sql: consulta, params } = new PgDialect().sqlToQuery(mockExecute.mock.calls[0][0]);
+    expect(consulta).toContain("extraction_pending");
+    expect(consulta).toContain("coalesce(updated_at, created_at) < now()");
+    expect(params).toEqual(["recibido", "procesando", "info_faltante", "confirmacion_pendiente"]);
   });
 });
 
@@ -108,7 +142,13 @@ describe("un chequeo que no pudo consultar", () => {
     (err as unknown as { code: string }).code = "42P01";
     mockExecute.mockRejectedValue(err);
 
-    for (const fn of [chequearCasosTrabados, chequearExtraccion, chequearEnvios, chequearAdjuntos]) {
+    for (const fn of [
+      chequearCasosTrabados,
+      chequearPendientesSinLeer,
+      chequearExtraccion,
+      chequearEnvios,
+      chequearAdjuntos,
+    ]) {
       const c = await fn();
       expect(c.status, fn.name).not.toBe("ok");
       expect(c.detail, fn.name).toContain("42P01");

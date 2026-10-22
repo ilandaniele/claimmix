@@ -458,7 +458,7 @@ ningún doc lo dice.
 | `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
-| `MONTHLY_BUDGET_USD` (`src/server/ai/tope-mensual.ts:23`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
+| `MONTHLY_BUDGET_USD` (`src/lib/topes.ts:117`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
 | `AI_TENANT_DAILY_TOKEN_CAP` (`.env.example:159`) | valor | excepción en dev y QA (D7); en esos dos, igual a la variable del repo (`.github/workflows/deploy-checks.yml:383`) | QA 20 M; dev y prd desconocido | Vercel y Settings > Variables del repo |
 | `ALTA_NUMEROS_MAXIMOS_WABA`, `ALTA_TOPE_NUMEROS_DIA` y los cupos de códigos (`.env.example:246-256`) | valor | igual; se sube recién con Veltra verificada | sin cargar (2, 2, 3, 5, 10, 5) | Vercel |
 | `ALTA_TOPE_IP_DIA` (`src/server/alta/cupo-por-ip.ts:20`), `ALTA_TOPE_CORREO_POR_IP_DIA`, `ALTA_TOPE_CORREOS_DIA`, `ALTA_TOPE_POR_DESTINATARIO_DIA`, `ALTA_TOPE_INVITACIONES_DIA` (`.env.example:232-237`), `ALTA_TOPE_PLANTILLAS_PRUEBA_DIA` (`src/server/whatsapp/cloud-api.ts:783`) | valor | igual | sin cargar (valores por omisión) | Vercel |
@@ -534,7 +534,7 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
     «IA frenada» y el chequeo queda amarillo: la IA de los clientes está apagada a propósito.
   - **Fuentes:** `package.json:23`; `docs/TESTING.md:1068`;
     `src/app/api/health/route.ts:413-416`, `:425`, `:591`, `:610`;
-    `src/server/ai/tope-mensual.ts:23`; `src/app/(app)/configuracion/page.tsx:165-166`.
+    `src/lib/topes.ts:117`; `src/app/(app)/configuracion/page.tsx:168-169`.
 - [ ] **3. Alta.**
   - **Quién:** [Dueño].
   - **Dónde:** una ventana privada, `https://claimmix-dev.vercel.app/registro`.
@@ -687,7 +687,7 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
   - **Si falla:** si un caso no suma en ninguno, avisar a Claude. `/configuracion` muestra el tope
     del proyecto entero (`MONTHLY_BUDGET_USD`), no lo que gastó cada espacio.
   - **Fuentes:** `src/app/(app)/metricas`; `src/app/(app)/admin/facturacion`;
-    `src/app/(app)/admin/cartera`; `src/app/(app)/configuracion/page.tsx:165-166`.
+    `src/app/(app)/admin/cartera`; `src/app/(app)/configuracion/page.tsx:168-169`.
 - [ ] **13. El ensayo, después de cada deploy de dev.** Es el paso E1 de «Ensayo del
   prompt».
 

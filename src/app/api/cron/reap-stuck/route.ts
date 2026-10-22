@@ -7,10 +7,11 @@
  * such case (older than SIMULATE_STUCK_REAP_AFTER_MS, default 20 min) to
  * `escalado` so it can be re-analyzed and so the simulation queue stays clear.
  *
- * Runs once daily (Hobby-plan safe — Hobby caps crons at once per day). The
- * primary, real-time mechanism is the opportunistic reaper call that simulate
- * and batch-simulate run synchronously before queuing a new batch; this cron is
- * just a backstop for when no new simulations run for a long stretch.
+ * Vercel runs it once daily (Hobby caps each cron at once per day), and
+ * `barrer-trabados.yml` calls it from GitHub Actions every fifteen minutes on
+ * dev and every two hours on QA and prd. The primary, real-time mechanism is the
+ * opportunistic reaper call that simulate, batch-simulate and the WhatsApp
+ * webhook run before their own work; this route is the backstop for quiet hours.
  *
  * Auth: Authorization: Bearer <CRON_SECRET> (constant-time compared), same as
  * the gmail-poll cron. Vercel cron invocations include this header automatically.
@@ -101,8 +102,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
    * la misma persona volviera a escribir — y a los catorce días el barrido de
    * abandonados lo cerraba diciendo que la persona no contestó.
    *
-   * Va acá y no en su propio cron porque Hobby da dos por día y los dos ya
-   * están usados. Va DESPUÉS del barrido de trabados —un pendiente que sigue
+   * Va acá y no en su propio cron porque en Hobby cada cron de Vercel corre una
+   * vez por día, y a esta ruta la llama además `barrer-trabados.yml`. Va
+   * DESPUÉS del barrido de trabados —un pendiente que sigue
    * en `recibido` pasados los veinte minutos ya salió escalado arriba— y
    * ANTES del de abandonados, que no mira la marca. Con el reloj de la
    * invocación: veinte corridas enteras no entran en ninguna función, así que
@@ -130,9 +132,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Same nightly pass, second sweep: conversations the claimant abandoned.
   // Piggybacking rather than adding a cron because the Hobby plan allows one
   // run a day and both jobs want exactly that cadence.
-  const abandoned = {
-    closed: suma((await porBase((db) => closeAbandonedConversations(db), hasta)).map((r) => r.closed)),
-  };
+  const abandonados = await porBase((db) => closeAbandonedConversations(db), hasta);
+  const abandoned = { closed: suma(abandonados.map((r) => r.closed)) };
 
   // El aviso de cierre (B4) busca los cierres recientes sin avisar, así que el
   // que hoy no entra sale mañana. Deja un minuto para la purga y la respuesta.
@@ -271,6 +272,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     purga,
     retencion,
     rate_limit_rows_purged: purged,
+    // Los barridos que no pudieron consultar devuelven cero, como una noche sin nada que hacer:
+    // esto los separa, y barrer-trabados.yml se pone rojo. Más las bases que no se pudieron leer.
+    fallas: [...trabados, ...abandonados].filter((r) => r.fallo).length + bases.fallas,
     ...(barridoDeBases ? { bases: barridoDeBases } : {}),
   });
 }

@@ -10,7 +10,7 @@
  * `/api/health` estuvo verde todo el día. Se consulta cada quince minutos y no
  * había nada que mirar.
  *
- * Estos cuatro son las consultas más baratas que contestan «¿se está perdiendo
+ * Estos cinco son las consultas más baratas que contestan «¿se está perdiendo
  * trabajo?». Van sobre índices que ya existen y son lo que convierte al job
  * `barrer` de `barrer-trabados.yml` —que ya pone el workflow en rojo cuando algo
  * está `down`, y avisa por mail— en una alarma de producto y no de plomería.
@@ -23,6 +23,7 @@ import "server-only";
 
 import { sql } from "drizzle-orm";
 
+import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 import type { DbDueno } from "@/lib/db";
 import { errorCode } from "@/lib/observability/error-code";
 import { paraCadaBase } from "@/server/bases/cada-base";
@@ -38,7 +39,7 @@ export interface ChequeoDeTrabajo {
 /**
  * Cuánto se tarda como máximo en pasar por las bases de los clientes.
  *
- * La ruta dura 60 s y los cuatro chequeos recorren a la vez: con 30 s alcanza para
+ * La ruta dura 60 s y los cinco chequeos recorren a la vez: con 30 s alcanza para
  * decenas de bases, a unos 50 ms cada una, y deja el resto para los otros nueve.
  */
 const MS_PARA_RECORRER = 30_000;
@@ -105,6 +106,9 @@ const sumar = (numeros: number[]) => numeros.reduce((total, n) => total + n, 0);
  * formulario o por remitente el caso se guarda así a propósito, sin agente, y ya
  * lo tiene una persona. Contarlos pondría la salud en rojo cada vez que alguien
  * pasa el tope. Un `procesando` marcado sí cuenta: el worker pudo caerse.
+ *
+ * El reloj es `coalesce(updated_at, created_at)`, el mismo del barredor: un caso
+ * viejo reabierto o re-analizado tiene sus veinte minutos como cualquiera.
  */
 export async function chequearCasosTrabados(): Promise<ChequeoDeTrabajo> {
   const name = "casos trabados";
@@ -114,7 +118,7 @@ export async function chequearCasosTrabados(): Promise<ChequeoDeTrabajo> {
       const hallados = await db.execute<{ n: number }>(sql`
         select count(*)::int as n from cases
          where status in ('recibido', 'procesando')
-           and created_at < now() - interval '${sql.raw(String(MINUTOS_TRABADO))} minutes'
+           and coalesce(updated_at, created_at) < now() - interval '${sql.raw(String(MINUTOS_TRABADO))} minutes'
            and (status = 'procesando' or para_responder_desde is null)
       `);
       return Number(hallados.rows?.[0]?.n ?? 0);
@@ -123,6 +127,36 @@ export async function chequearCasosTrabados(): Promise<ChequeoDeTrabajo> {
     return n === 0
       ? conLoQueFalto(bien(name, "ninguno"), sinMedir)
       : caido(name, `${n} caso(s) sin tomar hace más de ${MINUTOS_TRABADO} min`);
+  } catch (err) {
+    return noSePudo(name, err);
+  }
+}
+
+/**
+ * Respuestas del denunciante que quedaron marcadas y sin leer.
+ *
+ * `casos trabados` sólo mira `recibido` y `procesando`; una respuesta a una
+ * pregunta cae en `info_faltante` o `confirmacion_pendiente` con
+ * `extraction_pending`, y si `retomar-pendientes` no la levanta no la ve nadie.
+ * `degraded` y no `down`: el próximo barrido la retoma, y la salud corre antes.
+ */
+export async function chequearPendientesSinLeer(): Promise<ChequeoDeTrabajo> {
+  const name = "respuestas sin leer";
+  try {
+    const { filas, sinMedir } = await enCadaBase(async (db) => {
+      // sin-inquilino: idem, salud del sistema.
+      const hallados = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from cases
+         where extraction_pending
+           and status in (${sql.join(ESTADOS_DE_ARRANQUE.map((e) => sql`${e}`), sql`, `)})
+           and coalesce(updated_at, created_at) < now() - interval '${sql.raw(String(MINUTOS_TRABADO))} minutes'
+      `);
+      return Number(hallados.rows?.[0]?.n ?? 0);
+    });
+    const n = sumar(filas);
+    return n === 0
+      ? conLoQueFalto(bien(name, "ninguna"), sinMedir)
+      : flojo(name, `${n} caso(s) con una respuesta sin leer hace más de ${MINUTOS_TRABADO} min`);
   } catch (err) {
     return noSePudo(name, err);
   }

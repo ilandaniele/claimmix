@@ -82,6 +82,8 @@ export function getStuckReapAfterMs(): number {
 export interface ReapResult {
   reaped: number;
   caseIds: string[];
+  /** La consulta falló: el cero no es «no había nada». */
+  fallo?: true;
 }
 
 /**
@@ -132,7 +134,7 @@ export async function reapStuckProcessingCases(
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "unknown";
     logger.error({ code }, "reap_stuck.lookup_failed");
-    return { reaped: 0, caseIds: [] };
+    return { reaped: 0, caseIds: [], fallo: true };
   }
 
   if (stuck.length === 0) return { reaped: 0, caseIds: [] };
@@ -160,7 +162,7 @@ export async function reapStuckProcessingCases(
   } catch (e) {
     const code = (e as { code?: string })?.code ?? "unknown";
     logger.error({ code }, "reap_stuck.update_failed");
-    return { reaped: 0, caseIds: [] };
+    return { reaped: 0, caseIds: [], fallo: true };
   }
 
   const tenantById = new Map(stuck.map((s) => [s.id, s.tenant_id]));

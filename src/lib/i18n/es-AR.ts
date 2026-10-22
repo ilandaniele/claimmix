@@ -784,6 +784,7 @@ export const esAR = {
   "agente.descargarJson": "Descargar JSON extraído",
   "agente.emailOriginal": "Email original analizado",
   "agente.errorCarga": "No se pudo cargar el análisis del agente. Recargá la página para reintentar.",
+  "agente.cargaParcial": "Parte del análisis no se pudo cargar: lo que aparece vacío puede no estarlo. Recargá la página para reintentar.",
   "agente.faltantes": "Campos faltantes",
   "agente.jsonCrudo": "JSON extraído (crudo)",
   "agente.noSugerido": "No sugerido como ejemplo",

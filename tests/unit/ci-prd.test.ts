@@ -367,6 +367,23 @@ describe("barrer-trabados.yml: prd tiene su cron, su cola y su secreto", () => {
   it("el job de dev no toca el secreto ni la URL de prd", () => {
     expect(cuerpoDe(yml, "barrer")).not.toMatch(/PRD_/);
   });
+
+  it("en prd la salud corre antes del barrido y aunque el barrido falle, como en dev", () => {
+    const prd = cuerpoDe(yml, "prd");
+    expect(prd).toMatch(/- name: ¿A dónde apunta esto\?\n {8}id: host\n/);
+    const salud = pasoDe(prd, "Preguntarle al deploy que alcanza a ver");
+    expect(salud).toContain("id: salud");
+    expect(salud).toContain("if: ${{ !cancelled() && steps.host.outcome == 'success' }}");
+    expect(prd.indexOf("- name: Preguntarle al deploy")).toBeLessThan(prd.indexOf("- name: Pedirle al barredor"));
+    expect(pasoDe(prd, "Que significa que esto falle")).toContain("steps.salud.outcome == 'failure'");
+  });
+
+  it.each(["barrer", "prd"])("en %s un barrido que no pudo consultar pone el job en rojo", (job) => {
+    const barrido = pasoDe(cuerpoDe(yml, job), "Pedirle al barredor que pase");
+    expect(barrido).toContain("jq -r '.fallas // 0' respuesta.json");
+    expect(barrido).toContain('exit "${rojo}"');
+    expect(barrido).toMatch(/resumen\(\) \{\n.*fallas, bases, error\}/);
+  });
 });
 
 describe("scripts/sync-vercel-env.mjs: sólo carga dev", () => {

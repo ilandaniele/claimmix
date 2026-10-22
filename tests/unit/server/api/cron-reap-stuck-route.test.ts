@@ -334,7 +334,18 @@ describe("GET /api/cron/reap-stuck", () => {
       purga: null,
       retencion: null,
       rate_limit_rows_purged: 5,
+      fallas: 0,
     });
+  });
+
+  it("un barrido que no pudo consultar cuenta en `fallas`: su cero no es «no había nada»", async () => {
+    m.reap.mockResolvedValue({ reaped: 0, caseIds: [], fallo: true });
+    m.cerrar.mockResolvedValue({ closed: 0, caseIds: [], fallo: true });
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ reaped: 0, abandoned_closed: 0, fallas: 2 });
   });
 });
 
@@ -614,7 +625,7 @@ describe("GET /api/cron/reap-stuck: una pasada por base (P10)", () => {
     const res = await GET(pedido());
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ reaped: 0, retomados: 0, abandoned_closed: 0, bases: { fallas: 6 } });
+    expect(await res.json()).toMatchObject({ reaped: 0, retomados: 0, abandoned_closed: 0, fallas: 6, bases: { fallas: 6 } });
   });
 });
 

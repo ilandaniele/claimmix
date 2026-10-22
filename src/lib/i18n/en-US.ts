@@ -408,6 +408,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "audit.tenant.amount_ranges_changed": "Reference amount table changed",
   "audit.case.plan_created": "Work plan created",
   "audit.case.plan_step": "A work plan step was updated",
+  "audit.case.exported_to_core": "Core system JSON exported",
   "audit.tenant.work_settings_updated": "Team work settings changed (assignment, deadlines, plan or score)",
   "audit.ai.budget_exceeded": "Not analysed: AI budget exhausted",
   "audit.ai.budget_alerted": "Specialists notified: AI budget exhausted",

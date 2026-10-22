@@ -26,6 +26,7 @@ import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { nombreDePlan } from "@/lib/billing/plan-label";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,8 @@ function Aviso({ titulo, children }: { titulo: string; children: ReactNode }) {
     </div>
   );
 }
+
+export const generateMetadata = tituloDePantalla("nav.facturacion");
 
 export default async function FacturacionPage({
   searchParams,

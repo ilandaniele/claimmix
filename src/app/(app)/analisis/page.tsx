@@ -17,6 +17,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 import { logger } from "@/lib/observability/logger";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 // ── Status and type labels ─────────────────────────────────────────────────────
 
@@ -198,6 +199,8 @@ function DistributionRow({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+
+export const generateMetadata = tituloDePantalla("nav.analisis");
 
 export default async function AnalisisPage() {
   let data: AnalisisData | null;

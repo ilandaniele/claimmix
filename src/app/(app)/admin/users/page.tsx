@@ -14,6 +14,7 @@ import { authUsers, users } from "@/lib/db/schema";
 import { AdminUsersClient } from "./AdminUsersClient";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 interface UserRow {
   id: string;
@@ -24,6 +25,8 @@ interface UserRow {
 }
 
 type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
+
+export const generateMetadata = tituloDePantalla("admin.users.title");
 
 export default async function AdminUsersPage() {
   const t = getT(await getAccountLocale());

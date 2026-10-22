@@ -34,7 +34,7 @@ vi.mock("@/app/conectar-whatsapp/WabaPropiaPanel", () => ({
   WabaPropiaPanel: (props: Record<string, unknown>) => <pre data-testid="panel">{JSON.stringify(props)}</pre>,
 }));
 
-import ConectarWhatsappPage, { maxDuration } from "@/app/conectar-whatsapp/page";
+import ConectarWhatsappPage, { generateMetadata, maxDuration } from "@/app/conectar-whatsapp/page";
 import type { WabaPublica } from "@/server/alta/waba-publica";
 import { textosDePagina } from "@/lib/i18n";
 
@@ -355,6 +355,22 @@ describe("lo que recibe el panel", () => {
       expect(url.searchParams.get("subject")).toBe("Help connecting my WhatsApp");
       expect(url.searchParams.get("body")).toContain("Workspace: t-1");
     });
+  });
+});
+
+describe("el título de la pestaña", () => {
+  it("sale en el idioma de la cuenta", async () => {
+    expect(await generateMetadata()).toEqual({ title: "Conectá tu WhatsApp — ClaimMix" });
+
+    h.fila.mockResolvedValue(fila({ locale: "en-US" }));
+    expect(await generateMetadata()).toEqual({ title: "Connect your WhatsApp — ClaimMix" });
+  });
+
+  it("sin sesión usa el idioma del dispositivo", async () => {
+    h.sesion.mockResolvedValue(null);
+
+    expect(await generateMetadata()).toEqual({ title: "Conectá tu WhatsApp — ClaimMix" });
+    expect(h.fila).not.toHaveBeenCalled();
   });
 });
 

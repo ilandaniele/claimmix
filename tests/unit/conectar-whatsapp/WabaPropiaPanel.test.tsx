@@ -1060,6 +1060,16 @@ describe("conectado", () => {
       expect(h.desconectar).not.toHaveBeenCalled();
     });
 
+    it("el foco arranca en «Cancelar»: llegar al botón de baja pide un Tab a propósito", async () => {
+      const u = userEvent.setup();
+      pintarConectado();
+
+      await u.click(screen.getByRole("button", { name: "Desconectar WhatsApp" }));
+
+      expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancelar" })).toHaveFocus();
+      expect(h.desconectar).not.toHaveBeenCalled();
+    });
+
     it("«Cancelar» y Escape lo cierran sin desconectar", async () => {
       const u = userEvent.setup();
       pintarConectado();

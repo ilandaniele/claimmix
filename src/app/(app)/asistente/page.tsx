@@ -14,6 +14,9 @@ import { getT } from "@/lib/i18n";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { BloqueoPlanPro } from "../_components/BloqueoPlanPro";
 import { CajaDelAsistente } from "./_components/CajaDelAsistente";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
+
+export const generateMetadata = tituloDePantalla("nav.asistente");
 
 export default async function AsistentePage() {
   const session = await getSessionContext();

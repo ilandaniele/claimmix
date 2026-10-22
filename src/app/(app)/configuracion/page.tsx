@@ -44,6 +44,7 @@ import { panelDelNumero } from "@/server/alta/numero-resultados";
 import { pasosHechos } from "@/server/alta/pasos-hechos";
 import { leerWabaPublica, metodoDelEspacio } from "@/server/alta/waba-publica";
 import { esExitoDeGmail, esResultadoGmail } from "./gmail-resultados";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,8 @@ function Paso({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+
+export const generateMetadata = tituloDePantalla("nav.configuracion");
 
 export default async function ConfiguracionPage({
   searchParams,

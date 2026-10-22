@@ -8,10 +8,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const m = vi.hoisted(() => ({ inquilinoDelFormulario: vi.fn() }));
+const m = vi.hoisted(() => ({ inquilinoDelFormulario: vi.fn(), idioma: "es-AR" }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "es-AR" }) }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": m.idioma }) }));
 vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
@@ -41,6 +41,7 @@ const campo = (html: string, name: string) =>
     .replaceAll("&amp;", "&");
 
 beforeEach(() => {
+  m.idioma = "es-AR";
   m.inquilinoDelFormulario.mockResolvedValue({ tenantId: "t", nombre: "Aseguradora" });
 });
 
@@ -60,6 +61,31 @@ describe("la página pública de denuncias", () => {
     expect(campo(html, "nombre")).toContain(`title="${t("denuncia.nombreFormato")}"`);
     expect(campo(html, "email")).toContain(`title="${t("denuncia.emailFormato")}"`);
     expect(campo(html, "telefono")).toContain(`title="${t("denuncia.telefonoFormato")}"`);
+  });
+
+  it("la regla de cada campo se ve en la página y el campo la enlaza con aria-describedby", async () => {
+    const html = await pintar();
+    const t = getT("es-AR");
+    const pagina = document.createElement("div");
+    pagina.innerHTML = html;
+
+    for (const [nombre, clave] of [
+      ["nombre", "denuncia.nombreFormato"],
+      ["email", "denuncia.emailFormato"],
+      ["telefono", "denuncia.telefonoFormato"],
+    ] as const) {
+      expect(campo(html, nombre)).toContain(`aria-describedby="${nombre}-formato"`);
+      expect(pagina.querySelector(`#${nombre}-formato`)?.textContent).toBe(t(clave));
+    }
+  });
+
+  it.each([
+    ["es-AR", "es-AR"],
+    ["en-US,en;q=0.9", "en-US"],
+  ])("con Accept-Language %s el contenido declara lang=%s", async (cabecera, lang) => {
+    m.idioma = cabecera;
+
+    expect(await pintar()).toContain(`<main lang="${lang}"`);
   });
 
   it("los tres textos de formato existen en los dos idiomas", () => {

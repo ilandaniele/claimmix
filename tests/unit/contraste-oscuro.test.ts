@@ -150,3 +150,27 @@ describe("los bordes del modo oscuro", () => {
     expect(CSS).not.toMatch(/\.dark\s+\.shadow-(sm|md)\s*\{[^}]*box-shadow/);
   });
 });
+
+describe("los avisos de estado del modo oscuro", () => {
+  /*
+   * Cada fondo que `globals.css` pisa en oscuro necesita pisar también el
+   * texto que lo acompaña en el código: si no, el texto queda con su color de
+   * claro (red-900 sobre #4c0519 da 1,55:1) y el aviso parece una caja vacía.
+   */
+  const avisos: Array<[string, string, string[]]> = [
+    ["verde", "bg-emerald-50", ["text-emerald-700", "text-emerald-900"]],
+    ["ámbar", "bg-amber-50", ["text-amber-700", "text-amber-800", "text-amber-900"]],
+    ["rojo", "bg-red-50", ["text-red-600", "text-red-700", "text-red-800", "text-red-900"]],
+    ["azul", "bg-blue-50", ["text-blue-600", "text-blue-700", "text-blue-800"]],
+  ];
+
+  it.each(avisos)("el aviso %s lee a AA con cada texto que lo acompaña", (_color, fondo, textos) => {
+    const bg = colorEnOscuro(fondo);
+    for (const texto of textos) {
+      const r = contraste(colorEnOscuro(texto), bg);
+      expect(r, `${texto} sobre ${fondo} (${bg}) da ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+        MINIMO
+      );
+    }
+  });
+});

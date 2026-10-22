@@ -19,6 +19,7 @@ import { formatDate } from "@/lib/utils";
 import { listCustomers } from "@/server/customers/list";
 import { PAGINA_MAXIMA } from "@/lib/schemas/paginacion";
 import { FormularioDeCliente, ImportarPadron } from "./_components/PanelesDelPadron";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 /*
  * La fila la define `listCustomers`, no esta pantalla.
@@ -297,6 +298,8 @@ function ClientesLoading() {
     </div>
   );
 }
+
+export const generateMetadata = tituloDePantalla("nav.clientes");
 
 export default function ClientesPage(props: ClientesPageProps) {
   return (

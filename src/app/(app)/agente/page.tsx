@@ -12,6 +12,9 @@ import { AgentConsoleClient } from "./AgentConsoleClient";
 import { EntrenamientoBasePanel } from "./EntrenamientoBasePanel";
 import { FormularioWebPanel } from "./FormularioWebPanel";
 import { RamosPanel } from "./RamosPanel";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
+
+export const generateMetadata = tituloDePantalla("nav.agente");
 
 export default async function AgentConsolePage() {
   let role = "admin";

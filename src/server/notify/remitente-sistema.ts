@@ -48,7 +48,6 @@ import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { topeEntero } from "@/lib/topes";
-import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
 
 const DIA_MS = 24 * 60 * 60_000;
@@ -172,6 +171,8 @@ export async function enviarCorreoDelSistema(
       }
     }
 
+    // En diferido, como en dispatch.ts: importar Gmail son 688 ms de arranque en frío, y los pagaba toda ruta que importa este archivo, mandara o no.
+    const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
     const resultado = await new GmailSender(remitente.refreshToken).send({
       // Tal cual vino: la etiqueta `+` es parte de la dirección, sólo se ignora al contar.
       to: correo.to.trim(),

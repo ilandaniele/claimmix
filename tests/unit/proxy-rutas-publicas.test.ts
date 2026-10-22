@@ -56,7 +56,7 @@ async function sinSesion(ruta: string) {
 }
 
 beforeEach(() => {
-  h.getSession.mockResolvedValue(null);
+  h.getSession.mockResolvedValue({ headers: new Headers(), response: null });
 });
 
 describe("las páginas que existen, sin sesión", () => {

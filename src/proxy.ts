@@ -19,6 +19,7 @@
  * defense-in-depth (Vercel CDN layer picks those up even before middleware runs).
  */
 
+import { applySetCookies } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
 import { buildCsp, generateNonce } from "@/lib/security/csp";
 import { auth } from "@/lib/auth";
@@ -78,26 +79,41 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : `${p}/`));
 }
 
-/** Get the Better Auth session user from request headers. */
+/**
+ * El usuario de la sesión de Better Auth. Vencidos los 60 s de la caché de la
+ * cookie, getSession va a la base y la renueva: las cookies nuevas se suman al
+ * pedido, así la página lee la caché fresca y no vuelve a buscar la sesión, y
+ * se devuelven para copiarlas a la respuesta.
+ */
 async function getUser(
   request: NextRequest
-): Promise<{ id: string } | null> {
-  const session = await auth.api.getSession({ headers: request.headers });
-  return session?.user ?? null;
+): Promise<{ user: { id: string } | null; renovadas: string[] }> {
+  const { headers, response } = await auth.api.getSession({ headers: request.headers, returnHeaders: true });
+  const renovadas = headers.getSetCookie();
+  if (renovadas.length) applySetCookies(request.headers, renovadas);
+  return { user: response?.user ?? null, renovadas };
 }
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const publica = isPublic(pathname);
 
   // ── 1. Generate per-request CSP nonce ──────────────────────────────────────
   const nonce = generateNonce();
   // El SDK de Facebook y su popup sólo se permiten donde se usan: el alta con la WABA propia.
   const csp = buildCsp(nonce, { meta: wabaPropia() && pathname === "/conectar-whatsapp" });
 
-  // ── 2. Start with a pass-through response ──────────────────────────────────
-  let response = NextResponse.next({ request });
+  // ── 2. Verify Better Auth session ─────────────────────────────────────────
+  // Sólo donde decide algo: las privadas y las que son sólo para anónimos. Va
+  // antes de armar la respuesta, que lleva el pedido con la cookie renovada.
+  const { user, renovadas } =
+    !publica || SOLO_ANONIMOS.includes(pathname) ? await getUser(request) : { user: null, renovadas: [] };
 
-  // ── 3. Inject CSP + security headers ──────────────────────────────────────
+  // ── 3. Start with a pass-through response ──────────────────────────────────
+  const response = NextResponse.next({ request });
+  for (const cookie of renovadas) response.headers.append("Set-Cookie", cookie);
+
+  // ── 4. Inject CSP + security headers ──────────────────────────────────────
   response.headers.set("Content-Security-Policy", csp);
   // Pass nonce to Server Components via request header so layout.tsx can read it.
   response.headers.set("x-csp-nonce", nonce);
@@ -121,8 +137,8 @@ export async function proxy(request: NextRequest) {
     "camera=(), microphone=(), geolocation=()"
   );
 
-  // ── 4. Skip auth for public paths ─────────────────────────────────────────
-  if (isPublic(pathname)) {
+  // ── 5. Skip auth for public paths ─────────────────────────────────────────
+  if (publica) {
     /*
      * Publicas para quien NO tiene sesion, que no es lo mismo que publicas.
      *
@@ -135,16 +151,12 @@ export async function proxy(request: NextRequest) {
      * No lo agarro nadie porque el test que lo comprueba se salteaba por falta
      * de credenciales de Playwright.
      */
-    if (SOLO_ANONIMOS.includes(pathname)) {
-      const yaEntro = await getUser(request);
-      if (yaEntro) return NextResponse.redirect(new URL("/bandeja", request.url));
+    if (SOLO_ANONIMOS.includes(pathname) && user) {
+      return NextResponse.redirect(new URL("/bandeja", request.url));
     }
     if (pathname.startsWith("/legal/")) response.headers.set("X-Robots-Tag", "noindex");
     return response;
   }
-
-  // ── 5. Verify Better Auth session ─────────────────────────────────────────
-  const user = await getUser(request);
 
   // ── 6. Enforce authentication ─────────────────────────────────────────────
   if (!user) {
@@ -163,7 +175,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // ── 7. Redirect authenticated users away from the root ────────────────────
-  // login y registro se resuelven arriba, en el paso 4: son publicas y salen de
+  // login y registro se resuelven arriba, en el paso 5: son publicas y salen de
   // esta funcion antes de llegar aca.
   if (pathname === "/") {
     return NextResponse.redirect(new URL("/bandeja", request.url));

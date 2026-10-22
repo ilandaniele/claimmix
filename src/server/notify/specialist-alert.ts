@@ -28,11 +28,10 @@ import { DOMINIO_RE } from "@/core/case/mensaje-tardio";
 import { REGLAS, TITULO_DE_REGLA, type Regla } from "@/core/desvios/reglas";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import { getGmailAccountForTenant } from "@/server/email/gmail/accounts";
-import { GmailSender } from "@/server/email/gmail/gmail-sender";
 import { isSendSuccess } from "@/server/email/provider";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
-import { t, type TranslationKey } from "@/lib/i18n";
+import { t, type Locale, type TranslationKey } from "@/lib/i18n";
 import { liberarCupo, rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
@@ -177,34 +176,44 @@ export async function listaDelTenant(tenantId: string): Promise<string[]> {
   }
 }
 
-async function recipientsFor(tenantId: string): Promise<string[]> {
+/** A quién, y en qué idioma lo lee: el de su perfil. Una dirección suelta de una lista no tiene perfil, y va en castellano. */
+interface Destinatario {
+  email: string;
+  locale: Locale;
+}
+
+async function recipientsFor(tenantId: string): Promise<Destinatario[]> {
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId: tenantId };
-  const byRoles = async (roles: TenantRole[]) => {
+  const permitida = (e: string) => !vedadaParaAlertas(e);
+  const sueltas = (emails: string[]): Destinatario[] =>
+    emails.filter(permitida).map((email) => ({ email, locale: "es-AR" }));
+  const byRoles = async (roles: TenantRole[]): Promise<Destinatario[]> => {
     const rows = await enTenant(tenantCtx, (db) =>
       db
-        .select({ email: authUsers.email })
+        .select({ email: authUsers.email, locale: users.locale })
         .from(users)
         .innerJoin(authUsers, eq(authUsers.id, users.id))
         .where(and( inArray(users.role, roles)))
     );
-    return rows.map((r) => r.email).filter(Boolean);
+    return rows
+      .filter((r) => r.email && permitida(r.email))
+      .map((r) => ({ email: r.email, locale: r.locale === "en-US" ? "en-US" : "es-AR" }));
   };
-  const permitida = (e: string) => !vedadaParaAlertas(e);
 
-  const delTenant = (await listaDelTenant(tenantId)).filter(permitida);
+  const delTenant = sueltas(await listaDelTenant(tenantId));
   if (delTenant.length > 0) return delTenant;
 
   if (tenantId === resolveDefaultTenantId()) {
-    const explicita = listaExplicita().filter(permitida);
+    const explicita = sueltas(listaExplicita());
     if (explicita.length > 0) return explicita;
   }
 
-  const specialists = (await byRoles(PREFERRED_ROLES)).filter(permitida);
+  const specialists = await byRoles(PREFERRED_ROLES);
   if (specialists.length > 0) return specialists;
 
   // Sin especialistas: UNO solo, y que se sepa.
-  const respaldo = (await byRoles(FALLBACK_ROLES)).filter(permitida).slice(0, 1);
+  const respaldo = (await byRoles(FALLBACK_ROLES)).slice(0, 1);
   logger.warn({
         tenant_id: tenantId,
         // Cuántos, no quiénes: es un registro, y una dirección es un dato personal.
@@ -270,7 +279,8 @@ interface Aviso {
   log: string;
   /** Tope de correos, contado sólo cuando el aviso de verdad iba a salir y devuelto si no salió. */
   cupo?: { clave: string; config: { limit: number; windowMs: number } };
-  render: (enlace: string) => { subject: string; text: string };
+  /** En el idioma de quien lo lee. */
+  render: (enlace: string, locale: Locale) => { subject: string; text: string };
 }
 
 /**
@@ -306,7 +316,6 @@ export interface MensajeTardioInput {
  * caso y ya está gastado cuando llega esto.
  */
 export async function avisarMensajeTardio(input: MensajeTardioInput): Promise<void> {
-  const clase = t(`tardio.tipo.${input.tipo ?? "sin_clasificar"}` as TranslationKey);
   const resumen = resumenSinOpinion(input.resumen);
   await avisar({
     caseId: input.caseId,
@@ -318,19 +327,22 @@ export async function avisarMensajeTardio(input: MensajeTardioInput): Promise<vo
       clave: claveDeCupo("aviso-tardio", input.tenantId, input.caseId),
       config: RATE_LIMIT_CONFIGS.AVISO_TARDIO_POR_CASO,
     },
-    render: (caseUrl) => ({
-      subject: t("tardio.aviso.asunto").replace("{tipo}", clase),
-      text: [
-        t("tardio.aviso.cuerpo"),
-        "",
-        t("tardio.aviso.quePide").replace("{tipo}", clase),
-        resumen ? t("tardio.aviso.resumen").replace("{resumen}", resumen) : null,
-        t("tardio.aviso.caso").replace("{caso}", input.caseId),
-        caseUrl ? t("tardio.aviso.abrir").replace("{link}", caseUrl) : null,
-      ]
-        .filter((linea) => linea !== null)
-        .join("\n"),
-    }),
+    render: (caseUrl, locale) => {
+      const clase = t(`tardio.tipo.${input.tipo ?? "sin_clasificar"}` as TranslationKey, locale);
+      return {
+        subject: t("tardio.aviso.asunto", locale).replace("{tipo}", clase),
+        text: [
+          t("tardio.aviso.cuerpo", locale),
+          "",
+          t("tardio.aviso.quePide", locale).replace("{tipo}", clase),
+          resumen ? t("tardio.aviso.resumen", locale).replace("{resumen}", resumen) : null,
+          t("tardio.aviso.caso", locale).replace("{caso}", input.caseId),
+          caseUrl ? t("tardio.aviso.abrir", locale).replace("{link}", caseUrl) : null,
+        ]
+          .filter((linea) => linea !== null)
+          .join("\n"),
+      };
+    },
   });
 }
 
@@ -361,9 +373,9 @@ export async function avisarPresupuestoAgotado(input: PresupuestoAgotadoInput): 
       clave: claveDeCupo("aviso-presupuesto", tenantId),
       config: RATE_LIMIT_CONFIGS.AVISO_PRESUPUESTO_POR_INQUILINO,
     },
-    render: () => ({
-      subject: t("presupuesto.aviso.asunto"),
-      text: t("presupuesto.aviso.cuerpo")
+    render: (_enlace, locale) => ({
+      subject: t("presupuesto.aviso.asunto", locale),
+      text: t("presupuesto.aviso.cuerpo", locale)
         .replace(
           "{hora}",
           new Date().toLocaleTimeString("es-AR", {
@@ -373,8 +385,8 @@ export async function avisarPresupuestoAgotado(input: PresupuestoAgotadoInput): 
             hourCycle: "h23",
           })
         )
-        .replace("{plazo}", t(`presupuesto.aviso.plazo.${motivo}` as TranslationKey))
-        .replace("{motivo}", t(`presupuesto.aviso.motivo.${motivo}` as TranslationKey)),
+        .replace("{plazo}", t(`presupuesto.aviso.plazo.${motivo}` as TranslationKey, locale))
+        .replace("{motivo}", t(`presupuesto.aviso.motivo.${motivo}` as TranslationKey, locale)),
     }),
   });
 }
@@ -412,15 +424,17 @@ export async function avisarDesvios(input: DesviosNuevosInput): Promise<boolean>
       clave: claveDeCupo("aviso-desvios", tenantId),
       config: RATE_LIMIT_CONFIGS.AVISO_DESVIOS_POR_INQUILINO,
     },
-    render: (enlace) => ({
-      subject: t("desvios.aviso.asunto").replace("{n}", String(total)),
+    render: (enlace, locale) => ({
+      subject: t("desvios.aviso.asunto", locale).replace("{n}", String(total)),
       text: [
-        t("desvios.aviso.cuerpo"),
+        t("desvios.aviso.cuerpo", locale),
         "",
         ...reglas.map((r) =>
-          t("desvios.aviso.linea").replace("{regla}", t(TITULO_DE_REGLA[r])).replace("{n}", String(porRegla[r]))
+          t("desvios.aviso.linea", locale)
+            .replace("{regla}", t(TITULO_DE_REGLA[r], locale))
+            .replace("{n}", String(porRegla[r]))
         ),
-        ...(enlace ? ["", t("desvios.aviso.abrir").replace("{link}", enlace)] : []),
+        ...(enlace ? ["", t("desvios.aviso.abrir", locale).replace("{link}", enlace)] : []),
       ].join("\n"),
     }),
   });
@@ -472,17 +486,24 @@ async function avisar(aviso: Aviso): Promise<boolean> {
 
     const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ?? "";
     const ruta = caseId ? `/casos/${caseId}` : aviso.ruta;
-    const { subject, text } = aviso.render(ruta && base ? `${base}${ruta}` : "");
+    const enlace = ruta && base ? `${base}${ruta}` : "";
 
+    // En diferido, como en dispatch.ts: importar Gmail son 688 ms de arranque en frío, y los pagaba todo webhook, avisara o no.
+    const { GmailSender } = await import("@/server/email/gmail/gmail-sender");
     const sender = new GmailSender(account.refreshToken);
-    const result = await sender.send({
-      to: recipients.join(", "),
-      from: account.email,
-      subject,
-      textBody: text,
-    });
 
-    const delivered = isSendSuccess(result);
+    // Un correo por idioma. Se entregó si salieron todos: el reintento repite alguno, y un aviso de más es ruido.
+    let delivered = true;
+    for (const locale of new Set(recipients.map((d) => d.locale))) {
+      const { subject, text } = aviso.render(enlace, locale);
+      const result = await sender.send({
+        to: recipients.filter((d) => d.locale === locale).map((d) => d.email).join(", "),
+        from: account.email,
+        subject,
+        textBody: text,
+      });
+      delivered = isSendSuccess(result) && delivered;
+    }
     entregado = delivered;
 
     await writeAuditLog({

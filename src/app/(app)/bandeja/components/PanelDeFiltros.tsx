@@ -106,7 +106,7 @@ function Panel({
       aria-label={t("filter.titulo")}
       className="absolute left-5 top-full z-30 mt-1 max-h-[70vh] w-[320px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-lg"
     >
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-1.5 flex items-center justify-between">
         <h3 className="text-[13.5px] font-semibold text-slate-900">
           {t("filter.titulo")}
         </h3>
@@ -125,6 +125,14 @@ function Panel({
           </button>
         )}
       </div>
+      {/*
+        * Marcar varios del mismo grupo ya andaba (ver `alternar`) pero nadie lo
+        * descubría: un chip encendido se lee como «el elegido». Se dice una vez,
+        * arriba de los grupos, y no en cada rótulo.
+        */}
+      <p className="mb-3 text-[12.5px] leading-snug text-slate-500">
+        {t("filter.variosALaVez")}
+      </p>
 
       <div className="space-y-3">
         {gruposConTipos(tipos).map((grupo, i) => {

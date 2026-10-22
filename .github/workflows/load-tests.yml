@@ -16,8 +16,9 @@ run-name: >-
 # Los perfiles pesados van a mano, y contra donde diga quien los lanza.
 #
 # NO hay soak semanal, y es una decisión, no un olvido: dos horas a 30 VUs
-# sondeando cada cinco segundos son unas cuarenta y tres mil invocaciones, casi
-# la mitad de la cuota mensual del plan Hobby. Un perfil de resistencia contra
+# sondeando cada cinco segundos son unas cuarenta y tres mil invocaciones, más
+# de un 4 % del millón mensual del plan Hobby, y la CPU activa de todas ellas sale
+# de las 4 h del mes, que es la cuota más chica. Un perfil de resistencia contra
 # el deploy real de este proyecto no mide resistencia: mide el plan. Cuando haga
 # falta, se lanza a mano contra una vista previa.
 #
@@ -42,7 +43,12 @@ on:
         # `publico` no necesita sesión ni base: mide las páginas que el
         # middleware sirve sin leerla. Es lo único que se puede medir contra un
         # destino sin `DATABASE_URL`, y se elige a mano cuando se quiere sólo eso.
-        options: [smoke, load, stress, spike, soak, peak, publico]
+        #
+        # `aseguradoras` son 700 cuentas propias (20 aseguradoras de 35 personas) y
+        # 40 minutos: sólo contra QA o un destino -dev, nunca PRD. Las cuentas no
+        # las crea este flujo; se siembran antes con `pnpm sembrar --carga` en la
+        # base del destino, con la misma CARGA_PASSWORD que va como secreto.
+        options: [smoke, load, stress, spike, soak, peak, publico, aseguradoras]
       base_url:
         description: "Contra qué URL"
         required: true
@@ -369,6 +375,9 @@ jobs:
           # los perfiles de 50 VUs también miden con la cuenta admin.
           LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL }}
           LOAD_TEST_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
+          # Sólo lo lee `aseguradoras`: la clave de sus 700 cuentas. Sin el secreto el
+          # escenario corta al arrancar y lo dice.
+          CARGA_PASSWORD: ${{ secrets.CARGA_PASSWORD }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
       # Sin base, se mide lo que hay: las cuatro páginas que el middleware

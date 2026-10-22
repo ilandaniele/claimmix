@@ -27,6 +27,7 @@ vi.mock("@/lib/api/entrada", () => ({
 
 vi.mock("@/server/cases/list", () => ({
   listCases: mockListCases,
+  desdeDePeriodo: (p?: string) => (p ? `desde-${p}` : undefined),
 }));
 
 vi.mock("@/server/cases/delete", () => ({
@@ -81,6 +82,30 @@ describe("GET /api/cases — filtros multi-select", () => {
       expect.objectContaining({ type: ["choque"] }),
       USER_ID
     );
+  });
+
+  it("el período llega a la consulta como fecha de inicio", async () => {
+    const res = await GET(makeRequest("?periodo=7d"));
+
+    expect(res.status).toBe(200);
+    expect(mockListCases).toHaveBeenCalledWith(
+      { tenantId: TENANT_ID },
+      expect.objectContaining({ periodo: "7d", desde: "desde-7d" }),
+      USER_ID
+    );
+  });
+
+  it("sin período no hay fecha de inicio", async () => {
+    await GET(makeRequest("?type=choque"));
+
+    expect(mockListCases.mock.calls[0][1].desde).toBeUndefined();
+  });
+
+  it("un período que no existe da 400", async () => {
+    const res = await GET(makeRequest("?periodo=siempre"));
+
+    expect(res.status).toBe(400);
+    expect(mockListCases).not.toHaveBeenCalled();
   });
 
   it("un valor inválido entre válidos da 400", async () => {

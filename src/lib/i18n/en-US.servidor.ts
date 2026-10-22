@@ -294,6 +294,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "facturacion.periodoInvalido": "is not a valid period.",
   "facturacion.plan": "{n} plan",
   "facturacion.porDenunciaFacturable": "Per billable claim",
+  "facturacion.sinEstado": "There is no billing data for this workspace yet. If it was just created, try again in a few minutes.",
   "facturacion.sinIngresos": "no revenue this month",
   "facturacion.total": "Total",
   "facturacion.verMesEnCurso": "View the current month",

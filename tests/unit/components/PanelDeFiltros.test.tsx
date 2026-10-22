@@ -36,11 +36,11 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/bandeja",
 }));
 
-function montar(query = "", conCuentas: Record<string, number> = {}) {
+function montar(query = "", conCuentas: Record<string, number> = {}, locale: "es-AR" | "en-US" = "es-AR") {
   buscados.actual = query;
   cuentas.actual = conCuentas;
   return render(
-    <LocaleProvider locale="es-AR">
+    <LocaleProvider locale={locale}>
       <NavegacionPendienteProvider>
         {/*
           * Los dos juntos: el botón subió al encabezado de la tarjeta y las
@@ -82,6 +82,24 @@ describe("PanelDeFiltros", () => {
     fireEvent.click(boton());
     expect(boton()).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("el panel avisa una vez que se pueden marcar varios a la vez", () => {
+    montar();
+    const pista = "Podés marcar varios a la vez: por ejemplo, choque y robo.";
+    expect(screen.queryByText(pista)).toBeNull();
+
+    fireEvent.click(boton());
+    expect(screen.getAllByText(pista)).toHaveLength(1);
+    // Está dentro del panel, no suelto en la pantalla.
+    expect(screen.getByRole("dialog")).toContainElement(screen.getByText(pista));
+  });
+
+  it("la pista sale en inglés con la interfaz en inglés", () => {
+    montar("", {}, "en-US");
+    fireEvent.click(boton());
+
+    expect(screen.getAllByText("You can pick several at once: for example, collision and theft.")).toHaveLength(1);
   });
 
   it("elegir un chip escribe el parámetro en la URL y borra page", () => {

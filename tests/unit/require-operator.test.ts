@@ -25,7 +25,7 @@ vi.mock("@/lib/auth/require-admin", () => ({ requireAdmin: h.requireAdmin }));
 vi.mock("@/lib/auth/provision", () => ({ resolveDefaultTenantId: h.casa }));
 
 import { AppError } from "@/lib/errors";
-import { isOperatorEmail, operatorEmails, requireOperator } from "@/lib/auth/require-operator";
+import { esOperadorDe, isOperatorEmail, operatorEmails, requireOperator } from "@/lib/auth/require-operator";
 
 const SAVED = { ...process.env };
 
@@ -93,6 +93,61 @@ describe("operatorEmails", () => {
   it("parte la lista y descarta lo vacío", () => {
     process.env.ADMIN_EMAILS = "uno@example.com,,dos@example.com,";
     expect(operatorEmails()).toEqual(["uno@example.com", "dos@example.com"]);
+  });
+});
+
+describe("esOperadorDe", () => {
+  // La regla de la guarda sin la sesión: la barra y la pantalla no pueden discrepar.
+  const operador = { email: "operador@example.com", emailVerified: true };
+
+  beforeEach(() => {
+    h.casa.mockReset();
+    h.casa.mockReturnValue(CASA);
+    process.env.ADMIN_EMAILS = "operador@example.com";
+  });
+
+  it("el operador verificado del espacio de la casa lo es", () => {
+    expect(esOperadorDe(operador, CASA)).toBe(true);
+  });
+
+  it("no le importan las mayúsculas ni los espacios, ni en el mail ni en el espacio", () => {
+    h.casa.mockReturnValue(` ${CASA.toUpperCase()} `);
+    expect(esOperadorDe({ ...operador, email: " Operador@Example.com " }, CASA)).toBe(true);
+  });
+
+  it("su dirección sin verificar no alcanza", () => {
+    expect(esOperadorDe({ ...operador, emailVerified: false }, CASA)).toBe(false);
+  });
+
+  it.each([undefined, null])("sin el dato de verificación (%s) se trata como no verificada", (emailVerified) => {
+    expect(esOperadorDe({ ...operador, emailVerified }, CASA)).toBe(false);
+  });
+
+  it("una dirección que no es de la lista no lo es, aunque esté verificada", () => {
+    expect(esOperadorDe({ email: "admin@aseguradora.example.com", emailVerified: true }, CASA)).toBe(false);
+  });
+
+  it.each([undefined, null, ""])("sin dirección (%s) no lo es", (email) => {
+    expect(esOperadorDe({ email, emailVerified: true }, CASA)).toBe(false);
+  });
+
+  it("con su dirección pero en el espacio de un cliente no lo es", () => {
+    expect(esOperadorDe(operador, DE_UN_CLIENTE)).toBe(false);
+  });
+
+  it.each([undefined, null, "", "  "])("sin espacio (%j) no lo es", (tenantId) => {
+    expect(esOperadorDe(operador, tenantId)).toBe(false);
+  });
+
+  it("sin ADMIN_EMAILS no hay operador", () => {
+    delete process.env.ADMIN_EMAILS;
+    expect(esOperadorDe(operador, CASA)).toBe(false);
+  });
+
+  it.each([null, undefined, "  "])("sin casa configurada (%j) falla cerrado", (casa) => {
+    h.casa.mockReturnValue(casa);
+    expect(esOperadorDe(operador, CASA)).toBe(false);
+    expect(esOperadorDe(operador, "")).toBe(false);
   });
 });
 

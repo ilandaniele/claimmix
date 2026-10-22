@@ -767,9 +767,9 @@ ambiente, la hora, una captura y el número de caso.
   - **Quién:** [Automático]; [Claude] si algo queda trabado.
   - **Dónde:** el alta del paso 3; GitHub Actions.
   - **Qué hacer:** nada para la base (`BASE_POR_CLIENTE` en 0, D2). El barrido de casos
-    trabados de QA no está programado: si un caso queda trabado, [Claude] lo dispara desde
-    Actions, `barrer-trabados.yml`, «Run workflow» con `url` =
-    `https://claimmix-qa.vercel.app`. Usa el secreto `QA_CRON_SECRET`.
+    trabados de QA corre solo cada 2 h (`barrer-trabados.yml`, desde el lote de las notas
+    del 14/10); si hace falta antes, [Claude] lo dispara desde Actions, «Run workflow» con
+    `url` = `https://claimmix-qa.vercel.app`. Usa el secreto `QA_CRON_SECRET`.
   - **Salió bien si:** el alta no pasó por `/preparando`.
   - **Si falla:** si pasó, avisar a Claude antes de seguir (como el paso 5 de dev).
   - **Fuentes:** `.github/workflows/barrer-trabados.yml:87-89`, `:152`.
@@ -1313,7 +1313,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta). El resto no existe todavía: sus nombres de
+Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta), y el 14 en el lote de las notas del 14/10. El resto no existe todavía: sus nombres de
 archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre
@@ -1334,7 +1334,7 @@ que tenía en la versión anterior de esta guía.
 | 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio. **Hecho en #484** | mediano | nada |
 | 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |
 | 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo. **Hecho en #484**; `tests/unit/lib/topes-unico.test.ts` lo fija | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
-| 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions | chico | Decisión: la cadencia (supuesto: cada 2 h, como prd) |
+| 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions. **Hecho en el lote de las notas del 14/10**, cada 2 h como prd. | chico | Nada (cadencia fijada en cada 2 h) |
 | 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso | grande | Decisión: si vale una migración en todas las bases (receta de pausa para migrar) |
 | 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte `src/app/alta/page.tsx:19-23` |
 | 17 | Comprobar en qué zona horaria cortan el día y el mes del presupuesto, y fijarla (P14) | Los cortes coinciden con el mes que mira | El corte diario cae a una hora previsible | Un test fija la zona | chico | Decisión: mes argentino o mes de la factura de Google (supuesto: argentino) |
@@ -1502,7 +1502,7 @@ Apenas el dueño avise, Claude puede:
 - En el proyecto de Google Cloud propio de prd, con el OK explícito del dueño para los
   permisos de IAM: habilitar las APIs y crear el tema, la cuenta de servicio y la suscripción
   de Pub/Sub (prd, paso 1).
-- Disparar el barrido de QA desde Actions.
+- Disparar el barrido de QA desde Actions si hace falta antes de su corrida de cada 2 h.
 - Hacer la cuenta del costo por caso de C1.
 - Implementar los ítems del plan en orden, cada uno en su PR a `qa` y el mismo día a main y prd,
   con la revisión de seguridad en Fable (u Opus) para los ítems 3 y 4.

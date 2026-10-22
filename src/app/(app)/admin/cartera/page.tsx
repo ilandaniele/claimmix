@@ -14,13 +14,12 @@
  * alta: era poder mirarlos sin abrir una consola.
  */
 
-import { redirect } from "next/navigation";
 import { formatDate, formatUsd } from "@/lib/utils";
 
 import { getT, type TranslationKey } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
+import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireOperator } from "@/lib/auth/require-operator";
-import { AppError } from "@/lib/errors";
 import { listTenantSummaries, type TenantSummary } from "@/server/billing/tenant-summary";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { mesDeParametro } from "@/core/billing/mes-de-parametro";
@@ -63,10 +62,9 @@ export default async function CarteraPage({
   try {
     await requireOperator();
   } catch (e) {
-    if (e instanceof AppError && e.code === "MISSING_SESSION") redirect("/login");
     // Un admin de un asegurador que llega acá por la URL ve su bandeja, no un
     // 403: que la pantalla exista no es algo que le tenga que constar.
-    redirect("/bandeja");
+    rebotarSiNoEntra(e);
   }
 
   const locale = await getAccountLocale();

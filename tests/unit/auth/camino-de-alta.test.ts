@@ -326,6 +326,32 @@ describe("caminoDeAlta", () => {
     });
   });
 
+  it("con SSO, otro dominio, un subdominio o un dominio que termina igual no entran, aunque estén en la lista", async () => {
+    vi.stubEnv("SIGNUP_ALLOWED_EMAILS", "@otra.example.org");
+    const ingreso = { tenantId: "t-1", dominio: "example.com" };
+
+    for (const mal of ["x@otra.example.org", "x@sub.example.com", "x@malaexample.com", "x@example.com@malicioso.example.org"]) {
+      await expect(enIngresoPorSso(ingreso, () => caminoDeAlta(mal)), mal).rejects.toMatchObject({
+        body: { code: "registro_cerrado" },
+      });
+    }
+  });
+
+  it("dos ingresos por SSO de inquilinos distintos a la vez no se contaminan", async () => {
+    const intento = (mail: string) => caminoDeAlta(mail).catch((e) => e.body.code);
+    const visto = await Promise.all([
+      enIngresoPorSso({ tenantId: "a", dominio: "uno.example.com" }, async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        return [await intento("x@uno.example.com"), await intento("x@dos.example.com")];
+      }),
+      enIngresoPorSso({ tenantId: "b", dominio: "dos.example.com" }, async () => {
+        await new Promise((r) => setTimeout(r, 1));
+        return [await intento("x@dos.example.com"), await intento("x@uno.example.com")];
+      }),
+    ]);
+    expect(visto).toEqual([["sso", "registro_cerrado"], ["sso", "registro_cerrado"]]);
+  });
+
   it("el alta que abre el servidor da 'correo' o 'invitacion'", async () => {
     expect(await enAlta("correo", () => caminoDeAlta("ana@example.com"))).toBe("correo");
     expect(await enAlta("invitacion", () => caminoDeAlta("ana@example.com"))).toBe("invitacion");

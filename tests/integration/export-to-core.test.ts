@@ -1,13 +1,13 @@
 /**
  * POST /api/cases/:id/export-to-core: el JSON que el analista baja a mano.
  *
- * Como en api-v1-cases.test.ts, las consultas son las de verdad (`QueryBuilder`)
- * y la base falsa contesta según el inquilino del contexto, que es lo que hace
- * RLS. Así se ve la forma entera del payload, con las fechas en ISO, y que un
- * caso de otro inquilino da 404.
+ * Como en api-v1-cases.test.ts, las consultas son las de verdad (drizzle sobre
+ * `pg-proxy`, sin base) y la base falsa contesta según el inquilino del contexto,
+ * que es lo que hace RLS. Así se ve la forma entera del payload, con las fechas
+ * en ISO, que un caso de otro inquilino da 404 y que el lote deja el evento
+ * `case.exported_to_core` sin datos personales.
  */
 
-import { QueryBuilder } from "drizzle-orm/pg-core";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,24 +21,31 @@ const h = vi.hoisted(() => ({
   contextos: [] as string[],
 }));
 
-vi.mock("@/data/scope", () => ({
-  enTenantVarias: vi.fn(async (ctx: { tenantId: string }, armar: (db: unknown) => Consulta[]) => {
-    h.contextos.push(ctx.tenantId);
-    return armar(new QueryBuilder()).map((q) => {
-      const consulta = q.toSQL();
-      h.consultas.push(consulta);
-      if (consulta.sql.includes('from "cases"')) {
-        const caso = h.casos[ctx.tenantId];
-        return caso?.case_id === consulta.params[0] ? [caso] : [];
-      }
-      if (consulta.sql.includes('from "extracted_fields"')) return [{ field_key: "patente", field_value: "AB123CD", confidence: 0.9 }];
-      return [{ doc_key: "denuncia_policial", requested_at: "2026-09-28T12:00:00.000000Z", satisfied_at: null, declined_at: null, declined_note: null }];
-    });
-  }),
-}));
+vi.mock("@/data/scope", async () => {
+  const { drizzle } = await import("drizzle-orm/pg-proxy");
+  const base = drizzle(async () => ({ rows: [] }));
+  return {
+    enTenantVarias: vi.fn(async (ctx: { tenantId: string }, armar: (db: unknown) => Consulta[]) => {
+      h.contextos.push(ctx.tenantId);
+      return armar(base).map((q) => {
+        const consulta = q.toSQL();
+        h.consultas.push(consulta);
+        // El INSERT ... SELECT del registro también lee de "cases": va primero.
+        if (consulta.sql.includes('insert into "audit_log"')) return [];
+        if (consulta.sql.includes('from "cases"')) {
+          const caso = h.casos[ctx.tenantId];
+          return caso?.case_id === consulta.params[0] ? [caso] : [];
+        }
+        if (consulta.sql.includes('from "extracted_fields"')) return [{ field_key: "patente", field_value: "AB123CD", confidence: 0.9 }];
+        return [{ doc_key: "denuncia_policial", requested_at: "2026-09-28T12:00:00.000000Z", satisfied_at: null, declined_at: null, declined_note: null }];
+      });
+    }),
+  };
+});
 
 vi.mock("@/lib/api/entrada", () => ({ entrar: vi.fn() }));
 
+import { enTenantVarias } from "@/data/scope";
 import { entrar } from "@/lib/api/entrada";
 import { CASE_EDITOR_ROLES } from "@/lib/auth/require-role";
 import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
@@ -62,8 +69,8 @@ const FILA = {
   closed_at: null,
 };
 
-function exportar(id = CASO) {
-  return POST(new NextRequest(`http://localhost/api/cases/${id}/export-to-core`, { method: "POST" }), {
+function exportar(id = CASO, headers: Record<string, string> = {}) {
+  return POST(new NextRequest(`http://localhost/api/cases/${id}/export-to-core`, { method: "POST", headers }), {
     params: Promise.resolve({ id }),
   });
 }
@@ -78,6 +85,7 @@ const ENTRADA = {
 
 beforeEach(() => {
   vi.mocked(entrar).mockReset().mockResolvedValue(ENTRADA);
+  vi.mocked(enTenantVarias).mockClear();
   h.casos = { [TENANT]: FILA };
   h.consultas = [];
   h.contextos = [];
@@ -100,12 +108,46 @@ describe("export-to-core", () => {
     expect(h.contextos).toEqual([TENANT]);
   });
 
-  it("lee las tres cosas en un solo lote, con las fechas en ISO", async () => {
+  it("lee el caso y deja el evento en un solo lote, con las fechas en ISO", async () => {
     await exportar();
-    expect(h.consultas).toHaveLength(3);
-    const [caso, , docs] = h.consultas;
+    expect(enTenantVarias).toHaveBeenCalledTimes(1);
+    expect(h.consultas).toHaveLength(4);
+    const [caso, , docs, registro] = h.consultas;
     expect(caso.sql.match(/to_char/g)).toHaveLength(3);
     expect(docs.sql.match(/to_char/g)).toHaveLength(3);
+    // Última: el tenant_id sale del propio caso, así uno ajeno no deja fila.
+    expect(registro.sql).toMatch(/^insert into "audit_log" .* as "id", "tenant_id", .* from "cases" where /);
+    expect(registro.params).toEqual(expect.arrayContaining(["case.exported_to_core", USUARIO, CASO]));
+  });
+
+  it("el registro no lleva datos personales: payload vacío, y la IP que no es IP va en null", async () => {
+    await exportar(CASO, { "user-agent": "vitest" });
+    const registro = h.consultas[3];
+    for (const dato of ["Ana Pérez", "POL-1", "AB123CD"]) {
+      expect(registro.sql).not.toContain(dato);
+      expect(JSON.stringify(registro.params)).not.toContain(dato);
+    }
+    expect(registro.sql).toContain("'{}'::jsonb");
+    expect(registro.params).toContain("vitest");
+    expect(registro.params).toContain(null);
+    expect(registro.params).not.toContain("anonymous");
+  });
+
+  it("la IP de quien exporta queda en el registro cuando es válida", async () => {
+    await exportar(CASO, { "x-forwarded-for": "203.0.113.9" });
+    expect(h.consultas[3].params).toContain("203.0.113.9");
+  });
+
+  it("si el registro no entra, el lote cae, el JSON no sale y la falla es un 500 con el cuerpo de error de siempre", async () => {
+    vi.mocked(enTenantVarias).mockRejectedValueOnce(new Error("23503 violates foreign key audit_log_actor_id_fkey"));
+
+    const r = await exportar();
+
+    expect(r.status).toBe(500);
+    const texto = await r.text();
+    expect(JSON.parse(texto)).toEqual({ error: { code: "INTERNAL_ERROR", message: expect.any(String) } });
+    // Ni el caso ni el motivo técnico viajan en la respuesta.
+    for (const dato of ["Ana Pérez", "POL-1", "audit_log_actor_id_fkey"]) expect(texto).not.toContain(dato);
   });
 
   it("un caso simulado también se exporta: el filtro de /api/v1 no aplica a mano", async () => {
@@ -114,16 +156,19 @@ describe("export-to-core", () => {
     expect(h.consultas[0].params).toEqual([CASO, 1]);
   });
 
-  it("un caso de otro inquilino da 404", async () => {
+  it("un caso de otro inquilino da 404 en un solo lote, y el registro no inserta nada", async () => {
     h.casos = { [OTRO]: FILA };
     const r = await exportar();
     expect(r.status).toBe(404);
     expect(h.contextos).toEqual([TENANT]);
+    expect(enTenantVarias).toHaveBeenCalledTimes(1);
+    expect(h.consultas[3].sql).toContain('from "cases" where');
   });
 
   it("un id que no es UUID da 400 sin tocar la base", async () => {
     expect((await exportar("no-es-un-id")).status).toBe(400);
     expect(entrar).not.toHaveBeenCalled();
+    expect(enTenantVarias).not.toHaveBeenCalled();
     expect(h.consultas).toEqual([]);
   });
 
@@ -135,12 +180,14 @@ describe("export-to-core", () => {
   it("sin permiso da 403 sin tocar la base", async () => {
     vi.mocked(entrar).mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
     expect((await exportar()).status).toBe(403);
+    expect(enTenantVarias).not.toHaveBeenCalled();
     expect(h.consultas).toEqual([]);
   });
 
   it("pasado el cupo da 429 sin tocar la base", async () => {
     vi.mocked(entrar).mockResolvedValue({ ...ENTRADA, rl: { ...ENTRADA.rl, allowed: false, remaining: 0, retryAfterSeconds: 30 } });
     expect((await exportar()).status).toBe(429);
+    expect(enTenantVarias).not.toHaveBeenCalled();
     expect(h.consultas).toEqual([]);
   });
 });

@@ -3,16 +3,18 @@
  * re-enable a user that was deactivated (`{ activo: true }`).
  * DELETE /api/admin/users/:id - deactivate a user: no new session by any path,
  * and the open ones are closed.
+ *
+ * Baja, alta y rol van en un solo lote con el candado del espacio (`cambiarUsuario`).
  */
 
 import { NextRequest } from "next/server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { ALL_ROLES } from "@/lib/auth/roles";
+import { ALL_ROLES, type UserRole } from "@/lib/auth/roles";
 import { tables } from "@/lib/db";
-import { enControl, type TenantContext } from "@/data/scope";
+import { enControlVarias, type TenantContext } from "@/data/scope";
 import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { firstRow } from "@/lib/db/helpers";
 import { ok, err } from "@/lib/api/respond";
@@ -38,32 +40,67 @@ const USER_COLUMNS = {
   dado_de_baja_en: tables.users.dado_de_baja_en,
 };
 
-/**
- * Da de baja o vuelve a habilitar en una sola sentencia: la regla del owner viaja
- * en el WHERE. Sin fila, una segunda lectura dice si fue porque no es de este
- * espacio (NOT_FOUND) o porque es un owner y quien pide no lo es.
- */
-async function marcarBaja(tenantCtx: TenantContext, rolDeQuienPide: string, id: string, baja: boolean) {
-  const delEspacio = eq(tables.users.id, id);
-  const marcada = firstRow(
-    await enControl(tenantCtx, (db) =>
-      db
-        .update(tables.users)
-        // coalesce: repetir la baja no le cambia la fecha.
-        .set({ dado_de_baja_en: baja ? sql`coalesce(${tables.users.dado_de_baja_en}, now())` : null })
-        .where(rolDeQuienPide === "owner" ? delEspacio : and(delEspacio, ne(tables.users.role, "owner")))
-        .returning(USER_COLUMNS)
-    )
-  );
-  if (marcada) return marcada;
+type FilaDeUsuario = Pick<typeof tables.users.$inferSelect, keyof typeof USER_COLUMNS>;
 
-  const existe = firstRow(
-    await enControl(tenantCtx, (db) =>
-      db.select({ id: tables.users.id }).from(tables.users).where(delEspacio).limit(1)
-    )
-  );
-  if (!existe) throw new AppError("NOT_FOUND");
-  throw new AppError("FORBIDDEN_ROLE", "Solo un owner puede dar de baja o habilitar a un owner.");
+/**
+ * El candado por espacio pone en fila a los admins que se tocan entre sí, y la
+ * regla mira a quien pide en la base, no en la caché: dos que se dan de baja a la
+ * vez no dejan el espacio sin quien lo administre, y uno dado de baja o degradado
+ * hace 30 s no cambia a nadie. La lectura del rol previo va después del candado:
+ * es el rol de antes. Toda escritura de `users.role` o `dado_de_baja_en` pasa por
+ * acá (y quien pide nunca es el objetivo, ver el 400), o la invariante cae.
+ *
+ * Sin fila, el rol previo dice si fue porque no es de este espacio (NOT_FOUND) o
+ * porque la regla no lo dejó (FORBIDDEN_ROLE). El mensaje del owner es sólo para el
+ * admin que se topa con uno: si quien pide ya no está activo o ya no es admin, la
+ * caché le hacía creer otra cosa y el mensaje le diría que no es lo que es.
+ */
+async function cambiarUsuario(
+  tenantCtx: TenantContext,
+  actorId: string,
+  id: string,
+  cambio: { role: UserRole } | { dado_de_baja_en: SQL | null }
+): Promise<{ fila: FilaDeUsuario; rolPrevio: string }> {
+  const rolNuevo = "role" in cambio ? cambio.role : null;
+  // Un solo fragmento: el mensaje de error y la regla no pueden discrepar sobre quién es un actor vivo.
+  const actorVivo = sql`public.users a where a.id = ${actorId}::uuid and a.dado_de_baja_en is null`;
+  const res = await enControlVarias(tenantCtx, (db) => [
+    db.execute(sql`select pg_advisory_xact_lock(hashtext('admins'), hashtext(${tenantCtx.tenantId}::text))`),
+    db
+      .select({
+        role: tables.users.role,
+        actor: sql<string | null>`(select a.role from ${actorVivo})`,
+      })
+      .from(tables.users)
+      .where(eq(tables.users.id, id))
+      .limit(1),
+    db
+      .update(tables.users)
+      .set(cambio)
+      .where(
+        and(
+          eq(tables.users.id, id),
+          // Un admin no toca owners ni asigna owner; `is distinct from` porque en la baja y el alta el rol nuevo es null.
+          sql`exists (select 1 from ${actorVivo} and (a.role = 'owner' or (a.role = 'admin' and ${tables.users.role} <> 'owner' and ${rolNuevo}::text is distinct from 'owner')))`
+        )
+      )
+      .returning(USER_COLUMNS),
+  ]);
+
+  const previa = firstRow(res[1] as { role: string; actor: string | null }[]);
+  if (!previa) throw new AppError("NOT_FOUND");
+  const fila = firstRow(res[2] as FilaDeUsuario[]);
+  if (fila) return { fila, rolPrevio: previa.role };
+
+  if (previa.actor === "admin" && (previa.role === "owner" || rolNuevo === "owner")) {
+    throw new AppError(
+      "FORBIDDEN_ROLE",
+      rolNuevo
+        ? "Solo un owner puede asignar o modificar el rol owner."
+        : "Solo un owner puede dar de baja o habilitar a un owner."
+    );
+  }
+  throw new AppError("FORBIDDEN_ROLE");
 }
 
 export async function PATCH(
@@ -91,7 +128,7 @@ export async function PATCH(
     }
 
     if ("activo" in parsed.data) {
-      const habilitado = await marcarBaja(tenantCtx, userRow.role, params.data.id, false);
+      const { fila: habilitado } = await cambiarUsuario(tenantCtx, user.id, params.data.id, { dado_de_baja_en: null });
       await espejarSinFallar(userRow.tenant_id);
       olvidarFilaDeUsuario(params.data.id);
       await writeAuditLog({
@@ -105,41 +142,7 @@ export async function PATCH(
     }
     const { role } = parsed.data;
 
-    const existing = firstRow(
-      await enControl(tenantCtx, (db) =>
-        db
-          .select({ id: tables.users.id, role: tables.users.role })
-          .from(tables.users)
-          .where(
-            eq(tables.users.id, params.data.id)
-          )
-          .limit(1)
-      )
-    );
-
-    if (!existing) throw new AppError("NOT_FOUND");
-
-    const touchesOwnerRole = existing.role === "owner" || role === "owner";
-    if (touchesOwnerRole && userRow.role !== "owner") {
-      throw new AppError(
-        "FORBIDDEN_ROLE",
-        "Solo un owner puede asignar o modificar el rol owner."
-      );
-    }
-
-    const updated = firstRow(
-      await enControl(tenantCtx, (db) =>
-        db
-          .update(tables.users)
-          .set({ role })
-          .where(
-            eq(tables.users.id, params.data.id)
-          )
-          .returning(USER_COLUMNS)
-      )
-    );
-
-    if (!updated) throw new AppError("NOT_FOUND");
+    const { fila: updated, rolPrevio } = await cambiarUsuario(tenantCtx, user.id, params.data.id, { role });
 
     // El rol vive en control; la copia en la base del cliente puede quedar pendiente sin romper el cambio.
     await espejarSinFallar(userRow.tenant_id);
@@ -159,7 +162,7 @@ export async function PATCH(
       event_type: AuditEvent.USER_ROLE_CHANGED,
       target_type: "user",
       target_id: updated.id,
-      payload: { previous_role: existing.role, role: updated.role },
+      payload: { previous_role: rolPrevio, role: updated.role },
     });
 
     return ok({ user: updated });
@@ -178,13 +181,16 @@ export async function DELETE(
     const params = ParamsSchema.safeParse(await context.params);
     if (!params.success) throw new AppError("NOT_FOUND");
 
-    // Con esto y la regla del owner, al espacio siempre le queda quien lo administre.
+    // Con esto y el candado de cambiarUsuario, al espacio siempre le queda quien lo administre.
     if (params.data.id === user.id) {
       throw new AppError("VALIDATION_FAILED", "No podés darte de baja a vos mismo.");
     }
 
     // Primero la baja: desde acá el gancho de sesión no abre ninguna nueva.
-    const dado = await marcarBaja(tenantCtx, userRow.role, params.data.id, true);
+    // coalesce: repetir la baja no le cambia la fecha.
+    const { fila: dado } = await cambiarUsuario(tenantCtx, user.id, params.data.id, {
+      dado_de_baja_en: sql`coalesce(${tables.users.dado_de_baja_en}, now())`,
+    });
 
     // Si tira, no se audita: la baja quedó y repetir el pedido cierra lo que falte.
     const sesionesCerradas = await cerrarSesiones(dado.id);

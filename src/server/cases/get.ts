@@ -164,12 +164,16 @@ export async function fetchMissingDocs(
 }
 
 /**
- * Los eventos que hizo una persona: las intervenciones y abrir un presupuesto.
+ * Los eventos que hizo una persona: las intervenciones, abrir un presupuesto y exportar el JSON.
  * El resto lo escribe el sistema, aunque cargue el `actor_id` de quien lo
  * disparó (Re-analizar, simular): firmarlo con ese nombre sería decir que lo
  * decidió esa persona y no la IA.
  */
-const DE_PERSONA = new Set<string>([...EVENTOS_DE_INTERVENCION, AuditEvent.WORKSHOP_ESTIMATE_READ]);
+const DE_PERSONA = new Set<string>([
+  ...EVENTOS_DE_INTERVENCION,
+  AuditEvent.WORKSHOP_ESTIMATE_READ,
+  AuditEvent.CASE_EXPORTED_TO_CORE,
+]);
 
 /**
  * Las últimas veinte cosas que le pasaron al caso.

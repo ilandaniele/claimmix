@@ -425,6 +425,7 @@ export const esAR = {
   "audit.tenant.amount_ranges_changed": "Se cambió la tabla de montos orientativos",
   "audit.case.plan_created": "Se armó el plan de trabajo",
   "audit.case.plan_step": "Se marcó un paso del plan de trabajo",
+  "audit.case.exported_to_core": "Se exportó el JSON para el sistema central",
   "audit.tenant.work_settings_updated": "Se cambió cómo trabaja el equipo (asignación, plazos, plan o puntaje)",
   "audit.ai.budget_exceeded": "No se analizó: se terminó el cupo de IA",
   "audit.ai.budget_alerted": "Se avisó a los especialistas: presupuesto de IA agotado",

@@ -65,6 +65,8 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "claim.opened_from_late_message": false,
   // Abrir el presupuesto lo pide una persona, pero es leer, no gestionar.
   "claim.workshop_estimate_read": false,
+  // Bajar el JSON lo pide una persona, pero es leer, no gestionar.
+  "case.exported_to_core": false,
 
   "policy.conditions_uploaded": false,
   "tenant.amount_ranges_changed": false,

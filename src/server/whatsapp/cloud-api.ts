@@ -212,11 +212,18 @@ interface CloudApiTextMessage {
   video?: { caption?: string; id?: string; mime_type?: string };
   document?: { caption?: string; filename?: string; id?: string; mime_type?: string };
   audio?: { id?: string; mime_type?: string };
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string };
+  contacts?: Array<{ name?: { formatted_name?: string }; phones?: Array<{ phone?: string }> }>;
   button?: { text?: string };
   interactive?: {
     button_reply?: { title?: string };
     list_reply?: { title?: string };
   };
+}
+
+/** «a, b, c» sin los vacíos: el texto de una ubicación o un contacto que vino a medias. */
+function unidos(partes: Array<string | undefined>, separador = ", "): string {
+  return partes.map((p) => p?.trim()).filter(Boolean).join(separador);
 }
 
 /** Extract a usable text body from a Cloud API message of any supported type. */
@@ -235,6 +242,20 @@ function messageBody(msg: CloudApiTextMessage): string {
       );
     case "audio":
       return PLACEHOLDER_AUDIO;
+    case "location": {
+      const l = msg.location;
+      const coordenadas =
+        typeof l?.latitude === "number" && typeof l.longitude === "number" ? `${l.latitude}, ${l.longitude}` : undefined;
+      const texto = unidos([l?.name, l?.address, coordenadas]);
+      return texto ? `[Ubicación compartida: ${texto}]` : "";
+    }
+    case "contacts": {
+      const texto = unidos(
+        (msg.contacts ?? []).map((c) => unidos([c.name?.formatted_name, ...(c.phones ?? []).map((p) => p.phone)])),
+        "; "
+      );
+      return texto ? `[Contacto compartido: ${texto}]` : "";
+    }
     case "button":
       return msg.button?.text?.trim() || "";
     case "interactive":
@@ -568,7 +589,11 @@ export function parseCloudApiMessages(payload: unknown): NormalizedWhatsAppMessa
         const media = messageMedia(msg);
         // A photo with no caption still carries the claim's most important
         // evidence, so a message is only worthless when it has neither.
-        if (!body && media.length === 0) continue;
+        // Stickers y reacciones caen acá: se anota el tipo y no se contesta.
+        if (!body && media.length === 0) {
+          logger.info({ tipo: msg.type }, "whatsapp.mensaje_ignorado");
+          continue;
+        }
         out.push({
           from: msg.from,
           body,

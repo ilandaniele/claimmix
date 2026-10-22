@@ -21,6 +21,7 @@ import {
   verificarFirmaDeApp,
   verifyMetaSignature,
 } from "@/server/whatsapp/cloud-api";
+import { logger } from "@/lib/observability/logger";
 
 const APP_SECRET = "test-app-secret";
 const CRED = { accessToken: "test-token", phoneNumberId: "123", wabaId: "waba-1" };
@@ -127,6 +128,59 @@ describe("parseCloudApiMessages", () => {
     expect(parseCloudApiMessages({ object: "page", entry: [] })).toEqual([]);
     expect(parseCloudApiMessages(null)).toEqual([]);
     expect(parseCloudApiMessages({})).toEqual([]);
+  });
+
+  it("una ubicación compartida llega al agente como texto", () => {
+    const [msg] = parseCloudApiMessages(
+      metaPayload([
+        {
+          from: "549111",
+          id: "m4",
+          type: "location",
+          location: { latitude: -38.7183, longitude: -62.2663, name: "YPF Alem", address: "Av. Alem 1200, Bahía Blanca" },
+        },
+      ])
+    );
+    expect(msg.body).toBe("[Ubicación compartida: YPF Alem, Av. Alem 1200, Bahía Blanca, -38.7183, -62.2663]");
+
+    const [soloCoordenadas] = parseCloudApiMessages(
+      metaPayload([{ from: "549111", id: "m5", type: "location", location: { latitude: -38.7, longitude: -62.2 } }])
+    );
+    expect(soloCoordenadas.body).toBe("[Ubicación compartida: -38.7, -62.2]");
+  });
+
+  it("un contacto compartido llega con el nombre y los teléfonos", () => {
+    const [msg] = parseCloudApiMessages(
+      metaPayload([
+        {
+          from: "549111",
+          id: "m6",
+          type: "contacts",
+          contacts: [
+            { name: { formatted_name: "Juan Pérez" }, phones: [{ phone: "+54 9 291 555-0000" }] },
+            { name: { formatted_name: "Taller Sur" }, phones: [] },
+          ],
+        },
+      ])
+    );
+    expect(msg.body).toBe("[Contacto compartido: Juan Pérez, +54 9 291 555-0000; Taller Sur]");
+  });
+
+  it("stickers y reacciones se anotan con el tipo y no se contestan", () => {
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const out = parseCloudApiMessages(
+        metaPayload([
+          { from: "549111", id: "m7", type: "sticker", sticker: { id: "123", mime_type: "image/webp" } },
+          { from: "549111", id: "m8", type: "reaction", reaction: { message_id: "wamid.1", emoji: "\u{1F44D}" } },
+        ])
+      );
+      expect(out).toEqual([]);
+      expect(info).toHaveBeenCalledWith({ tipo: "sticker" }, "whatsapp.mensaje_ignorado");
+      expect(info).toHaveBeenCalledWith({ tipo: "reaction" }, "whatsapp.mensaje_ignorado");
+    } finally {
+      info.mockRestore();
+    }
   });
 });
 

@@ -72,6 +72,7 @@ if (!process.env.DATABASE_URL || !TENANT_ID) {
 // Imported after dotenv: the db module reads DATABASE_URL at import time.
 const { createWhatsAppIntakeAndRunAgent } = await import("@/server/agents/intake-agent");
 const { ingestInboundEmail } = await import("@/server/email/inbound-email");
+const { rehostAndRecordAttachments } = await import("@/server/email/rehost-attachments");
 const { runIntakeAgent } = await import("@/server/agents/intake-agent");
 const { recordarCaso } = await import("@/server/confirmations/recordatorios");
 const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
@@ -1187,6 +1188,26 @@ async function seedPolicyFor(
 /** El id con que el ensayo le entrega el turno `i` al WhatsApp: sirve para saber en qué caso quedó. */
 const providerMessageIdDe = (scenario: Scenario, i: number) => `rehearsal.${RUN}.${scenario.id}.${i}`;
 
+/** Lo que adjunta el turno, igual por WhatsApp que por mail. */
+function mediaDelTurno(turn: TurnDicho, i: number) {
+  const archivo = turn.photo
+    ? {
+        mimeType: "image/jpeg",
+        filename: `${typeof turn.photo === "string" ? turn.photo : "foto"}-${i}.jpg`,
+        data: imageFor(turn.photo),
+      }
+    : turn.pesado
+      ? { mimeType: "image/jpeg", filename: `pesada-${i}.jpg`, data: Buffer.alloc(MAX_ATTACHMENT_SIZE_BYTES + 1) }
+      : turn.adjunto
+        ? {
+            mimeType: turn.adjunto.tipo,
+            filename: archivoDe(turn.adjunto),
+            data: fs.readFileSync(fixturePath(archivoDe(turn.adjunto))),
+          }
+        : null;
+  return archivo ? [{ id: `rehearsal-${RUN}-${i}`, ...archivo }] : undefined;
+}
+
 /**
  * Hand one message to the WhatsApp intake, exactly as the webhook does.
  */
@@ -1202,34 +1223,7 @@ async function deliverWhatsApp(
     body: turn.say,
     providerMessageId: providerMessageIdDe(scenario, i),
     simulated: true,
-    media: turn.photo
-      ? [
-          {
-            id: `rehearsal-${RUN}-${i}`,
-            mimeType: "image/jpeg",
-            filename: `${typeof turn.photo === "string" ? turn.photo : "foto"}-${i}.jpg`,
-            data: imageFor(turn.photo),
-          },
-        ]
-      : turn.pesado
-        ? [
-            {
-              id: `rehearsal-${RUN}-${i}`,
-              mimeType: "image/jpeg",
-              filename: `pesada-${i}.jpg`,
-              data: Buffer.alloc(MAX_ATTACHMENT_SIZE_BYTES + 1),
-            },
-          ]
-      : turn.adjunto
-        ? [
-            {
-              id: `rehearsal-${RUN}-${i}`,
-              mimeType: turn.adjunto.tipo,
-              filename: archivoDe(turn.adjunto),
-              data: fs.readFileSync(fixturePath(archivoDe(turn.adjunto))),
-            },
-          ]
-        : undefined,
+    media: mediaDelTurno(turn, i),
   });
   return result.caseId;
 }
@@ -1279,6 +1273,23 @@ async function deliverEmail(
   });
 
   if (result.outcome === "skipped") return null;
+
+  // Como el poller: los adjuntos quedan guardados antes de que el agente lea el caso.
+  const media = mediaDelTurno(turn, i);
+  if (media) {
+    await rehostAndRecordAttachments({
+      attachments: media.map((m) => ({
+        Name: m.filename,
+        Content: m.data.toString("base64"),
+        ContentType: m.mimeType,
+        ContentLength: m.data.length,
+      })),
+      tenantId: TENANT_ID!,
+      caseId: result.caseId,
+      messageId: result.claimMessageId,
+      budgetMs: 5_000,
+    });
+  }
 
   await runIntakeAgent({
     caseId: result.caseId,

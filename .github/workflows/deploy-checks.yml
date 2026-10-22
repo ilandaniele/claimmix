@@ -263,14 +263,15 @@ jobs:
 
   # ── El ensayo de conversaciones ──────────────────────────────────────────────
   #
-  # Dieciocho denuncias enteras contra el agente real, por WhatsApp y por mail,
-  # sobre los canales simulados. No le manda un mensaje a nadie.
+  # Las denuncias enteras contra el agente real (veintiséis, ver docs/TESTING.md),
+  # por WhatsApp y por mail, sobre los canales simulados. No le manda un mensaje
+  # a nadie.
   #
   # Corre después del smoke y sólo si pasó: si producción no puede llegar a la
   # base o al modelo, el ensayo va a fallar por eso y el resultado no dice nada
   # sobre el agente.
   #
-  # Usa la base de PRODUCCIÓN. Escribe dieciocho casos y los borra al terminar,
+  # Usa la base de PRODUCCIÓN. Escribe un caso por denuncia y los borra al terminar,
   # y al empezar barre los que hayan quedado de una corrida que se murió a
   # mitad de camino. Se los reconoce por identidades inventadas — números
   # 5490000… y direcciones ensayo.*@example.com — que ningún asegurado real
@@ -491,9 +492,10 @@ jobs:
 
   # ── La prueba de carga, sólo la mitad gratis ─────────────────────────────────
   #
-  # La fase de lectura: las consultas del tablero contra la base de producción,
+  # La fase de lectura: las consultas del tablero contra la base de dev,
   # con 1, 5 y 20 analistas simultáneos, y el plan que Postgres elige para cada
-  # una. No escribe nada y no gasta un token.
+  # una. No escribe nada y no gasta un token. Sólo dev la corre: prd no mide la
+  # carga, y su base por cliente (`BASE_POR_CLIENTE`) no pasa por acá.
   #
   # Lo que busca no es una latencia bonita: es la regresión silenciosa. Un
   # cambio de orden o un filtro nuevo pueden dejar el índice afuera y convertir
@@ -508,7 +510,7 @@ jobs:
   # De las cuatro formas de lectura corre UNA, la de carga, que es la que
   # contesta la pregunta de un deploy: ¿esto quedó más lento que ayer? Las otras
   # tres (pico, resistencia, estrés) tienen sentido a mano y no en cada deploy:
-  # miden minutos contra la base de producción para contestar preguntas que no
+  # miden minutos contra la base de dev para contestar preguntas que no
   # cambian de un commit al otro. `pnpm load --forma todas`.
   #
   # El reporte se guarda como artefacto porque, cuando esto falla, el mensaje de
@@ -517,7 +519,7 @@ jobs:
   # ── Y por qué espera a los otros dos ────────────────────────────────────────
   #
   # Esto mide p95 con 1, 5 y 20 analistas simultáneos contra la base de
-  # producción. El ensayo y el timbre entran a ESA misma base al mismo tiempo:
+  # dev. El ensayo y el timbre entran a ESA misma base al mismo tiempo:
   # el ensayo abre trece conversaciones enteras con extracción incluida, y el
   # timbre crea casos y consulta en bucle. Con todos arrancando juntos, este
   # job no medía las consultas del tablero — medía a sus hermanos.
@@ -551,7 +553,7 @@ jobs:
   # ── Y por qué QA no la mide ─────────────────────────────────────────────────
   #
   # `medir_carga` lo apaga el caller. QA va a tener cuatrocientos casos contra
-  # los cientos de miles de producción, y un p95 medido ahí no compara con el
+  # los cientos de miles de dev, y un p95 medido ahí no compara con el
   # presupuesto de esta medición: no dice si el deploy quedó más lento, dice
   # que la tabla es chica. Un rojo así se deja de mirar, igual que el del
   # sorteo de arriba.

@@ -11,29 +11,42 @@
  *
  * ── Y después: una sola tampoco ────────────────────────────────────────────
  *
- * `/api/cases` tiene cupo de 100 por minuto POR USUARIO (`CASES_API`), y las
- * tres rutas más pesadas de la mezcla comparten la misma etiqueta, o sea el
- * mismo balde. Cincuenta VUs sondeando cada cinco segundos son ~510 pedidos por
- * minuto contra un tope de 100.
+ * `/api/cases` tiene cupo de 100 por minuto POR USUARIO Y POR RUTA (`CASES_API`,
+ * un balde por etiqueta), y la bandeja es el balde más cargado de la mezcla.
+ * Cincuenta VUs sondeando cada cinco segundos son ~510 pedidos por minuto
+ * contra un tope de 100.
  *
  * Con una sola cuenta, esos cincuenta VUs no miden la aplicación: miden el
  * limitador. Y la corrida sale roja por `http_req_failed` mientras el p95 sale
  * VERDE, porque un 429 se contesta rapidísimo. Es el p95 de que te rechacen.
  *
  * Cincuenta usuarios de verdad tienen cincuenta baldes de 100. Para reproducir
- * eso hacen falta varias cuentas, y el reparto es `__VU % n`. Hoy hay una sola
- * y es admin: el rol no cambia el cupo —el balde es por usuario y por ruta— y
- * sí cambia qué rutas contestan 200, que es lo que hacía falta arreglar.
+ * eso hacen falta varias cuentas, y el reparto es `__VU % n`. Si el perfil
+ * pide más pedidos por minuto de los que las cuentas dan, `iniciarSesiones`
+ * CORTA la corrida antes de entrar, con la cuenta de cuántas hacen falta: un
+ * aviso en la consola no alcanza, porque la corrida sigue y sale roja midiendo
+ * el limitador. El rol no cambia el cupo —el balde es por usuario y por ruta—
+ * y sí cambia qué rutas contestan 200.
+ *
+ * ── Y los logins, de a tandas ──────────────────────────────────────────────
+ *
+ * Con más cuentas que el tope de login por IP (`AUTH_POR_IP`, 30 por minuto)
+ * el `setup()` se cortaría solo cerca de la cuenta 31. Se entra de a 25 y se
+ * espera un minuto entre tandas; los escenarios con muchas cuentas necesitan
+ * un `setupTimeout` largo.
  *
  * `scripts/load-test.mts` ya había documentado exactamente este problema como
  * la razón para NO escribir la versión por HTTP. Se escribió igual, y sin esto.
  */
 
 import http from "k6/http";
-import { fail } from "k6";
+import { fail, sleep } from "k6";
 import { Counter } from "k6/metrics";
 
-import { BASE_URL, cabecerasDeVercel, cupoPorSesion } from "../config/base.js";
+import { BASE_URL, TOPE_LOGIN_POR_MIN, cabecerasDeVercel, cupoPorSesion } from "../config/base.js";
+
+/** Logins por tanda: el tope por IP con cinco de aire para los reintentos. */
+const LOGINS_POR_TANDA = TOPE_LOGIN_POR_MIN - 5;
 
 /** Pedidos rechazados por cupo. Que la corrida lo diga, no que lo esconda. */
 export const rechazadosPorCupo = new Counter("rechazados_por_cupo");
@@ -144,24 +157,32 @@ export function entrar(cuenta) {
 /**
  * Entra con TODAS las cuentas, una vez, antes de levantar los VUs.
  *
- * Avisa fuerte cuando los VUs pedidos no entran en el cupo que las cuentas
+ * Corta la corrida cuando los VUs pedidos no entran en el cupo que las cuentas
  * dan: es la diferencia entre «la aplicación aguanta 50 analistas» y «una
  * cuenta aguanta 100 pedidos por minuto», que es lo que se estaría midiendo.
+ * La cuenta se hace ANTES de entrar, así no se gastan logins ni minutos de
+ * espera en una corrida que no puede salir.
  */
 export function iniciarSesiones(vusPico, pedidosPorVuPorMinuto) {
   const lista = cuentas();
-  const cookies = lista.map(entrar);
 
   const techo = lista.length * cupoPorSesion();
   const previsto = vusPico * pedidosPorVuPorMinuto;
   if (previsto > techo) {
-    console.warn(
-      `AVISO: ${vusPico} VUs harían ~${Math.round(previsto)} pedidos/min a /api/cases ` +
+    fail(
+      `${vusPico} VUs harían ~${Math.round(previsto)} pedidos/min a /api/cases ` +
         `y ${lista.length} cuenta(s) dan ${techo}/min. Lo que sobra vuelve 429, ` +
-        `así que esta corrida mide el limitador y no la aplicación. ` +
-        `Sumá cuentas en LOAD_TEST_EMAILS/LOAD_TEST_PASSWORDS o bajá los VUs.`
+        `así que esta corrida mediría el limitador y no la aplicación.\n` +
+        `  Hacen falta al menos ${Math.ceil(previsto / cupoPorSesion())} cuentas en ` +
+        `LOAD_TEST_EMAILS/LOAD_TEST_PASSWORDS, o menos VUs.`
     );
   }
+
+  const cookies = [];
+  lista.forEach((cuenta, i) => {
+    if (i > 0 && i % LOGINS_POR_TANDA === 0) sleep(60);
+    cookies.push(entrar(cuenta));
+  });
 
   return { cookies, cuentas: lista.length };
 }

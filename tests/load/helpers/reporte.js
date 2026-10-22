@@ -39,32 +39,44 @@ function ms(valor) {
  *
  * `escenario` y `notas` los pone cada archivo: son lo que ESE perfil fue a
  * medir, y son distintos entre sí a propósito.
+ *
+ * `selector` dice de qué pedidos son los números (ver `selectorDeLectura` en
+ * `config/base.js`): por omisión las lecturas, y con fase los de esa fase.
  */
-export function resumen(datos, escenario, notas = {}) {
+export function resumen(datos, escenario, notas = {}, selector = "escenario:lectura") {
   /*
-   * El p95 de las LECTURAS, no el de todo.
+   * Latencia, pedidos y fallos de las LECTURAS, no de todo.
    *
-   * `http_req_duration` a secas incluye el login de `setup()`, que es un pedido
-   * lento y uno solo — y el umbral, a propósito, mira sólo `{escenario:lectura}`
-   * (ver `config/base.js`). Publicar el otro hacía que el reporte y el umbral
+   * Los globales incluyen el login de `setup()`, que es un pedido lento y uno
+   * solo — y el umbral, a propósito, mira sólo la lectura (ver
+   * `umbralesDeLectura`). Publicar el global hacía que el reporte y el umbral
    * hablaran de números distintos: con un login de 800 ms y lecturas de 20, el
    * reporte mostraba un p99 de 530 ms que era el login, y mandaba a buscar una
    * cola de latencia en `/api/cases` que no existe.
    *
-   * El respaldo hace falta: una submétrica sin umbral no aparece en `metrics`.
+   * Las tres salen del mismo lado: una submétrica sin umbral no aparece en
+   * `metrics`, y mezclar el p95 de la lectura con los pedidos de todo daría un
+   * reporte incoherente. Si falta alguna se cae al global, pero DICIÉNDOLO en
+   * `medido_sobre`: un respaldo silencioso es un número que miente.
    */
-  const dur =
-    datos.metrics["http_req_duration{escenario:lectura}"] ||
-    datos.metrics.http_req_duration || { values: {} };
-  const fallos = datos.metrics.http_req_failed || { values: {} };
-  const pedidos = datos.metrics.http_reqs || { values: {} };
+  const sub = (nombre) => datos.metrics[`${nombre}{${selector}}`];
+  const hayLectura = sub("http_req_duration") && sub("http_reqs") && sub("http_req_failed");
+  const pide = (nombre) => (hayLectura ? sub(nombre) : datos.metrics[nombre]) || { values: {} };
+  const dur = pide("http_req_duration");
+  const fallos = pide("http_req_failed");
+  const pedidos = pide("http_reqs");
+  const cupo = datos.metrics.rechazados_por_cupo;
 
   return {
     escenario,
     generado_en: new Date().toISOString(),
+    medido_sobre: hayLectura
+      ? selector
+      : `todos los pedidos, el login del setup incluido (no hay umbrales sobre {${selector}})`,
     pedidos: pedidos.values.count ?? 0,
     rps: ms(pedidos.values.rate),
     fallidos_pct: ms((fallos.values.rate ?? 0) * 100),
+    rechazados_por_cupo: cupo ? (cupo.values.count ?? 0) : 0,
     latencia_ms: {
       p50: ms(dur.values.med),
       p90: ms(dur.values["p(90)"]),
@@ -127,7 +139,7 @@ function html(r) {
 <h1>Carga — ${r.escenario}</h1>
 <p class="sub">${r.generado_en} · ${r.pedidos} pedidos · ${r.rps ?? "—"} req/s · ${
     r.fallidos_pct ?? 0
-  }% fallidos</p>
+  }% fallidos · ${r.rechazados_por_cupo} rechazados por cupo<br>medido sobre: ${r.medido_sobre}</p>
 <h2>Latencia</h2><table>${filas}</table>
 <h2>Umbrales</h2><table>${umbrales || "<tr><td>ninguno</td></tr>"}</table>
 ${fallados ? `<h2>Chequeos que fallaron</h2><table>${fallados}</table>` : ""}
@@ -138,14 +150,15 @@ ${notas ? `<h2>Lo que este perfil fue a medir</h2><table>${notas}</table>` : ""}
  * El `handleSummary` de k6. Cada escenario lo reexporta con su nombre y sus
  * notas.
  */
-export function guardar(datos, escenario, notas = {}) {
-  const r = resumen(datos, escenario, notas);
+export function guardar(datos, escenario, notas = {}, selector = undefined) {
+  const r = resumen(datos, escenario, notas, selector);
   const base = `resultados/carga-${escenario}`;
   return {
     // Sin la segunda línea, un rojo obliga a bajar el artefacto para saber qué
     // se rompió; el log de la CI es lo primero que se mira.
     stdout:
-      `\n${escenario}: p95 ${r.latencia_ms.p95} ms · ${r.fallidos_pct}% fallidos · ${r.pedidos} pedidos\n` +
+      `\n${escenario}: p95 ${r.latencia_ms.p95} ms · ${r.fallidos_pct}% fallidos · ${r.pedidos} pedidos · ` +
+      `${r.rechazados_por_cupo} rechazados por cupo (medido sobre: ${r.medido_sobre})\n` +
       r.chequeos_rotos
         .map((c) => `  ROTO: ${c.nombre} — ${c.fallos} de ${c.fallos + c.pases}\n`)
         .join(""),

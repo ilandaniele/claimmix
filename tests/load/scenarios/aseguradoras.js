@@ -40,6 +40,9 @@
  * Con `ASEGURADORAS=2 USUARIOS_POR_ASEGURADORA=5 DURACION=1m` es una prueba de
  * humo del escenario en un minuto.
  *
+ * Los umbrales miran sólo la meseta (`fase:plano`): durante la subida de media
+ * hora hay pocas personas y mezclarlas con las setecientas bajaría el p95.
+ *
  * Sólo corre contra localhost, 127.0.0.1 o un host con -qa / -dev, y no hay
  * llave para saltearlo. Ver `config/destino.js`.
  */
@@ -48,7 +51,15 @@ import http from "k6/http";
 import { check, fail, sleep } from "k6";
 import { Counter } from "k6/metrics";
 
-import { BASE_URL, PERCENTILES, RUTAS_DE_CASO, umbrales } from "../config/base.js";
+import {
+  BASE_URL,
+  PERCENTILES,
+  RUTAS_DE_CASO,
+  TOPE_LOGIN_POR_MIN,
+  listado,
+  selectorDeLectura,
+  umbrales,
+} from "../config/base.js";
 import {
   APELLIDOS,
   ASEGURADORAS_POR_OMISION,
@@ -58,12 +69,10 @@ import {
 } from "../config/cuentas.js";
 import { exigirDestinoDePrueba } from "../config/destino.js";
 import { comoAnalista, entrar, esRechazoDeCupo, pedirSesion } from "../helpers/auth.js";
+import { faseDeLaCarga } from "../helpers/fase.js";
 import { guardar } from "../helpers/reporte.js";
 
 exigirDestinoDePrueba("aseguradoras", BASE_URL, [__ENV.PRD_URL || ""]);
-
-/** El tope de `AUTH_POR_IP` del producto. Si allá cambia, acá también. */
-const TOPE_LOGIN_POR_MIN = 30;
 
 function entero(nombre, porOmision) {
   const crudo = __ENV[nombre];
@@ -115,11 +124,15 @@ export const options = {
   // Como smoke: una API que pasara a redirigir a /login no se mide como sana.
   maxRedirects: 0,
   summaryTrendStats: PERCENTILES,
-  thresholds: umbrales({
-    // Un puñado de logins reintentados es normal con la subida pegada al tope
-    // por IP; más del 2% es que algo anda mal con las cuentas o con la subida.
-    logins_fallidos: [`count<=${Math.ceil(TOTAL * 0.02)}`],
-  }),
+  // La subida dura media hora con poca gente: los umbrales miran sólo la meseta.
+  thresholds: umbrales(
+    {
+      // Un puñado de logins reintentados es normal con la subida pegada al tope
+      // por IP; más del 2% es que algo anda mal con las cuentas o con la subida.
+      logins_fallidos: [`count<=${Math.ceil(TOTAL * 0.02)}`],
+    },
+    "plano"
+  ),
 };
 
 /**
@@ -128,10 +141,7 @@ export const options = {
  */
 export function setup() {
   const cookie = entrar({ correo: correoDe(1, 1), clave: CLAVE });
-  const res = http.get(
-    `${BASE_URL}/api/cases?page=1&per_page=1`,
-    comoAnalista({ cookie }, "setup")
-  );
+  const res = http.get(`${BASE_URL}${listado(1)}`, comoAnalista({ cookie }, "setup"));
   if (res.status !== 200) {
     fail(`La bandeja contestó ${res.status} en el setup. Sin ella no hay nada que medir.`);
   }
@@ -177,7 +187,10 @@ function elegir(lista) {
 }
 
 function leer(ruta, accion) {
-  const res = http.get(`${BASE_URL}${ruta}`, comoAnalista({ cookie }, "lectura", { accion }));
+  const res = http.get(
+    `${BASE_URL}${ruta}`,
+    comoAnalista({ cookie }, "lectura", { accion, fase: faseDeLaCarga(TOTAL) })
+  );
   esRechazoDeCupo(res);
   check(res, { [`${accion} 200`]: (r) => r.status === 200 });
   // Sesión perdida: la próxima vuelta vuelve a entrar en vez de pedir 401s.
@@ -198,10 +211,10 @@ function recordar(res) {
 
 const ACCIONES = {
   bandeja() {
-    recordar(leer("/api/cases?page=1&per_page=50", "bandeja"));
+    recordar(leer(listado(50), "bandeja"));
   },
   filtrar() {
-    recordar(leer(`/api/cases?page=1&per_page=25&${consulta(elegir(FILTROS))}`, "filtrar"));
+    recordar(leer(listado(25, consulta(elegir(FILTROS))), "filtrar"));
   },
   abrir() {
     if (ids.length === 0) return ACCIONES.bandeja();
@@ -210,7 +223,7 @@ const ACCIONES = {
     leer(RUTAS_DE_CASO.mensajes(id), "mensajes");
   },
   buscar() {
-    recordar(leer(`/api/cases?page=1&per_page=25&${consulta({ q: elegir(APELLIDOS) })}`, "buscar"));
+    recordar(leer(listado(25, consulta({ q: elegir(APELLIDOS) })), "buscar"));
   },
 };
 
@@ -260,5 +273,6 @@ export function handleSummary(datos) {
     "subida": `${RAMPA_MIN} min a ${LOGINS_POR_MIN} logins por minuto (el tope del login es ${TOPE_LOGIN_POR_MIN}/min por IP)`,
     "mezcla": "30% bandeja · 30% filtros con selección múltiple · 30% abrir un caso · 10% búsqueda",
     "logins fallidos": fallidos ? fallidos.values.count : 0,
-  });
+    "medido sobre": `la meseta de ${DURACION}, sin la subida de ${RAMPA_MIN} min ni la bajada`,
+  }, selectorDeLectura("plano"));
 }

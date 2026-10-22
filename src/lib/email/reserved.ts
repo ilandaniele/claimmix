@@ -83,6 +83,20 @@ export function isReservedTestAddress(value: string | null | undefined): boolean
   return DOMINIO_RESERVADO.test(address);
 }
 
+const CASILLA_DE_GMAIL = /^([a-z0-9.]+)(\+[a-z0-9._'+-]*)?@(gmail\.com|googlemail\.com)$/;
+
+/**
+ * La casilla de Gmail detrás de `local[+alias]@gmail.com` o `@googlemail.com`,
+ * sin puntos ni alias: `Je.Fa+x@googlemail.com` → `jefa@googlemail.com`.
+ * Estricta: sólo la dirección pelada, sin nombre visible, comillas ni comentarios,
+ * y los dos dominios no se cruzan. Cualquier otra cosa, `null`.
+ */
+export function casillaDeGmail(value: string | null | undefined): string | null {
+  const m = CASILLA_DE_GMAIL.exec(value?.trim().toLowerCase() ?? "");
+  const base = m?.[1].replace(/\./g, "");
+  return m && base ? `${base}@${m[3]}` : null;
+}
+
 /** La dirección que nunca recibe avisos, en cualquier escritura de Gmail. */
 export function vedadaParaAlertas(value: string | null | undefined): boolean {
   const a = bareAddress(value);

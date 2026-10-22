@@ -12,7 +12,9 @@
  * espacio» si esa cuenta ya tiene perfil; «tu empresa pide el SSO» si el espacio
  * exige el SSO para el dominio invitado (ni Google ni la contraseña se ofrecen:
  * la cuenta nacería y la sesión se le negaría); con la sesión de la dirección
- * invitada, el botón de aceptar; y sin sesión, las tres opciones.
+ * invitada, el botón de aceptar; y sin sesión, las tres opciones. Una dirección
+ * Gmail con «+» no ofrece Google: la cuenta vuelve con la casilla base y no
+ * coincide con la invitada, así que sólo queda la contraseña.
  *
  * El enlace es una credencial de un solo destinatario: `referrer: no-referrer`
  * evita que viaje a los sitios a los que se llegue desde esta pantalla.
@@ -24,6 +26,7 @@ import { signInSso, signOut } from "@/app/login/actions";
 import { PistaDelOtroAmbiente } from "@/app/login/PistaDelOtroAmbiente";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRowOrThrow } from "@/lib/auth/user-row";
+import { casillaDeGmail } from "@/lib/email/reserved";
 import { getT, type ClaveDelServidor, type Locale } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
 import { abrirInvitacion, leerCookieDeInvitacion, resumenDeInvitacion } from "@/server/alta/invitacion";
@@ -156,6 +159,7 @@ export default async function InvitacionPage({
   const motivo = ultimo(e);
   const claveError = motivo !== undefined && Object.hasOwn(ERRORES, motivo) ? ERRORES[motivo] : null;
   const conSesion = usuario !== undefined && usuario.emailVerified === true;
+  const conGoogle = !(datos.e.includes("+") && casillaDeGmail(datos.e) !== null);
 
   return (
     <Tarjeta titulo={t("invitacion.titulo")} locale={locale}>
@@ -183,18 +187,22 @@ export default async function InvitacionPage({
         </form>
       ) : (
         <div className="space-y-4">
-          <form action={aceptarConGoogle}>
-            <input type="hidden" name="t" value={enlace} />
-            <button type="submit" className={CLASE_DEL_BOTON_SECUNDARIO}>
-              {t("invitacion.google")}
-            </button>
-          </form>
+          {conGoogle && (
+            <>
+              <form action={aceptarConGoogle}>
+                <input type="hidden" name="t" value={enlace} />
+                <button type="submit" className={CLASE_DEL_BOTON_SECUNDARIO}>
+                  {t("invitacion.google")}
+                </button>
+              </form>
 
-          <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span className="h-px flex-1 bg-slate-200" />
-            <span className="uppercase tracking-[0.08em]">{t("invitacion.o")}</span>
-            <span className="h-px flex-1 bg-slate-200" />
-          </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                <span className="h-px flex-1 bg-slate-200" />
+                <span className="uppercase tracking-[0.08em]">{t("invitacion.o")}</span>
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
+            </>
+          )}
 
           <form action={aceptarConClave} className="space-y-4">
             <input type="hidden" name="t" value={enlace} />

@@ -40,6 +40,8 @@ vi.mock("@/lib/audit/log", () => ({
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { getT } from "@/lib/i18n";
+import { correoDeEnlace } from "@/server/notify/correos-de-alta";
 import { sendPasswordResetEmail } from "@/server/notify/password-reset";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -144,18 +146,20 @@ describe("con el remitente del sistema", () => {
     expect(enviadoPorElSistema().texto).toMatch(/contraseña actual/i);
   });
 
-  it("sin perfil es el mail de activación, y no promete una contraseña que no existe", async () => {
+  it("sin perfil también es el mail de recuperación, pero no dice que la contraseña actual sigue funcionando: la cuenta del paso 1 puede ser sólo de Google", async () => {
     mockFila.mockResolvedValue(null);
 
     await sendPasswordResetEmail(ENTRADA);
 
     const { asunto, texto } = enviadoPorElSistema();
-    expect(asunto).toMatch(/activar/i);
+    expect(asunto).toMatch(/recuperar/i);
+    expect(asunto).not.toMatch(/activar/i);
     expect(texto).toContain(URL_RESET);
-    // La contraseña de una cuenta nueva no la conoce nadie: decirle que la
-    // actual sigue funcionando es falso.
+    expect(texto).toMatch(/si no fuiste vos/i);
     expect(texto).not.toMatch(/contraseña actual/i);
-    expect(texto).not.toMatch(/volver a entrar/i);
+    // Abrir el enlace no cambia nada y nadie más lo recibe: lo que cambia la cuenta es elegir la contraseña nueva.
+    expect(texto).toContain("tu cuenta no cambia hasta que se elige una contraseña nueva desde este enlace");
+    expect(texto).not.toMatch(/alguien abre/i);
   });
 
   it("sin perfil sale igual y no hay inquilino a quien anotárselo", async () => {
@@ -178,12 +182,12 @@ describe("los cupos del remitente", () => {
     expect(mockEnviar).toHaveBeenCalledWith(expect.anything(), { tipo: "recuperacion", ip: "203.0.113.7" });
   });
 
-  it("el enlace que activa una cuenta de alta (sin perfil) cuenta como `alta`", async () => {
+  it("una cuenta sin perfil también cuenta como `recuperacion`: no gasta el cupo de las altas", async () => {
     mockFila.mockResolvedValue(null);
 
     await sendPasswordResetEmail({ ...ENTRADA, request: pedido({ "x-forwarded-for": "203.0.113.7" }) });
 
-    expect(mockEnviar).toHaveBeenCalledWith(expect.anything(), { tipo: "alta", ip: "203.0.113.7" });
+    expect(mockEnviar).toHaveBeenCalledWith(expect.anything(), { tipo: "recuperacion", ip: "203.0.113.7" });
   });
 
   it("prefiere la cabecera de Vercel, la única que no escribe quien llama", async () => {
@@ -242,7 +246,7 @@ describe("el idioma", () => {
     expect(texto).toContain(URL_RESET);
   });
 
-  it("la activación también sale en inglés", async () => {
+  it("sin perfil no hay idioma guardado: el mail de recuperación sale en castellano aunque otra cuenta lo tenga en inglés", async () => {
     mockFila.mockResolvedValue(fila({ locale: "en-US" }));
 
     await sendPasswordResetEmail(ENTRADA);
@@ -250,7 +254,7 @@ describe("el idioma", () => {
     await sendPasswordResetEmail(ENTRADA);
 
     // Sin perfil no hay idioma guardado: es-AR.
-    expect((mockEnviar.mock.calls[1][0] as { asunto: string }).asunto).toBe("Activar tu cuenta de ClaimMix");
+    expect((mockEnviar.mock.calls[1][0] as { asunto: string }).asunto).toBe("Recuperar el acceso a ClaimMix");
   });
 
   it.each([
@@ -263,6 +267,19 @@ describe("el idioma", () => {
     await sendPasswordResetEmail(ENTRADA);
 
     expect(enviadoPorElSistema().asunto).toBe("Recuperar el acceso a ClaimMix");
+  });
+});
+
+describe("el texto del mail para una cuenta sin perfil, en los dos idiomas", () => {
+  it.each([
+    ["en-US", "your account does not change until a new password is chosen from this link"],
+    ["es-AR", "tu cuenta no cambia hasta que se elige una contraseña nueva desde este enlace"],
+  ] as const)("%s dice qué cambia la cuenta, sin suponer que alguien más abre el enlace", (locale, frase) => {
+    const { texto } = correoDeEnlace(getT(locale), "recuperar", URL_RESET, 60, true);
+
+    expect(texto).toContain(frase);
+    expect(texto).not.toMatch(/someone opens|alguien abre/i);
+    expect(texto).not.toMatch(/current password|contraseña actual/i);
   });
 });
 

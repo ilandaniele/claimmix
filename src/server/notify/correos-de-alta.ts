@@ -17,15 +17,20 @@ import type { CorreoDelSistema } from "./remitente-sistema";
 
 type Traductor = ReturnType<typeof getT>;
 
-/** Un enlace de un solo uso: el de activar una cuenta nueva o el de recuperar el acceso. */
+/**
+ * Un enlace de un solo uso: el de activar una cuenta nueva o el de recuperar el acceso.
+ * `sinPerfil` es la recuperación de una cuenta del paso 1 del alta: puede ser sólo de
+ * Google, sin contraseña, así que no se le dice que «la actual sigue funcionando».
+ */
 export function correoDeEnlace(
   t: Traductor,
   caso: "activar" | "recuperar",
   url: string,
-  duraMinutos: number
+  duraMinutos: number,
+  sinPerfil = false
 ): Omit<CorreoDelSistema, "to"> {
-  // La contraseña de una cuenta recién creada no la conoce nadie: el enlace
-  // es la única forma de entrar, así que no se le dice que la actual sigue sirviendo.
+  const noFuiste =
+    caso === "recuperar" && sinPerfil ? "correo.recuperar.noFuisteSinPerfil" : (`correo.${caso}.noFuiste` as const);
   return {
     asunto: t(`correo.${caso}.asunto`),
     texto: [
@@ -37,7 +42,7 @@ export function correoDeEnlace(
       "",
       t("correo.enlace.vence").replace("{minutos}", String(duraMinutos)),
       "",
-      t(`correo.${caso}.noFuiste`),
+      t(noFuiste),
     ].join("\n"),
   };
 }

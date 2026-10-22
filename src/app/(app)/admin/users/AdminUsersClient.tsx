@@ -234,7 +234,11 @@ function CreateUserDialog({
               required
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
               placeholder={t("usuarios.form.emailPlaceholder")}
+              aria-describedby="email-ayuda"
             />
+            <p id="email-ayuda" className="mt-1 text-xs text-slate-500">
+              {t("usuarios.form.emailAyuda")}
+            </p>
           </div>
 
           <div>

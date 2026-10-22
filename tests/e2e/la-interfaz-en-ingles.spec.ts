@@ -14,7 +14,7 @@
  * se saltea sola si no hay credenciales configuradas.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 import { enUS, esAR } from "../../src/lib/i18n/index";
 import { SESION_ANALISTA } from "./sesiones";
@@ -23,11 +23,26 @@ const ANALYST_EMAIL = process.env.PLAYWRIGHT_ANALYST_EMAIL ?? process.env.PLAYWR
 const ANALYST_PASSWORD =
   process.env.PLAYWRIGHT_ANALYST_PASSWORD ?? process.env.PLAYWRIGHT_TEST_PASSWORD;
 
+/**
+ * El PATCH olvida la fila cacheada sólo en su propia copia del módulo: el layout
+ * puede tener otra y servir el idioma anterior hasta que vence `TTL_FILA_MS`
+ * (30 s, `fila-de-usuario-cacheada.ts`). Se reintenta hasta pasar ese plazo.
+ */
+async function abrirEnIngles(page: Page, ruta: string) {
+  await expect(async () => {
+    await page.goto(ruta);
+    await expect(page).not.toHaveURL(/\/login/);
+    await expect(page.getByRole("navigation", { name: enUS["nav.principal"], exact: true })).toBeVisible({
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 40_000, intervals: [2_000] });
+}
+
 test.describe("con la cuenta en en-US", () => {
   test.skip(!(ANALYST_EMAIL && ANALYST_PASSWORD), "Falta PLAYWRIGHT_ANALYST_EMAIL / PLAYWRIGHT_ANALYST_PASSWORD");
 
   // Un solo archivo cambia el idioma de una cuenta compartida: en serie, para no pisarse a sí mismo.
-  test.describe.configure({ mode: "serial" });
+  test.describe.configure({ mode: "serial", timeout: 60_000 });
   test.use({ storageState: SESION_ANALISTA });
 
   let idiomaOriginal: "es-AR" | "en-US" | null = null;
@@ -47,17 +62,14 @@ test.describe("con la cuenta en en-US", () => {
   });
 
   test("la bandeja se ve en inglés y el documento lo declara", async ({ page }) => {
-    await page.goto("/bandeja");
-    await expect(page).not.toHaveURL(/\/login/);
+    await abrirEnIngles(page, "/bandeja");
 
-    await expect(page.getByRole("navigation", { name: enUS["nav.principal"], exact: true })).toBeVisible();
     await expect(page.getByRole("navigation", { name: esAR["nav.principal"], exact: true })).toHaveCount(0);
     await expect(page.locator('[lang="en-US"]').first()).toBeAttached();
   });
 
   test("configuración se ve en inglés, con el título de la pestaña", async ({ page }) => {
-    await page.goto("/configuracion");
-    await expect(page).not.toHaveURL(/\/login/);
+    await abrirEnIngles(page, "/configuracion");
 
     await expect(page).toHaveTitle(`${enUS["nav.configuracion"]} — ClaimMix`);
     await expect(page.getByRole("heading", { name: enUS["configuracion.title"], exact: true })).toBeVisible();

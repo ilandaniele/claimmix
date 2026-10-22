@@ -123,10 +123,10 @@ function buildContext(id: string) {
 /**
  * Set up requireRole to return a valid session context.
  */
-function setupAuth(role: UserRole = "analyst") {
+function setupAuth(role: UserRole = "analyst", plan = "piloto") {
   vi.mocked(requireRole).mockResolvedValue({
     user: { id: USER_ID, email: "test@example.com" },
-    userRow: { id: USER_ID, tenant_id: TENANT_ID, role, plan: "piloto" },
+    userRow: { id: USER_ID, tenant_id: TENANT_ID, role, plan },
   });
 }
 
@@ -246,6 +246,40 @@ describe("GET /api/cases/[id]/messages", () => {
       recortada: false,
       // Canal ("email") falla antes que plan en el nuevo orden: rol, canal, plan, agente_activo, ventana.
       respuesta: { habilitada: false, motivo: "canal", vence_en: null },
+    });
+  });
+
+  describe("P8: respuesta por WhatsApp según quién tiene el caso", () => {
+    const OTRO_USUARIO = "user-uuid-002";
+
+    /** Un caso de WhatsApp terminado, dentro de la ventana de 24 h, en Plan Pro. */
+    async function respuestaDe(role: UserRole, assignedTo: string | null) {
+      setupAuth(role, "profesional");
+      mockBatch({
+        caso: [{ id: CASE_ID, status: "listo", channel: "whatsapp", assigned_to: assignedTo }],
+        ultimoEntranteWhatsApp: [{ received_at: new Date(Date.now() - 60_000).toISOString() }],
+      });
+      const response = await GET(buildRequest(), buildContext(CASE_ID));
+      expect(response.status).toBe(200);
+      return (await response.json()).respuesta;
+    }
+
+    it("un analista no puede responder un caso asignado a otro", async () => {
+      expect(await respuestaDe("analyst", OTRO_USUARIO)).toEqual({
+        habilitada: false,
+        motivo: "rol",
+        vence_en: null,
+      });
+    });
+
+    it.each([
+      ["un analista, en un caso suyo", "analyst", USER_ID],
+      ["un analista, en un caso sin asignar", "analyst", null],
+      ["un admin, en un caso asignado a otro", "admin", OTRO_USUARIO],
+    ] as const)("%s, puede responder", async (_quien, role, assignedTo) => {
+      const respuesta = await respuestaDe(role, assignedTo);
+      expect(respuesta.habilitada).toBe(true);
+      expect(respuesta.motivo).toBeNull();
     });
   });
 

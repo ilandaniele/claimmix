@@ -38,6 +38,7 @@ import { responderPorWhatsApp, PLANTILLA_RESPUESTA_HUMANA } from "@/server/confi
 
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
 const USER_ID = "20000000-0000-0000-0000-000000000001";
+const OTRO_USUARIO_ID = "20000000-0000-0000-0000-000000000002";
 const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TEXTO = "Ya está resuelto, gracias por avisar.";
 const CRED = { accessToken: "test-token", phoneNumberId: "123456", wabaId: "654321", autoalta: false, vencida: false };
@@ -51,7 +52,14 @@ const HACE_UN_MINUTO = () => new Date(Date.now() - 60_000).toISOString();
 const HACE_VEINTICINCO_HORAS = () => new Date(Date.now() - 25 * 60 * 60_000).toISOString();
 
 /** El primer viaje: el caso y el último entrante de WhatsApp, en un lote. */
-function caso(o: Partial<{ status: string; channel: string; email_thread_id: string | null }> = {}) {
+function caso(
+  o: Partial<{
+    status: string;
+    channel: string;
+    email_thread_id: string | null;
+    assigned_to: string | null;
+  }> = {}
+) {
   return [
     [
       {
@@ -59,6 +67,7 @@ function caso(o: Partial<{ status: string; channel: string; email_thread_id: str
         status: o.status ?? "listo",
         channel: o.channel ?? "whatsapp",
         email_thread_id: o.email_thread_id ?? "5491100000001",
+        assigned_to: o.assigned_to ?? null,
       },
     ],
     [{ received_at: HACE_UN_MINUTO() }],
@@ -89,6 +98,44 @@ describe("responderPorWhatsApp", () => {
     expect(mockWriteAuditLog).not.toHaveBeenCalled();
   });
 
+  it("un analista en un caso asignado a otro: no_encontrado, no manda ni inserta ni audita", async () => {
+    mockEnTenantVarias.mockResolvedValueOnce(caso({ assigned_to: OTRO_USUARIO_ID }));
+
+    const r = await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO);
+
+    expect(r).toEqual({ ok: false, motivo: "no_encontrado" });
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockEnTenant).not.toHaveBeenCalled();
+    expect(mockEnTenantVarias).toHaveBeenCalledTimes(1);
+    expect(mockWriteAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("el no_encontrado de un caso ajeno no depende del resto del estado", async () => {
+    mockEnTenantVarias.mockResolvedValueOnce(caso({ status: "recibido", assigned_to: OTRO_USUARIO_ID }));
+
+    expect(await responderPorWhatsApp(CTX as never, CASE_ID, TEXTO)).toEqual({
+      ok: false,
+      motivo: "no_encontrado",
+    });
+  });
+
+  it.each([
+    ["un analista, en un caso suyo", "analyst", USER_ID],
+    ["un analista, en un caso sin asignar", "analyst", null],
+    ["un admin, en un caso asignado a otro", "admin", OTRO_USUARIO_ID],
+  ])("%s, manda", async (_quien, role, assigned_to) => {
+    mockEnTenantVarias
+      .mockResolvedValueOnce(caso({ assigned_to }))
+      .mockResolvedValueOnce([undefined, undefined]);
+    mockEnTenant.mockResolvedValueOnce([{ id: "outbound-1" }]);
+    const ctx = { ...CTX, userRow: { ...CTX.userRow, role } };
+
+    const r = await responderPorWhatsApp(ctx as never, CASE_ID, TEXTO);
+
+    expect(r).toEqual({ ok: true, id: "outbound-1", estado: "sent" });
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
   it("con el agente activo, no manda ni inserta", async () => {
     mockEnTenantVarias.mockResolvedValueOnce(caso({ status: "recibido" }));
 
@@ -102,7 +149,15 @@ describe("responderPorWhatsApp", () => {
 
   it("fuera de la ventana de 24 h, no manda ni inserta", async () => {
     mockEnTenantVarias.mockResolvedValueOnce([
-      [{ id: CASE_ID, status: "listo", channel: "whatsapp", email_thread_id: "5491100000001" }],
+      [
+        {
+          id: CASE_ID,
+          status: "listo",
+          channel: "whatsapp",
+          email_thread_id: "5491100000001",
+          assigned_to: null,
+        },
+      ],
       [{ received_at: HACE_VEINTICINCO_HORAS() }],
     ]);
 

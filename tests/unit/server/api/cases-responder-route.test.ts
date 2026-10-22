@@ -132,6 +132,13 @@ describe("POST /api/cases/:id/responder", () => {
     expect(res.status).toBe(404);
   });
 
+  it("la ruta le pasa a responderPorWhatsApp el usuario y el rol de la sesión, con los que decide si el caso es suyo", async () => {
+    await llamar();
+
+    const [ctxLlamado] = mockResponder.mock.calls[0]!;
+    expect(ctxLlamado.userRow).toMatchObject({ id: USER_ID, role: "analyst" });
+  });
+
   it.each(["agente_activo", "ventana", "canal", "plan", "rol"] as const)(
     "motivo %s da 409 RESPUESTA_NO_PERMITIDA con el motivo",
     async (motivo) => {

@@ -806,6 +806,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "usuarios.error.rol": "Could not update the role.",
   "usuarios.error.sesiones": "Could not close the sessions.",
   "usuarios.form.email": "Email address",
+  "usuarios.form.emailAyuda": "If the person has already created their ClaimMix account, invite that same address.",
   "usuarios.form.emailPlaceholder": "analyst@company.com",
   "usuarios.form.nombre": "Full name",
   "usuarios.form.nombrePlaceholder": "e.g. María García",

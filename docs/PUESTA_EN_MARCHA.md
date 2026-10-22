@@ -81,7 +81,7 @@ y `docs/PROJECT_STATUS.md` se corrigieron en este mismo cambio.
   Ahí entra la cuenta de operador y, en dev, el número y la casilla de la plataforma.
 - **Operador**: quien administra la plataforma, no un cliente. Ve `/admin/altas` y
   `/admin/cartera`.
-- **Autoalta**: el alta que hace el cliente solo, desde `/registro`.
+- **Autoalta**: el alta que hace el cliente solo, en dos pasos: la cuenta en `/registro` y, ya con la sesión abierta, el espacio de su empresa en `/alta`.
 - **En prueba**: un espacio que todavía no paga. Tiene topes de gasto e invitaciones más
   chicos.
 - **Base propia** (`t_<hex>`): en prd, cada cliente tiene su propia base de datos en Neon. Su
@@ -190,15 +190,15 @@ tarda algo, la guía lo dice así.
   - **Fuentes:** `docs/PROMOCION.md:779-784` (D2); `docs/PROMOCION.md:268-292` y
     `.github/workflows/deploy-checks.yml:378-383` (D7: el ensayo gasta unos 1,5 M de tokens
     por corrida y el tope de dev y QA tiene que ser igual a la variable del repo);
-    `src/app/alta/page.tsx:19-23` (D8).
+    `src/app/alta/page.tsx` (D8).
 - [ ] **A2. El nombre de la empresa ficticia.**
   - **Quién:** [Dueño].
-  - **Dónde:** el campo «empresa» de `/registro` de prd.
+  - **Dónde:** el campo «empresa» de `/alta` de prd, el segundo paso del alta («Dar de alta mi empresa»).
   - **Qué hacer:** elegir un nombre inventado, que no se parezca a una aseguradora ni a una
     empresa real.
   - **Salió bien si:** una búsqueda del nombre en internet no devuelve una empresa.
   - **Si falla:** elegir otro.
-  - **Fuentes:** `src/app/registro/page.tsx`.
+  - **Fuentes:** `src/app/alta/page.tsx`.
 - [ ] **A3. Las direcciones de correo: administrador, analista y mail agente, por ambiente.**
   - **Quién:** [Dueño]; en QA, Gonzalo.
   - **Dónde:** Gmail. Las cuentas nuevas se crean en
@@ -207,7 +207,7 @@ tarda algo, la guía lo dice así.
   - **Qué hacer:** tener tres direcciones en cada ambiente.
     - **Administrador:** un alias `+` de una Gmail: la dirección con `+dev-admin` antes de la arroba. Gmail
       lo entrega en la bandeja de la cuenta sin configurar nada. Hace la autoalta en
-      `/registro` por el camino del correo. `ADMIN_EMAILS` compara la dirección exacta, así
+      `/registro` y `/alta` por el camino del correo. `ADMIN_EMAILS` compara la dirección exacta, así
       que el alias de una cuenta de operador no cuenta como operador.
     - **Analista:** otro alias `+` de la misma Gmail que el administrador, con `+dev-analista`
       antes de la arroba. Se invita desde `/admin/users` sin activar el espacio (D4 d): en
@@ -255,7 +255,7 @@ tarda algo, la guía lo dice así.
     el alta termina en `ya_tiene_espacio`; con una de `ADMIN_EMAILS`, `/alta` muestra el
     aviso de operador en vez de abrir un espacio.
   - **Fuentes:** `src/server/alta/crear-inquilino.ts:5`, `:37`; `.env.example:404`
-    (`ADMIN_EMAILS`), `:295` (`CASILLAS_DE_DEV`); `src/app/alta/page.tsx:19-23`;
+    (`ADMIN_EMAILS`), `:295` (`CASILLAS_DE_DEV`); `src/app/alta/page.tsx`;
     `src/lib/auth/require-operator.ts:42-47` (comparación exacta);
     `src/app/api/admin/users/route.ts:134-153` (dominio y alias propio), `:155-179`
     (invitación a un operador); `src/lib/email/reserved.ts:86-98` (`casillaDeGmail`);
@@ -458,8 +458,8 @@ ningún doc lo dice.
 | Variable | Tipo | Igual o excepción | Estado conocido | Cómo comprobarlo |
 |---|---|---|---|---|
 | `ALTA_AUTOMATICA` (`src/lib/auth/registro-permitido.ts:53`) | bandera | igual (D6) | dev y prd en 1 (`docs/PROJECT_STATUS.md:4763-4764`); QA en 1 desde el 17/10 (A12) | Vercel; una autoalta de prueba |
-| `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | igual: 1 en los tres (D1, b); en QA sin token, el alta va a revisión con `sin_credencial` | 1 en los tres: dev y QA desde el 17/10 (A12) | el aviso del número en `/registro` |
-| Número por código | bandera y Meta | excepción de hecho aunque la bandera sea igual (D1, b): el tope de Meta es de 2 números por portfolio y uno ya es el de la plataforma, así que queda un solo lugar libre para dev y prd juntos, y es primero del cliente ficticio de prd. QA tiene la bandera pero no token, y sus altas por código van a revisión con `sin_credencial`. QA tiene su propia WABA y su propio token recién después de A5 (la verificación la pide el [Dueño] en Meta Business Suite) | prd prendido; dev y QA con la bandera en 1 desde el 17/10 (A12) | el aviso del número en `/registro`; `docs/whatsapp-setup.md:283-299` |
+| `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | igual: 1 en los tres (D1, b); en QA sin token, el alta va a revisión con `sin_credencial` | 1 en los tres: dev y QA desde el 17/10 (A12) | el aviso del número en `/alta`, con una sesión abierta (`/registro` ya no lo muestra) |
+| Número por código | bandera y Meta | excepción de hecho aunque la bandera sea igual (D1, b): el tope de Meta es de 2 números por portfolio y uno ya es el de la plataforma, así que queda un solo lugar libre para dev y prd juntos, y es primero del cliente ficticio de prd. QA tiene la bandera pero no token, y sus altas por código van a revisión con `sin_credencial`. QA tiene su propia WABA y su propio token recién después de A5 (la verificación la pide el [Dueño] en Meta Business Suite) | prd prendido; dev y QA con la bandera en 1 desde el 17/10 (A12) | el aviso del número en `/alta`, con una sesión abierta (`/registro` ya no lo muestra); `docs/whatsapp-setup.md:283-299` |
 | `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1`; `pnpm paridad` |
 | Entrenamiento del agente (reglas y ejemplos de `/agente`) | datos de cada espacio | excepción hasta que el entrenamiento base viva en el repo, igual en los tres (`docs/PROJECT_STATUS.md:5055-5063`). No existe un script que copie reglas y ejemplos entre ambientes (`scripts/export-training.mjs:11`) | dev 19 reglas y 207 ejemplos en el espacio de prueba; prd ninguno; QA desconocido | `/agente`, solapas «Reglas de prompt» y «Ejemplos aprobados» (`src/lib/i18n/es-AR.ts:844`, `:852`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` (`.env.example:312-313`) | valor y secreto | igual (dev y prd comparten la clave del sitio) | cargadas en los tres (la CSP de QA trae `challenges.cloudflare.com`) | el desafío en `/registro` |
@@ -549,15 +549,25 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
 - [ ] **3. Alta.**
   - **Quién:** [Dueño].
   - **Dónde:** una ventana privada, `https://claimmix-dev.vercel.app/registro`.
-  - **Qué hacer:** el alias de administrador de A3, por el camino del correo. Llega
-    un mail del remitente con un enlace a `/alta/correo?t=` que vale 60 minutos. Ahí se
-    elige una contraseña de 8 a 128 caracteres y el espacio se crea en el acto.
-  - **Salió bien si:** termina en `/bandeja?bienvenida=1`.
+  - **Qué hacer:** el alta tiene dos pasos. Paso 1, en `/registro`: el nombre, el alias de
+    administrador de A3 y la casilla de los términos, por el camino del correo (no pide
+    empresa ni celular). Llega un mail del remitente con un enlace a `/alta/correo?t=` que
+    vale 60 minutos; ahí se elige una contraseña de 8 a 128 caracteres y se crea sólo la
+    cuenta, y la página sigue en `/alta`. Paso 2, en `/alta`: elegir «Dar de alta mi empresa»,
+    escribir la empresa y el WhatsApp, aceptar los términos y enviar. La otra opción, «Mi empresa
+    ya usa ClaimMix», no crea nada: es un texto fijo que pide a un administrador de la empresa que
+    invite la dirección de la cuenta (con una invitación en el navegador, lo reemplaza el enlace
+    «Seguir con tu invitación») y no muestra si la empresa existe.
+  - **Salió bien si:** el paso 1 termina en `/alta`, sin espacio todavía, y el paso 2 termina en
+    `/bandeja?bienvenida=1`.
   - **Si falla:**
-    - `/registro?e=datos`: la empresa, el celular o la casilla de los términos están mal.
-    - `/registro?e=celular`: sólo aparece donde `ALTA_NUMERO_AUTOMATICO` está en 1 (hoy, los
+    - `/alta?e=datos`: la empresa, el celular o la casilla de los términos están mal.
+    - `/alta?e=celular`: sólo aparece donde `ALTA_NUMERO_AUTOMATICO` está en 1 (hoy, los
       tres: dev y QA desde el lote de A12, D1 b) y el +54 del campo de WhatsApp viene sin el 9.
-    - `/registro?e=intentos`: se llegó a un cupo por IP o del día. Esperar al otro día.
+    - `/alta?e=intentos` (o `/registro?e=intentos`): se llegó a un cupo por IP o del día. Esperar al otro día.
+    - `/registro?e=datos`: con el formulario por correo, el nombre, el correo o la casilla de
+      los términos del paso 1 están mal.
+    - `/registro?e=terminos`: con Google, la casilla de los términos no estaba marcada.
     - `registro_cerrado`, o la tarjeta «cerrada» en `/alta`: `ALTA_AUTOMATICA` no vale
       exactamente `1` y la dirección no está en la lista.
     - Aviso de operador: la dirección está en `ADMIN_EMAILS`.
@@ -565,9 +575,9 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
       `ALTA_TOPE_GLOBAL_DIA` o falta una función de la base.
     - No llega el mail: la respuesta es siempre neutra (`/login?aviso=revisa_tu_correo`).
       Mirar spam y los cupos `ALTA_TOPE_CORREOS_DIA` y `ALTA_TOPE_POR_DESTINATARIO_DIA`.
-  - **Fuentes:** `src/app/alta/correo`; `src/app/registro/actions.ts:59`, `:72`, `:73`,
-    `:135`, `:159`, `:184`; `src/app/alta/page.tsx:88-89`;
-    `src/lib/auth/registro-permitido.ts:52-53`; `src/server/alta/crear-inquilino.ts:52`,
+  - **Fuentes:** `src/app/alta/correo`; `src/app/registro/actions.ts`; `src/app/alta/actions.ts`;
+    `src/app/alta/page.tsx`; `src/server/alta/crear-espacio.ts`;
+    `src/server/alta/cuenta-del-enlace.ts`; `src/lib/auth/registro-permitido.ts:52-53`; `src/server/alta/crear-inquilino.ts:52`,
     `:67`, `:79`; `.env.example:232-233`.
 - [ ] **4. El espacio nuevo en `/admin/altas`.**
   - **Quién:** [Dueño], con la cuenta de operador.
@@ -765,8 +775,9 @@ ambiente, la hora, una captura y el número de caso.
 - [ ] **3. Alta.**
   - **Quién:** [Gonzalo].
   - **Dónde:** `https://claimmix-qa.vercel.app/registro`.
-  - **Qué hacer:** la dirección de Gonzalo, por el camino del correo. El enlace a
-    `/alta/correo?t=` vale 60 minutos.
+  - **Qué hacer:** la dirección de Gonzalo, por el camino del correo, en los dos pasos del
+    paso 3 de dev: la cuenta en `/registro` (el enlace a `/alta/correo?t=` vale 60 minutos) y la
+    empresa y el WhatsApp en `/alta`.
   - **Salió bien si:** termina en `/bandeja?bienvenida=1`, y `/configuracion` muestra
     «Primeros pasos», que sólo aparece para quien administra un espacio de autoalta.
   - **Si falla:** los mismos casos que el paso 3 de dev (en QA, con `ALTA_NUMERO_AUTOMATICO` en 1, `?e=celular` sale si el +54 viene sin el 9). Si
@@ -983,7 +994,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     la usa la suscripción de dev, `gmail-inbound-push`.
   - **Salió bien si:** después del redeploy, el log del paso «Smoke de prd» del Post-deploy
     PRD lista cada chequeo sin «sin configurar», salvo `whatsapp` hasta el paso 2. Y
-    `https://claimmix.vercel.app/registro` muestra el correo, Turnstile y el aviso del número.
+    `https://claimmix.vercel.app/registro` muestra el correo y Turnstile, y `/alta` (con una sesión abierta) el aviso del número.
   - **Si falla:** [Claude] lee ese log, o pide `GET /api/health` con el `CRON_SECRET` de prd,
     y dice qué variable falta. Si el smoke dice «CRON_SECRET local no coincide», el de Vercel
     y el de GitHub son distintos: el Post-deploy PRD y el barrido quedan en rojo. Si `token-remitente.mts` se niega porque
@@ -1037,13 +1048,14 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
 - [ ] **4. Alta.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** una ventana privada, `https://claimmix.vercel.app/registro`.
-  - **Qué hacer:** la empresa de A2, el alias de administrador de A3, el nombre de quien hace
-    de cliente y el celular de la SIM de A4, con el 9. Camino del correo: el mail del
-    remitente trae el enlace a `/alta/correo?t=` (60 minutos).
+  - **Qué hacer:** en dos pasos, como el paso 3 de dev. En `/registro`: el alias de
+    administrador de A3 y el nombre de quien hace de cliente. Camino del correo: el mail del
+    remitente trae el enlace a `/alta/correo?t=` (60 minutos), donde se elige la contraseña. En
+    `/alta`, «Dar de alta mi empresa»: la empresa de A2 y el celular de la SIM de A4, con el 9.
   - **Salió bien si:** pasa a `/preparando`.
-  - **Si falla:** los mismos casos que el paso 3 de dev. Acá sí puede salir `?e=celular`: el
-    +54 vino sin el 9.
-  - **Fuentes:** `src/app/registro/actions.ts:73`.
+  - **Si falla:** los mismos casos que el paso 3 de dev. Acá sí puede salir `?e=celular` en
+    `/alta`: el +54 vino sin el 9.
+  - **Fuentes:** `src/app/registro/actions.ts`; `src/app/alta/actions.ts`.
 - [ ] **5. Base propia.**
   - **Quién:** [Automático]; [Claude] si se traba.
   - **Dónde:** `/preparando`.
@@ -1354,14 +1366,14 @@ que tenía en la versión anterior de esta guía.
 | 6 | `/configuracion` y `/api/health` muestran el tope real de `MONTHLY_BUDGET_USD` (nuevo) | El semáforo y la pantalla dicen la cifra que corta | Ve su tope real | Con `MONTHLY_BUDGET_USD` en 50, las dos muestran 50; con 0, dicen «IA frenada», porque el guardia frena. **Hecho en #461.** Que 0 quiera decir «sin tope» lo decide el dueño | chico | nada |
 | 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
 | 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador recibe un mail al llegar a 80 usuarios y cuando la WABA se llena | mediano | 4 y 7 |
-| 9 | Prueba automática del alta por el enlace del correo, de punta a punta, en QA: `pnpm alta:probar` (`scripts/probar-alta.mts`), un guión nuevo. No parte de `pnpm onboard`, que prueba el alta de un inquilino por el operador y no la autoalta (nuevo) | Cada deploy de QA prueba `/registro`, el alta por el enlace del correo y la base (la función de la 0048 y los cupos por red) sin una persona. No prueba Turnstile, Gmail ni el alta con Google: siguen a mano | Menos altas rotas | El job «Alta automática en QA» corre en el Post-deploy de QA y queda rojo si el alta se rompe o QA queda sucia. Si no puede probar (red, tope de QA lleno, otro commit, candado ocupado) sale verde y el resumen del run dice «corrió SIN PODER PROBAR». **Hecho con el merge del lote 1** (`docs/TESTING.md`, capa 11). El lote 2 queda pendiente del dueño | grande | 3 |
+| 9 | Prueba automática del alta en dos pasos (el enlace del correo y el pedido del espacio), de punta a punta, en QA: `pnpm alta:probar` (`scripts/probar-alta.mts`), un guión nuevo. No parte de `pnpm onboard`, que prueba el alta de un inquilino por el operador y no la autoalta (nuevo) | Cada deploy de QA prueba `/registro`, el alta por el enlace del correo y la base (la función de la 0048 y los cupos por red) sin una persona. No prueba Turnstile, Gmail ni el alta con Google: siguen a mano | Menos altas rotas | El job «Alta automática en QA» corre en el Post-deploy de QA y queda rojo si el alta se rompe o QA queda sucia. Si no puede probar (red, tope de QA lleno, otro commit, candado ocupado) sale verde y el resumen del run dice «corrió SIN PODER PROBAR». **Hecho con el merge del lote 1** (`docs/TESTING.md`, capa 11). El lote 2 queda pendiente del dueño | grande | 3 |
 | 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones. **Hecho en la rama `ci/paridad-banderas`**: corre en cada deploy, al lado de los chequeos, sólo avisa (`::warning` y resumen del run) y nunca pone rojo; en el log público salen las claves, no los valores | mediano | 3. Decisión del dueño: si algún día bloquea en vez de avisar |
 | 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio. **Hecho en #484** | mediano | nada |
 | 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |
 | 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo. **Hecho en #484**; `tests/unit/lib/topes-unico.test.ts` lo fija | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
 | 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions. **Hecho en el lote de las notas del 14/10**, cada 2 h como prd. | chico | Nada (cadencia fijada en cada 2 h) |
 | 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso | grande | Decisión: si vale una migración en todas las bases (receta de pausa para migrar) |
-| 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte `src/app/alta/page.tsx:19-23` |
+| 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte que `/alta` no revele qué empresas existen (`docs/SEGURIDAD.md`) |
 | 17 | Comprobar en qué zona horaria cortan el día y el mes del presupuesto, y fijarla (P14) | Los cortes coinciden con el mes que mira | El corte diario cae a una hora previsible | Un test fija la zona | chico | Decisión: mes argentino o mes de la factura de Google (supuesto: argentino) |
 | 18 | Correo que no sea Gmail (nuevo). Hoy no existe: sólo hay webhooks de Gmail y de WhatsApp (`src/app/api/webhooks`). Mientras tanto, el formulario web de `/denuncia/[slug]`, que se prende en `/agente`, solapa «Formulario web» | Puede vender a quien no usa Gmail | Conecta su correo, sea cual sea | Un cliente con otro proveedor recibe denuncias por correo | grande | Decisión: qué proveedores |
 | 19 | Cobro y activación sin operador (nuevo). Hoy no existe: activar es un paso del operador | No activa a mano cada cliente que paga | Paga y queda activo solo | Un pago de prueba activa el espacio sin tocar `/admin/altas` | grande | Decisión: medio de pago y lo que pida el abogado |
@@ -1397,9 +1409,9 @@ conexión para Gmail y Google Workspace («Conectar Gmail»). Para otro proveedo
 
 Con todo lo anterior hecho, a un cliente real le queda:
 
-- [ ] 1. [Cliente] `/registro` con su empresa, su correo y su celular; confirmar el correo con
-  el enlace (60 minutos) o entrar con Google. Salió bien si llega a `/preparando`. Si falla,
-  los casos del paso 3 de dev.
+- [ ] 1. [Cliente] `/registro` con su nombre y su correo; confirmar el correo con el enlace (60
+  minutos) o entrar con Google; en `/alta`, «Dar de alta mi empresa» con su empresa y su
+  celular. Salió bien si llega a `/preparando`. Si falla, los casos del paso 3 de dev.
 - [ ] 2. [Automático] La base propia en `/preparando`. Salió bien si pasa sola a la bandeja. Si
   falla, el paso 5 de prd.
 - [ ] 3. [Cliente] El número: una SIM libre, «Por SMS» o «Por llamada» y el código. Salió bien

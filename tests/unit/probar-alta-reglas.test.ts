@@ -14,17 +14,20 @@ import { normalizarE164, validarEmpresa } from "@/server/alta/validar";
 
 import {
   CUPOS_DE_LA_RED_DE_PRUEBA,
+  CUPOS_ESPERADOS,
   HALLAZGOS,
   LETRAS,
   NOMBRES_DE_TOPES,
   PREFIJO_CORREO,
   PREFIJO_EMPRESA,
   clasificarError,
+  codigoDeDestinoInesperado,
   compararContadores,
   correoDe,
   diagnosticarCierre,
   empresaDe,
   esCorrida,
+  esFallaTragada,
   formatear,
   hallazgo,
   ipDe,
@@ -75,6 +78,8 @@ describe("la tabla de hallazgos", () => {
         "registro_ok",
         "enlace_ajeno_rechazado",
         "margen_ok",
+        "enlace_ok",
+        "enlace_viejo_ok",
         "alta_ok",
         "segunda_vez_ok",
         "contadores_ok",
@@ -108,12 +113,14 @@ describe("la tabla de hallazgos", () => {
         "sin_banderas",
         "alta_apagada",
         "registro_sin_formulario",
+        "registro_pide_empresa",
         "registro_correo_incoherente",
         "registro_turnstile_incoherente",
         "token_ajeno_aceptado",
         "enlace_ilegible",
         "tope_0",
         "destino_inesperado",
+        "enlace_creo_espacio",
         "correo_sin_verificar",
         "sin_perfil_de_dueno",
         "inquilino_mal_creado",
@@ -157,10 +164,10 @@ describe("la identidad de la corrida", () => {
     expect(esCorrida(123456)).toBe(false);
   });
 
-  it("las cuatro IPs de una corrida son distintas, del bloque de prueba y válidas", () => {
+  it("las cinco IPs de una corrida son distintas, del bloque de prueba y válidas", () => {
     for (const c of MUESTRA) {
       const ips = TODAS_LAS_LETRAS.map((l) => ipDe(c, l));
-      expect(new Set(ips).size).toBe(4);
+      expect(new Set(ips).size).toBe(5);
       for (const ip of ips) {
         expect(ip).toMatch(/^203\.0\.113\.[0-9]{1,3}$/);
         const ultimo = Number(ip.split(".")[3]);
@@ -177,11 +184,13 @@ describe("la identidad de la corrida", () => {
     expect(ipDe("000000", "a")).toBe("203.0.113.2");
     expect(ipDe("000000", "b")).toBe("203.0.113.3");
     expect(ipDe("000000", "r")).toBe("203.0.113.4");
+    expect(ipDe("000000", "v")).toBe("203.0.113.5");
     // 0xfd = 253: la base más alta, y las demás dan la vuelta.
     expect(ipDe("0000fd", "g")).toBe("203.0.113.254");
     expect(ipDe("0000fd", "a")).toBe("203.0.113.1");
     expect(ipDe("0000fd", "b")).toBe("203.0.113.2");
     expect(ipDe("0000fd", "r")).toBe("203.0.113.3");
+    expect(ipDe("0000fd", "v")).toBe("203.0.113.4");
   });
 
   it("la red de prueba no incluye otras redes", () => {
@@ -190,10 +199,10 @@ describe("la identidad de la corrida", () => {
     }
   });
 
-  it("los cuatro números son distintos, válidos y del bloque que no es de nadie", () => {
+  it("los cinco números son distintos, válidos y del bloque que no es de nadie", () => {
     for (const c of MUESTRA) {
       const numeros = TODAS_LAS_LETRAS.map((l) => numeroDe(c, l));
-      expect(new Set(numeros).size).toBe(4);
+      expect(new Set(numeros).size).toBe(5);
       for (const n of numeros) {
         expect(n).toMatch(/^\+[1-9][0-9]{7,14}$/);
         expect(normalizarE164(n)).toBe(n);
@@ -203,13 +212,14 @@ describe("la identidad de la corrida", () => {
     }
     expect(numeroDe("0f4240", "g")).toBe("+54900000000001");
     expect(numeroDe("0f4240", "r")).toBe("+54900000000004");
+    expect(numeroDe("0f4240", "v")).toBe("+54900000000005");
   });
 
   it("el correo y la empresa llevan el prefijo con el que el barrido los elige", () => {
     for (const c of MUESTRA) {
       for (const l of TODAS_LAS_LETRAS) {
         expect(correoDe(c, l)).toBe(`${PREFIJO_CORREO}${c}-${l}@example.com`);
-        expect(correoDe(c, l)).toMatch(/^alta-probar-[0-9a-f]{6}-[gabr]@example\.com$/);
+        expect(correoDe(c, l)).toMatch(/^alta-probar-[0-9a-f]{6}-[gabrv]@example\.com$/);
         const empresa = empresaDe(c, l);
         expect(empresa.startsWith(PREFIJO_EMPRESA)).toBe(true);
         expect(empresa.length).toBeGreaterThanOrEqual(2);
@@ -333,7 +343,7 @@ describe("leerSalud", () => {
 });
 
 describe("revisarRegistro", () => {
-  const CAMPOS = '<input name="empresa"><input name="whatsapp">';
+  const CAMPOS = '<input name="terminos">';
   const CORREO = '<input id="registro-correo" name="email">';
   const DESAFIO = '<div class="cf-turnstile" data-sitekey="x"></div>';
   const CON_CORREO = {
@@ -350,9 +360,16 @@ describe("revisarRegistro", () => {
     expect(codigos(revisarRegistro(307, CAMPOS, {}))).toEqual(["registro_no_contesta"]);
   });
 
-  it("sin los campos de la empresa y del número no hay formulario", () => {
-    expect(codigos(revisarRegistro(200, '<input name="whatsapp">', {}))).toEqual(["registro_sin_formulario"]);
-    expect(codigos(revisarRegistro(200, '<input name="empresa">', {}))).toEqual(["registro_sin_formulario"]);
+  it("sin los términos no hay formulario", () => {
+    expect(codigos(revisarRegistro(200, "<main></main>", {}))).toEqual(["registro_sin_formulario"]);
+  });
+
+  it("pedir la empresa o el número en el registro es del alta de antes: los dos van en el segundo paso", () => {
+    expect(codigos(revisarRegistro(200, CAMPOS + '<input name="empresa">', {}))).toEqual(["registro_pide_empresa"]);
+    expect(codigos(revisarRegistro(200, CAMPOS + '<input name="whatsapp">', {}))).toEqual(["registro_pide_empresa"]);
+    expect(codigos(revisarRegistro(200, CAMPOS + '<input name="empresa"><input name="whatsapp">', {}))).toEqual([
+      "registro_pide_empresa",
+    ]);
   });
 
   it("la matriz de correo y desafío contra lo que dicen las banderas", () => {
@@ -467,6 +484,57 @@ describe("clasificarError", () => {
   });
 });
 
+describe("codigoDeDestinoInesperado", () => {
+  // Los módulos tragan los errores y devuelven un destino: «falla» en /alta, o /login si la cuenta se creó y no abrió la sesión.
+  const TRAGADAS = ["/alta?e=falla", "/alta/correo?t=abc&e=falla", "/login"];
+  const QUE_NO_CORRESPONDEN = [
+    "/alta",
+    "/bandeja",
+    "/login?aviso=ya_tenes_cuenta",
+    "/login?error=registro_cerrado",
+    "/alta?e=intentos",
+    "/alta?e=cerrada",
+    "/alta?e=datos",
+    "/alta/correo?t=abc&e=clave",
+    "/alta/correo?t=abc&e=intentos",
+    "/preparando",
+  ];
+
+  it("una falla que el módulo tragó con la base caída es «no se pudo probar» y no «se rompió»", () => {
+    for (const destino of TRAGADAS) {
+      expect(esFallaTragada(destino)).toBe(true);
+      expect(codigoDeDestinoInesperado(destino, false)).toBe("pasajero");
+    }
+  });
+
+  it("una falla tragada con la base arriba es un defecto: no se esconde como inconcluso", () => {
+    for (const destino of TRAGADAS) {
+      expect(codigoDeDestinoInesperado(destino, true)).toBe("destino_inesperado");
+    }
+  });
+
+  it("cualquier otro destino que no se esperaba sigue en rojo, conteste la base o no", () => {
+    for (const destino of QUE_NO_CORRESPONDEN) {
+      expect(esFallaTragada(destino)).toBe(false);
+      expect(codigoDeDestinoInesperado(destino, false)).toBe("destino_inesperado");
+      expect(codigoDeDestinoInesperado(destino, true)).toBe("destino_inesperado");
+    }
+  });
+
+  it("«falla» tiene que ser el último parámetro: uno que la lleve en medio no se confunde", () => {
+    expect(esFallaTragada("/alta/correo?e=falla&t=abc")).toBe(false);
+    expect(esFallaTragada("/alta?e=fallar")).toBe(false);
+  });
+
+  it("el pasajero no pone rojo el Post-deploy y el destino inesperado sí", () => {
+    expect(hallazgo("pasajero").nivel).toBe("inconcluso");
+    expect(hallazgo("destino_inesperado").nivel).toBe("rojo");
+    expect(veredicto([hallazgo(codigoDeDestinoInesperado("/alta?e=falla", false))]).salida).toBe(0);
+    expect(veredicto([hallazgo(codigoDeDestinoInesperado("/alta?e=falla", true))]).salida).toBe(1);
+    expect(veredicto([hallazgo(codigoDeDestinoInesperado("/login?error=registro_cerrado", false))]).salida).toBe(1);
+  });
+});
+
 describe("diagnosticarCierre", () => {
   const SANO = { funcion: true, objetos: true, topeBases: 0, bases: 0, topeMb: 0, mb: 0 };
 
@@ -524,6 +592,28 @@ describe("margenDelTope", () => {
     expect(h.codigo).toBe("margen_ok");
     expect(llamadas).toEqual([[9, 40]]);
     expect(margenDelTope(7, 40, () => true).codigo).toBe("cerca_del_aviso");
+  });
+});
+
+describe("CUPOS_ESPERADOS", () => {
+  it("son acumulados desde antes del primer paso: el enlace gasta la red y no el cupo del alta", () => {
+    expect(CUPOS_ESPERADOS.enlace).toEqual({ "auth:ip": 1, "alta:ip": 0 });
+    expect(CUPOS_ESPERADOS.espacio).toEqual({ "auth:ip": 1, "alta:ip": 1 });
+    expect(CUPOS_ESPERADOS.enlaceOtraVez).toEqual({ "auth:ip": 2, "alta:ip": 1 });
+  });
+
+  it("ningún contador baja de un escenario al siguiente", () => {
+    const pasos = [CUPOS_ESPERADOS.enlace, CUPOS_ESPERADOS.espacio, CUPOS_ESPERADOS.enlaceOtraVez];
+    for (const clave of ["auth:ip", "alta:ip"] as const) {
+      for (let i = 1; i < pasos.length; i++) {
+        expect(pasos[i]![clave]).toBeGreaterThanOrEqual(pasos[i - 1]![clave]);
+      }
+    }
+  });
+
+  it("un enlace que gastó el cupo del alta no pasa", () => {
+    expect(compararContadores({}, { "auth:ip": 1 }, CUPOS_ESPERADOS.enlace).codigo).toBe("contadores_ok");
+    expect(compararContadores({}, { "auth:ip": 1, "alta:ip": 1 }, CUPOS_ESPERADOS.enlace).codigo).toBe("cupos_mal_contados");
   });
 });
 

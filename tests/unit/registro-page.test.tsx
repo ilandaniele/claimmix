@@ -1,9 +1,10 @@
 /**
  * /registro: qué se muestra.
  *
- * Un solo paso. «Continuar con Google» está siempre; «Crear cuenta con mi correo»
- * (con el nombre y el correo) sólo si hay remitente del sistema, porque sin él no
- * hay cómo mandar el enlace. El desafío de Turnstile sólo con las dos claves, y
+ * Primer paso del alta: sólo la cuenta. «Continuar con Google» está siempre;
+ * «Crear cuenta con mi correo» (con el nombre y el correo) sólo si hay remitente del
+ * sistema, porque sin él no hay cómo mandar el enlace. La empresa y el WhatsApp
+ * se piden en /alta, no acá. El desafío de Turnstile sólo con las dos claves, y
  * dentro de la parte del correo: no frena a Google.
  */
 
@@ -39,14 +40,9 @@ const conClaves = () => {
   process.env.TURNSTILE_SECRET_KEY = "test-turnstile-secret-key";
 };
 
+// Las banderas que antes cambiaban la ayuda del WhatsApp: ya no hay WhatsApp acá.
 const BANDERAS = ["ALTA_NUMERO_AUTOMATICO", "ALTA_WABA_PROPIA", "META_APP_ID", "META_ES_CONFIG_ID", "WHATSAPP_APP_SECRET"];
 const sinBanderas = () => BANDERAS.forEach((nombre) => delete process.env[nombre]);
-const conWabaPropia = () => {
-  process.env.ALTA_WABA_PROPIA = "1";
-  process.env.META_APP_ID = "fake-app-id";
-  process.env.META_ES_CONFIG_ID = "fake-config-id";
-  process.env.WHATSAPP_APP_SECRET = "fake-app-secret";
-};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -66,97 +62,50 @@ afterEach(() => {
 });
 
 describe("/registro: los campos", () => {
-  it("empresa, WhatsApp con el ejemplo «+54 9 …» y términos, todo obligatorio", async () => {
-    await pintar();
+  it("sólo la cuenta: nombre, correo y términos obligatorios; Google no pide nada más", async () => {
+    conRemitente();
+    const { container } = await pintar();
 
-    expect(screen.getByLabelText("Nombre de tu empresa")).toBeRequired();
-    const whatsapp = screen.getByLabelText("WhatsApp de tu empresa");
-    expect(whatsapp).toBeRequired();
-    expect(whatsapp).toHaveAttribute("placeholder", "+54 9 …");
-    expect(screen.getByText(/Con código de país/)).toBeInTheDocument();
+    const nombres = [...container.querySelectorAll("input, select, textarea")].map((campo) => campo.getAttribute("name"));
+    expect(nombres.sort()).toEqual(["email", "full_name", "terminos"]);
     expect(screen.getByRole("checkbox")).toBeRequired();
     expect(screen.getByRole("link", { name: "términos de uso" })).toHaveAttribute("href", "/terms");
     expect(screen.getByRole("link", { name: "política de privacidad" })).toHaveAttribute("href", "/privacy");
   });
 
-  it("con el número por código prendido, la ayuda del WhatsApp suma que tiene que recibir SMS o llamada", async () => {
-    process.env.ALTA_NUMERO_AUTOMATICO = "1";
-    const { container } = await pintar();
-
-    const ayuda = container.querySelector("#registro-whatsapp-ayuda");
-    expect(ayuda).toHaveTextContent("Con código de país, por ejemplo +54 9 11 5555 0000.");
-    expect(ayuda).toHaveTextContent("Tiene que poder recibir un SMS o una llamada y no puede estar en uso en la app de WhatsApp ni en WhatsApp Business.");
-    expect(screen.getByLabelText("WhatsApp de tu empresa")).toHaveAccessibleDescription(/Tiene que poder recibir un SMS/);
-  });
-
-  it("con el número por código prendido, en inglés", async () => {
-    process.env.ALTA_NUMERO_AUTOMATICO = "1";
-    h.locale.mockResolvedValue("en-US");
-    const { container } = await pintar();
-
-    expect(container.querySelector("#registro-whatsapp-ayuda")).toHaveTextContent(
-      "It must be able to receive an SMS or a phone call, and it can't be in use in the WhatsApp or WhatsApp Business app."
-    );
-  });
-
-  describe("con la WABA propia prendida", () => {
-    beforeEach(conWabaPropia);
-
-    it("la ayuda avisa que el número se conecta con la cuenta de Facebook en el paso siguiente", async () => {
-      const { container } = await pintar();
-
-      const ayuda = container.querySelector("#registro-whatsapp-ayuda");
-      expect(ayuda).toHaveTextContent("Con código de país, por ejemplo +54 9 11 5555 0000.");
-      expect(ayuda).toHaveTextContent("en el paso siguiente lo conectás con tu cuenta de Facebook");
-      expect(ayuda).toHaveTextContent("Tiene que poder recibir un SMS o una llamada");
-      expect(screen.getByLabelText("WhatsApp de tu empresa")).toHaveAccessibleDescription(/cuenta de Facebook/);
-    });
-
-    it("gana sobre el aviso del código si las dos están prendidas: es una sola frase", async () => {
-      process.env.ALTA_NUMERO_AUTOMATICO = "1";
-      const { container } = await pintar();
-
-      const ayuda = container.querySelector("#registro-whatsapp-ayuda");
-      expect(ayuda).toHaveTextContent("cuenta de Facebook");
-      expect(ayuda?.textContent?.match(/Tiene que poder recibir un SMS/g)).toHaveLength(1);
-    });
-
-    it("en inglés", async () => {
-      h.locale.mockResolvedValue("en-US");
-      const { container } = await pintar();
-
-      expect(container.querySelector("#registro-whatsapp-ayuda")).toHaveTextContent("in the next step you connect it with your Facebook account");
-    });
-
-    it.each(["META_APP_ID", "META_ES_CONFIG_ID", "WHATSAPP_APP_SECRET"])("sin %s la ayuda es la de hoy", async (falta) => {
-      delete process.env[falta];
-      const { container } = await pintar();
-
-      expect(container.querySelector("#registro-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
-    });
-
-    it.each(["0", "true", ""])("con ALTA_WABA_PROPIA=%j la ayuda es la de hoy", async (valor) => {
-      process.env.ALTA_WABA_PROPIA = valor;
-      const { container } = await pintar();
-
-      expect(container.querySelector("#registro-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
-    });
-  });
-
-  it.each([undefined, "0", "true", ""])("con ALTA_NUMERO_AUTOMATICO=%j la ayuda del WhatsApp es la de hoy", async (valor) => {
-    if (valor !== undefined) process.env.ALTA_NUMERO_AUTOMATICO = valor;
-    const { container } = await pintar();
-
-    expect(container.querySelector("#registro-whatsapp-ayuda")?.textContent).toBe("Con código de país, por ejemplo +54 9 11 5555 0000.");
-  });
-
-  it("los campos van por los nombres que leen las acciones", async () => {
+  it("no pide la empresa ni el WhatsApp: se piden en /alta", async () => {
     conRemitente();
     const { container } = await pintar();
 
-    for (const nombre of ["empresa", "whatsapp", "terminos", "full_name", "email"]) {
-      expect(container.querySelector(`[name="${nombre}"]`), nombre).not.toBeNull();
-    }
+    expect(container.querySelector('[name="empresa"]')).toBeNull();
+    expect(container.querySelector('[name="whatsapp"]')).toBeNull();
+    expect(screen.queryByLabelText("Nombre de tu empresa")).toBeNull();
+    expect(screen.queryByLabelText("WhatsApp de tu empresa")).toBeNull();
+    expect(container.querySelector("#registro-whatsapp-ayuda")).toBeNull();
+  });
+
+  it("sin remitente tampoco: sólo los términos y Google", async () => {
+    const { container } = await pintar();
+
+    const nombres = [...container.querySelectorAll("input, select, textarea")].map((campo) => campo.getAttribute("name"));
+    expect(nombres).toEqual(["terminos"]);
+  });
+
+  it.each([
+    ["ALTA_NUMERO_AUTOMATICO", "1"],
+    ["ALTA_WABA_PROPIA", "1"],
+  ])("con %s prendida la página es la misma: la ayuda del WhatsApp vive en /alta", async (bandera, valor) => {
+    conRemitente();
+    const sin = (await pintar()).container.innerHTML;
+    document.body.innerHTML = "";
+
+    process.env[bandera] = valor;
+    process.env.META_APP_ID = "fake-app-id";
+    process.env.META_ES_CONFIG_ID = "fake-config-id";
+    process.env.WHATSAPP_APP_SECRET = "fake-app-secret";
+    const con = (await pintar()).container.innerHTML;
+
+    expect(con).toBe(sin);
   });
 
   it("no pide contraseña: la elige desde el enlace del correo", async () => {
@@ -166,10 +115,72 @@ describe("/registro: los campos", () => {
     expect(container.querySelector('input[type="password"]')).toBeNull();
   });
 
+  it("el texto de ayuda cuenta que después se elige entre dar de alta la empresa o entrar a una", async () => {
+    conRemitente();
+    await pintar();
+
+    expect(screen.getByText(/Creá tu cuenta con tu nombre y tu correo, o con Google\. Después elegís/)).toBeInTheDocument();
+  });
+
+  it("sin remitente del sistema la ayuda habla sólo de Google: no hay nombre ni correo que escribir", async () => {
+    await pintar();
+
+    expect(screen.getByText(/Creá tu cuenta con Google\. Después elegís/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/tu nombre y tu correo/);
+  });
+
+  it("sin remitente del sistema la ayuda en inglés también habla sólo de Google", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintar();
+
+    expect(screen.getByText(/Create your account with Google\. Next you choose/)).toBeInTheDocument();
+  });
+
   it("tiene el enlace a /login", async () => {
     await pintar();
 
     expect(screen.getByRole("link", { name: "Iniciar sesión" })).toHaveAttribute("href", "/login");
+  });
+});
+
+describe("/registro: «mi empresa ya usa ClaimMix»", () => {
+  // La invitación se abre desde el enlace del correo, no desde /login. El SSO sí se entra desde /login: el texto lo nombra y apunta al enlace que está justo debajo.
+  const TEXTO =
+    "¿Tu empresa ya usa ClaimMix? Pedile a un administrador que te invite y seguí el enlace del correo que te llegue. Si tu empresa tiene SSO, también podés entrar con él desde «Iniciar sesión».";
+
+  it("el texto es fijo: pide la invitación o el SSO desde «Iniciar sesión» y no nombra ninguna empresa", async () => {
+    const { container } = await pintar();
+
+    expect(screen.getByText(TEXTO)).toBeInTheDocument();
+    // El rótulo del botón del SSO es del ingreso: se cita el enlace de esta página, no el botón.
+    expect(container.textContent).not.toMatch(/Entrar con el SSO/);
+    expect(screen.getByRole("link", { name: "Iniciar sesión" })).toHaveAttribute("href", "/login");
+    expect(container.querySelector('a[href^="/invitacion"]')).toBeNull();
+  });
+
+  it("es el mismo texto con y sin remitente, con y sin Turnstile", async () => {
+    await pintar();
+    expect(screen.getByText(TEXTO)).toBeInTheDocument();
+    document.body.innerHTML = "";
+
+    conRemitente();
+    conClaves();
+    await pintar();
+    expect(screen.getByText(TEXTO)).toBeInTheDocument();
+  });
+
+  it("en inglés", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintar();
+
+    expect(
+      screen.getByText(
+        "Does your company already use ClaimMix? Ask an administrator to invite you and follow the link in the email you receive. If your company has SSO, you can also use it from “Sign in”."
+      )
+    ).toBeInTheDocument();
+    // El botón del SSO del ingreso está en castellano: citarlo en inglés mandaría a buscar un texto que no aparece.
+    expect(document.body.textContent).not.toMatch(/Entrar con el SSO|Sign in with.*SSO/);
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 });
 
@@ -286,20 +297,39 @@ describe("/registro: Turnstile", () => {
 
 describe("/registro: los rechazos", () => {
   it.each([
-    ["datos", /Revisá los datos/],
+    ["datos", /Revisá los datos\. Escribí tu nombre y un correo válido, y aceptá los términos/],
+    ["terminos", /Para crear tu cuenta tenés que aceptar los términos/],
     ["intentos", /demasiados intentos/],
-    ["celular", /¿Es un celular\? Escribilo con el 9 después del \+54/],
   ])("%s muestra su texto", async (motivo, texto) => {
     await pintar(motivo);
 
     expect(screen.getByRole("alert")).toHaveTextContent(texto);
   });
 
-  it("«celular» en inglés pide el 9 en inglés", async () => {
+  it("«datos» no habla de la empresa ni del WhatsApp: ya no se piden acá", async () => {
+    await pintar("datos");
+
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/empresa|WhatsApp/i);
+  });
+
+  it("«datos» en inglés", async () => {
     h.locale.mockResolvedValue("en-US");
+    await pintar("datos");
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Check the details. Enter your name and a valid email, and accept the terms.");
+  });
+
+  it("«terminos» en inglés", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintar("terminos");
+
+    expect(screen.getByRole("alert")).toHaveTextContent("To create your account you need to accept the terms.");
+  });
+
+  it("«celular» ya no es un motivo: el número se pide en /alta", async () => {
     await pintar("celular");
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/Write it with the 9 after \+54/);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("un motivo que no está en la lista no muestra nada, ni se refleja", async () => {

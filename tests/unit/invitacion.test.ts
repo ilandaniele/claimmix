@@ -15,17 +15,25 @@ const h = vi.hoisted(() => ({
   ejecutadas: [] as unknown[],
   filas: [] as unknown[],
   exigeSso: vi.fn(),
+  /** El valor de la cookie `cm_invitacion` de la petición; undefined si no la trae. */
+  cookie: undefined as string | undefined,
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/data/scope", () => ({ enControl: h.enControl }));
 vi.mock("@/server/bases/espejar-sin-fallar", () => ({ espejarSinFallar: vi.fn().mockResolvedValue(true) }));
 vi.mock("@/server/sso/usuarios", () => ({ correoExigeSso: h.exigeSso }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (nombre: string) => (nombre === "cm_invitacion" && h.cookie !== undefined ? { value: h.cookie } : undefined),
+  }),
+}));
 
 import {
   abrirInvitacion,
   aceptarInvitacion,
   DURACION_DE_LA_INVITACION_MS,
+  invitacionDeLaSesion,
   puedeInvitar,
   resumenDeInvitacion,
   sellarInvitacion,
@@ -51,6 +59,7 @@ beforeEach(() => {
   h.ejecutadas.length = 0;
   h.filas = [];
   h.exigeSso.mockReset();
+  h.cookie = undefined;
   h.exigeSso.mockResolvedValue(false);
   h.enControl.mockImplementation(async (ctx: unknown, armar: (db: unknown) => unknown) => {
     h.ejecutadas.push(ctx);
@@ -291,5 +300,50 @@ describe("resumenDeInvitacion", () => {
     function compilar(consulta: unknown) {
       return new PgDialect().sqlToQuery(consulta as never);
     }
+  });
+});
+
+describe("la invitación de la sesión", () => {
+  const AHORA = 1_800_000_000_000;
+
+  beforeEach(() => vi.useFakeTimers({ now: AHORA, toFake: ["Date"] }));
+  afterEach(() => vi.useRealTimers());
+
+  it("sin cookie no hay invitación", async () => {
+    expect(await invitacionDeLaSesion("lucia@example.com")).toBeNull();
+  });
+
+  it("la cookie con una invitación vigente para la dirección de la sesión la devuelve, sin mirar mayúsculas ni espacios", async () => {
+    h.cookie = sellarInvitacion(base, AHORA);
+
+    expect(await invitacionDeLaSesion("  Lucia@Example.com ")).toEqual({ ...base, exp: AHORA + DURACION_DE_LA_INVITACION_MS });
+  });
+
+  it("la invitación de otra dirección no es de esta sesión", async () => {
+    h.cookie = sellarInvitacion(base, AHORA);
+
+    expect(await invitacionDeLaSesion("otra@example.com")).toBeNull();
+  });
+
+  it("una cookie vencida, adulterada o que no es una invitación no cuenta", async () => {
+    h.cookie = sellarInvitacion(base, AHORA - DURACION_DE_LA_INVITACION_MS - 1000);
+    expect(await invitacionDeLaSesion("lucia@example.com")).toBeNull();
+
+    const valor = sellarInvitacion(base, AHORA).split(".");
+    valor[3] = (valor[3].startsWith("A") ? "B" : "A") + valor[3].slice(1);
+    h.cookie = valor.join(".");
+    expect(await invitacionDeLaSesion("lucia@example.com")).toBeNull();
+
+    h.cookie = "no-es-una-invitacion";
+    expect(await invitacionDeLaSesion("lucia@example.com")).toBeNull();
+  });
+
+  it("no consulta la base: lee sólo la cookie, así que no sirve para averiguar qué empresas existen", async () => {
+    h.cookie = sellarInvitacion(base, AHORA);
+    await invitacionDeLaSesion("lucia@example.com");
+    await invitacionDeLaSesion("otra@example.com");
+
+    expect(h.enControl).not.toHaveBeenCalled();
+    expect(h.exigeSso).not.toHaveBeenCalled();
   });
 });

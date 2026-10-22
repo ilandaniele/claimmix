@@ -1,5 +1,8 @@
 /**
- * Registration page — alta de una cuenta y de su espacio, en un solo paso.
+ * Registration page — primer paso del alta: sólo la cuenta (nombre, correo y
+ * términos, o Google). La empresa y el WhatsApp se piden después, en /alta, con
+ * la sesión ya abierta, porque quien crea una cuenta puede venir a dar de alta
+ * su empresa o a entrar a una que ya usa ClaimMix.
  *
  * Fuera del LocaleProvider: el idioma se resuelve acá, en el servidor. Es un
  * componente de servidor y funciona sin JavaScript. La acción que corresponde a
@@ -24,8 +27,8 @@ export const metadata = {
 };
 
 const ERRORES: Record<string, ClaveDelServidor> = {
-  datos: "alta.error.datos",
-  celular: "alta.error.celular",
+  datos: "registro.error.datos",
+  terminos: "registro.error.terminos",
   intentos: "login.errores.demasiados_intentos",
 };
 
@@ -40,6 +43,8 @@ export default async function RegistroPage({
   const motivo = Array.isArray(e) ? e.at(-1) : e;
   const claveError = motivo !== undefined && Object.hasOwn(ERRORES, motivo) ? ERRORES[motivo] : null;
   const nonce = (await headers()).get("x-csp-nonce") ?? undefined;
+  // Sin remitente del sistema no hay camino por correo: queda sólo Google.
+  const conCorreo = remitenteDelSistema() !== null;
 
   return (
     <main lang={locale} className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
@@ -53,7 +58,7 @@ export default async function RegistroPage({
         {/* Sign-up card */}
         <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
           <h2 className="mb-2 text-lg font-medium text-slate-800">{t("registro.titulo")}</h2>
-          <p className="mb-6 text-sm text-slate-600">{t("registro.ayuda")}</p>
+          <p className="mb-6 text-sm text-slate-600">{t(conCorreo ? "registro.ayuda" : "registro.ayudaGoogle")}</p>
 
           {claveError && (
             <div
@@ -66,13 +71,16 @@ export default async function RegistroPage({
 
           <SignUpForm
             t={t}
-            conCorreo={remitenteDelSistema() !== null}
+            conCorreo={conCorreo}
             claveDeTurnstile={clavesDeTurnstile()?.sitio ?? null}
             nonce={nonce}
           />
         </div>
 
-        <p className="mt-4 text-center text-sm text-slate-500">
+        {/* Texto fijo: no consulta nada, así que no dice qué empresas usan ClaimMix. */}
+        <p className="mt-4 text-center text-xs text-slate-500">{t("registro.yaUsa")}</p>
+
+        <p className="mt-2 text-center text-sm text-slate-500">
           {t("registro.yaTenes")}{" "}
           <Link href="/login" className="font-medium text-slate-800 underline-offset-2 hover:underline">
             {t("auth.signIn.title")}

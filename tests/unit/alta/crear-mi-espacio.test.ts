@@ -1,7 +1,7 @@
 /**
- * `crearMiEspacio`: la acción de /alta.
+ * `crearMiEspacio`: la acción de /alta, la del segundo paso del alta.
  *
- * Se prueba con la función de `crearInquilino` de verdad; lo único que se
+ * Se prueba con `crearEspacio` y la función de `crearInquilino` de verdad; lo único que se
  * sustituye es la base (`enControl`), el limitador, el mail y la sesión. Lo que
  * importa acá no es que cree el espacio sino el orden de lo que se hace antes y
  * lo que se devuelve después:
@@ -21,7 +21,6 @@ const h = vi.hoisted(() => ({
   iniciarBase: vi.fn(),
   rateLimit: vi.fn(),
   liberarCupo: vi.fn(),
-  borrarCookie: vi.fn(),
   remitente: vi.fn(),
   enviar: vi.fn(),
   error: vi.fn(),
@@ -63,7 +62,6 @@ vi.mock("@/lib/auth/require-operator", () => ({
   isOperatorEmail: (e: string | null | undefined) => e === "ops@example.com",
 }));
 vi.mock("@/data/scope", () => ({ enControl: h.enControl }));
-vi.mock("@/server/alta/cookie", () => ({ borrarCookieDeAlta: h.borrarCookie }));
 vi.mock("@/server/bases/iniciar", () => ({ iniciarBase: h.iniciarBase }));
 vi.mock("@/server/notify/remitente-sistema", () => ({
   remitenteDelSistema: h.remitente,
@@ -156,7 +154,6 @@ beforeEach(() => {
   h.fila.mockResolvedValue(null);
   h.rateLimit.mockResolvedValue(cupo());
   h.liberarCupo.mockResolvedValue(undefined);
-  h.borrarCookie.mockResolvedValue(undefined);
   h.remitente.mockReturnValue("alta@example.com");
   h.iniciarBase.mockResolvedValue(undefined);
   h.enviar.mockResolvedValue({ enviado: true });
@@ -299,13 +296,12 @@ describe("crear el espacio", () => {
     expect(params[10]).toBeNull();
   });
 
-  it.each(["ok", "ok_numero_en_revision"])("%s: borra la cookie y va a la bienvenida", async (resultado) => {
+  it.each(["ok", "ok_numero_en_revision"])("%s: va a la bienvenida", async (resultado) => {
     h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
       armar({ execute: async () => respuesta({ resultado, creadas_24h: 3, tope: 20 }) })
     );
 
     expect(await crear()).toBe("/bandeja?bienvenida=1");
-    expect(h.borrarCookie).toHaveBeenCalledTimes(1);
     expect(h.liberarCupo).not.toHaveBeenCalled();
     // El redirect no se confundió con una falla: afuera del try, no pasó por el catch.
     expect(h.error).not.toHaveBeenCalled();
@@ -318,7 +314,6 @@ describe("crear el espacio", () => {
     const { contexto } = await llamadaALaBase();
     expect(h.iniciarBase).toHaveBeenCalledTimes(1);
     expect(h.iniciarBase).toHaveBeenCalledWith(contexto.tenantId);
-    expect(h.borrarCookie).toHaveBeenCalledTimes(1);
   });
 
   it("con una base por cliente, sin espacio no lanza nada", async () => {
@@ -363,7 +358,6 @@ describe("lo que se libera", () => {
     expect(await crear()).toBe(destino);
     expect(h.liberarCupo).toHaveBeenCalledTimes(1);
     expect(h.liberarCupo).toHaveBeenCalledWith(CLAVE_IP, DIA_MS, VENTANA);
-    expect(h.borrarCookie).not.toHaveBeenCalled();
     expect(h.pendientes).toHaveLength(0);
   });
 
@@ -419,6 +413,19 @@ describe("el aviso al operador", () => {
 
   it("antes del 80 % del tope no deja nada para después", async () => {
     conteo(15, 20);
+
+    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(h.pendientes).toHaveLength(0);
+  });
+
+  it.each([
+    [null, 20],
+    [20, null],
+    [null, null],
+  ])("si la base no dijo el número (%s de %s), no avisa ni deja nada para después", async (creadas, tope) => {
+    h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
+      armar({ execute: async () => respuesta({ resultado: "ok", creadas_24h: creadas, tope }) })
+    );
 
     expect(await crear()).toBe("/bandeja?bienvenida=1");
     expect(h.pendientes).toHaveLength(0);

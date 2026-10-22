@@ -835,6 +835,7 @@ export const esAR = {
   "usuarios.error.rol": "No se pudo actualizar el rol.",
   "usuarios.error.sesiones": "No se pudieron cerrar las sesiones.",
   "usuarios.form.email": "Correo electrónico",
+  "usuarios.form.emailAyuda": "Si la persona ya creó su cuenta en ClaimMix, invitá esa misma dirección.",
   "usuarios.form.emailPlaceholder": "analista@empresa.com",
   "usuarios.form.nombre": "Nombre completo",
   "usuarios.form.nombrePlaceholder": "Ej: María García",

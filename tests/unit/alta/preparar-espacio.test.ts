@@ -17,7 +17,7 @@ vi.mock("@/lib/observability/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: h.error },
 }));
 
-import { prepararEspacio } from "@/server/alta/destinos";
+import { prepararEspacio } from "@/server/alta/crear-espacio";
 
 const TENANT = "aaaaaaaa-0000-4000-8000-00000000000a";
 const ALTA = { resultado: "ok" as const, tenantId: TENANT, creadas24h: 1, tope: 20 };

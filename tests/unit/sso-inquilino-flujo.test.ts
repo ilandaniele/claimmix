@@ -57,10 +57,13 @@ vi.mock("@/server/sso/usuarios", () => ({
     const huerfanaDeSso = tenant === null && cuentas.length > 0 && cuentas.every((a) => a.providerId === `sso:${tenantId}`);
     return { existe: true, userId: u.id, tenantId: tenant, huerfanaDeSso };
   },
-  inquilinoDelUsuario: async (id: string) => h.perfiles.get(id)?.tenant ?? null,
-  dominioExigeSso: async (id: string) => {
+  perfilDelIngreso: async (id: string) => {
     const u = h.store.user.find((x) => x.id === id);
-    return !!u && h.exigen.has(String(u.email).split("@")[1]);
+    return {
+      tenantId: h.perfiles.get(id)?.tenant ?? null,
+      deBaja: false,
+      exigeSso: !!u && h.exigen.has(String(u.email).split("@")[1]),
+    };
   },
   correoExigeSso: async (email: string, tenantId: string) =>
     tenantId === h.config?.tenant_id && h.exigen.has(email.split("@")[1]!),

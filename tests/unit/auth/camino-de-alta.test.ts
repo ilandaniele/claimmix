@@ -53,8 +53,7 @@ vi.mock("@/lib/auth/sesiones", () => ({ cerrarSesiones: vi.fn(async () => 0) }))
 vi.mock("@/server/notify/remitente-sistema", () => ({ remitenteDelSistema: () => ({ de: "no-responder@example.com" }) }));
 vi.mock("@/server/sso/usuarios", () => ({
   duenoDelMail: vi.fn(),
-  inquilinoDelUsuario: vi.fn(),
-  dominioExigeSso: vi.fn(),
+  perfilDelIngreso: vi.fn(),
   correoExigeSso: vi.fn(),
   dominioExigeSsoEnAlgunInquilino: h.exigeSso,
 }));

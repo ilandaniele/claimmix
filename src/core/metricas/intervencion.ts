@@ -25,6 +25,8 @@ export const ES_INTERVENCION: Readonly<Record<AuditEventType, boolean>> = {
   "auth.password_reset_requested": false,
   "auth.password_reset_completed": false,
   "auth.user_sessions_revoked": false,
+  "auth.user_deactivated": false,
+  "auth.user_reactivated": false,
 
   "case.created": false,
   "case.status_changed": true,

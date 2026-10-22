@@ -124,7 +124,7 @@ export interface ResumenDeInvitacion {
 /**
  * Lo que la pantalla de la invitación muestra: el nombre del espacio y de quien
  * invita. Null si la invitación ya no sirve: el espacio se suspendió o dio de
- * baja, o quien invitó dejó de poder hacerlo. La consulta de la invitación es una
+ * baja, o quien invitó dejó de poder hacerlo o fue dado de baja. La consulta de la invitación es una
  * sola, con el espacio del enlace como contexto: la base devuelve su fila de
  * `tenants` y nada de otro. Con una invitación que sirve, una segunda mira si ese
  * espacio exige el SSO para el dominio invitado.
@@ -134,7 +134,7 @@ export async function resumenDeInvitacion(d: DatosDeInvitacion): Promise<Resumen
     db.execute(sql`
       select x.name as espacio, x.billing_status as estado, i.full_name as quien, i.role as rol_de_quien
       from public.tenants x
-      left join public.users i on i.id = ${d.i}::uuid and i.tenant_id = x.id
+      left join public.users i on i.id = ${d.i}::uuid and i.tenant_id = x.id and i.dado_de_baja_en is null
       where x.id = ${d.t}::uuid
     `)
   );
@@ -149,8 +149,8 @@ export async function resumenDeInvitacion(d: DatosDeInvitacion): Promise<Resumen
 
 /**
  * Crea el perfil de quien acepta, en el espacio del enlace. Devuelve true si
- * quedó creado; false si ya no se puede: quien invitó perdió el rol, el espacio
- * está suspendido o dado de baja, o la persona ya tenía perfil.
+ * quedó creado; false si ya no se puede: quien invitó perdió el rol o fue dado de
+ * baja, el espacio está suspendido o dado de baja, o la persona ya tenía perfil.
  *
  * Una sola sentencia con el espacio del enlace como contexto. Las comprobaciones
  * viajan dentro del INSERT, así que no hay un hueco entre mirar y escribir. Con
@@ -171,7 +171,7 @@ export async function aceptarInvitacion(
         select ${quien.userId}::uuid, ${d.t}::uuid, ${d.n}::text, ${d.r}::text
         where exists (
             select 1 from public.users i
-            where i.id = ${d.i}::uuid and i.tenant_id = ${d.t}::uuid
+            where i.id = ${d.i}::uuid and i.tenant_id = ${d.t}::uuid and i.dado_de_baja_en is null
               and (i.role = 'owner' or (i.role = 'admin' and ${d.r}::text <> 'owner'))
           )
           and exists (

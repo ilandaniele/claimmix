@@ -5,8 +5,10 @@
  * debe cachear un miss (alta o baja recientes); y expira a los 30 s.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
-const { mockSelect } = vi.hoisted(() => ({ mockSelect: vi.fn() }));
+const { mockSelect, h } = vi.hoisted(() => ({ mockSelect: vi.fn(), h: { donde: null as unknown } }));
 
 vi.mock("@/lib/db", () => ({ db: { select: mockSelect } }));
 vi.mock("@/lib/db/schema", () => ({
@@ -16,6 +18,7 @@ vi.mock("@/lib/db/schema", () => ({
     role: "role",
     full_name: "full_name",
     locale: "locale",
+    dado_de_baja_en: "dado_de_baja_en",
   },
   tenants: { id: "id", plan: "plan" },
   tenantBases: { tenant_id: "tenant_id", estado: "estado", creada_at: "creada_at" },
@@ -50,7 +53,10 @@ function conFila(fila: unknown | null) {
     from: () => ({
       innerJoin: () => ({
         leftJoin: () => ({
-          where: () => ({ limit: () => Promise.resolve(fila ? [fila] : []) }),
+          where: (donde: unknown) => {
+            h.donde = donde;
+            return { limit: () => Promise.resolve(fila ? [fila] : []) };
+          },
         }),
       }),
     }),
@@ -119,6 +125,19 @@ describe("filaDeUsuario", () => {
 
     expect(primera).toBeNull();
     expect(segunda).toBeNull();
+    expect(mockSelect).toHaveBeenCalledTimes(2);
+  });
+
+  it("un usuario dado de baja no tiene fila: se mira en la misma consulta y no se cachea", async () => {
+    // La base no devuelve la fila de alguien con `dado_de_baja_en` puesto.
+    conFila(null);
+
+    expect(await filaDeUsuario("u-baja")).toBeNull();
+    const { sql, params } = new PgDialect().sqlToQuery(h.donde as SQL);
+    expect(sql).toMatch(/ and \$\d+ is null\)$/);
+    expect(params.at(-1)).toBe("dado_de_baja_en");
+
+    expect(await filaDeUsuario("u-baja")).toBeNull();
     expect(mockSelect).toHaveBeenCalledTimes(2);
   });
 

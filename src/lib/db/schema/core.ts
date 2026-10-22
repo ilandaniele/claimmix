@@ -233,6 +233,8 @@ export const users = pgTable("users", {
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
+  /** null = activo. Con fecha, la persona no entra más (0053). */
+  dado_de_baja_en: timestamp("dado_de_baja_en", { withTimezone: true, mode: "string" }),
 });
 
 /**

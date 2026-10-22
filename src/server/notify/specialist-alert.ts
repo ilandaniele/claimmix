@@ -17,7 +17,7 @@
 
 import "server-only";
 
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { enTenant, type ClienteDatos, type TenantContext } from "@/data/scope";
 import { auditLog, authUsers, cases, claimMessages, tenants, users } from "@/lib/db/schema";
 import { isReservedTestAddress, vedadaParaAlertas } from "@/lib/email/reserved";
@@ -194,7 +194,7 @@ async function recipientsFor(tenantId: string): Promise<Destinatario[]> {
         .select({ email: authUsers.email, locale: users.locale })
         .from(users)
         .innerJoin(authUsers, eq(authUsers.id, users.id))
-        .where(and( inArray(users.role, roles)))
+        .where(and(inArray(users.role, roles), isNull(users.dado_de_baja_en)))
     );
     return rows
       .filter((r) => r.email && permitida(r.email))

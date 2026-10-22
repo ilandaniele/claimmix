@@ -50,6 +50,7 @@ export async function GET() {
           full_name: users.full_name,
           role: users.role,
           created_at: users.created_at,
+          dado_de_baja_en: users.dado_de_baja_en,
           email: authUsers.email,
         })
         .from(users)
@@ -64,6 +65,7 @@ export async function GET() {
         email: r.email ?? "",
         role: r.role,
         created_at: r.created_at,
+        dado_de_baja_en: r.dado_de_baja_en,
       })),
     });
   } catch (e) {

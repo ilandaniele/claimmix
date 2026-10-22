@@ -67,6 +67,8 @@ import { alertSpecialists, avisarMensajeTardio } from "@/server/notify/specialis
 const condicionesDeYaSeAviso: unknown[] = [];
 /** El `where` con el que se pidió la lista del tenant, para poder compilarlo. */
 const condicionDelTenant: unknown[] = [];
+/** El `where` con el que se pidió la gente por rol, para poder compilarlo. */
+const condicionesPorRol: unknown[] = [];
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -108,6 +110,7 @@ function database(opts: {
   let porRol = 0;
   condicionesDeYaSeAviso.length = 0;
   condicionDelTenant.length = 0;
+  condicionesPorRol.length = 0;
 
   mockSelect.mockImplementation(() => ({
     from: (tabla: unknown) =>
@@ -125,7 +128,8 @@ function database(opts: {
           }
         : {
             innerJoin: () => ({
-              where: () => {
+              where: (cond: unknown) => {
+                condicionesPorRol.push(cond);
                 porRol += 1;
                 if (opts.especialistas !== undefined || opts.owners !== undefined) {
                   const lista = porRol === 1 ? (opts.especialistas ?? []) : (opts.owners ?? []);
@@ -516,6 +520,17 @@ describe("a quién le llega", () => {
     const compilado = new PgDialect().sqlToQuery(condicionDelTenant[0] as never);
     expect(compilado.sql).toContain('"tenants"."id"');
     expect(compilado.params).toContain(TENANT);
+  });
+
+  it("quien está de baja no recibe el aviso", async () => {
+    const { PgDialect } = await import("drizzle-orm/pg-core");
+    database({ especialistas: ["peritaje@aseguradora.com"] });
+
+    await alert();
+
+    expect(condicionesPorRol.length).toBeGreaterThan(0);
+    const compilado = new PgDialect().sqlToQuery(condicionesPorRol[0] as never);
+    expect(compilado.sql).toContain('"users"."dado_de_baja_en" is null');
   });
 });
 

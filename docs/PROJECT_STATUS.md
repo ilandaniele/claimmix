@@ -4625,8 +4625,12 @@ sola migración (la 0047).
 - **Revocación por persona.** `DELETE /api/admin/users/[id]/sessions` cierra todas
   las sesiones de una persona del inquilino, con un botón en la pantalla de
   usuarios y el evento `auth.user_sessions_revoked`. Un admin no cierra las de un
-  owner, y nadie cierra la propia por acá. La persona queda afuera dentro de los
-  60 s del `cookieCache`, y la pantalla lo dice.
+  owner, y nadie cierra la propia por acá. Las sesiones abiertas caen dentro de
+  los 60 s del `cookieCache`, pero la persona puede volver a entrar: no la deja
+  afuera. Eso lo hace la baja (0053, `DELETE /api/admin/users/[id]`, evento
+  `auth.user_deactivated`), que marca `users.dado_de_baja_en`, cierra sus sesiones
+  y le niega cualquier sesión nueva por contraseña, Google o SSO. Las dos pantallas
+  lo dicen.
 - **Secreto de sesión que vieron los PR.** Ningún workflow lee ya el
   `BETTER_AUTH_SECRET` del repositorio: `ci.yml` y los pasos de `deploy-checks.yml`
   que importan `@/lib/auth` generan uno propio por corrida

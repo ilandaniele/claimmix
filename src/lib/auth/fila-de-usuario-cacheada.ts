@@ -20,10 +20,11 @@
  *
  * NUNCA se cachea un `null`: un usuario recién dado de alta, o uno recién
  * borrado, no puede quedar mal durante 30 s. Dos misses seguidos hacen dos
- * consultas.
+ * consultas. Un usuario dado de baja (`dado_de_baja_en`) no tiene fila: para
+ * `requireRole` y el layout es lo mismo que no existir.
  */
 import "server-only";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { firstRow } from "@/lib/db/helpers";
@@ -113,7 +114,7 @@ export async function filaDeUsuario(userId: string): Promise<FilaUsuario | null>
       // Left: un inquilino sin base propia no tiene fila. `tenants.id` va primero:
       // `pnpm arquitectura` cuenta los `eq(x.tenant_id, …)` y esto no es un filtro.
       .leftJoin(tenantBases, eq(tenants.id, tenantBases.tenant_id))
-      .where(eq(users.id, userId))
+      .where(and(eq(users.id, userId), isNull(users.dado_de_baja_en)))
       .limit(1)
   );
 

@@ -1,9 +1,12 @@
 /**
- * PATCH /api/admin/users/:id - update a user's role in the current tenant.
+ * PATCH /api/admin/users/:id - update a user's role in the current tenant, or
+ * re-enable a user that was deactivated (`{ activo: true }`).
+ * DELETE /api/admin/users/:id - deactivate a user: no new session by any path,
+ * and the open ones are closed.
  */
 
 import { NextRequest } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/require-admin";
@@ -16,21 +19,52 @@ import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
+import { cerrarSesiones } from "@/lib/auth/sesiones";
 
 export const dynamic = "force-dynamic";
 
 const ParamsSchema = z.object({ id: z.guid() });
 const RoleSchema = z.enum(ALL_ROLES);
-const PatchUserSchema = z.object({
-  role: RoleSchema,
-});
+const PatchUserSchema = z.union([
+  z.object({ role: RoleSchema }),
+  z.object({ activo: z.literal(true) }),
+]);
 
 const USER_COLUMNS = {
   id: tables.users.id,
   full_name: tables.users.full_name,
   role: tables.users.role,
   created_at: tables.users.created_at,
+  dado_de_baja_en: tables.users.dado_de_baja_en,
 };
+
+/**
+ * Da de baja o vuelve a habilitar en una sola sentencia: la regla del owner viaja
+ * en el WHERE. Sin fila, una segunda lectura dice si fue porque no es de este
+ * espacio (NOT_FOUND) o porque es un owner y quien pide no lo es.
+ */
+async function marcarBaja(tenantCtx: TenantContext, rolDeQuienPide: string, id: string, baja: boolean) {
+  const delEspacio = eq(tables.users.id, id);
+  const marcada = firstRow(
+    await enControl(tenantCtx, (db) =>
+      db
+        .update(tables.users)
+        // coalesce: repetir la baja no le cambia la fecha.
+        .set({ dado_de_baja_en: baja ? sql`coalesce(${tables.users.dado_de_baja_en}, now())` : null })
+        .where(rolDeQuienPide === "owner" ? delEspacio : and(delEspacio, ne(tables.users.role, "owner")))
+        .returning(USER_COLUMNS)
+    )
+  );
+  if (marcada) return marcada;
+
+  const existe = firstRow(
+    await enControl(tenantCtx, (db) =>
+      db.select({ id: tables.users.id }).from(tables.users).where(delEspacio).limit(1)
+    )
+  );
+  if (!existe) throw new AppError("NOT_FOUND");
+  throw new AppError("FORBIDDEN_ROLE", "Solo un owner puede dar de baja o habilitar a un owner.");
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -56,6 +90,21 @@ export async function PATCH(
       );
     }
 
+    if ("activo" in parsed.data) {
+      const habilitado = await marcarBaja(tenantCtx, userRow.role, params.data.id, false);
+      await espejarSinFallar(userRow.tenant_id);
+      olvidarFilaDeUsuario(params.data.id);
+      await writeAuditLog({
+        tenant_id: userRow.tenant_id,
+        actor_id: user.id,
+        event_type: AuditEvent.USER_REACTIVATED,
+        target_type: "user",
+        target_id: habilitado.id,
+      });
+      return ok({ user: habilitado });
+    }
+    const { role } = parsed.data;
+
     const existing = firstRow(
       await enControl(tenantCtx, (db) =>
         db
@@ -70,7 +119,7 @@ export async function PATCH(
 
     if (!existing) throw new AppError("NOT_FOUND");
 
-    const touchesOwnerRole = existing.role === "owner" || parsed.data.role === "owner";
+    const touchesOwnerRole = existing.role === "owner" || role === "owner";
     if (touchesOwnerRole && userRow.role !== "owner") {
       throw new AppError(
         "FORBIDDEN_ROLE",
@@ -82,7 +131,7 @@ export async function PATCH(
       await enControl(tenantCtx, (db) =>
         db
           .update(tables.users)
-          .set({ role: parsed.data.role })
+          .set({ role })
           .where(
             eq(tables.users.id, params.data.id)
           )
@@ -114,6 +163,46 @@ export async function PATCH(
     });
 
     return ok({ user: updated });
+  } catch (e) {
+    return err(e);
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { user, userRow } = await requireAdmin();
+    const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
+    const params = ParamsSchema.safeParse(await context.params);
+    if (!params.success) throw new AppError("NOT_FOUND");
+
+    // Con esto y la regla del owner, al espacio siempre le queda quien lo administre.
+    if (params.data.id === user.id) {
+      throw new AppError("VALIDATION_FAILED", "No podés darte de baja a vos mismo.");
+    }
+
+    // Primero la baja: desde acá el gancho de sesión no abre ninguna nueva.
+    const dado = await marcarBaja(tenantCtx, userRow.role, params.data.id, true);
+
+    // Si tira, no se audita: la baja quedó y repetir el pedido cierra lo que falte.
+    const sesionesCerradas = await cerrarSesiones(dado.id);
+
+    // Esta instancia deja de servir la fila ya; las demás, al vencer su caché (30 s).
+    olvidarFilaDeUsuario(dado.id);
+    await espejarSinFallar(userRow.tenant_id);
+
+    await writeAuditLog({
+      tenant_id: userRow.tenant_id,
+      actor_id: user.id,
+      event_type: AuditEvent.USER_DEACTIVATED,
+      target_type: "user",
+      target_id: dado.id,
+      payload: { sesiones_cerradas: sesionesCerradas },
+    });
+
+    return ok({ user: dado, sesiones_cerradas: sesionesCerradas });
   } catch (e) {
     return err(e);
   }

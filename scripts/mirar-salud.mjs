@@ -16,7 +16,7 @@
  * habla al modelo, y hacer eso noventa y seis veces por día se comería el mismo
  * presupuesto que el chequeo vigila.
  */
-import { interpretarSalud } from "./lib/salud.mjs";
+import { interpretarSalud, pedirSalud } from "./lib/salud.mjs";
 
 const BASE = (process.env.URL || "https://claimmix-dev.vercel.app").replace(/\/+$/, "");
 const SECRET = process.env.CRON_SECRET;
@@ -26,39 +26,8 @@ if (!SECRET) {
   process.exitCode = 1;
 }
 
-/** Tres intentos: la red de un runner se corta sola, igual que en el barrido. */
-async function consultar() {
-  for (let intento = 1; intento <= 3; intento++) {
-    try {
-      const res = await fetch(`${BASE}/api/health`, {
-        headers: { Authorization: `Bearer ${SECRET}` },
-        // La ruta declara maxDuration 60 y en frío se toma varios segundos: un
-        // plazo más corto convertiría un arranque en frío en un rojo.
-        signal: AbortSignal.timeout(70_000),
-      });
-
-      const texto = await res.text();
-      let cuerpo = null;
-      try {
-        cuerpo = JSON.parse(texto);
-      } catch {
-        cuerpo = null;
-      }
-
-      if (res.status === 200 || res.status === 503 || res.status === 401) {
-        return { codigo: res.status, cuerpo };
-      }
-      console.log(`intento ${intento}: HTTP ${res.status}`);
-    } catch (err) {
-      console.log(`intento ${intento}: ${err instanceof Error ? err.message : "error de red"}`);
-    }
-    if (intento < 3) await new Promise((r) => setTimeout(r, 10_000));
-  }
-  return { codigo: 0, cuerpo: null };
-}
-
 if (SECRET) {
-  const { codigo, cuerpo } = await consultar();
+  const { codigo, cuerpo } = await pedirSalud(BASE, SECRET);
   // Los logs de Actions pueden ser públicos: ahí van el nombre y el estado de cada
   // chequeo, sin el detalle (número de WhatsApp, casilla de Gmail, migraciones…).
   // Corrido a mano se ve entero.

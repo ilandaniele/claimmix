@@ -66,6 +66,7 @@
     "peso": "node scripts/medir-peso.mjs",
     "peso:ver": "next experimental-analyze",
     "comparar-ensayos": "node scripts/comparar-ensayos.mjs",
+    "paridad": "node --env-file-if-exists=.env.local scripts/paridad.mjs",
     "achicar-payloads": "tsx --tsconfig tsconfig.rehearsal.json scripts/achicar-payloads.mts"
   },
   "dependencies": {

@@ -5247,6 +5247,17 @@ No hay dominio propio, así que en un espacio de prueba ninguna invitación pasa
 - **Ambientes.** Entra por #489 a qa y sigue a main y a prd por la regla de ambientes iguales; hasta entonces, el analista se invita como en D4 (b).
 - **Guía.** `docs/PUESTA_EN_MARCHA.md` pasa a D4 (d): A1, A3, dev paso 8, QA paso 8, prd pasos 10 y 14, «Si prueban otros en prd», C1, «Cuando entra un cliente real» y «Decisiones pendientes». De paso corrige restos viejos de la guía: el número por código figuraba apagado en dev y QA (está en 1 en los tres desde el 17/10), `/admin/altas` figuraba fuera del menú lateral (está en el menú del operador desde #461) y el texto del rechazo se citaba en `es-AR.servidor.ts:387`, que es `:397`.
 
+### Paridad de banderas entre dev, QA y prd (21/10, rama `ci/paridad-banderas`)
+
+Ítem 10 del plan de `docs/PUESTA_EN_MARCHA.md`: hasta ahora las variables de los tres proyectos se comparaban a mano (A12).
+
+- **Qué entra.** `pnpm paridad` (`scripts/paridad.mjs` y `scripts/lib/paridad.mjs`, sólo `fetch` y módulos de Node) le pide `/api/health` a dev, QA y prd con el Bearer de cada uno, junta `banderas` y lista lo que difiere. Las excepciones viven sólo en `EXCEPCIONES`, cada una con su motivo. Un ambiente ilegible (sin secreto, 401, sin respuesta) no tapa la comparación del resto.
+- **Sólo avisa.** El job `paridad` de `post-deploy.yml` corre al lado de los chequeos, sin `needs` (esperar a los reusables es esperar al ensayo entero), en cualquiera de los tres deploys y deja `::warning::` y el resumen del run. `continue-on-error` va en el job y en el paso, para que no ponga roja la corrida de QA y anule la marca `ensayo-verde-<árbol>`; el script sale siempre con 0 y `qa_veredicto` no lo espera: nunca pone rojo un deploy. El ambiente recién desplegado se lee recién cuando `/api/health` sirve el commit del deploy (el alias de Vercel se mueve después del aviso); si no llega en unos tres minutos queda ilegible, no se compara el build viejo.
+- **Logs públicos.** En Actions salen sólo la clave, el tipo de diferencia y qué ambientes coinciden (`dev=qa≠prd`), nunca un valor. Los valores se ven corriéndolo a mano. El secreto de cada ambiente viaja sólo a su origen, y la URL de prd sale de `vars.PRD_URL`.
+- **Tests.** `tests/unit/paridad.test.ts` (comparador, contrato de valores, URL de prd y script sin red) y la parte de `tests/unit/ci-prd.test.ts` que fija el job.
+- **Lo que sigue en manos del dueño.** Los valores reales de D7 en dev y QA (hoy desconocidos en la guía) y los huecos de `AI_PRUEBA_*` y `ALTA_PRUEBA_DIAS`: el comparador pide que sean iguales, pero no decide cuánto valen. Si algún día debe bloquear en vez de avisar, es decisión suya.
+- **Ambientes.** Todavía en la rama; entra por PR a qa y sigue a main y a prd por la regla de ambientes iguales.
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),

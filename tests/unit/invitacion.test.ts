@@ -176,6 +176,7 @@ describe("aceptarInvitacion", () => {
     const { sql, params } = compilar(h.ejecutadas[1]);
     expect(sql).toMatch(/insert into public\.users/i);
     expect(sql).toMatch(/i\.role = 'owner' or \(i\.role = 'admin' and \$\d+::text <> 'owner'\)/);
+    expect(sql).toMatch(/i\.dado_de_baja_en is null/);
     expect(sql).toMatch(/billing_status not in \('suspended', 'churned'\)/);
     expect(sql).toMatch(/on conflict \(id\) do nothing/i);
     // El asiento sale de la fila insertada: sin perfil nuevo no hay asiento.
@@ -281,9 +282,11 @@ describe("resumenDeInvitacion", () => {
     h.filas = [fila];
     await resumenDeInvitacion(datos());
 
-    const { params } = compilar(h.ejecutadas[1]);
+    const { sql, params } = compilar(h.ejecutadas[1]);
     expect(params).not.toContain(OTRO_ESPACIO);
     expect(params).toEqual(expect.arrayContaining([ESPACIO, ADMIN]));
+    // Quien invitó y después fue dado de baja ya no invita.
+    expect(sql).toMatch(/i\.dado_de_baja_en is null/);
 
     function compilar(consulta: unknown) {
       return new PgDialect().sqlToQuery(consulta as never);

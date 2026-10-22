@@ -14,6 +14,7 @@ import { authUsers, users } from "@/lib/db/schema";
 import { AdminUsersClient } from "./AdminUsersClient";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 interface UserRow {
   id: string;
@@ -21,9 +22,12 @@ interface UserRow {
   email: string;
   role: UserRole;
   created_at: string;
+  dado_de_baja_en: string | null;
 }
 
 type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
+
+export const generateMetadata = tituloDePantalla("admin.users.title");
 
 export default async function AdminUsersPage() {
   const t = getT(await getAccountLocale());
@@ -47,6 +51,7 @@ export default async function AdminUsersPage() {
         full_name: users.full_name,
         role: users.role,
         created_at: users.created_at,
+        dado_de_baja_en: users.dado_de_baja_en,
         email: authUsers.email,
       })
       .from(users)
@@ -60,6 +65,7 @@ export default async function AdminUsersPage() {
     email: r.email ?? "",
     role: r.role as UserRole,
     created_at: r.created_at,
+    dado_de_baja_en: r.dado_de_baja_en,
   }));
 
   return (

@@ -55,6 +55,7 @@ export const CODIGOS_DE_ERROR = [
   "sso_requerido",
   "sso_otro_inquilino",
   "sso_fallo",
+  "usuario_de_baja",
   "alta_cerrada",
   "demasiados_intentos",
   "email_no_verificado",

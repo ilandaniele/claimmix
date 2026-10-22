@@ -36,8 +36,8 @@ vi.mock("@/lib/db", () => ({
 
 // Sin esto `enTenant` abría una conexión de verdad contra la base de mentira.
 vi.mock("@/data/scope", () => ({
-  enTenant: (_ctx: unknown, fn: (db: unknown) => unknown) =>
-    fn({ select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }) }),
+  enTenant: vi.fn((_ctx: unknown, fn: (db: unknown) => unknown) =>
+    fn({ select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }) })),
 }));
 
 vi.mock("@/lib/db/helpers", () => ({
@@ -50,6 +50,7 @@ import {
   isVertexConfigured,
   resolveExtractionEngine,
 } from "@/server/ai/provider";
+import { enTenant } from "@/data/scope";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
 
@@ -116,6 +117,15 @@ describe("resolveExtractionEngine — never silently mock", () => {
     process.env.GOOGLE_CLOUD_PROJECT = "claimmix-prod";
 
     expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
+  });
+
+  it("con Vertex no lee la preferencia del inquilino: hay un solo proveedor", async () => {
+    process.env.GEMINI_TRANSPORT = "vertex";
+    process.env.GOOGLE_CLOUD_PROJECT = "claimmix-prod";
+    vi.mocked(enTenant).mockClear();
+
+    expect(await resolveExtractionEngine(TENANT)).toBe("gemini");
+    expect(enTenant).not.toHaveBeenCalled();
   });
 
   it("falls to mock only when there is genuinely no model to call", async () => {

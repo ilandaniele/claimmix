@@ -169,6 +169,10 @@ describe("consultaDeCarga", () => {
     expect(q.params).not.toContain("viewer");
   });
 
+  it("quien está de baja no entra en la carga", () => {
+    expect(sqlDe(consultaDeCarga(db)).sql).toContain('"users"."dado_de_baja_en" is null');
+  });
+
   it("acota al pool cuando se le pasa uno", () => {
     const q = sqlDe(consultaDeCarga(db, [ANA, BETO]));
     expect(q.params).toEqual(expect.arrayContaining([ANA, BETO]));

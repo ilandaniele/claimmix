@@ -17,7 +17,6 @@ import {
   enAlta,
   enIngresoPorSso,
   ingresoPorSso,
-  altaHabilitada,
   altaAbierta,
   altaEnCursoPorServidor,
 } from "@/lib/auth/registro-permitido";
@@ -128,95 +127,35 @@ describe("puedeRegistrarse", () => {
   });
 });
 
-describe("altaHabilitada", () => {
-  it("sin la variable no se registra nadie", () => {
-    delete process.env.SIGNUP_ALLOWED_EMAILS;
-    expect(altaHabilitada("quien.sea@empresa.com")).toBe(false);
-  });
-
-  it("con la variable, entra quien está en la lista", () => {
-    process.env.SIGNUP_ALLOWED_EMAILS = "@empresa.com";
-    expect(altaHabilitada("quien.sea@empresa.com")).toBe(true);
-    expect(altaHabilitada("quien.sea@otra.com")).toBe(false);
-  });
-
-  /*
-   * Las puertas del servidor (el enlace del mail, la invitación) las abre quien
-   * llama a `signUpEmail`, y el gancho de alta las reconoce por su cuenta. Ninguna
-   * le abre la lista a una dirección de afuera: un admin invita, no da de alta.
-   */
-  it("una puerta del servidor no abre la lista", async () => {
-    delete process.env.SIGNUP_ALLOWED_EMAILS;
-    for (const camino of ["correo", "invitacion"] as const) {
-      await enAlta(camino, async () => {
-        expect(altaHabilitada("de.afuera@cualquiera.com")).toBe(false);
-      });
-    }
-  });
-
-  it("la puerta no se escapa del pedido que la abrió", async () => {
+describe("las puertas no se escapan del pedido", () => {
+  it("la del servidor", async () => {
     await enAlta("invitacion", async () => {
       expect(altaEnCursoPorServidor()).toBe("invitacion");
     });
     expect(altaEnCursoPorServidor()).toBeUndefined();
   });
 
-  /*
-   * `ADMIN_EMAILS` tambien habilita. Es la politica que ya estaba y no la
-   * cambio: quien opera el producto tiene que poder entrar la primera vez sin
-   * que otro le abra la puerta.
-   */
-  it("ADMIN_EMAILS también habilita, sin estar en SIGNUP_ALLOWED_EMAILS", () => {
-    process.env.ADMIN_EMAILS = "quien.opera@claimmix.com";
-    expect(altaHabilitada("quien.opera@claimmix.com")).toBe(true);
-    expect(altaHabilitada("otro@claimmix.com")).toBe(false);
-  });
-});
-
-describe("altaHabilitada dentro de un ingreso por SSO", () => {
-  const T = "11111111-1111-4111-8111-111111111111";
-  const ingreso = { tenantId: T, dominio: "empresa.com" };
-
-  it("el dominio verificado del inquilino hace de allowlist, sin variable alguna", async () => {
-    delete process.env.SIGNUP_ALLOWED_EMAILS;
-    await enIngresoPorSso(ingreso, async () => {
-      expect(altaHabilitada("quien.sea@empresa.com")).toBe(true);
-      expect(altaHabilitada("Quien.Sea@EMPRESA.com")).toBe(true);
-    });
-  });
-
-  it("otro dominio, un subdominio o un dominio que termina igual no entran", async () => {
-    process.env.SIGNUP_ALLOWED_EMAILS = "@otra.com";
-    await enIngresoPorSso(ingreso, async () => {
-      for (const mal of ["x@otra.com", "x@sub.empresa.com", "x@malaempresa.com", "x@empresa.com@malicioso.com"]) {
-        expect(altaHabilitada(mal)).toBe(false);
-      }
-    });
-  });
-
-  it("no se escapa del pedido: después, el mismo mail vuelve a pedir la lista", async () => {
-    delete process.env.SIGNUP_ALLOWED_EMAILS;
+  it("la del SSO", async () => {
+    const ingreso = { tenantId: "11111111-1111-4111-8111-111111111111", dominio: "empresa.com" };
     await enIngresoPorSso(ingreso, async () => {
       expect(ingresoPorSso()).toEqual(ingreso);
     });
     expect(ingresoPorSso()).toBeUndefined();
-    expect(altaHabilitada("quien.sea@empresa.com")).toBe(false);
   });
 
-  it("dos ingresos de inquilinos distintos a la vez no se contaminan", async () => {
-    delete process.env.SIGNUP_ALLOWED_EMAILS;
+  it("dos ingresos por SSO de inquilinos distintos a la vez no se contaminan", async () => {
     const visto: string[] = [];
     await Promise.all([
       enIngresoPorSso({ tenantId: "a", dominio: "uno.com" }, async () => {
         await new Promise((r) => setTimeout(r, 5));
-        visto.push(`a:${ingresoPorSso()?.tenantId}:${altaHabilitada("x@uno.com")}:${altaHabilitada("x@dos.com")}`);
+        visto.push(`a:${ingresoPorSso()?.tenantId}:${ingresoPorSso()?.dominio}`);
       }),
       enIngresoPorSso({ tenantId: "b", dominio: "dos.com" }, async () => {
         await new Promise((r) => setTimeout(r, 1));
-        visto.push(`b:${ingresoPorSso()?.tenantId}:${altaHabilitada("x@dos.com")}:${altaHabilitada("x@uno.com")}`);
+        visto.push(`b:${ingresoPorSso()?.tenantId}:${ingresoPorSso()?.dominio}`);
       }),
     ]);
-    expect(visto.sort()).toEqual(["a:a:true:false", "b:b:true:false"]);
+    expect(visto.sort()).toEqual(["a:a:uno.com", "b:b:dos.com"]);
   });
 });
 
@@ -237,6 +176,32 @@ describe("altaAbierta", () => {
     process.env.SIGNUP_ALLOWED_EMAILS = "@example.com";
     expect(altaAbierta("ana@example.com")).toBe(true);
     expect(altaAbierta("ana@otra.example.org")).toBe(false);
+  });
+
+  /*
+   * `ADMIN_EMAILS` tambien abre. Es la politica que ya estaba y no la
+   * cambio: quien opera el producto tiene que poder entrar la primera vez sin
+   * que otro le abra la puerta.
+   */
+  it("apagada, ADMIN_EMAILS también abre sin estar en SIGNUP_ALLOWED_EMAILS", () => {
+    delete process.env.ALTA_AUTOMATICA;
+    process.env.ADMIN_EMAILS = "quien.opera@example.com";
+    expect(altaAbierta("quien.opera@example.com")).toBe(true);
+    expect(altaAbierta("otro@example.com")).toBe(false);
+  });
+
+  /*
+   * Las puertas del servidor (el enlace del mail, la invitación) las abre quien
+   * llama a `signUpEmail`, y el gancho de alta las reconoce por su cuenta. Ninguna
+   * le abre la lista a una dirección de afuera: un admin invita, no da de alta.
+   */
+  it("una puerta del servidor no abre la lista", async () => {
+    delete process.env.ALTA_AUTOMATICA;
+    for (const camino of ["correo", "invitacion"] as const) {
+      await enAlta(camino, async () => {
+        expect(altaAbierta("de.afuera@example.org")).toBe(false);
+      });
+    }
   });
 
   it("con ALTA_AUTOMATICA=1 se abre para cualquiera", () => {

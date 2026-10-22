@@ -23,13 +23,13 @@ import { Vacio } from "../bandeja/components/Vacio";
 
 const COLOR_DEL_VENCIMIENTO: Record<EstadoDelVencimiento, string> = {
   vencido: "text-red-600 font-medium",
-  por_vencer: "text-amber-600 font-medium",
+  por_vencer: "text-amber-700 font-medium",
   en_plazo: "text-slate-500",
 };
 
 const COLOR_DE_LA_BANDA: Record<BandaDeComplejidad, string> = {
   baja: "text-slate-500",
-  media: "text-amber-600",
+  media: "text-amber-700",
   alta: "text-red-600 font-medium",
 };
 
@@ -84,7 +84,7 @@ export function InsigniaDeDenuncia({ resultado }: { resultado: { dias: number; s
   if (resultado === null) return null;
   return (
     <span
-      className={`text-xs whitespace-nowrap ${resultado.superaArt46 ? "text-amber-600" : "text-slate-500"}`}
+      className={`text-xs whitespace-nowrap ${resultado.superaArt46 ? "text-amber-700" : "text-slate-500"}`}
       title={t("denuncia.ayuda")}
     >
       {t(resultado.superaArt46 ? "denuncia.revisar" : "denuncia.dias").replace("{n}", String(resultado.dias))}

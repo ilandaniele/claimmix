@@ -2,7 +2,9 @@
  * Toast notification component for realtime updates.
  *
  * AC12: Shows subtle toast for new cases and status changes.
- * Design: bottom-right position, auto-dismiss after 4 seconds.
+ * Design: bottom-right position, auto-dismiss after 4 seconds. Errors stay until
+ * dismissed: whoever reads slowly or with a magnifier must not miss a failure.
+ * The container is always mounted so screen readers announce what is added to it.
  */
 
 "use client";
@@ -29,14 +31,16 @@ function ToastItem({
   onDismiss: (id: string) => void;
 }) {
   const t = useT();
+  const esError = toast.type === "error";
 
   useEffect(() => {
+    if (esError) return;
     const timer = setTimeout(() => onDismiss(toast.id), 4000);
     return () => clearTimeout(timer);
-  }, [toast.id, onDismiss]);
+  }, [toast.id, esError, onDismiss]);
 
   const bgClass =
-    toast.type === "error"
+    esError
       ? "bg-red-50 border-red-200 text-red-900"
       : toast.type === "success"
       ? "bg-green-50 border-green-200 text-green-900"
@@ -44,8 +48,6 @@ function ToastItem({
 
   return (
     <div
-      role="status"
-      aria-live="polite"
       className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-3 shadow-md text-sm animate-in slide-in-from-bottom-2 ${bgClass}`}
     >
       <span>{toast.message}</span>
@@ -62,10 +64,10 @@ function ToastItem({
 
 export function ToastContainer({ toasts, onDismiss }: ToastProps) {
   const t = useT();
-  if (toasts.length === 0) return null;
 
   return (
     <div
+      role="status"
       aria-label={t("toast.region")}
       className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-80"
     >

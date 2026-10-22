@@ -50,6 +50,8 @@ export interface Conversacion {
   recortada: boolean;
   status: string;
   channel: string;
+  /** Quién tiene el caso, para decidir si esta persona puede responderlo. */
+  assigned_to: string | null;
   /** `received_at` del último entrante de WhatsApp, para la ventana de 24 h. */
   ultimoEntranteWhatsApp: string | null;
 }
@@ -87,7 +89,7 @@ export async function conversacionDelCaso(
 ): Promise<Conversacion | null> {
   const [caso, hilo, simulados, salientes, ultimoEntrante] = await enTenantVarias<
     [
-      Array<{ id: string; status: string; channel: string }>,
+      Array<{ id: string; status: string; channel: string; assigned_to: string | null }>,
       DelHilo[],
       Simulado[],
       Saliente[],
@@ -95,7 +97,12 @@ export async function conversacionDelCaso(
     ]
   >(ctx, (db) => [
     db
-      .select({ id: cases.id, status: cases.status, channel: cases.channel })
+      .select({
+        id: cases.id,
+        status: cases.status,
+        channel: cases.channel,
+        assigned_to: cases.assigned_to,
+      })
       .from(cases)
       .where(eq(cases.id, caseId))
       .limit(1),
@@ -237,6 +244,7 @@ export async function conversacionDelCaso(
     recortada: mensajes.length > TOPE_MENSAJES,
     status: elCaso.status,
     channel: elCaso.channel,
+    assigned_to: elCaso.assigned_to,
     ultimoEntranteWhatsApp: ultimoEntrante[0]?.received_at ?? null,
   };
 }

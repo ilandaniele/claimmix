@@ -36,7 +36,7 @@ import {
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { SignInSchema } from "@/lib/schemas/auth";
 import { logger } from "@/lib/observability/logger";
-import { CODIGO_SSO_REQUERIDO } from "@/server/sso/exigir";
+import { CODIGO_SSO_REQUERIDO, CODIGO_USUARIO_DE_BAJA } from "@/server/sso/exigir";
 import { urlDelSso } from "@/server/sso/ingreso";
 
 type SignInState = {
@@ -118,13 +118,14 @@ export async function signIn(
     userId = result.user.id;
   } catch (e) {
     /*
-     * «Exigir SSO»: la contraseña estaba bien y el gancho de sesión la frenó.
-     * Decir «Credenciales inválidas» acá manda a quien no se equivocó a probar
-     * otra contraseña, y cuenta un fallo que no fue. Sólo lo oye quien acertó la
-     * contraseña, así que no ayuda a adivinarla.
+     * «Exigir SSO» o usuario de baja: la contraseña estaba bien y el gancho de
+     * sesión la frenó. Decir «Credenciales inválidas» acá manda a quien no se
+     * equivocó a probar otra contraseña, y cuenta un fallo que no fue. Sólo lo
+     * oye quien acertó la contraseña, así que no ayuda a adivinarla.
      */
-    if (e instanceof APIError && e.body?.code === CODIGO_SSO_REQUERIDO) {
-      redirect(`/login?error=${CODIGO_SSO_REQUERIDO}`);
+    const codigo = e instanceof APIError ? e.body?.code : undefined;
+    if (codigo === CODIGO_SSO_REQUERIDO || codigo === CODIGO_USUARIO_DE_BAJA) {
+      redirect(`/login?error=${codigo}`);
     }
     await writeAuditLog({
       tenant_id: "00000000-0000-0000-0000-000000000000",

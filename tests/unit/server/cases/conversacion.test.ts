@@ -68,6 +68,13 @@ describe("conversacionDelCaso", () => {
     expect(armadas).toHaveLength(5);
   });
 
+  it("trae a quién está asignado el caso, para decidir si esta persona puede responderlo", async () => {
+    responder([[{ id: CASO, status: "listo", channel: "whatsapp", assigned_to: "user-2" }], [], [], [], []]);
+
+    expect((await conversacionDelCaso(CTX, CASO))?.assigned_to).toBe("user-2");
+    expect(armadas[0]!.sql).toContain('"assigned_to"');
+  });
+
   it("devuelve null si el caso no se ve", async () => {
     responder([[], [], [], [], []]);
     expect(await conversacionDelCaso(CTX, CASO)).toBeNull();

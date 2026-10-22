@@ -11,8 +11,14 @@
  * lenta, algo quedó saturado —una cola, un pool, una función congelándose— y
  * eso no se ve en ningún otro escenario.
  *
- * Por eso la medición está partida en tres etiquetas de tiempo, y el umbral
- * sólo aplica a la de después.
+ * Por eso la medición está partida en tres etiquetas de tiempo (`fase:antes`,
+ * `durante` y `despues`): el umbral de latencia y de pedidos caídos sólo aplica
+ * a la de después, y los `check()` llevan la misma etiqueta para exigir 200 en
+ * el antes y el después, pero no durante el pico.
+ *
+ * Los 429 no se toleran en ninguna fase: `rechazados_por_cupo` tiene umbral. La
+ * ola pide lo que dan las cuentas —las que haga falta, `iniciarSesiones` corta
+ * la corrida si no alcanzan— con la misma pausa que el sondeo de la bandeja.
  */
 
 import http from "k6/http";
@@ -21,11 +27,14 @@ import { Counter, Trend } from "k6/metrics";
 
 import {
   BASE_URL,
+  CHECKS_SIN_FALLAS,
+  PAUSA_S,
   PERCENTILES,
-  PRESUPUESTO_P95_MS,
   RUTAS,
-  cabecerasDeVercel,
+  cupoSinRechazos,
   exigirDestinoSeguro,
+  selectorDeLectura,
+  umbralesDeLectura,
 } from "../config/base.js";
 import { comoAnalista, esRechazoDeCupo, iniciarSesiones } from "../helpers/auth.js";
 import { guardar } from "../helpers/reporte.js";
@@ -33,9 +42,8 @@ import { guardar } from "../helpers/reporte.js";
 exigirDestinoSeguro("spike");
 
 const antes = new Trend("spike_antes_ms", true);
-/** Cuántas muestras cayó en cada fase. Ver el umbral, abajo. */
+/** Cuántas muestras cayeron en la línea de base. Ver el umbral, abajo. */
 const muestrasAntes = new Counter("spike_muestras_antes");
-const muestrasDespues = new Counter("spike_muestras_despues");
 const durante = new Trend("spike_durante_ms", true);
 const despues = new Trend("spike_despues_ms", true);
 
@@ -67,42 +75,38 @@ export const options = {
     { duration: `${VUELTA_S}s`, target: 20 },  // ¿volvió?
   ],
   summaryTrendStats: PERCENTILES,
+  // Un 302 al login no se sigue como si fuera la respuesta.
+  maxRedirects: 0,
+  // El login va de a 25 por minuto: con decenas de cuentas el setup tarda minutos.
+  setupTimeout: "10m",
   thresholds: {
     /*
-     * El umbral va sobre el DESPUÉS, no sobre el total.
+     * Los umbrales de latencia y de pedidos caídos van sobre el DESPUÉS, no
+     * sobre el total.
      *
      * Sobre el total, el pico —que es lo que este perfil fue a provocar— tira
      * el p95 y la corrida sale roja siempre, midiendo lo esperado en vez de lo
-     * que se pregunta.
-     */
-    /*
-     * `min>0` además del p95: en k6 un umbral sobre una métrica SIN MUESTRAS
-     * pasa —un Trend vacío da p(95)=0— así que una fase que nunca se llenó
-     * salía verde. Con muestras la latencia siempre es mayor que cero.
-     */
-    /*
-     * Un contador aparte, y no `min>0` sobre el Trend.
+     * que se pregunta. Durante el pico se admite perder pedidos; después, no.
      *
-     * En k6, un umbral sobre una métrica SIN MUESTRAS pasa: un Trend vacío da
-     * p(95)=0 y nadie se queja. Así que una fase que nunca se llenó salía
-     * verde, que es el peor de los verdes.
-     *
-     * `min>0` parecía la guarda barata y no lo es: contra un servidor local
-     * una respuesta puede tardar menos de un milisegundo, `min` da 0, y el
-     * umbral rompe con las fases perfectamente llenas. Lo comprobé.
-     *
-     * Un contador no tiene esa ambigüedad: o hubo muestras o no hubo.
+     * Incluyen `http_reqs … count>0`, la guarda de que la fase se llenó: en k6
+     * un umbral sobre una métrica SIN MUESTRAS pasa —un Trend vacío da
+     * p(95)=0— y una fase que nunca se llenó saldría verde, que es el peor de
+     * los verdes. Un contador no tiene esa ambigüedad: o hubo muestras o no.
+     * (`min>0` no sirve de guarda: contra un servidor local una respuesta puede
+     * tardar menos de un milisegundo y `min` da 0 con la fase llena.)
      */
-    spike_despues_ms: [`p(95)<${PRESUPUESTO_P95_MS}`],
+    ...umbralesDeLectura("despues"),
+    // Y lo mismo para la línea de base: sin ella no hay con qué comparar.
     spike_muestras_antes: ["count>0"],
-    spike_muestras_despues: ["count>0"],
-    // Durante el pico se admite perder pedidos; después, no.
-    "http_req_failed{fase:despues}": ["rate<0.01"],
+    ...cupoSinRechazos(),
+    // Los checks se exigen en el antes y el después; durante el pico no.
+    "checks{fase:antes}": CHECKS_SIN_FALLAS,
+    "checks{fase:despues}": CHECKS_SIN_FALLAS,
   },
 };
 
 export function setup() {
-  return { ...iniciarSesiones(300, 30), arranque: Date.now() };
+  return { ...iniciarSesiones(300, 60 / PAUSA_S), arranque: Date.now() };
 }
 
 /** En qué momento de la ola estamos, por reloj de la corrida. */
@@ -120,7 +124,7 @@ export default function (sesion) {
     comoAnalista(sesion, "lectura", { fase: enQue })
   );
   esRechazoDeCupo(res);
-  check(res, { "200": (r) => r.status === 200 });
+  check(res, { "200": (r) => r.status === 200 }, { fase: enQue });
 
   const d = res.timings.duration;
   if (enQue === "antes") {
@@ -130,12 +134,11 @@ export default function (sesion) {
     durante.add(d);
   } else {
     despues.add(d);
-    muestrasDespues.add(1);
   }
 
-  // Corta, pero pausa: trescientas personas abriendo la bandeja refrescan cada
-  // par de segundos, no martillan. Sin esto se mide un ataque, no una tormenta.
-  sleep(2);
+  // Pausa como la del sondeo de la bandeja: trescientas personas abriendo la
+  // bandeja no martillan. Sin esto se mide un ataque, no una tormenta.
+  sleep(PAUSA_S);
 }
 
 export function handleSummary(datos) {
@@ -163,5 +166,5 @@ export function handleSummary(datos) {
       : "sin muestras",
     "p95 después": vuelta ? `${Math.round(vuelta)} ms` : "sin muestras",
     "recuperó": recupero,
-  });
+  }, selectorDeLectura("despues"));
 }

@@ -8,10 +8,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { ALL_ROLES } from "@/lib/auth/require-role";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
+import { entrar } from "@/lib/api/entrada";
 import { err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import {
   AGENT_EXPORT_PII_MODES,
   AGENT_EXPORT_TYPES,
@@ -75,8 +77,10 @@ function clientIp(request: Request): string | null {
 
 export async function GET(request: Request) {
   try {
+    const { ctx, rl } = await entrar("agent-export", RATE_LIMIT_CONFIGS.CASES_API, ...ALL_ROLES);
+    if (!rl.allowed) return err(new AppError("RATE_LIMITED"));
+    const { user, userRow } = ctx;
     const parsed = parseQuery(request);
-    const { user, userRow } = await requireRole(...ALL_ROLES);
     const canExportFullPii = userRow.role === "owner" || userRow.role === "admin";
 
     if (!canExportAgentData(userRow.role, parsed)) {

@@ -791,6 +791,7 @@ export const esARServidor = {
   "correo.recuperar.noFuiste": "Si no fuiste vos, no hace falta que hagas nada: tu contraseña actual sigue funcionando y este enlace vence solo. Si te llega esto varias veces sin haberlo pedido, avisale a quien administra tu cuenta.",
   "login.errores.registro_cerrado": "Por ahora no podemos crear una cuenta con esa dirección. Si te invitaron, abrí el enlace de la invitación; si no, escribinos y lo vemos.",
   "login.errores.sso_requerido": "Tu empresa pide entrar con su SSO. Usá «Entrar con el SSO de mi empresa» e ingresá tu correo de la empresa.",
+  "login.errores.usuario_de_baja": "Tu usuario fue dado de baja. Pedile a un admin de tu organización que te habilite.",
   "login.errores.sso_otro_inquilino": "Ese correo ya pertenece a otra cuenta de ClaimMix, así que no pudimos darte acceso por acá. Escribinos si creés que es un error.",
   "login.errores.sso_fallo": "No pudimos completar el ingreso con el SSO de tu empresa. Revisá que el correo sea el de la empresa y probá de nuevo en un rato, o entrá con tu contraseña.",
   "login.errores.alta_cerrada": "Ahora no podemos crear espacios nuevos. Probá de nuevo más tarde o escribinos.",

@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-21. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-22. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -4625,8 +4625,12 @@ sola migración (la 0047).
 - **Revocación por persona.** `DELETE /api/admin/users/[id]/sessions` cierra todas
   las sesiones de una persona del inquilino, con un botón en la pantalla de
   usuarios y el evento `auth.user_sessions_revoked`. Un admin no cierra las de un
-  owner, y nadie cierra la propia por acá. La persona queda afuera dentro de los
-  60 s del `cookieCache`, y la pantalla lo dice.
+  owner, y nadie cierra la propia por acá. Las sesiones abiertas caen dentro de
+  los 60 s del `cookieCache`, pero la persona puede volver a entrar: no la deja
+  afuera. Eso lo hace la baja (0053, `DELETE /api/admin/users/[id]`, evento
+  `auth.user_deactivated`), que marca `users.dado_de_baja_en`, cierra sus sesiones
+  y le niega cualquier sesión nueva por contraseña, Google o SSO. Las dos pantallas
+  lo dicen.
 - **Secreto de sesión que vieron los PR.** Ningún workflow lee ya el
   `BETTER_AUTH_SECRET` del repositorio: `ci.yml` y los pasos de `deploy-checks.yml`
   que importan `@/lib/auth` generan uno propio por corrida
@@ -5126,7 +5130,7 @@ Los cuatro ítems chicos del «Plan para que el alta sea automática» (`docs/PU
 
 - **Ítem 1.** El menú lateral del operador muestra «Altas», con enlace a `/admin/altas`. Un admin de un cliente no lo ve.
 - **Ítem 5.** `/admin/altas` muestra la mediana y el p95 de lo que tardó un espacio en quedar listo en los últimos 30 días, desde `tenant_bases` (`src/server/alta/panel-operador.ts`; el formato sale de `src/core/fecha/duracion.ts`).
-- **Ítem 6.** El guardia, `/configuracion` y `/api/health` leen el tope con la misma función, `topeMensualDelProyecto()` en `src/server/ai/tope-mensual.ts`. Antes health leía el 0 como 200 y la pantalla mostraba siempre 200. Con `MONTHLY_BUDGET_USD=0` el guardia frena la IA de los clientes (la demo sigue con su tope, `DEMO_MONTHLY_BUDGET_USD`), la pantalla dice «IA frenada» y health queda en `degraded` con HTTP 200: un `down` daría 503 y tumbaría el smoke, el `curl -fsS` del Post-deploy y el barrido. Que 0 quiera decir «sin tope» (opción B) lo decide el dueño.
+- **Ítem 6.** El guardia, `/configuracion` y `/api/health` leen el tope con la misma función, `topeMensualDelProyecto()` en `src/lib/topes.ts`. Antes health leía el 0 como 200 y la pantalla mostraba siempre 200. Con `MONTHLY_BUDGET_USD=0` el guardia frena la IA de los clientes (la demo sigue con su tope, `DEMO_MONTHLY_BUDGET_USD`), la pantalla dice «IA frenada» y health queda en `degraded` con HTTP 200: un `down` daría 503 y tumbaría el smoke, el `curl -fsS` del Post-deploy y el barrido. Que 0 quiera decir «sin tope» (opción B) lo decide el dueño.
 - **Ítem 12.** `.env.example` nombra todas las variables que lee el código, y `tests/unit/env-example-completo.test.ts` falla si aparece una nueva sin anotar.
 - **Verificación.** Suite entera en verde (14.319 tests) antes de sumar el Lote A. La revisión de Fable pidió un test que fije que el guardia frena con el tope en 0 y precisar que la demo tiene su propio tope; las dos cosas están. La auditoría #90 queda parcial: health todavía repite la suma del gasto del mes.
 
@@ -5262,6 +5266,19 @@ No hay dominio propio, así que en un espacio de prueba ninguna invitación pasa
 ### Sembrado por la puerta del alta (21/10, #494)
 
 `pnpm sembrar` creaba las cuentas de prueba con `signUpEmail` fuera de `enAlta`, y el gancho del alta rechaza con 422 toda alta que no entra por ninguna puerta. En CI no se notaba porque las cuentas ya existen en la base del ensayo y el sembrado sólo les pone la contraseña al día. Contra una base nueva, como la de un ambiente independiente, se plantaba en la primera cuenta. Ahora `scripts/sembrar-para-integracion.mts` usa `enAlta("correo", …)`, igual que el modo `--carga` del mismo script. Entra a qa con #495 por la misma rama de integración.
+
+### Lote de la segunda auditoría (22/10, #499)
+
+La segunda corrida de los catorce prompts (un Workflow de sólo lectura, con seguridad en Fable) dio 55 hallazgos confirmados, y security-auditor, re-corrido en cinco alcances, sumó cuatro más (S1 a S4). Todos los arreglos entran en un solo lote, `lote/auditoria-limpieza`, con un commit por área.
+
+- **Migraciones, aplicadas a mano antes del merge.** 0052 (índices de las FK de `agent_runs` y `training_examples`) y 0053 (`users.dado_de_baja_en`) están en QA, dev, staging, prd (control y `t_20000000000000000000000000000002`) y la rama de ensayo de prd. `--exigir-al-dia` da verde en las tres y `bases:empaquetar --comprobar` da 53.
+- **S1, baja de usuarios.** Un DELETE nuevo en `/api/admin/users/[id]`, sólo para administradores, que no sirve contra uno mismo ni contra un dueño; lo deshace un PATCH con `{activo:true}`. `filaDeUsuario` ignora a los dados de baja y `session.create.before` (`revisarSesionNueva`) corta la contraseña, Google y el SSO del inquilino con `usuario_de_baja`. Quedan tres ventanas cortas: la caché de la cookie (60 s), la de `filaDeUsuario` (30 s) y, si falla el espejo a `t_<hex>`, hasta el `espejarTodas` de la hora siguiente.
+- **S2 a S4.** El tope del formulario web cuenta la dirección canónica (sin alias `+` ni puntos de Gmail), un analista no responde por WhatsApp un caso asignado a otra persona, y `agent/export`, `metricas` y `export-to-core` pasan por `entrar()` con cupo de pedidos.
+- **B1 a B9.** Los cortes pasajeros de Gemini vuelven a la cola en vez de escalar, entran los mails sólo HTML y la ubicación y los contactos de WhatsApp, la salud y los crons avisan cuando algo falla, las bases por cliente no se traban en `creando`, hay contraste y títulos por pantalla en los dos idiomas, las pruebas de carga miden lo que dicen y se va código duplicado. El detalle por hallazgo está en el cuerpo del PR.
+- **Guía.** El mail agente es la Gmail de Veltra en los tres ambientes (decisión del dueño del 22/10), «Activa» sólo donde se prueba; en prd primero sale de `CASILLAS_DE_DEV`.
+- **Comprobación.** `pnpm check --local` en verde salvo `mail-tardio-pregunta-como-va`, que cortó por un timeout de Gemini en el clasificador del mensaje tardío; ensayado solo dio verde, y `pnpm smoke` contra dev también.
+- **Ambientes.** Entra a qa por #499 y sigue a main y a prd el mismo día, por la regla de ambientes iguales.
+- **Queda afuera.** H3 (índice duplicado) espera una corrida de Carga en QA. Para el lote siguiente: quién puede marcar «respondido» (hoy lo hace cualquiera del equipo, por diseño de la cola), el `audit_log` de `export-to-core`, la invalidación de cachés entre instancias, la carrera entre dos administradores que se dan de baja a la vez y el reintento de `espejarSinFallar`.
 
 ### 🙋 Waiting on you (not code)
 

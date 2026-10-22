@@ -6,7 +6,8 @@
  * lo que el GET de mensajes ya mostró. El destinatario sale de
  * `cases.email_thread_id`, nunca del cuerpo del pedido.
  *
- * 200: { id, estado }. 404: el caso no existe o es de otro inquilino.
+ * 200: { id, estado }. 404: el caso no existe, es de otro inquilino o, para un
+ * analista, lo tiene asignado otra persona.
  * 409: RESPUESTA_NO_PERMITIDA con { motivo }. 502: el envío a Meta falló (la
  * fila de outbound queda con status failed).
  */

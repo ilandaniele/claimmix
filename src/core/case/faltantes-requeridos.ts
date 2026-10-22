@@ -43,8 +43,10 @@ export const REQUIRED_CONTACT_FIELDS = ["email", "phone"] as const;
  * después lo de esta corrida, así una corrección del último mensaje no queda
  * por debajo del valor viejo.
  */
-export function mapaDeCampos(campos: readonly ExtractedField[]): Map<string, ExtractedField> {
-  const mapa = new Map<string, ExtractedField>();
+export function mapaDeCampos<T extends { field_key: string; confidence: number }>(
+  campos: readonly T[]
+): Map<string, T> {
+  const mapa = new Map<string, T>();
   for (const f of campos) {
     const clave = canonicalFieldKey(f.field_key);
     const existente = mapa.get(clave);
@@ -130,11 +132,11 @@ export function faltantesRequeridos(
  * requerido. Para los campos base, `clavesQueSatisfacen` sólo devuelve la
  * clave pedida, así que esto es `mapa.get(reqField)` como antes.
  */
-function mejorEntreClaves(
-  mapa: ReadonlyMap<string, ExtractedField>,
+export function mejorEntreClaves<T extends { confidence: number }>(
+  mapa: ReadonlyMap<string, T>,
   claves: readonly string[]
-): ExtractedField | undefined {
-  let mejor: ExtractedField | undefined;
+): T | undefined {
+  let mejor: T | undefined;
   for (const clave of claves) {
     const campo = mapa.get(canonicalFieldKey(clave));
     if (campo && (!mejor || campo.confidence > mejor.confidence)) {

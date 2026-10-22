@@ -254,6 +254,41 @@ describe("avisarDesvios", () => {
     expect(JSON.stringify(payload)).not.toContain("@");
   });
 
+  describe("en el idioma de cada uno", () => {
+    const CASTELLANO = "especialista@aseguradora.example.com";
+    const INGLES = "specialist@insurer.example.com";
+
+    /** Sin lista: los especialistas, cada uno con el idioma de su perfil. */
+    function especialistasConIdioma() {
+      const respuestas = [[{ emails: [] }], [{ email: CASTELLANO, locale: null }, { email: INGLES, locale: "en-US" }]];
+      let i = 0;
+      m.enTenant.mockImplementation(async () => respuestas[i++] ?? []);
+    }
+
+    it("un especialista en inglés lo recibe en inglés, en un correo aparte", async () => {
+      especialistasConIdioma();
+
+      expect(await avisarDesvios({ tenantId: nuevoInquilino(), porRegla: { ...DESVIOS } })).toBe(true);
+
+      expect(m.enviar).toHaveBeenCalledTimes(2);
+      const [castellano, ingles] = m.enviar.mock.calls.map(([c]) => c);
+      expect(castellano).toMatchObject({ to: CASTELLANO, subject: "La revisión de anoche encontró 3 desvíos nuevos" });
+      expect(ingles).toMatchObject({ to: INGLES, subject: "Last night's review found 3 new deviations" });
+      expect(ingles.textBody).toContain("See the deviations: https://claimmix.example.com/desvios");
+      expect(ingles.textBody).not.toContain("{");
+      expect(m.auditar.mock.calls[0][0].payload).toMatchObject({ recipients: 2, delivered: true });
+    });
+
+    it("si uno de los dos no sale, el aviso no cuenta como entregado", async () => {
+      especialistasConIdioma();
+      m.enviar.mockResolvedValueOnce({ providerMessageId: "sent-1" }).mockResolvedValueOnce({ error: "rechazado" });
+
+      expect(await avisarDesvios({ tenantId: nuevoInquilino(), porRegla: { ...DESVIOS } })).toBe(false);
+
+      expect(m.auditar.mock.calls[0][0].payload).toMatchObject({ recipients: 2, delivered: false });
+    });
+  });
+
   describe("la dirección vedada no recibe nunca", () => {
     // googlemail.com: mismo alias que gmail.com para vedadaParaAlertas,
     // sin repetir la dirección real con otra ortografía (scripts/check-personal-data.sh).

@@ -37,9 +37,11 @@ vi.mock("@/data/scope", () => ({
   }),
 }));
 
-vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
+vi.mock("@/lib/api/entrada", () => ({ entrar: vi.fn() }));
 
-import { requireRole } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
+import { CASE_EDITOR_ROLES } from "@/lib/auth/require-role";
+import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { POST } from "@/app/api/cases/[id]/export-to-core/route";
 
 const TENANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -66,11 +68,16 @@ function exportar(id = CASO) {
   });
 }
 
-beforeEach(() => {
-  vi.mocked(requireRole).mockReset().mockResolvedValue({
+const ENTRADA = {
+  ctx: {
     user: { id: USUARIO },
-    userRow: { id: USUARIO, tenant_id: TENANT, role: "analyst", plan: "profesional" },
-  });
+    userRow: { id: USUARIO, tenant_id: TENANT, role: "analyst" as const, plan: "profesional" },
+  },
+  rl: { allowed: true, remaining: 99, resetAt: 0, retryAfterSeconds: 0, ventana: 0 },
+};
+
+beforeEach(() => {
+  vi.mocked(entrar).mockReset().mockResolvedValue(ENTRADA);
   h.casos = { [TENANT]: FILA };
   h.consultas = [];
   h.contextos = [];
@@ -116,13 +123,24 @@ describe("export-to-core", () => {
 
   it("un id que no es UUID da 400 sin tocar la base", async () => {
     expect((await exportar("no-es-un-id")).status).toBe(400);
-    expect(requireRole).not.toHaveBeenCalled();
+    expect(entrar).not.toHaveBeenCalled();
     expect(h.consultas).toEqual([]);
   });
 
+  it("pasa por la puerta común, con el cupo de los casos y los roles que editan casos", async () => {
+    await exportar();
+    expect(entrar).toHaveBeenCalledWith("export-to-core", RATE_LIMIT_CONFIGS.CASES_API, ...CASE_EDITOR_ROLES);
+  });
+
   it("sin permiso da 403 sin tocar la base", async () => {
-    vi.mocked(requireRole).mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
+    vi.mocked(entrar).mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
     expect((await exportar()).status).toBe(403);
+    expect(h.consultas).toEqual([]);
+  });
+
+  it("pasado el cupo da 429 sin tocar la base", async () => {
+    vi.mocked(entrar).mockResolvedValue({ ...ENTRADA, rl: { ...ENTRADA.rl, allowed: false, remaining: 0, retryAfterSeconds: 30 } });
+    expect((await exportar()).status).toBe(429);
     expect(h.consultas).toEqual([]);
   });
 });

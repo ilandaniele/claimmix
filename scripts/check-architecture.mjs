@@ -44,7 +44,7 @@ import { join } from "node:path";
  * exacta que `reapStuckProcessingCases`, que es el diez.
  *
  * El doce y el trece son de «Exigir SSO» (`src/server/sso/usuarios.ts`) y no
- * tienen cómo ir por `enTenant`: `dominioExigeSso` corre en el gancho de sesión,
+ * tienen cómo ir por `enTenant`: `perfilDelIngreso` corre en el gancho de sesión,
  * antes de que haya inquilino, y compara el inquilino del perfil con el de la
  * configuración en una sola consulta; `cerrarSesionesDelDominio` borra sesiones,
  * que no son de un inquilino, de las cuentas de ese inquilino. Sin ese filtro

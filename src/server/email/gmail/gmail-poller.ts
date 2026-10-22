@@ -169,6 +169,73 @@ function extractBodyPart(
   return "";
 }
 
+/** Lo que el mail no muestra: ni el código ni los estilos son texto que escribió alguien. */
+const SIN_TEXTO = ["script", "style", "head"];
+const CORTA_RENGLON = /^\/?(br|p|div|tr|li|h[1-6]|table|blockquote)\b/i;
+const ENTIDADES = new Map(Object.entries({
+  nbsp: " ", lt: "<", gt: ">", quot: '"', apos: "'", amp: "&",
+  aacute: "á", eacute: "é", iacute: "í", oacute: "ó", uacute: "ú",
+  Aacute: "Á", Eacute: "É", Iacute: "Í", Oacute: "Ó", Uacute: "Ú",
+  ntilde: "ñ", Ntilde: "Ñ", uuml: "ü", iexcl: "¡", iquest: "¿",
+}));
+
+/** Una sola pasada: `&amp;lt;` queda en `&lt;`, como lo muestra el cliente de correo. */
+function decodificarEntidades(texto: string): string {
+  return texto.replace(/&(#\d{1,7}|#x[0-9a-f]{1,6}|[a-z]{2,8});/gi, (entera, cuerpo: string) => {
+    if (cuerpo[0] !== "#") return ENTIDADES.get(cuerpo) ?? entera;
+    const hexa = cuerpo[1].toLowerCase() === "x";
+    const n = parseInt(cuerpo.slice(hexa ? 2 : 1), hexa ? 16 : 10);
+    // Sin el 0: Postgres no guarda un NUL en un text.
+    return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : entera;
+  });
+}
+
+/** Fin de `</nombre…>` desde `desde`, o -1. */
+function finDelCierre(html: string, desde: number, nombre: string): number {
+  for (let lt = html.indexOf("</", desde); lt !== -1; lt = html.indexOf("</", lt + 2)) {
+    if (html.slice(lt + 2, lt + 2 + nombre.length).toLowerCase() === nombre) {
+      const gt = html.indexOf(">", lt + 2 + nombre.length);
+      return gt === -1 ? -1 : gt + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * El texto de un mail que vino sólo en HTML, para que la extracción lo lea.
+ *
+ * No usa `readable` de core/email/texto-legible: sus expresiones retroceden y
+ * este HTML lo escribe cualquiera (ver relevance-prefilter). Es una pasada con
+ * indexOf, y un cierre que no está se busca una sola vez por etiqueta.
+ */
+function textoDelHtml(html: string): string {
+  let texto = "";
+  let i = 0;
+  const sinCierre = new Set<string>();
+  for (let lt = html.indexOf("<"); lt !== -1; lt = html.indexOf("<", i)) {
+    const comentario = html.startsWith("<!--", lt);
+    const gt = comentario ? html.indexOf("-->", lt + 4) : html.indexOf(">", lt + 1);
+    if (gt === -1) break;
+    texto += html.slice(i, lt).replace(/\s+/g, " ");
+    i = gt + (comentario ? 3 : 1);
+    if (comentario) continue;
+    const etiqueta = html.slice(lt + 1, gt);
+    const nombre = /^[a-z]+/i.exec(etiqueta)?.[0].toLowerCase() ?? "";
+    if (SIN_TEXTO.includes(nombre) && !sinCierre.has(nombre)) {
+      const fin = finDelCierre(html, i, nombre);
+      if (fin === -1) sinCierre.add(nombre);
+      else i = fin;
+    }
+    texto += CORTA_RENGLON.test(etiqueta) ? "\n" : " ";
+  }
+  texto += html.slice(i).replace(/\s+/g, " ");
+  return decodificarEntidades(texto)
+    .split("\n")
+    .map((renglon) => renglon.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 /**
  * Resolve the tenant_id for the polling run.
  *
@@ -321,12 +388,13 @@ async function processMessage(
     return { outcome: "skipped" };
   }
 
-  // Decode body parts (text/plain and text/html).
-  const bodyText = extractBodyPart(payload ?? undefined, "text/plain");
+  // Decode body parts (text/plain and text/html). Sin text/plain, el texto
+  // sale del HTML: la extracción lee sólo body_text.
   const bodyHtml = extractBodyPart(payload ?? undefined, "text/html");
+  const bodyText = extractBodyPart(payload ?? undefined, "text/plain") || textoDelHtml(bodyHtml);
 
   // raw_payload: el JSON verbatim de Gmail (AC4), menos el cuerpo en base64
-  // que ya queda decodificado dos líneas más arriba, en `bodyText` y
+  // que ya queda decodificado más arriba, en `bodyText` y
   // `bodyHtml`. Ver `payload-sin-duplicados`: eran 18 kB por correo de los
   // cuales el 79 % era esa copia.
   const rawPayload = sinLosCuerposYaDecodificados(msg);

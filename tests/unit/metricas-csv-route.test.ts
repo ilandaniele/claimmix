@@ -12,12 +12,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AppError } from "@/lib/errors";
 import { COLUMNAS_DEL_HISTORIAL, type FilaDeHistorial } from "@/core/metricas/ciclo";
 import { getT } from "@/lib/i18n";
+import { ALL_ROLES } from "@/lib/auth/require-role";
+import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 
-const { mockEntrar, mockEnTenant, mockKpis, mockRequireRole } = vi.hoisted(() => ({
+const { mockEntrar, mockEnTenant, mockKpis } = vi.hoisted(() => ({
   mockEntrar: vi.fn(),
   mockEnTenant: vi.fn(),
   mockKpis: vi.fn(),
-  mockRequireRole: vi.fn(),
 }));
 
 vi.mock("@/lib/api/entrada", () => ({ entrar: mockEntrar }));
@@ -25,10 +26,6 @@ vi.mock("@/data/scope", () => ({ enTenant: mockEnTenant }));
 vi.mock("@/server/metrics/trayecto", () => ({ consultaDeHistorial: vi.fn() }));
 vi.mock("@/lib/i18n/locale", () => ({ resolveAccountLocale: vi.fn().mockResolvedValue("es-AR") }));
 vi.mock("@/server/metrics/kpis", () => ({ getTenantKpis: mockKpis }));
-vi.mock("@/lib/auth/require-role", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/auth/require-role")>()),
-  requireRole: mockRequireRole,
-}));
 
 import { GET as exportar } from "@/app/api/metricas/export.csv/route";
 import { GET as metricas } from "@/app/api/metricas/route";
@@ -136,11 +133,33 @@ describe("GET /api/metricas/export.csv", () => {
 
 describe("GET /api/metricas — ?periodo=", () => {
   beforeEach(() => {
-    mockRequireRole.mockResolvedValue({ userRow: { tenant_id: TENANT_ID } });
     mockKpis.mockResolvedValue({ summary: {} });
   });
 
   const pedir = (qs = "") => metricas(new Request(`http://localhost/api/metricas${qs}`));
+
+  it("pasa por la puerta común, con el cupo de los casos y todos los roles", async () => {
+    await pedir();
+
+    expect(mockEntrar).toHaveBeenCalledWith("metricas", RATE_LIMIT_CONFIGS.CASES_API, ...ALL_ROLES);
+  });
+
+  it("con un rol que no corresponde responde el error de la puerta y no calcula", async () => {
+    mockEntrar.mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
+
+    expect((await pedir()).status).toBe(403);
+    expect(mockKpis).not.toHaveBeenCalled();
+  });
+
+  it("pasado el cupo responde 429 y no calcula", async () => {
+    mockEntrar.mockResolvedValue({
+      ctx: { userRow: { id: "u-1", tenant_id: TENANT_ID, role: "admin", locale: "es-AR" } },
+      rl: { allowed: false, remaining: 0, retryAfterSeconds: 30 },
+    });
+
+    expect((await pedir()).status).toBe(429);
+    expect(mockKpis).not.toHaveBeenCalled();
+  });
 
   it("un período del tablero llega tal cual a los KPIs", async () => {
     await pedir("?periodo=mes_pasado");

@@ -8,13 +8,20 @@ import { proxy } from "@/proxy";
 
 const ENV = { ...process.env };
 
+/** Lo que devuelve getSession con `returnHeaders`: el usuario y las cookies que renovó. */
+function sesion(user: { id: string } | null, ...setCookie: string[]) {
+  const headers = new Headers();
+  for (const c of setCookie) headers.append("Set-Cookie", c);
+  return { headers, response: user && { user } };
+}
+
 async function csp(ruta: string): Promise<string> {
   const respuesta = await proxy(new NextRequest(`https://claimmix.example.com${ruta}`));
   return respuesta.headers.get("Content-Security-Policy") ?? "";
 }
 
 beforeEach(() => {
-  h.getSession.mockResolvedValue({ user: { id: "u1" } });
+  h.getSession.mockResolvedValue(sesion({ id: "u1" }));
 });
 
 afterEach(() => {
@@ -49,7 +56,7 @@ describe("el proxy y la CSP de Meta", () => {
   });
 
   it("sin sesión, el redirect al login lleva la misma CSP y /conectar-whatsapp sigue siendo privada", async () => {
-    h.getSession.mockResolvedValue(null);
+    h.getSession.mockResolvedValue(sesion(null));
     process.env.ALTA_WABA_PROPIA = "1";
     process.env.META_APP_ID = "fake-app-id";
     process.env.META_ES_CONFIG_ID = "fake-config-id";
@@ -83,7 +90,7 @@ describe("el proxy y las páginas legales de cada espacio", () => {
 
   it.each(LEGAL)("%s se abre sin sesión: la lee Meta, y quien escribe por WhatsApp", async (ruta) => {
     h.getSession.mockClear();
-    h.getSession.mockResolvedValue(null);
+    h.getSession.mockResolvedValue(sesion(null));
 
     const respuesta = await pedir(ruta);
 
@@ -97,7 +104,7 @@ describe("el proxy y las páginas legales de cada espacio", () => {
   });
 
   it.each(["/privacy", "/terms", "/login"])("%s, que ya era pública, no se marca noindex", async (ruta) => {
-    h.getSession.mockResolvedValue(null);
+    h.getSession.mockResolvedValue(sesion(null));
 
     expect((await pedir(ruta)).headers.get("X-Robots-Tag")).toBeNull();
   });
@@ -123,7 +130,7 @@ describe("el proxy y las páginas legales de cada espacio", () => {
   });
 
   it("la barra final es parte del prefijo: /legal sola y /legales siguen pidiendo sesión", async () => {
-    h.getSession.mockResolvedValue(null);
+    h.getSession.mockResolvedValue(sesion(null));
 
     for (const ruta of ["/legal", "/legales/x/terminos"]) {
       const respuesta = await pedir(ruta);
@@ -131,5 +138,42 @@ describe("el proxy y las páginas legales de cada espacio", () => {
       expect(respuesta.status).toBe(307);
       expect(respuesta.headers.get("location")).toContain("/login");
     }
+  });
+});
+
+describe("el proxy y la caché de la sesión", () => {
+  const VIEJA = "better-auth.session_token=fake-token; better-auth.session_data=vieja";
+  const NUEVA = "better-auth.session_data=nueva; Path=/; HttpOnly; SameSite=Lax";
+
+  it("la cookie que renueva getSession va al navegador y a la página, con una sola consulta", async () => {
+    h.getSession.mockClear();
+    h.getSession.mockResolvedValue(sesion({ id: "u1" }, NUEVA));
+
+    const respuesta = await proxy(
+      new NextRequest("https://claimmix.example.com/bandeja", { headers: { cookie: VIEJA } })
+    );
+
+    expect(respuesta.status).toBe(200);
+    expect(respuesta.headers.getSetCookie()).toContain(NUEVA);
+    expect(respuesta.headers.get("x-middleware-request-cookie")).toContain("better-auth.session_data=nueva");
+    expect(respuesta.headers.get("x-middleware-request-cookie")).toContain("better-auth.session_token=fake-token");
+    expect(h.getSession).toHaveBeenCalledTimes(1);
+    expect(h.getSession).toHaveBeenCalledWith(expect.objectContaining({ returnHeaders: true }));
+  });
+
+  it("sin cookie renovada el pedido sigue igual", async () => {
+    const respuesta = await proxy(
+      new NextRequest("https://claimmix.example.com/bandeja", { headers: { cookie: VIEJA } })
+    );
+
+    expect(respuesta.headers.getSetCookie()).toEqual([]);
+    expect(respuesta.headers.get("x-middleware-request-cookie")).toBe(VIEJA);
+  });
+
+  it("con sesión, el login manda a la bandeja", async () => {
+    const respuesta = await proxy(new NextRequest("https://claimmix.example.com/login"));
+
+    expect(respuesta.status).toBe(307);
+    expect(new URL(respuesta.headers.get("location")!).pathname).toBe("/bandeja");
   });
 });

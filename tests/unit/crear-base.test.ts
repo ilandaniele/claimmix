@@ -351,6 +351,13 @@ describe("marcarBase", () => {
     expect(params).toEqual(["lista", 50, null, true, TENANT]);
   });
 
+  it("sólo cierra una fila creando o fallida: un workflow vencido no pisa la `lista` de otro ni revive una `borrada`", async () => {
+    await marcarBase(TENANT, "fallida", { error: "tarde" });
+
+    const { sql } = enviada();
+    expect(sql).toContain("where tenant_id = $5::uuid and estado in ('creando', 'fallida')");
+  });
+
   it("fallida: guarda el error, no sella lista_at y suelta el lease", async () => {
     await marcarBase(TENANT, "fallida", { error: "boom" });
 

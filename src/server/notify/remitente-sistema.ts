@@ -44,6 +44,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
+import { direccionCanonica } from "@/core/email/direccion-canonica";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
@@ -82,9 +83,6 @@ export interface OpcionesDeCorreo {
 /** Los tipos cuyo cupo por dirección se cuenta por IP. */
 const TIPOS_POR_IP: ReadonlySet<TipoDeCorreo> = new Set(["alta", "recuperacion"]);
 
-/** Gmail entrega estos dominios en la misma bandeja, con o sin puntos en la parte local. */
-const DOMINIOS_DE_GMAIL: ReadonlySet<string> = new Set(["gmail.com", "googlemail.com"]);
-
 /**
  * La casilla de la plataforma, o null si falta el correo, el refresh token o el
  * cliente OAuth. El token sólo lo canjea el cliente que lo emitió: sin
@@ -98,21 +96,11 @@ export function remitenteDelSistema(): RemitenteDelSistema | null {
   return correo && refreshToken && clienteId && clienteSecreto ? { correo, refreshToken } : null;
 }
 
-/**
- * La dirección como se cuenta: sin espacios, en minúsculas y sin el `+etiqueta`,
- * porque `ana+1@x.com` y `ana+2@x.com` son la misma bandeja. En Gmail también
- * sin los puntos, y `googlemail.com` es `gmail.com`. Null si no es una dirección
- * sola.
- */
+/** La dirección como se cuenta (`direccionCanonica`), o null si no es una dirección sola. */
 function normalizarDestinatario(correo: string): string | null {
   const limpio = correo.trim().toLowerCase();
   if (limpio.length > LARGO_MAXIMO_DE_CORREO || !UNA_DIRECCION.test(limpio)) return null;
-  const arroba = limpio.lastIndexOf("@");
-  const dominio = limpio.slice(arroba + 1);
-  const deGmail = DOMINIOS_DE_GMAIL.has(dominio);
-  const etiquetada = limpio.slice(0, arroba).split("+")[0];
-  const local = deGmail ? etiquetada.replaceAll(".", "") : etiquetada;
-  return local ? `${local}@${deGmail ? "gmail.com" : dominio}` : null;
+  return direccionCanonica(limpio);
 }
 
 function huellaDelDestinatario(normalizado: string): string {

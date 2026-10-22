@@ -12,10 +12,12 @@
 import { type NextRequest } from "next/server";
 import { z } from "zod";
 
-import { requireRole } from "@/lib/auth/require-role";
+import { CASE_EDITOR_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { enTenantVarias, type TenantContext } from "@/data/scope";
+import { entrar } from "@/lib/api/entrada";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { RATE_LIMIT_CONFIGS, type RateLimitResult } from "@/lib/rate-limit/index";
 import { consultasDelCaso, type DelCaso } from "@/server/core-sync/lectura";
 
 const ParamsSchema = z.object({
@@ -34,13 +36,15 @@ export async function POST(
   const caseId = paramsParsed.data.id;
 
   // ── Auth ──────────────────────────────────────────────────────────────────────
-  let ctx: Awaited<ReturnType<typeof requireRole>>;
+  let ctx: RoleContext;
+  let rl: RateLimitResult;
   try {
-    ctx = await requireRole("owner", "admin", "specialist", "analyst");
+    ({ ctx, rl } = await entrar("export-to-core", RATE_LIMIT_CONFIGS.CASES_API, ...CASE_EDITOR_ROLES));
   } catch (e) {
     if (e instanceof AppError) return err(e);
     throw e;
   }
+  if (!rl.allowed) return err(new AppError("RATE_LIMITED"));
   const { userRow } = ctx;
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   // Este contexto es lo único que le dice de quién son los datos.

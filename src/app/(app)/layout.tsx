@@ -17,7 +17,8 @@ import { esPlanPro } from "@/core/billing/plan-pro";
 import { basePorCliente } from "@/data/bases";
 import { olvidarFilaDeUsuario } from "@/lib/auth/fila-de-usuario-cacheada";
 import { getSessionContext } from "@/lib/auth/session";
-import { isOperatorEmail } from "@/lib/auth/require-operator";
+import { esOperadorDe } from "@/lib/auth/require-operator";
+import { ADMIN_ROLES } from "@/lib/auth/roles";
 import { getUserRowOrThrow, type UserRow } from "@/lib/auth/user-row";
 import { Sidebar } from "./_components/Sidebar";
 import { TopBar } from "./_components/TopBar";
@@ -65,8 +66,14 @@ export default async function AppLayout({
   const role: string = userRow?.role ?? "analyst";
   // Sólo para decidir si los enlaces del operador (cartera, altas) aparecen.
   // Las pantallas se defienden solas con requireOperator: esconder un enlace
-  // no es una guarda.
-  const isOperator = isOperatorEmail(user?.email);
+  // no es una guarda. La regla es la de la guarda (mail verificado, de la lista
+  // y del espacio de la casa, con rol de admin): con sólo el mail, la barra
+  // ofrecía pantallas que rebotaban. Sin la fila no hay espacio ni rol que
+  // comparar, y falla cerrado.
+  const isOperator =
+    user && userRow && (ADMIN_ROLES as string[]).includes(userRow.role)
+      ? esOperadorDe(user, userRow.tenant_id)
+      : false;
   // Account preference wins over the device cookie (so the saved language
   // follows the user to any device); cookie/default covers the rest.
   const locale = await resolveAccountLocale(userRow?.locale);

@@ -18,7 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const nav = vi.hoisted(() => ({ busqueda: new URLSearchParams() }));
 vi.mock("next/navigation", () => ({ useSearchParams: () => nav.busqueda }));
 
-import { useCasesRealtime } from "../../../src/app/(app)/bandeja/components/useCasesRealtime";
+import { PERIODOS, useCasesRealtime } from "../../../src/app/(app)/bandeja/components/useCasesRealtime";
+import { PeriodoSchema } from "../../../src/lib/schemas/cases";
 import type { CaseRow } from "../../../src/server/cases/list";
 
 function caso(id: string, status = "recibido"): CaseRow {
@@ -192,6 +193,61 @@ describe("useCasesRealtime — cada cuánto pregunta", () => {
     soltar({ ok: true, json: async () => ({ data: [caso("b"), caso("a")] }) });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(onInsert).not.toHaveBeenCalled();
+  });
+
+  // La búsqueda y el período recortan la lista igual que los chips: si el
+  // sondeo no los reenvía, un caso nuevo que no coincide aparece arriba.
+  describe("la búsqueda y el período", () => {
+    /** Los parámetros del último pedido del sondeo. */
+    async function pedido(query: string): Promise<URLSearchParams> {
+      nav.busqueda = new URLSearchParams(query);
+      renderHook(() => useCasesRealtime(manos));
+      await vi.advanceTimersByTimeAsync(0);
+      const url = String(fetchSpy.mock.calls.at(-1)?.[0]);
+      return new URLSearchParams(url.slice(url.indexOf("?") + 1));
+    }
+
+    it("con tres o más caracteres reenvía q, recortado", async () => {
+      expect((await pedido("q=abc")).get("q")).toBe("abc");
+      expect((await pedido("q=%20%20juan%20perez%20%20")).get("q")).toBe("juan perez");
+    });
+
+    it("con dos caracteres no manda q: /api/cases contestaría 400", async () => {
+      const params = await pedido("q=ab");
+      expect(params.has("q")).toBe(false);
+      expect((await pedido("q=%20ab%20")).has("q")).toBe(false);
+    });
+
+    it("sin q, o con q vacío, no lo manda", async () => {
+      expect((await pedido("")).has("q")).toBe(false);
+      expect((await pedido("q=")).has("q")).toBe(false);
+    });
+
+    it("reenvía el período y lo deja junto a los demás filtros", async () => {
+      const params = await pedido("periodo=7d&type=choque&type=robo");
+      expect(params.get("periodo")).toBe("7d");
+      expect(params.getAll("type")).toEqual(["choque", "robo"]);
+    });
+
+    it("un período desconocido no se manda, como lo ignora la página", async () => {
+      expect((await pedido("periodo=ayer")).has("periodo")).toBe(false);
+      // Con varios, el primero válido.
+      expect((await pedido("periodo=ayer&periodo=30d")).get("periodo")).toBe("30d");
+    });
+
+    it("escribir en la caja reinicia el sondeo con la q nueva", async () => {
+      const { rerender } = renderHook(() => useCasesRealtime(manos));
+      await vi.advanceTimersByTimeAsync(0);
+
+      nav.busqueda = new URLSearchParams("q=perez");
+      rerender();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSpy.mock.calls.at(-1)?.[0]).toContain("q=perez");
+    });
+
+    it("la lista de períodos del sondeo es la del esquema", () => {
+      expect([...PERIODOS].sort()).toEqual([...PeriodoSchema.options].sort());
+    });
   });
 
   it("al desmontar no queda ningún temporizador pidiendo", async () => {

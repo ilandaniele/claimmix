@@ -22,6 +22,7 @@ vi.mock("@/server/cases/list", () => ({
 }));
 vi.mock("@/server/intake/scenarios", () => ({ OPCIONES_DE_ESCENARIO: [] }));
 
+import { normalizarBusqueda as normalizarBusquedaPura } from "@/app/(app)/bandeja/normalizar-busqueda";
 import {
   normalizarBusqueda,
   VALID_CHANNELS,
@@ -32,6 +33,10 @@ import {
 } from "@/app/(app)/bandeja/page";
 
 describe("normalizarBusqueda", () => {
+  it("la página reexporta la función pura que usa también el sondeo del cliente", () => {
+    expect(normalizarBusqueda).toBe(normalizarBusquedaPura);
+  });
+
   it("recorta los espacios de los extremos", () => {
     expect(normalizarBusqueda("  juan perez  ")).toBe("juan perez");
   });

@@ -47,6 +47,25 @@ export function isOperatorEmail(email: string | null | undefined): boolean {
 }
 
 /**
+ * Las tres condiciones de operador que no necesitan leer la base: dirección
+ * verificada, dirección de `ADMIN_EMAILS` y espacio de la casa.
+ *
+ * Es la regla de `requireOperator` sin la sesión, para que la barra lateral
+ * ofrezca «Cartera» y «Altas» con el mismo criterio con que las pantallas las
+ * abren: un enlace que la guarda va a rechazar no se muestra.
+ */
+export function esOperadorDe(
+  user: { email?: string | null; emailVerified?: boolean | null },
+  tenantId: string | null | undefined
+): boolean {
+  // La dirección tiene que estar probada, no sólo tipeada: mismo criterio que provision.ts.
+  if (user.emailVerified !== true || !isOperatorEmail(user.email)) return false;
+  // Sin inquilino por defecto configurado no hay casa: falla cerrado, como ADMIN_EMAILS.
+  const casa = resolveDefaultTenantId()?.trim().toLowerCase();
+  return !!casa && !!tenantId && tenantId.trim().toLowerCase() === casa;
+}
+
+/**
  * Sesión de admin Y dirección de operador verificada Y espacio por defecto.
  *
  * @throws AppError('MISSING_SESSION') — sin sesión
@@ -54,13 +73,7 @@ export function isOperatorEmail(email: string | null | undefined): boolean {
  */
 export async function requireOperator(): Promise<AdminContext> {
   const ctx = await requireAdmin();
-  // La dirección tiene que estar probada, no sólo tipeada: mismo criterio que provision.ts.
-  if (ctx.user.emailVerified !== true || !isOperatorEmail(ctx.user.email)) {
-    throw new AppError("FORBIDDEN_ROLE");
-  }
-  // Sin inquilino por defecto configurado no hay casa: falla cerrado, como ADMIN_EMAILS.
-  const casa = resolveDefaultTenantId()?.trim().toLowerCase();
-  if (!casa || ctx.userRow.tenant_id.trim().toLowerCase() !== casa) {
+  if (!esOperadorDe(ctx.user, ctx.userRow.tenant_id)) {
     throw new AppError("FORBIDDEN_ROLE");
   }
   return ctx;

@@ -21,7 +21,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 vi.mock("@/lib/auth/user-row", () => ({ getUserRowOrThrow: h.fila }));
 vi.mock("@/lib/auth/fila-de-usuario-cacheada", () => ({ olvidarFilaDeUsuario: h.olvidar }));
-vi.mock("@/lib/auth/require-operator", () => ({ isOperatorEmail: () => false }));
+vi.mock("@/lib/auth/require-operator", () => ({ esOperadorDe: () => false }));
 vi.mock("@/lib/i18n/locale", () => ({
   getServerLocale: async () => "es-AR",
   resolveAccountLocale: async () => "es-AR",

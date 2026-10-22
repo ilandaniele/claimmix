@@ -6,12 +6,11 @@
  */
 
 import { eq } from "drizzle-orm";
-import { redirect } from "next/navigation";
 
+import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
-import { AppError } from "@/lib/errors";
 import { AdminUsersClient } from "./AdminUsersClient";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
@@ -32,8 +31,7 @@ export default async function AdminUsersPage() {
   try {
     ctx = await requireAdmin();
   } catch (e) {
-    if (e instanceof AppError && e.code === "MISSING_SESSION") redirect("/login");
-    redirect("/bandeja");
+    rebotarSiNoEntra(e);
   }
 
   const { userRow } = ctx;

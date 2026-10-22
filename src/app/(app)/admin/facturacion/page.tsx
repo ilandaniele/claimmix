@@ -15,11 +15,11 @@
  */
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { formatUsd } from "@/lib/utils";
-import { redirect } from "next/navigation";
 
+import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { AppError } from "@/lib/errors";
 import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period";
 import { getStatement } from "@/server/billing/statement";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
@@ -38,6 +38,18 @@ function shiftMonth(month: string, delta: number): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+// El aviso que ocupa la página entera cuando no hay una factura que mostrar.
+function Aviso({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <div className="px-6 py-8 max-w-3xl">
+      <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{titulo}</h1>
+      <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+        {children}
+      </p>
+    </div>
+  );
+}
+
 export default async function FacturacionPage({
   searchParams,
 }: {
@@ -47,8 +59,7 @@ export default async function FacturacionPage({
   try {
     ctx = await requireAdmin();
   } catch (e) {
-    if (e instanceof AppError && e.code === "MISSING_SESSION") redirect("/login");
-    redirect("/bandeja");
+    rebotarSiNoEntra(e);
   }
 
   const locale = await getAccountLocale();
@@ -62,23 +73,19 @@ export default async function FacturacionPage({
   const range = resolveBillingPeriod(requested);
   if (!range) {
     return (
-      <div className="px-6 py-8 max-w-3xl">
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-          {t("nav.facturacion")}
-        </h1>
-        <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-          <strong>{String(requested)}</strong> {t("facturacion.periodoInvalido")}{" "}
-          {t("facturacion.periodoEsperado")} <code>{t("facturacion.formatoPeriodo")}</code>.{" "}
-          <Link href="/admin/facturacion" className="underline">
-            {t("facturacion.verMesEnCurso")}
-          </Link>
-        </p>
-      </div>
+      <Aviso titulo={t("nav.facturacion")}>
+        <strong>{String(requested)}</strong> {t("facturacion.periodoInvalido")}{" "}
+        {t("facturacion.periodoEsperado")} <code>{t("facturacion.formatoPeriodo")}</code>.{" "}
+        <Link href="/admin/facturacion" className="underline">
+          {t("facturacion.verMesEnCurso")}
+        </Link>
+      </Aviso>
     );
   }
 
+  // Sin la fila del cliente no hay factura que armar: se dice, no se manda a otra pantalla.
   const statement = await getStatement(ctx.userRow.tenant_id, range);
-  if (!statement) redirect("/bandeja");
+  if (!statement) return <Aviso titulo={t("nav.facturacion")}>{t("facturacion.sinEstado")}</Aviso>;
 
   const { volume, invoice, ai_cost: cost, margin, tenant } = statement;
   const current = resolveBillingPeriod(null)!.month;

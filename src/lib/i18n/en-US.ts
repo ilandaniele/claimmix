@@ -526,6 +526,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "filter.limpiar": "Clear",
   "filter.limpiarTodo": "Clear all",
   "filter.quitar": "Remove filter",
+  "filter.variosALaVez": "You can pick several at once: for example, collision and theft.",
   "filter.busqueda": "Search",
   // B10 y B13: plazo y complejidad, sólo para el equipo.
   "filter.vencimiento": "Deadline",
@@ -1155,7 +1156,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "ayuda.paso1.titulo": "1. The claim arrives on its own",
   "ayuda.paso1.texto": "Claims arrive by email or WhatsApp and the agent fills in the data.",
   "ayuda.paso2.titulo": "2. The inbox",
-  "ayuda.paso2.texto": "In the inbox you filter by status, type, severity and channel. «Escalated», «Needs reply» and «Not relevant» in the sidebar are shortcuts to those filters.",
+  "ayuda.paso2.texto": "In the inbox you filter by status, type, severity and channel, and within each filter you can pick several values at once. «Escalated», «Needs reply» and «Not relevant» in the sidebar are shortcuts to those filters.",
   "ayuda.paso3.titulo": "3. Confirming a value",
   "ayuda.paso3.texto": "If a value has medium confidence or does not match what we already had, the case asks you to confirm it: confirm, correct or reject it from the case detail.",
   "ayuda.paso4.titulo": "4. Sending to a specialist",

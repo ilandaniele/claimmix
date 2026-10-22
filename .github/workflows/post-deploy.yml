@@ -684,3 +684,68 @@ jobs:
             echo "::error::Las bases de prd no tienen las mismas migraciones (bases.desfase)."
             exit 1
           fi
+
+  # ── Paridad de banderas: sólo avisa, nunca pone rojo ────────────────────────
+  #
+  # Dev, QA y prd tienen que ser iguales salvo lo que está escrito como
+  # excepción (docs/PUESTA_EN_MARCHA.md, ítem 10). Este job le pide
+  # `/api/health` con su Bearer a los tres y compara el bloque `banderas`.
+  # La tabla de excepciones vive en scripts/lib/paridad.mjs.
+  #
+  # Corre al lado de los chequeos, sin `needs`: esperar a `dev`, `qa` o `prd`
+  # es esperar a todo el workflow reutilizable, ensayo de 25 a 37 minutos
+  # incluido, y con una corrida cancelada no habría comparación. Entra con
+  # cualquiera de los tres deploys; un disparo a mano y una vista previa no
+  # entran.
+  #
+  # Nada de esto bloquea ni toca el veredicto: `continue-on-error` va en el
+  # JOB y no sólo en el paso, porque la marca `ensayo-verde-<árbol>` que leen
+  # `ensayo_previo` y `qa_secretos` exige que la corrida de QA termine en
+  # `success`, y un checkout que falla o un tope de tiempo del job la pondrían
+  # roja. El script sale 0 aunque un ambiente no conteste, y `qa_veredicto` no
+  # depende de este job. Una diferencia sale como `::warning` y en el resumen
+  # del run.
+  #
+  # Los logs de Actions son PÚBLICOS (el repo lo es): el script imprime acá
+  # sólo la clave, el tipo de hallazgo y qué ambientes coinciden, nunca un
+  # valor. Los valores se ven corriendo `pnpm paridad` a mano.
+  #
+  # Vercel mueve el alias un momento DESPUÉS de avisar que el deploy salió
+  # (scripts/smoke-production.mts, `waitForCommit`): leer enseguida compara las
+  # banderas del build anterior. Por eso el script recibe qué ambiente acaba de
+  # desplegarse y con qué commit, y no lo compara hasta que `/api/health` diga
+  # que sirve ese commit; si en unos tres minutos no llega, lo da por ilegible.
+  #
+  # Sin `pnpm install`: el script usa sólo fetch y módulos nativos de Node.
+  # Cada secreto viaja al origen que le corresponde y a ninguno más; la URL de
+  # prd sale de `vars.PRD_URL`, nunca escrita acá.
+  paridad:
+    name: Paridad · banderas de DEV, QA y PRD
+    continue-on-error: true
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      (endsWith(github.event.deployment.environment, 'claimmix') ||
+       endsWith(github.event.deployment.environment, '-qa') ||
+       endsWith(github.event.deployment.environment, '-prd'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+
+      - name: Comparar banderas
+        continue-on-error: true
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          QA_CRON_SECRET: ${{ secrets.QA_CRON_SECRET }}
+          PRD_CRON_SECRET: ${{ secrets.PRD_CRON_SECRET }}
+          PRD_URL: ${{ vars.PRD_URL }}
+          DEPLOY_AMBIENTE: ${{ endsWith(github.event.deployment.environment, '-prd') && 'prd' || endsWith(github.event.deployment.environment, '-qa') && 'qa' || 'dev' }}
+          DEPLOY_SHA: ${{ github.event.deployment.sha }}
+        run: node scripts/paridad.mjs

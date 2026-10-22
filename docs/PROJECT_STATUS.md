@@ -5024,7 +5024,7 @@ reescribió. #451 los saca del árbol actual con datos sintéticos.
 
 ### CI ordenada por entorno: DEV, QA y PRD (2026-10-16, #452, en prd por #458)
 
-Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha>` o `PRD · deploy <sha>`, y sus checks llevan el entorno adelante (`DEV / Smoke del deploy`, `QA / Ensayo de conversaciones`, `PRD · Smoke y salud de las bases`). Los siete workflows siguen, con un nombre que dice cuándo corren (`PR y main · Chequeos del código`, `Post-deploy · DEV, QA y PRD`, `Programado · Barrer trabados en DEV y PRD`). No se saca ningún check: `Tipos` y `Lint` pasan a ser un solo job, `Tipos y lint`.
+Cada corrida del post-deploy se titula `DEV · deploy <sha>`, `QA · deploy <sha>` o `PRD · deploy <sha>`, y sus checks llevan el entorno adelante (`DEV / Smoke del deploy`, `QA / Ensayo de conversaciones`, `PRD · Smoke y salud de las bases`). Los siete workflows siguen, con un nombre que dice cuándo corren (`PR y main · Chequeos del código`, `Post-deploy · DEV, QA y PRD`, `Programado · Barrer trabados en DEV y PRD`, que desde el lote de las notas del 14/10 es `Programado · Barrer trabados en DEV, QA y PRD`). No se saca ningún check: `Tipos` y `Lint` pasan a ser un solo job, `Tipos y lint`.
 
 - **Dev sin `inherit`.** El job `produccion` pasó a llamarse `dev` y mapea sus catorce secretos uno por uno: ningún caller usa `secrets: inherit`, y `tests/unit/ci-secretos-del-reusable.test.ts` frena un secreto declarado que no llegue.
 - **Caché y tiempo.** Cada job que instala guarda la caché de pnpm. Con el repo público los runners estándar no se cobran: esto acorta la corrida de cada PR (el plan estimó ≈2 min de runner por push, sin medir), no ahorra plata. El k6 `carga` y `secrets.yml` siguen en `ubuntu-latest`, y el job `origen` y los logs sin detalle de #451 quedan como estaban.
@@ -5244,8 +5244,24 @@ No hay dominio propio, así que en un espacio de prueba ninguna invitación pasa
 - **La aceptación.** `/invitacion` no ofrece Google para una dirección Gmail con `+` (`src/app/invitacion/page.tsx:162`): Google devuelve la casilla base, que no coincide con la invitada. Queda la contraseña.
 - **Límites.** No sirve para invitar a un compañero con su propia Gmail: para eso, la activación a mano (b) o un dominio propio (a). Pasa también la casilla base sin alias o con otros puntos, porque es la misma bandeja. La pantalla de aceptación sólo oculta Google cuando la dirección lleva `+`.
 - **Tests.** `tests/unit/admin-users-invitacion.test.ts`, `tests/unit/reserved-vedadas.test.ts` y `tests/unit/invitacion-page.test.tsx`.
-- **Ambientes.** Entra por #489 a qa y sigue a main y a prd por la regla de ambientes iguales; hasta entonces, el analista se invita como en D4 (b).
+- **Ambientes.** En los tres desde el 21/10: #489 a qa (`a109947a`), #490 a main (`45714c00`) y #493 a prd (`796e314c`). main y prd tienen el mismo árbol, `7ddfbf53`, y el Post-deploy de PRD sobre `796e314c` salió en verde (run 39708862978).
 - **Guía.** `docs/PUESTA_EN_MARCHA.md` pasa a D4 (d): A1, A3, dev paso 8, QA paso 8, prd pasos 10 y 14, «Si prueban otros en prd», C1, «Cuando entra un cliente real» y «Decisiones pendientes». De paso corrige restos viejos de la guía: el número por código figuraba apagado en dev y QA (está en 1 en los tres desde el 17/10), `/admin/altas` figuraba fuera del menú lateral (está en el menú del operador desde #461) y el texto del rechazo se citaba en `es-AR.servidor.ts:387`, que es `:397`.
+
+### Paridad de banderas entre dev, QA y prd (21/10, #495)
+
+Ítem 10 del plan de `docs/PUESTA_EN_MARCHA.md`: hasta ahora las variables de los tres proyectos se comparaban a mano (A12).
+
+- **Qué entra.** `pnpm paridad` (`scripts/paridad.mjs` y `scripts/lib/paridad.mjs`, sólo `fetch` y módulos de Node) le pide `/api/health` a dev, QA y prd con el Bearer de cada uno, junta `banderas` y lista lo que difiere. Las excepciones viven sólo en `EXCEPCIONES`, cada una con su motivo. Un ambiente ilegible (sin secreto, 401, sin respuesta) no tapa la comparación del resto.
+- **Sólo avisa.** El job `paridad` de `post-deploy.yml` corre al lado de los chequeos, sin `needs` (esperar a los reusables es esperar al ensayo entero), en cualquiera de los tres deploys y deja `::warning::` y el resumen del run. `continue-on-error` va en el job y en el paso, para que no ponga roja la corrida de QA y anule la marca `ensayo-verde-<árbol>`; el script sale siempre con 0 y `qa_veredicto` no lo espera: nunca pone rojo un deploy. El ambiente recién desplegado se lee recién cuando `/api/health` sirve el commit del deploy (el alias de Vercel se mueve después del aviso); si no llega en unos tres minutos queda ilegible, no se compara el build viejo.
+- **Logs públicos.** En Actions salen sólo la clave, el tipo de diferencia y qué ambientes coinciden (`dev=qa≠prd`), nunca un valor. Los valores se ven corriéndolo a mano. El secreto de cada ambiente viaja sólo a su origen, y la URL de prd sale de `vars.PRD_URL`.
+- **Tests.** `tests/unit/paridad.test.ts` (comparador, contrato de valores, URL de prd y script sin red) y la parte de `tests/unit/ci-prd.test.ts` que fija el job.
+- **Lo que sigue en manos del dueño.** Los valores reales de D7 en dev y QA (hoy desconocidos en la guía) y los huecos de `AI_PRUEBA_*` y `ALTA_PRUEBA_DIAS`: el comparador pide que sean iguales, pero no decide cuánto valen. Si algún día debe bloquear en vez de avisar, es decisión suya.
+- **Primera corrida, a mano (21/10).** dev contra prd da tres diferencias. Dos son `omision`: `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO` y `AI_PRUEBAS_MONTHLY_BUDGET_USD` no están cargadas en dev (rige el valor por defecto de `src/lib/topes.ts`, 1 y 30) y en prd están cargadas con esos mismos valores, así que el efecto es igual pero `/api/health` informa el valor crudo. La otra es `regla`: `SIGNUP_ALLOWED_EMAILS` está cargada en dev con `ALTA_AUTOMATICA` en 1; con el alta automática prendida la lista no cambia nada en tiempo de ejecución (`altaAbierta` en `src/lib/auth/registro-permitido.ts`), pero tapa la prueba de autoalta si algún día se apaga. Sacarla de dev es decisión del dueño. QA no se pudo leer en local porque `.env.local` no tiene `QA_CRON_SECRET`; en Actions sí se lee.
+- **Ambientes.** Entra a qa junto con #494 por una sola rama de integración (`integra/paridad-sembrar`), para pagar un solo CI y un solo ensayo de QA, y sigue a main y a prd por la regla de ambientes iguales.
+
+### Sembrado por la puerta del alta (21/10, #494)
+
+`pnpm sembrar` creaba las cuentas de prueba con `signUpEmail` fuera de `enAlta`, y el gancho del alta rechaza con 422 toda alta que no entra por ninguna puerta. En CI no se notaba porque las cuentas ya existen en la base del ensayo y el sembrado sólo les pone la contraseña al día. Contra una base nueva, como la de un ambiente independiente, se plantaba en la primera cuenta. Ahora `scripts/sembrar-para-integracion.mts` usa `enAlta("correo", …)`, igual que el modo `--carga` del mismo script. Entra a qa con #495 por la misma rama de integración.
 
 ### 🙋 Waiting on you (not code)
 
@@ -5257,7 +5273,7 @@ No hay dominio propio, así que en un espacio de prueba ninguna invitación pasa
   A3 son tres direcciones por ambiente: administrador y analista como alias `+` de Gmail, y
   el mail agente como una Gmail propia. D4 pasó el 21/10 a (d) (#489): no hay dominio propio,
   y el analista se invita como un alias `+` de la misma Gmail que el administrador, sin
-  activar el espacio.
+  activar el espacio. Desde el 21/10 está en los tres ambientes (#493 a prd).
 - **Tono de los mails (del transcripto del 17/10).** Cuatro cosas que son copia del producto y
   quedan como están hasta que decidas: el mail no saluda por el nombre (`05-canal-mail.md`), la
   referencia es el UUID entero y no una corta, los mails firman como ClaimMix frente al

@@ -431,17 +431,25 @@ y una WABA para cada uno.
 
 ### Lo que tiene que quedar igual en los tres
 
-No existe ningún script que compare las variables de los tres proyectos: hoy se comparan a
-mano (A12). Con `CRON_SECRET`, `/api/health` lista en `banderas` las banderas, topes y modos
-de esta tabla, y de los secretos sólo si están cargados (`docs/TESTING.md`, «`/api/health`»).
-«Desconocido» quiere decir que ningún doc lo dice.
+`pnpm paridad` compara las `banderas` de `/api/health` de dev, QA y prd (ítem 10 del plan) y
+lista lo que difiere fuera de las excepciones de esta tabla. El job `paridad` del Post-deploy
+lo corre en cada deploy, al lado de los chequeos, y sólo avisa (`::warning` y resumen del run):
+nunca pone rojo.
+Con `CRON_SECRET`, `/api/health` lista en `banderas` las banderas, topes y modos de esta tabla,
+y de los secretos sólo si están cargados (`docs/TESTING.md`, «`/api/health`»). Lo que no está
+ahí, como el entrenamiento del agente, se sigue comparando a mano (A12). Las excepciones que
+el comparador conoce están en `EXCEPCIONES` de `scripts/lib/paridad.mjs`, cada una con su
+motivo; una nueva se agrega ahí y no en este texto. En el log público del run salen sólo la clave y qué
+ambientes coinciden (`dev=qa≠prd`); los valores se ven corriéndolo a mano, con `CRON_SECRET`,
+`QA_CRON_SECRET`, `PRD_CRON_SECRET` y `PRD_URL` en `.env.local`. «Desconocido» quiere decir que
+ningún doc lo dice.
 
 | Variable | Tipo | Igual o excepción | Estado conocido | Cómo comprobarlo |
 |---|---|---|---|---|
 | `ALTA_AUTOMATICA` (`src/lib/auth/registro-permitido.ts:53`) | bandera | igual (D6) | dev y prd en 1 (`docs/PROJECT_STATUS.md:4763-4764`); QA en 1 desde el 17/10 (A12) | Vercel; una autoalta de prueba |
 | `ALTA_NUMERO_AUTOMATICO` (`src/server/alta/numero-automatico-activo.ts:10`) | bandera | igual: 1 en los tres (D1, b); en QA sin token, el alta va a revisión con `sin_credencial` | 1 en los tres: dev y QA desde el 17/10 (A12) | el aviso del número en `/registro` |
 | Número por código | bandera y Meta | excepción de hecho aunque la bandera sea igual (D1, b): el tope de Meta es de 2 números por portfolio y uno ya es el de la plataforma, así que queda un solo lugar libre para dev y prd juntos, y es primero del cliente ficticio de prd. QA tiene la bandera pero no token, y sus altas por código van a revisión con `sin_credencial`. QA tiene su propia WABA y su propio token recién después de A5 (la verificación la pide el [Dueño] en Meta Business Suite) | prd prendido; dev y QA con la bandera en 1 desde el 17/10 (A12) | el aviso del número en `/registro`; `docs/whatsapp-setup.md:283-299` |
-| `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1` |
+| `BASE_POR_CLIENTE` (`.env.example:26`) | bandera | excepción (D2): no tiene vuelta | dev 0, QA 0, prd 1 | `/preparando` en el alta; `bases` en `/api/health?deep=1`; `pnpm paridad` |
 | Entrenamiento del agente (reglas y ejemplos de `/agente`) | datos de cada espacio | excepción hasta que el entrenamiento base viva en el repo, igual en los tres (`docs/PROJECT_STATUS.md:5055-5063`). No existe un script que copie reglas y ejemplos entre ambientes (`scripts/export-training.mjs:11`) | dev 19 reglas y 207 ejemplos en el espacio de prueba; prd ninguno; QA desconocido | `/agente`, solapas «Reglas de prompt» y «Ejemplos aprobados» (`src/lib/i18n/es-AR.ts:844`, `:852`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` (`.env.example:312-313`) | valor y secreto | igual (dev y prd comparten la clave del sitio) | cargadas en los tres (la CSP de QA trae `challenges.cloudflare.com`) | el desafío en `/registro` |
 | `ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN` (`.env.example:265-266`) | valor y secreto | excepción: un remitente por ambiente | cargadas en los tres, cada una con el cliente de su ambiente: QA el 18/10 y prd el 19/10 con `token-remitente.mts --vercel <proyecto>` (paso 1 de cada ambiente); la de prd vale desde su próximo deploy | el bloque de correo en `/registro` |
@@ -767,9 +775,9 @@ ambiente, la hora, una captura y el número de caso.
   - **Quién:** [Automático]; [Claude] si algo queda trabado.
   - **Dónde:** el alta del paso 3; GitHub Actions.
   - **Qué hacer:** nada para la base (`BASE_POR_CLIENTE` en 0, D2). El barrido de casos
-    trabados de QA no está programado: si un caso queda trabado, [Claude] lo dispara desde
-    Actions, `barrer-trabados.yml`, «Run workflow» con `url` =
-    `https://claimmix-qa.vercel.app`. Usa el secreto `QA_CRON_SECRET`.
+    trabados de QA corre solo cada 2 h (`barrer-trabados.yml`, desde el lote de las notas
+    del 14/10); si hace falta antes, [Claude] lo dispara desde Actions, «Run workflow» con
+    `url` = `https://claimmix-qa.vercel.app`. Usa el secreto `QA_CRON_SECRET`.
   - **Salió bien si:** el alta no pasó por `/preparando`.
   - **Si falla:** si pasó, avisar a Claude antes de seguir (como el paso 5 de dev).
   - **Fuentes:** `.github/workflows/barrer-trabados.yml:87-89`, `:152`.
@@ -1313,7 +1321,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta). El resto no existe todavía: sus nombres de
+Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta), y el 14 en el lote de las notas del 14/10, y el 10 en la rama `ci/paridad-banderas`. El resto no existe todavía: sus nombres de
 archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre
@@ -1330,11 +1338,11 @@ que tenía en la versión anterior de esta guía.
 | 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
 | 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador recibe un mail al llegar a 80 usuarios y cuando la WABA se llena | mediano | 4 y 7 |
 | 9 | Prueba automática del alta por el enlace del correo, de punta a punta, en QA: `pnpm alta:probar` (`scripts/probar-alta.mts`), un guión nuevo. No parte de `pnpm onboard`, que prueba el alta de un inquilino por el operador y no la autoalta (nuevo) | Cada deploy de QA prueba `/registro`, el alta por el enlace del correo y la base (la función de la 0048 y los cupos por red) sin una persona. No prueba Turnstile, Gmail ni el alta con Google: siguen a mano | Menos altas rotas | El job «Alta automática en QA» corre en el Post-deploy de QA y queda rojo si el alta se rompe o QA queda sucia. Si no puede probar (red, tope de QA lleno, otro commit, candado ocupado) sale verde y el resumen del run dice «corrió SIN PODER PROBAR». **Hecho con el merge del lote 1** (`docs/TESTING.md`, capa 11). El lote 2 queda pendiente del dueño | grande | 3 |
-| 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones | mediano | 3. Decisión: qué puede quedar distinto y si bloquea o sólo avisa (supuesto: avisa la primera semana) |
+| 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones. **Hecho en la rama `ci/paridad-banderas`**: corre en cada deploy, al lado de los chequeos, sólo avisa (`::warning` y resumen del run) y nunca pone rojo; en el log público salen las claves, no los valores | mediano | 3. Decisión del dueño: si algún día bloquea en vez de avisar |
 | 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio. **Hecho en #484** | mediano | nada |
 | 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |
 | 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo. **Hecho en #484**; `tests/unit/lib/topes-unico.test.ts` lo fija | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
-| 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions | chico | Decisión: la cadencia (supuesto: cada 2 h, como prd) |
+| 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions. **Hecho en el lote de las notas del 14/10**, cada 2 h como prd. | chico | Nada (cadencia fijada en cada 2 h) |
 | 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso | grande | Decisión: si vale una migración en todas las bases (receta de pausa para migrar) |
 | 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte `src/app/alta/page.tsx:19-23` |
 | 17 | Comprobar en qué zona horaria cortan el día y el mes del presupuesto, y fijarla (P14) | Los cortes coinciden con el mes que mira | El corte diario cae a una hora previsible | Un test fija la zona | chico | Decisión: mes argentino o mes de la factura de Google (supuesto: argentino) |
@@ -1502,7 +1510,7 @@ Apenas el dueño avise, Claude puede:
 - En el proyecto de Google Cloud propio de prd, con el OK explícito del dueño para los
   permisos de IAM: habilitar las APIs y crear el tema, la cuenta de servicio y la suscripción
   de Pub/Sub (prd, paso 1).
-- Disparar el barrido de QA desde Actions.
+- Disparar el barrido de QA desde Actions si hace falta antes de su corrida de cada 2 h.
 - Hacer la cuenta del costo por caso de C1.
 - Implementar los ítems del plan en orden, cada uno en su PR a `qa` y el mismo día a main y prd,
   con la revisión de seguridad en Fable (u Opus) para los ítems 3 y 4.

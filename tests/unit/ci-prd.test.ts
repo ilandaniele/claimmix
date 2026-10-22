@@ -108,6 +108,7 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
     ["qa", false, true, false, false],
     ["qa_veredicto", false, true, false, false],
     ["prd", false, false, true, false],
+    ["paridad", true, true, true, false],
   ])("%s corre en dev=%s, qa=%s, prd=%s, preview=%s", (id, dev, qa, prd, preview) => {
     const si = condicion(id as string);
     expect(evaluar(si, DEV, "deployment_status")).toBe(dev);
@@ -118,7 +119,7 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
 
   it("un disparo a mano sólo entra a `dev`", () => {
     expect(evaluar(condicion("dev"), "", "workflow_dispatch")).toBe(true);
-    for (const id of ["ensayo_previo", "qa_secretos", "qa", "prd"]) {
+    for (const id of ["ensayo_previo", "qa_secretos", "qa", "prd", "paridad"]) {
       expect(evaluar(condicion(id), "", "workflow_dispatch")).toBe(false);
     }
   });
@@ -171,6 +172,40 @@ describe("post-deploy.yml: cada job mira el nombre de su entorno", () => {
     expect(prd).not.toContain("secrets: inherit");
     expect(prd).not.toMatch(/pnpm (rehearse|pentest|knock|tenancy|capa-datos)/);
     expect(prd).not.toMatch(/DATABASE_URL|secrets\.CRON_SECRET|QA_/);
+  });
+
+  it("el job de paridad sólo avisa: sin instalar, sin heredar y fuera del veredicto de QA", () => {
+    const paridad = cuerpoDe(yml, "paridad");
+    expect(paridad).toContain("run: node scripts/paridad.mjs");
+    // En el JOB, no sólo en el paso: un checkout caído o el tope de tiempo
+    // pondrían roja la corrida de QA y anularían la marca `ensayo-verde-<árbol>`,
+    // que sólo vale con la corrida en `success`.
+    const encabezado = paridad.slice(0, paridad.indexOf("\n    steps:"));
+    expect(encabezado).toMatch(/^ {4}continue-on-error: true$/m);
+    // Sin `needs`: esperar a `dev`, `qa` o `prd` es esperar al ensayo entero y
+    // no corre con la corrida cancelada.
+    expect(paridad).not.toMatch(/^ {4}needs:/m);
+    expect(paridad).not.toMatch(/pnpm|deep=1|secrets: inherit|deploy-checks\.yml|https:/);
+    expect(paridad).not.toMatch(/run: .*\$\{\{/);
+    // Cada secreto con su nombre, y la URL de prd sólo por la variable del repo.
+    expect([...paridad.matchAll(/secrets\.(\w+)/g)].map((m) => m[1]).sort()).toEqual([
+      "CRON_SECRET",
+      "PRD_CRON_SECRET",
+      "QA_CRON_SECRET",
+    ]);
+    expect(paridad.match(/vars\.\w+/g)).toEqual(["vars.PRD_URL"]);
+    // Nadie espera a este job: ni el veredicto de QA ni ningún otro.
+    expect(yml.replace(paridad, "")).not.toContain("paridad");
+  });
+
+  it("el job de paridad le dice al script qué ambiente se desplegó y con qué commit", () => {
+    const job = cuerpoDe(yml, "paridad");
+    const ambiente = /^ {10}DEPLOY_AMBIENTE: (.+)$/m.exec(job);
+    expect(ambiente).not.toBeNull();
+    expect(evaluar(ambiente![1], DEV, "deployment_status")).toBe("dev");
+    expect(evaluar(ambiente![1], QA, "deployment_status")).toBe("qa");
+    expect(evaluar(ambiente![1], PRD, "deployment_status")).toBe("prd");
+    expect(job).toMatch(/^ {10}DEPLOY_SHA: \$\{\{ github\.event\.deployment\.sha \}\}$/m);
   });
 
   it("las URLs por defecto son las de dev", () => {

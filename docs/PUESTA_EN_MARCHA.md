@@ -139,7 +139,7 @@ tarda algo, la guía lo dice así.
     |---|---|---|
     | D1. Número por código | (c): dejarlo prendido sólo en prd; el alta del cliente ficticio es la prueba | prd pasos 2 y 7; la fila «Número por código» de la tabla |
     | D2. `BASE_POR_CLIENTE` en dev y QA | 0 en los dos. Es una excepción a «iguales»: la bandera no tiene vuelta y no existe herramienta para pasar los datos de dev | dev paso 5, QA paso 5, A12 |
-    | D3. QA con canales reales | Casilla de Gmail de prueba de Gonzalo, sí. Número de WhatsApp, no: ocuparía el único lugar libre de la WABA | QA pasos 6, 7 y 10 |
+    | D3. QA con canales reales | Gmail del agente: la de Veltra, la misma en los tres ambientes (cambiado el 22/10). Número de WhatsApp, no: ocuparía el único lugar libre de la WABA | QA pasos 6, 7 y 10 |
     | D4. Invitaciones en un espacio en prueba | (d): el administrador invita al analista como un alias `+` de su propia Gmail, sin activar el espacio; la invitación sale sola. (a), un dominio propio que no sea un proveedor abierto, no aplica: no hay dominio propio. (b), activar con cuota 0 desde `/admin/altas`, queda como botón manual | A3; dev paso 8, QA paso 8, prd pasos 10 y 14 |
     | D5. El cliente ficticio, después | Si Veltra sigue sin verificar: borrar su número en WhatsApp Manager para liberar el lugar y suspender el espacio. Purgar la base sólo si hacen falta los MB | prd paso 16 |
     | D6. `ALTA_AUTOMATICA` en QA | 1, igual que dev y prd | QA paso 1 |
@@ -163,8 +163,9 @@ tarda algo, la guía lo dice así.
       - A futuro, una WABA por ambiente. Espera a A5 (ver «Después de A5: una WABA y un token
         por ambiente»).
     - **D2:** `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada a «iguales».
-    - **D3:** QA con la casilla de Gmail de prueba de Gonzalo. Sin número de WhatsApp hasta que
-      QA tenga su propia WABA y su propio token (después de A5).
+    - **D3:** QA con la casilla de Gmail de prueba de Gonzalo. **Cambiado el 22/10:** el mail
+      agente es la Gmail de Veltra en los tres ambientes (ver A3). Sin número de WhatsApp hasta
+      que QA tenga su propia WABA y su propio token (después de A5).
     - **D4: (d).** Corregido otra vez el 21/10 (#489). El 17/10 quedó anotada (a), pero no hay
       dominio propio (todo es Gmail y `claimmix.vercel.app` es de Vercel); el 20/10 pasó a (b),
       activar cada espacio con cuota 0 antes de invitar al analista. Ahora, en un espacio en
@@ -217,16 +218,26 @@ tarda algo, la guía lo dice así.
       invitada.
     - **Mail agente:** una cuenta de Gmail propia, no un alias, porque Google conecta la
       cuenta entera. Se conecta en `/configuracion` → «Conectar Gmail»; el agente lee ahí las
-      denuncias y desde ahí contesta. Una por ambiente y por cliente: prd rechaza las casillas
-      de `CASILLAS_DE_DEV` con `otro_ambiente`, y una casilla ya conectada a otro espacio
-      termina en `mailbox_taken`.
+      denuncias y desde ahí contesta. prd rechaza las casillas de `CASILLAS_DE_DEV` con
+      `otro_ambiente`, y una casilla ya conectada a otro espacio del mismo ambiente termina en
+      `mailbox_taken`.
+    - **Decisión del 22/10:** el mail agente es la Gmail de Veltra, la misma que manda los
+      correos del sistema, en dev, QA y prd. prd la cambia más adelante por una propia (ver el
+      paso 9 de prd).
+      - Cada ambiente tiene su base y no ve los casos de los otros: un correo que llega a esa
+        casilla abre un caso en cada ambiente donde esté activa, y el agente contesta una vez
+        por ambiente. Mientras tanto, dejarla «Activa» sólo en el ambiente que se está
+        probando y apagar «Activa» en `/configuracion` de los otros. Con «Activa» apagada, el
+        ambiente no lee esa casilla.
+      - En prd, primero hay que sacarla de `CASILLAS_DE_DEV` de prd (lo hace Claude con el OK
+        del dueño); si no, el connect vuelve con `otro_ambiente`.
     - Por ambiente:
-      - dev: una Gmail nueva para el agente; administrador y analista, alias de la Gmail del
-        dueño.
-      - QA: la Gmail de prueba de Gonzalo para el agente (D3); administrador y analista, alias
-        de otra cuenta de Gonzalo. Si tiene una sola, crear una Gmail nueva para el agente.
-      - prd: una Gmail nueva para el agente; administrador y analista, alias de la Gmail del
-        dueño o de una Gmail del cliente ficticio.
+      - dev: la Gmail de Veltra para el agente; administrador y analista, alias de la Gmail
+        del dueño.
+      - QA: la Gmail de Veltra para el agente; administrador y analista, alias de una cuenta
+        de Gonzalo.
+      - prd: la Gmail de Veltra para el agente, hasta que el dueño la cambie; administrador y
+        analista, alias de la Gmail del dueño o de una Gmail del cliente ficticio.
     - El administrador y el analista son alias de la misma Gmail: el servidor compara la
       casilla de fondo, sin puntos ni alias, y gmail.com no se cruza con googlemail.com.
       Además la casilla del administrador tiene que estar verificada; si no, la invitación se
@@ -781,11 +792,12 @@ ambiente, la hora, una captura y el número de caso.
   - **Salió bien si:** el alta no pasó por `/preparando`.
   - **Si falla:** si pasó, avisar a Claude antes de seguir (como el paso 5 de dev).
   - **Fuentes:** `.github/workflows/barrer-trabados.yml:87-89`, `:152`.
-- [ ] **6. Gmail (D3: la casilla de prueba de Gonzalo).**
-  - **Quién:** [Gonzalo].
+- [ ] **6. Gmail (la de Veltra, A3).**
+  - **Quién:** [Dueño], que tiene la sesión de la Gmail de Veltra.
   - **Dónde:** `/configuracion`, «Conectar Gmail».
-  - **Qué hacer:** la Gmail del mail agente de QA (A3), una casilla de prueba de Gonzalo que
-    no se use en dev ni en prd. La casilla conectada también manda las respuestas del agente.
+  - **Qué hacer:** conectar la Gmail de Veltra como mail agente de QA (A3, decisión del
+    22/10). Es la misma de dev y prd: dejarla «Activa» sólo en el ambiente que se prueba. La
+    casilla conectada también manda las respuestas del agente.
     **Aviso:** Google muestra una pantalla de app no verificada; es esperable. Para seguir,
     entrar al enlace de opciones avanzadas de esa pantalla y continuar hacia la app.
   - **Salió bien si:** vuelve con `?gmail=connected`.
@@ -1077,9 +1089,14 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
 - [ ] **9. Gmail.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/configuracion`, «Conectar Gmail».
-  - **Qué hacer:** la Gmail del mail agente de prd (A3). **Aviso:** Google muestra una
+  - **Qué hacer:** la Gmail del mail agente de prd (A3): por ahora la de Veltra (decisión del
+    22/10), que antes sale de `CASILLAS_DE_DEV` de prd. **Aviso:** Google muestra una
     pantalla de app no verificada; es esperable. Para seguir, entrar al enlace de opciones
     avanzadas de esa pantalla y continuar hacia la app.
+  - **Cambiar el mail agente más adelante:** en `/configuracion`, «Conectar otra cuenta» con
+    la Gmail nueva (Google pide entrar con esa cuenta), y en la fila de la de Veltra apagar
+    «Activa» o «Eliminar». Los casos ya abiertos quedan; los correos nuevos entran por la
+    casilla nueva. La nueva no puede estar en `CASILLAS_DE_DEV` ni conectada en dev o QA.
   - **Salió bien si:** vuelve con `?gmail=connected`. prd tiene push propio
     (`gmail-push-prd`), así que el correo entra en minutos.
   - **Si falla:** con `otro_ambiente`, la casilla figura en `CASILLAS_DE_DEV`. Los demás
@@ -1436,7 +1453,8 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   casilla de Gmail de prueba de Gonzalo, que sólo contesta a quien le escribe; número de
   WhatsApp no, porque ocuparía el único lugar libre de la WABA y QA no tiene token. **Elegido
   el 17/10:** la casilla de Gmail de prueba de Gonzalo; sin número de WhatsApp hasta que QA
-  tenga su propia WABA y su propio token (después de A5).
+  tenga su propia WABA y su propio token (después de A5). **Cambiado el 22/10:** el mail
+  agente es la Gmail de Veltra en los tres ambientes, hasta que prd tenga la suya (A3).
 - **D4. Invitaciones en un espacio en prueba.** Con gmail.com se rechazan, salvo en la opción
   (d). Opciones: (a) usar direcciones de un dominio propio que no sea un proveedor abierto;
   (b) activar el espacio desde `/admin/altas` con cuota 0, que levanta los topes de la prueba

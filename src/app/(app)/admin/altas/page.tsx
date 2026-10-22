@@ -12,14 +12,12 @@
  * Lee todo en una consulta (`listarAltas`).
  */
 
-import { redirect } from "next/navigation";
-
 import { duracionLegible } from "@/core/fecha/duracion";
 import { dominioDelMail } from "@/core/sso";
 import { PLANS } from "@/lib/billing/plans";
 import { nombreDePlan } from "@/lib/billing/plan-label";
+import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireOperator } from "@/lib/auth/require-operator";
-import { AppError } from "@/lib/errors";
 import { ID_DE_META } from "@/lib/meta-ids";
 import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
@@ -105,9 +103,8 @@ export default async function AltasPage({
   try {
     await requireOperator();
   } catch (e) {
-    if (e instanceof AppError && e.code === "MISSING_SESSION") redirect("/login");
     // Quien llega por la URL sin ser operador ve su bandeja: que esto exista no tiene por qué constarle.
-    redirect("/bandeja");
+    rebotarSiNoEntra(e);
   }
 
   const locale = await getAccountLocale();

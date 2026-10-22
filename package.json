@@ -35,6 +35,7 @@
     "carga:soak": "pnpm carga:preparar && k6 run tests/load/scenarios/soak.js",
     "carga:peak": "pnpm carga:preparar && k6 run tests/load/scenarios/peak.js",
     "carga:publico": "pnpm carga:preparar && k6 run tests/load/scenarios/publico.js",
+    "carga:aseguradoras": "pnpm carga:preparar && k6 run tests/load/scenarios/aseguradoras.js",
     "pentest": "tsx --tsconfig tsconfig.rehearsal.json scripts/pen-test.mts",
     "onboard": "tsx --tsconfig tsconfig.rehearsal.json scripts/rehearse-onboarding.mts",
     "knock": "tsx --tsconfig tsconfig.rehearsal.json scripts/knock-on-the-door.mts",
@@ -65,6 +66,7 @@
     "peso": "node scripts/medir-peso.mjs",
     "peso:ver": "next experimental-analyze",
     "comparar-ensayos": "node scripts/comparar-ensayos.mjs",
+    "paridad": "node --env-file-if-exists=.env.local scripts/paridad.mjs",
     "achicar-payloads": "tsx --tsconfig tsconfig.rehearsal.json scripts/achicar-payloads.mts"
   },
   "dependencies": {

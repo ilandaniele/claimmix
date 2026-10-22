@@ -520,6 +520,10 @@ interactivo.
 Los que sí van a aparecer son de plan y de cuota, y son escalones, no curvas:
 el mes que Vercel o Neon lleguen a su tope no se pone lento, se corta.
 
+#### Setecientas personas con k6: `pnpm carga:aseguradoras`
+
+Los perfiles de k6 comparten una o pocas sesiones, o sea una o pocas aseguradoras; éste mide lo que ninguno: 20 aseguradoras de 35 personas (`ASEGURADORAS`, `USUARIOS_POR_ASEGURADORA` y `DURACION` lo cambian), cada una con su cuenta, su balde de `CASES_API` y su espacio, que es lo que pone a trabajar la separación por inquilino bajo carga. Cada persona abre la bandeja, la filtra (con selección múltiple: `type=choque&type=robo`), abre un caso y busca, con una pausa de 15 a 30 s entre acciones; el p95 de lectura, el 1 % de errores, los checks y los rechazos por cupo tienen los mismos umbrales que los otros perfiles, más un tope de 2 % de logins fallidos. Como el login tiene tope de 30 por minuto por IP (`AUTH_POR_IP`), la subida dura unos 28 minutos (`LOGINS_POR_MIN`, nunca más de 30) y la corrida entera, 40. El escenario se niega a correr contra algo que no sea localhost, 127.0.0.1 o un host con `-qa` o `-dev`, y no hay variable para saltearlo (`tests/load/config/destino.js`, con su test en `tests/unit/carga-aseguradoras-destino.test.ts`). **Cómo correrlo barato:** `next start` local contra la base de QA o contra una rama de Neon descartable, nunca contra prd; `CARGA_PASSWORD=… SEED_DATABASE_URL=<QA o la rama> pnpm sembrar --carga` crea las 700 cuentas `carga-aNN-uNN@example.com` y 60 casos por espacio (se niega contra cualquier base con datos reales, la de dev incluida, y la clave sale del entorno: no se escribe en ningún lado), y después `CARGA_PASSWORD=… BASE_URL=http://localhost:3000 pnpm carga:aseguradoras`; para probar el escenario en un minuto, `ASEGURADORAS=2 USUARIOS_POR_ASEGURADORA=5 DURACION=1m` con `--aseguradoras 2 --usuarios 5` al sembrar. **Cuánto tráfico genera:** 700 personas con 15 a 30 s de pausa son entre 23 y 47 acciones por segundo (31 de media), y como abrir un caso son dos pedidos, unos 40 pedidos por segundo en la meseta; la corrida completa suma unos 60 mil pedidos más 700 logins. **Qué cuota gasta:** contra un deploy, cerca del 6 % del millón de invocaciones mensuales de Vercel Hobby, más la CPU activa de esos 60 mil pedidos, que no está medida y es la cuota más chica (4 h por mes); se corre local porque así no gasta nada de Vercel y porque prd queda fuera; contra Neon Free, 40 minutos con la base despierta y la transferencia de unas 60 mil respuestas, cuyos listados de 50 casos pesan decenas de KB cada uno, así que conviene mirar el consumo en la consola de Neon antes y después en vez de confiar en este cálculo, que no está medido. Desde Actions se puede elegir `aseguradoras` en `load-tests.yml`, pero el flujo no siembra las cuentas: tienen que estar en la base del destino y el secreto `CARGA_PASSWORD` cargado, o el escenario corta al arrancar.
+
 ### 6. `pnpm knock` — que un mensaje de verdad se convierta en un caso
 
 Todo lo anterior entra por los canales simulados, y eso es una decisión, no una
@@ -936,7 +940,7 @@ pnpm sombra:evaluar --reporte ruta.json      # ids, claves, enums, conteo, versi
 - **El runtime de Vercel.** El recorrido corre en el runner. Una variable de QA mal cargada en Vercel sólo se ve en lo que alcanzan los tres GETs.
 - **El cierre del alta por tope.** El tope global de 24 horas sólo se lee y se usa como precondición. Las puertas de la función de la 0048 —un id que no es el del contexto, un usuario que no existe y el tope en 0— las prueba `pnpm tenancy`, en un rollback. Los topes de bases y de MB sólo se miran para explicar un cierre que ocurrió solo.
 
-**Tres resultados.** El job imprime una línea por cosa que miró, `alta: <código> — <texto>`, y al final `alta: resultado=<probado|inconcluso|rojo> corrida=<hex>`. Los logs de Actions son públicos: sólo salen códigos de una tabla cerrada con un texto fijo (`scripts/lib/probar-alta-reglas.mts`), nunca banderas, conteos, correos, ids, el enlace, la clave ni las cadenas.
+**Tres resultados.** El job imprime una línea por cosa que miró, `alta: <código> — <texto>`, y al final `alta: resultado=<probado|inconcluso|rojo> corrida=<hex>`. Los logs de Actions son públicos: sólo salen códigos de una tabla cerrada con un texto fijo (`scripts/lib/probar-alta-reglas.mts`), nunca banderas, conteos, correos, ids, el enlace, la clave ni las cadenas. El job de paridad es otro: imprime el nombre de una bandera que difiere, pero nunca su valor.
 
 - **Probado** — verde. Todas las líneas son de las que anduvieron (sin `::warning::` ni `::error::`): `salud_ok`, `registro_ok`, `enlace_ajeno_rechazado`, `margen_ok`, `alta_ok`, `segunda_vez_ok`, `contadores_ok`, `cupo_devuelto`, `tope_por_ip_ok` y `barrido_ok`.
 - **Inconcluso** — verde, a propósito (`::warning::`). No se pudo probar, y eso no quiere decir que el alta se rompió: un parpadeo de la red, el tope de QA lleno, otro commit desplegado en el medio, el candado ocupado. El resumen del run lo dice: la fila «Alta automática (QA)» sale **corrió SIN PODER PROBAR: mirá el log del job**. Un inconcluso no es un probado: si se repite deploy tras deploy, mirá el código.
@@ -1041,6 +1045,7 @@ Es el paso `always()` del job, así que corre aunque la prueba o el job se hayan
 | Después de tocar el alta, la capa de bases o las migraciones de una base por cliente | `pnpm bases:probar` (y `pnpm bases:empaquetar` si sumaste una migración) |
 | Después de migrar la base de control o la de un cliente de prd | `pnpm permisos --perfil control` y `pnpm permisos --perfil cliente --base t_<hex>` |
 | Después de tocar el alta por el enlace del correo, sus cupos o la 0048 (corre sola en cada deploy de QA) | `pnpm alta:probar --url https://claimmix-qa.vercel.app`, con el entorno de la capa 11 |
+| Querés ver si dev, QA y prd tienen las mismas banderas (corre sola tras cada deploy y sólo avisa) | `pnpm paridad`, con `CRON_SECRET`, `QA_CRON_SECRET`, `PRD_CRON_SECRET` y `PRD_URL` en `.env.local` |
 
 `--fast` saltea el ensayo (gratis, sin tokens). `--local` saltea el chequeo de
 producción.
@@ -1069,7 +1074,7 @@ en cada PR pero no bloquean el merge.
 | `post-deploy.yml` | Post-deploy · DEV, QA y PRD | cada deploy de Vercel | DEV, QA o PRD, según el proyecto |
 | `deploy-checks.yml` | Chequeos de un deploy (lo llama Post-deploy) | sólo desde post-deploy | DEV o QA |
 | `load-tests.yml` | Post-deploy · Carga k6 de vistas previas y QA | vistas previas de claimmix y claimmix-qa, deploy de QA, a mano; nunca PRD | la URL del deploy |
-| `barrer-trabados.yml` | Programado · Barrer trabados en DEV y PRD | cada 15 min DEV, cada 2 h PRD, a mano | DEV y PRD |
+| `barrer-trabados.yml` | Programado · Barrer trabados en DEV, QA y PRD | cada 15 min DEV, cada 2 h QA y PRD, a mano | DEV, QA y PRD |
 
 `ci.yml`:
 
@@ -1092,7 +1097,7 @@ en cada PR pero no bloquean el merge.
 
 - **Credenciales, datos personales y arquitectura** (obligatorio) — gitleaks sobre los commits del PR, `bash scripts/check-personal-data.sh` y `node scripts/check-architecture.mjs`, en un solo job; el historial entero corre aparte, los domingos.
 
-**Después de cada deploy** — `.github/workflows/post-deploy.yml`. Lee de qué proyecto de Vercel es el deploy y corre el grupo de ese entorno: DEV (`claimmix`), QA (`claimmix-qa`) o PRD (`claimmix-prd`). Cada corrida se titula con el entorno y el commit —`DEV · deploy <sha>`, `QA · deploy <sha>`, `PRD · deploy <sha>`—, y las que no chequean nada lo dicen: «Sin chequeos» o «Vista previa · sin chequeos». DEV y QA llaman al workflow reusable `.github/workflows/deploy-checks.yml`: seis chequeos, el smoke primero y los otros cinco colgando de él, más el resumen. PRD corre sólo smoke y salud (ver más abajo).
+**Después de cada deploy** — `.github/workflows/post-deploy.yml`. Lee de qué proyecto de Vercel es el deploy y corre el grupo de ese entorno: DEV (`claimmix`), QA (`claimmix-qa`) o PRD (`claimmix-prd`). Cada corrida se titula con el entorno y el commit —`DEV · deploy <sha>`, `QA · deploy <sha>`, `PRD · deploy <sha>`—, y las que no chequean nada lo dicen: «Sin chequeos» o «Vista previa · sin chequeos». DEV y QA llaman al workflow reusable `.github/workflows/deploy-checks.yml`: seis chequeos, el smoke primero y los otros cinco colgando de él, más el resumen. PRD corre sólo smoke y salud (ver más abajo). Los tres tienen además el job de paridad de banderas, que sólo avisa.
 
 1. `pnpm smoke --deep` contra el alias: base de datos, migraciones, una subida
    real a R2, una llamada real al modelo, el token de WhatsApp y la casilla.
@@ -1120,6 +1125,8 @@ en cada PR pero no bloquean el merge.
    de QA y de producción se aplican a mano, y un `ALTER ROLE` no deja registro.
 
 Sólo en QA hay un séptimo, **Alta automática en QA**: el alta por el enlace del correo, de punta a punta (capa 11).
+
+En los tres hay además un job aparte, **Paridad · banderas de DEV, QA y PRD**, que **sólo avisa**. Corre al lado de los chequeos y no espera a ninguno (sin `needs`: esperar a `dev`, `qa` o `prd` es esperar al ensayo entero, y con una corrida cancelada no habría comparación), con cualquiera de los tres deploys. No pone rojo nada ni toca la marca `ensayo-verde-<árbol>`: `continue-on-error` va en el job y en el paso, el script sale siempre con 0 y `qa_veredicto` no depende de él. Le pide `/api/health` a dev, QA y prd con el Bearer de cada uno (`CRON_SECRET`, `QA_CRON_SECRET`, `PRD_CRON_SECRET` y `vars.PRD_URL`; el secreto de cada ambiente viaja sólo a su origen), junta `banderas` y lista las diferencias que no estén en `EXCEPCIONES` de `scripts/lib/paridad.mjs`, la única lista de excepciones: una nueva se agrega ahí. No instala dependencias (usa `fetch` y módulos de Node) y no pide `?deep=1`. El pedido es `pedirSalud` de `scripts/lib/salud.mjs`, el mismo de `mirar-salud.mjs`: tres intentos, y un 503 con HTML o un cuerpo cortado se reintentan. Un ambiente que no contesta, que da 401 o al que le falta el secreto queda como «ilegible», y se compara el resto. Vercel mueve el alias un momento después de avisar el deploy (el smoke lo espera con `--expect-commit`), así que el job pasa `DEPLOY_AMBIENTE` y `DEPLOY_SHA` y el script no lee el ambiente recién desplegado hasta que `/api/health` sirva ese commit; si en unos tres minutos no llega, queda «ilegible» («no sirve todavía el commit del deploy») en vez de comparar el build anterior. Los logs y el resumen de Actions son públicos, así que ahí salen sólo la clave, el tipo de diferencia y qué ambientes coinciden (`dev=qa≠prd`), nunca un valor; corrido a mano con `pnpm paridad` se ven los valores. `tests/unit/paridad.test.ts` fija el comparador sin red, y `tests/unit/ci-prd.test.ts`, el job.
 
 Hay un trabajo más que no verifica nada, `alcance` («Resumen de lo que corrió»). Corre con `if: always()`
 y escribe en el resumen del run una fila por chequeo: **corrió**, **corrió y
@@ -1269,6 +1276,8 @@ valor por omisión; los modos, como uno de sus nombres o `desconocido`; los secr
 direcciones y los textos libres, sólo como `true` o `false` (cargados o no), nunca su valor. Va
 aparte de `checks` porque el smoke imprime el `detail` de cada chequeo en los logs de Actions,
 que son públicos. Sin el Bearer sigue el 401 de siempre. Ver `src/app/api/health/banderas.ts`.
+`pnpm paridad` y el job `paridad` del Post-deploy comparan este bloque entre dev, QA y prd
+(arriba, «Después de cada deploy»).
 
 ---
 

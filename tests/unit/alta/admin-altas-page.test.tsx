@@ -22,6 +22,10 @@ vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     throw new Error("REDIRECT:" + url);
   },
+  // Como el de Next: lo que corta el render (acá, el redirect) sigue su camino.
+  unstable_rethrow: (e: unknown) => {
+    if (e instanceof Error && e.message.startsWith("REDIRECT:")) throw e;
+  },
 }));
 vi.mock("@/lib/auth/require-operator", () => ({ requireOperator: h.operador }));
 vi.mock("@/server/i18n/idioma-de-la-cuenta", () => ({ getAccountLocale: h.locale }));
@@ -134,6 +138,14 @@ describe("antes de mostrar nada", () => {
     h.operador.mockRejectedValue(new AppError("FORBIDDEN_ROLE"));
 
     await expect(pintar()).rejects.toThrow("REDIRECT:/bandeja");
+    expect(h.listar).not.toHaveBeenCalled();
+    expect(h.lugares).not.toHaveBeenCalled();
+  });
+
+  it("si la guarda no pudo leer la base no rebota a /bandeja: la falla se muestra", async () => {
+    h.operador.mockRejectedValue(new Error("fetch failed"));
+
+    await expect(pintar()).rejects.toThrow("fetch failed");
     expect(h.listar).not.toHaveBeenCalled();
     expect(h.lugares).not.toHaveBeenCalled();
   });

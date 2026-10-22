@@ -25,7 +25,8 @@
 import { useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CaseRow } from "@/server/cases/list";
-import type { CaseStatus } from "@/lib/schemas/cases";
+import type { CaseStatus, Periodo } from "@/lib/schemas/cases";
+import { normalizarBusqueda } from "../normalizar-busqueda";
 import { PARAMS_DE_FILTRO } from "./grupos-de-filtro";
 
 interface RealtimeHandlers {
@@ -75,6 +76,15 @@ const POLL_MAX_MS = 30000;
  */
 export const FILTER_PARAMS = [...PARAMS_DE_FILTRO, "para_responder", "cola"];
 
+/**
+ * Los períodos que la URL puede traer, los mismos de `PeriodoSchema`.
+ *
+ * Escrita acá y no leída del esquema: importar el valor de `schemas/cases` en
+ * un componente de cliente sube zod entero al JS del navegador, y para eso el
+ * tipo `Periodo` no alcanza. Un test la compara con `PeriodoSchema.options`.
+ */
+export const PERIODOS: readonly Periodo[] = ["hoy", "7d", "30d", "90d"];
+
 /** Build the /api/cases query string from the current location filters. */
 function buildQuery(current: URLSearchParams): string {
   const params = new URLSearchParams();
@@ -84,6 +94,17 @@ function buildQuery(current: URLSearchParams): string {
     // primero — con `get`/`set` un multi-select perdía todo menos uno.
     for (const value of current.getAll(key)) params.append(key, value);
   }
+  /*
+   * La búsqueda y el período también recortan la lista, y no son chips del
+   * panel: sin ellos el sondeo traía todo y un caso nuevo que no coincidía con
+   * lo buscado aparecía arriba. Se leen igual que en `page.tsx`: `q` recortado
+   * y sólo si llega a tres caracteres —por debajo, /api/cases contesta 400 y
+   * el sondeo se callaría—, y el primer `periodo` que sea uno de los conocidos.
+   */
+  const q = normalizarBusqueda(current.get("q") ?? undefined);
+  if (q) params.set("q", q);
+  const periodo = current.getAll("periodo").find((v) => (PERIODOS as readonly string[]).includes(v));
+  if (periodo) params.set("periodo", periodo);
   params.set("page", "1");
   params.set("per_page", String(POR_PEDIDO));
   params.set("sort", "created_at");

@@ -1,10 +1,8 @@
-import { redirect } from "next/navigation";
-
 import type { RamoDelInquilino } from "@/core/case/ramos";
 import { basePorCliente } from "@/data/bases";
 import { enControl, enTenant, enTenantVarias } from "@/data/scope";
+import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { AppError } from "@/lib/errors";
 import { getT } from "@/lib/i18n";
 import { consultaRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
 import { codigoPg } from "@/server/core-sync/config";
@@ -23,8 +21,7 @@ export default async function AgentConsolePage() {
     role = userRow.role;
     tenantId = userRow.tenant_id;
   } catch (e) {
-    if (e instanceof AppError && e.code === "MISSING_SESSION") redirect("/login");
-    redirect("/bandeja");
+    rebotarSiNoEntra(e);
   }
 
   const idioma = await getAccountLocale();

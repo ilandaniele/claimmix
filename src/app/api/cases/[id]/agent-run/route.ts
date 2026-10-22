@@ -19,7 +19,8 @@
  *     extracted_fields: [...],   // current (analyst-corrected) values
  *     missing_docs: [...],
  *     pending_confirmations: [...],
- *     already_approved: boolean  // training example exists for this run
+ *     already_approved: boolean, // training example exists for this run
+ *     parcial: boolean           // alguna consulta falló: una lista vacía puede no serlo
  *   }
  */
 
@@ -40,6 +41,8 @@ import {
 } from "@/lib/db/schema";
 import { ok, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { errorCode } from "@/lib/observability/error-code";
+import { logger } from "@/lib/observability/logger";
 import { getLatestAgentRun } from "@/server/training/agent-runs";
 import {
   RATE_LIMIT_CONFIGS,
@@ -87,8 +90,14 @@ export async function GET(
     }
 
     // ── 5. Latest run + current extraction state, in parallel ────────────────
-    // Each related query degrades to [] on failure — matching the previous
-    // behavior where query errors yielded empty arrays.
+    // Cada consulta relacionada que falla deja su lista vacía, pero lo anota:
+    // `parcial` le dice al panel que «sin valores» puede ser un error y no el caso.
+    let parcial = false;
+    const siFalla = (e: unknown): never[] => {
+      parcial = true;
+      logger.error({ case_id: caseId, code: errorCode(e) }, "agent_run.consulta_fallo");
+      return [];
+    };
     const [run, fieldRows, missingRows, confirmationRows] = await Promise.all([
       getLatestAgentRun(tenantId, caseId),
       enTenant(tenantCtx, (db) =>
@@ -104,7 +113,7 @@ export async function GET(
             eq(extractedFields.case_id, caseId)
           )
           .orderBy(asc(extractedFields.field_key))
-      ).catch(() => []),
+      ).catch(siFalla),
       enTenant(tenantCtx, (db) =>
         db
           .select({
@@ -119,7 +128,7 @@ export async function GET(
               isNull(missingDocs.declined_at)
             )
           )
-      ).catch(() => []),
+      ).catch(siFalla),
       enTenant(tenantCtx, (db) =>
         db
           .select({
@@ -137,7 +146,7 @@ export async function GET(
               eq(claimFieldConfirmations.status, "pending")
             )
           )
-      ).catch(() => []),
+      ).catch(siFalla),
     ]);
 
     // ── 6. Already approved? ─────────────────────────────────────────────────
@@ -152,7 +161,7 @@ export async function GET(
               eq(trainingExamples.agent_run_id, run.id)
             )
             .limit(1)
-        ).catch(() => [] as Array<{ id: string }>)
+        ).catch(siFalla)
       );
       alreadyApproved = Boolean(existing);
     }
@@ -173,6 +182,7 @@ export async function GET(
         confidence: Number(c.confidence),
       })),
       already_approved: alreadyApproved,
+      parcial,
     });
   } catch (e) {
     return err(e);

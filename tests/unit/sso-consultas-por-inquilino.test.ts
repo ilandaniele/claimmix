@@ -43,7 +43,7 @@ vi.mock("@/data/scope", async () => {
   };
 });
 
-import { correoExigeSso, dominioExigeSso, duenoDelMail } from "@/server/sso/usuarios";
+import { correoExigeSso, duenoDelMail, perfilDelIngreso } from "@/server/sso/usuarios";
 
 const TENANT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const consulta = () => (h.consultas as Consulta[])[0]!;
@@ -54,19 +54,25 @@ beforeEach(() => {
   h.filasDelDriver = [];
 });
 
-describe("dominioExigeSso", () => {
+describe("perfilDelIngreso", () => {
   it("compara el inquilino del perfil con el de la configuración, además del dominio", async () => {
-    await dominioExigeSso("u1");
+    await perfilDelIngreso("u1");
 
     expect(h.consultas).toHaveLength(1);
-    expect(consulta().sql).toContain('inner join "users" on "users"."id" = "user"."id"');
-    expect(consulta().sql).toMatch(/inner join "sso_settings" on \("sso_settings"\."tenant_id" = "users"\."tenant_id" and "sso_settings"\."dominio" = lower\(split_part\("user"\."email", '@', 2\)\)\)/);
+    expect(consulta().sql).toContain('from "users" inner join "user" on "user"."id" = "users"."id"');
+    expect(consulta().sql).toMatch(/left join "sso_settings" on \("sso_settings"\."tenant_id" = "users"\."tenant_id" and "sso_settings"\."dominio" = lower\(split_part\("user"\."email", '@', 2\)\) and /);
   });
 
-  it("una cuenta sin perfil no tiene inquilino y por eso no entra en el join: no se exige nada", async () => {
-    // inner join: sin fila en `users` no hay fila que devolver.
-    await dominioExigeSso("u1");
-    expect(consulta().sql).not.toMatch(/left join/);
+  it("una cuenta sin perfil no tiene fila: no hay inquilino ni nada que exigir", async () => {
+    expect(await perfilDelIngreso("u1")).toBeNull();
+  });
+
+  it("mira la baja en la misma consulta", async () => {
+    h.filasDelDriver = [[TENANT_A, true, false]];
+
+    expect(await perfilDelIngreso("u1")).toEqual({ tenantId: TENANT_A, deBaja: true, exigeSso: false });
+    expect(h.consultas).toHaveLength(1);
+    expect(consulta().sql).toContain('"users"."dado_de_baja_en" is not null');
   });
 });
 

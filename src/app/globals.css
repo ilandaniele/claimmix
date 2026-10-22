@@ -303,7 +303,8 @@ body {
 }
 
 .dark .text-amber-700,
-.dark .text-amber-800 {
+.dark .text-amber-800,
+.dark .text-amber-900 {
   color: #fde68a !important;
 }
 
@@ -333,7 +334,8 @@ body {
 
 .dark .text-red-600,
 .dark .text-red-700,
-.dark .text-red-800 {
+.dark .text-red-800,
+.dark .text-red-900 {
   color: #fecaca !important;
 }
 
@@ -370,7 +372,8 @@ body {
 }
 
 .dark .text-blue-600,
-.dark .text-blue-700 {
+.dark .text-blue-700,
+.dark .text-blue-800 {
   color: #93c5fd !important;
 }
 

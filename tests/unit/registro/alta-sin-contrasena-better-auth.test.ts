@@ -49,8 +49,7 @@ vi.mock("@/lib/audit/log", async (original) => ({
 }));
 vi.mock("@/server/sso/usuarios", () => ({
   duenoDelMail: vi.fn(),
-  inquilinoDelUsuario: vi.fn(),
-  dominioExigeSso: vi.fn(),
+  perfilDelIngreso: vi.fn(),
   correoExigeSso: vi.fn(),
   dominioExigeSsoEnAlgunInquilino: vi.fn(async () => false),
 }));

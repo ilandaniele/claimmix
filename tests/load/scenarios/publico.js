@@ -17,6 +17,7 @@ import { check, sleep } from "k6";
 
 import {
   BASE_URL,
+  CHECKS_SIN_FALLAS,
   comoVisitante,
   PERCENTILES,
   RUTAS_PUBLICAS,
@@ -35,10 +36,10 @@ export const options = {
   // las lecturas de la API del tablero, y de ahí no se mueven.
   thresholds: {
     http_req_failed: ["rate==0"],
-    // `checks` a mano y no `umbralesComunes()`: ese trae también
+    // `CHECKS_SIN_FALLAS` y no `umbralesComunes()`: ese trae también
     // `rechazados_por_cupo`, un contador que sólo existe si se importa
     // `helpers/auth.js` — y acá no hay sesión que importar.
-    checks: ["rate==1.00"],
+    checks: CHECKS_SIN_FALLAS,
     "http_req_duration{escenario:publico}": ["p(95)<1000"],
   },
 };

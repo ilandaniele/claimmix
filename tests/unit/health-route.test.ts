@@ -11,9 +11,14 @@
  * anonymous callers. This verifies it before it ships.
  */
 
-const { mockExecute, mockSelect } = vi.hoisted(() => ({
+const { mockExecute, mockSelect, mockGetWatchExpiration } = vi.hoisted(() => ({
   mockExecute: vi.fn(),
   mockSelect: vi.fn(),
+  mockGetWatchExpiration: vi.fn(),
+}));
+
+vi.mock("@/server/email/gmail/poll-state", () => ({
+  getWatchExpiration: mockGetWatchExpiration,
 }));
 
 // La capa de datos, corriendo contra el db que este test ya simula.
@@ -34,6 +39,7 @@ vi.mock("@/lib/db", () => ({
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/health/route";
+import { cifrar } from "@/lib/security/cifrado";
 
 /** Lo que el chequeo de presupuesto va a ver como gastado este mes. */
 let gastadoUsd = 0;
@@ -531,6 +537,36 @@ describe("GET /api/health — a connected mailbox that cannot be read", () => {
     const gmail = await gmailCheck();
     expect(gmail.status).toBe("degraded");
     expect(gmail.detail).toContain("corta");
+  });
+
+  describe("el aviso de push", () => {
+    const enHoras = (h: number) => new Date(Date.now() + h * 60 * 60 * 1000).toISOString();
+
+    beforeEach(() => mailboxOnFile(cifrar("fake-refresh-token")));
+
+    it("vencido no es «push al día»: el correo entra sólo por el cron", async () => {
+      mockGetWatchExpiration.mockResolvedValue(enHoras(-2));
+
+      const gmail = await gmailCheck();
+      expect(gmail.status).toBe("degraded");
+      expect(gmail.detail).toContain("venció");
+    });
+
+    it("a menos de 12 h, el cron ya tendría que haberlo renovado", async () => {
+      mockGetWatchExpiration.mockResolvedValue(enHoras(6));
+
+      const gmail = await gmailCheck();
+      expect(gmail.status).toBe("degraded");
+      expect(gmail.detail).toContain("menos de 12 h");
+    });
+
+    it("con días por delante está al día", async () => {
+      mockGetWatchExpiration.mockResolvedValue(enHoras(5 * 24));
+
+      const gmail = await gmailCheck();
+      expect(gmail.status).toBe("ok");
+      expect(gmail.detail).toContain("push al día");
+    });
   });
 
   it("still reports a mailbox nobody has connected as merely degraded", async () => {

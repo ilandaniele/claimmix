@@ -15,6 +15,7 @@
  * llamadas a Graph y el tope por omisión no alcanza.
  */
 
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { Tarjeta } from "@/app/alta/Tarjeta";
@@ -30,7 +31,12 @@ import { WabaPropiaPanel } from "./WabaPropiaPanel";
 
 export const maxDuration = 60;
 
-export const metadata = { title: "Conectar WhatsApp — ClaimMix" };
+export async function generateMetadata(): Promise<Metadata> {
+  const usuario = (await getSessionContext())?.user;
+  const fila = usuario ? await filaDeUsuario(usuario.id) : null;
+  const locale = await resolveAccountLocale(fila?.locale);
+  return { title: `${getT(locale)("waba.titulo")} — ClaimMix` };
+}
 
 export default async function ConectarWhatsappPage() {
   const usuario = (await getSessionContext())?.user;

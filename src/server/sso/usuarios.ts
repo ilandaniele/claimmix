@@ -51,18 +51,6 @@ export async function duenoDelMail(email: string, tenantId: string): Promise<Due
   };
 }
 
-/** El inquilino del perfil de una cuenta, o null si no tiene perfil. */
-export async function inquilinoDelUsuario(userId: string): Promise<string | null> {
-  // sin-inquilino: se pregunta a qué inquilino pertenece la cuenta que está
-  // entrando; antes de esta consulta no hay inquilino.
-  const [fila] = await db
-    .select({ tenant_id: users.tenant_id })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  return fila?.tenant_id ?? null;
-}
-
 /** Un dominio exige SSO sólo con el SSO prendido, el dominio probado y «exigir» puesto. */
 const EXIGE_SSO = and(
   eq(ssoSettings.exigir, true),
@@ -84,33 +72,58 @@ async function sinSsoQueExigir(consulta: () => Promise<boolean>): Promise<boolea
   }
 }
 
+/** Lo que el gancho de sesión mira de la cuenta que entra. */
+export interface PerfilDelIngreso {
+  tenantId: string;
+  /** `users.dado_de_baja_en` puesto: la persona no entra más. */
+  deBaja: boolean;
+  /** El dominio de su mail exige el SSO de su inquilino. */
+  exigeSso: boolean;
+}
+
 /**
- * ¿El dominio del mail de esta cuenta exige SSO? Una sola consulta.
+ * El perfil de la cuenta que está entrando, o null si no tiene. Una sola consulta.
  *
  * Exige el SSO de SU inquilino: el dominio verificado es único por inquilino, pero
  * el mismo dominio puede tener cuentas en otro (contratistas, un estudio que
  * atiende a dos aseguradoras). Sin comparar el inquilino de la cuenta con el de la
  * configuración, exigir en uno dejaría sin poder entrar a los del otro.
+ *
+ * Sin la 0045 no hay SSO que exigir: se repite sin esa tabla, y la baja se sigue
+ * mirando. Cualquier otro error se relanza: ante una falla de la base, no se abre
+ * la puerta.
  */
-export function dominioExigeSso(userId: string): Promise<boolean> {
-  return sinSsoQueExigir(async () => {
-    // sin-inquilino: el dominio del mail y el inquilino del perfil deciden qué
-    // configuración rige, y el login es previo al inquilino.
-    const filas = await db
-      .select({ uno: sql<number>`1` })
-      .from(authUsers)
-      .innerJoin(users, eq(users.id, authUsers.id))
-      .innerJoin(
+export async function perfilDelIngreso(userId: string): Promise<PerfilDelIngreso | null> {
+  const deBaja = sql<boolean>`${users.dado_de_baja_en} is not null`;
+  let fila: { tenant_id: string; de_baja: boolean; exige: boolean } | undefined;
+  try {
+    // sin-inquilino: se pregunta a qué inquilino pertenece la cuenta que está
+    // entrando; el dominio de su mail y ese inquilino deciden qué SSO rige.
+    [fila] = await db
+      .select({ tenant_id: users.tenant_id, de_baja: deBaja, exige: sql<boolean>`${ssoSettings.tenant_id} is not null` })
+      .from(users)
+      .innerJoin(authUsers, eq(authUsers.id, users.id))
+      .leftJoin(
         ssoSettings,
         and(
           eq(ssoSettings.tenant_id, users.tenant_id),
-          eq(ssoSettings.dominio, sql`lower(split_part(${authUsers.email}, '@', 2))`)
+          eq(ssoSettings.dominio, sql`lower(split_part(${authUsers.email}, '@', 2))`),
+          EXIGE_SSO
         )
       )
-      .where(and(eq(authUsers.id, userId), EXIGE_SSO))
+      .where(eq(users.id, userId))
       .limit(1);
-    return filas.length > 0;
-  });
+  } catch (e) {
+    if (!esFaltaDe0045(e)) throw e;
+    // sin-inquilino: ídem, sin la tabla del SSO.
+    [fila] = await db
+      .select({ tenant_id: users.tenant_id, de_baja: deBaja, exige: sql<boolean>`false` })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+  }
+  if (!fila) return null;
+  return { tenantId: fila.tenant_id, deBaja: fila.de_baja === true, exigeSso: fila.exige === true };
 }
 
 /**

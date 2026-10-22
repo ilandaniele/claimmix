@@ -338,6 +338,7 @@ describe("las claves con marcas del lote de decisiones", () => {
   const marcas = (texto: string) => (texto.match(/\{\w+\}/g) ?? []).sort();
   const DE_CLIENTE = {
     "usuarios.cerrarSesionesConfirmar": ["{nombre}"],
+    "usuarios.darDeBajaConfirmar": ["{nombre}"],
     "usuarios.toast.sesionesCerradas": ["{n}"],
     "usuarios.toast.sesionCerrada": [],
   } as const;

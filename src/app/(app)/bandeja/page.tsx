@@ -43,6 +43,7 @@ import { diasDePrueba } from "@/lib/billing/plans";
 import { getT } from "@/lib/i18n";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 export const VALID_STATUSES: CaseStatus[] = CaseStatusSchema.options;
 /*
@@ -333,6 +334,8 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
     </div>
   );
 }
+
+export const generateMetadata = tituloDePantalla("nav.bandeja");
 
 /**
  * El esqueleto de carga, con la forma de lo que va a aparecer.

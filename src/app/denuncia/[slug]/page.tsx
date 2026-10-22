@@ -29,6 +29,15 @@ export async function generateMetadata(): Promise<Metadata> {
 
 const CAMPO = `block w-full ${CAMPO_BASE}`;
 
+/** La regla del campo a la vista de todos: el `title` solo la muestra al pasar el mouse. */
+function Ayuda({ id, texto }: { id: string; texto: string }) {
+  return (
+    <p id={id} className="text-xs text-slate-500">
+      {texto}
+    </p>
+  );
+}
+
 export default async function DenunciaWebPage({
   params,
   searchParams,
@@ -48,7 +57,8 @@ export default async function DenunciaWebPage({
   });
   if (!formulario) notFound();
 
-  const t = getT(await idiomaDelNavegador());
+  const locale = await idiomaDelNavegador();
+  const t = getT(locale);
 
   // Lo que la ruta contestó, si esta carga viene de un envío. La página no lleva JavaScript: es el único aviso.
   const aviso =
@@ -71,7 +81,7 @@ export default async function DenunciaWebPage({
 
   return (
     <div className="lienzo min-h-screen px-4 py-10">
-      <main className="mx-auto max-w-xl space-y-5">
+      <main lang={locale} className="mx-auto max-w-xl space-y-5">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             {formulario.nombre}
@@ -115,44 +125,56 @@ export default async function DenunciaWebPage({
                 />
               </label>
             </div>
-            <label className={ETIQUETA}>
-              {t("denuncia.nombre")}
-              <input
-                name="nombre"
-                required
-                minLength={2}
-                maxLength={80}
-                pattern={patronHtml(PATRON_DE_NOMBRE)}
-                title={t("denuncia.nombreFormato")}
-                autoComplete="name"
-                className={CAMPO}
-              />
-            </label>
-            <label className={ETIQUETA}>
-              {t("denuncia.email")}
-              <input
-                name="email"
-                type="email"
-                required
-                maxLength={254}
-                pattern={patronHtml(PATRON_DE_CORREO)}
-                title={t("denuncia.emailFormato")}
-                autoComplete="email"
-                className={CAMPO}
-              />
-            </label>
-            <label className={ETIQUETA}>
-              {t("denuncia.telefono")}
-              <input
-                name="telefono"
-                type="tel"
-                maxLength={40}
-                pattern={patronHtml(PATRON_DE_TELEFONO)}
-                title={t("denuncia.telefonoFormato")}
-                autoComplete="tel"
-                className={CAMPO}
-              />
-            </label>
+            <div className="space-y-1">
+              <label className={ETIQUETA}>
+                {t("denuncia.nombre")}
+                <input
+                  name="nombre"
+                  required
+                  minLength={2}
+                  maxLength={80}
+                  pattern={patronHtml(PATRON_DE_NOMBRE)}
+                  title={t("denuncia.nombreFormato")}
+                  aria-describedby="nombre-formato"
+                  autoComplete="name"
+                  className={CAMPO}
+                />
+              </label>
+              <Ayuda id="nombre-formato" texto={t("denuncia.nombreFormato")} />
+            </div>
+            <div className="space-y-1">
+              <label className={ETIQUETA}>
+                {t("denuncia.email")}
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  maxLength={254}
+                  pattern={patronHtml(PATRON_DE_CORREO)}
+                  title={t("denuncia.emailFormato")}
+                  aria-describedby="email-formato"
+                  autoComplete="email"
+                  className={CAMPO}
+                />
+              </label>
+              <Ayuda id="email-formato" texto={t("denuncia.emailFormato")} />
+            </div>
+            <div className="space-y-1">
+              <label className={ETIQUETA}>
+                {t("denuncia.telefono")}
+                <input
+                  name="telefono"
+                  type="tel"
+                  maxLength={40}
+                  pattern={patronHtml(PATRON_DE_TELEFONO)}
+                  title={t("denuncia.telefonoFormato")}
+                  aria-describedby="telefono-formato"
+                  autoComplete="tel"
+                  className={CAMPO}
+                />
+              </label>
+              <Ayuda id="telefono-formato" texto={t("denuncia.telefonoFormato")} />
+            </div>
             <label className={ETIQUETA}>
               {t("denuncia.relato")}
               <textarea

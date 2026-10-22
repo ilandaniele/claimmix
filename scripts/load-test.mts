@@ -338,6 +338,9 @@ interface Escenario {
 
 const QUERY = { page: 1, per_page: 25, sort: "created_at", order: "desc" } as const;
 
+/** Cuántos de los casos más viejos se prueban hasta dar con uno que devuelva detalle. */
+const CANDIDATOS_DE_DETALLE = 5;
+
 /**
  * Quién mira «Mi cola» en los escenarios que la miden.
  *
@@ -402,12 +405,35 @@ async function prepararLectura(): Promise<{
    * artefacto del deploy anterior: dos corridas midiendo casos distintos leen
    * como una regresión del código.
    */
-  const masViejo = await listCases(CTX, {
+  const masViejos = await listCases(CTX, {
     ...QUERY,
-    per_page: 1,
+    per_page: CANDIDATOS_DE_DETALLE,
     order: "asc",
   } as never);
-  const someCase = masViejo.data[0]?.id ?? null;
+  /*
+   * `getCaseDetail` devuelve `null` si el caso se borró entre las dos
+   * consultas (la limpieza del ensayo) o si la base tropezó. Se prueba con el
+   * siguiente más viejo; si ninguno abre, la corrida termina en rojo, igual
+   * que con el listado vacío. Sin esto la celda del detalle desaparecía de la
+   * tabla y la Carga salía verde justo en la corrida en que se tropezó.
+   */
+  let abierto: string | null = null;
+  let saltados = 0;
+  for (const candidato of masViejos.data) {
+    if (await getCaseDetail(TENANT_ID!, candidato.id)) {
+      abierto = candidato.id;
+      break;
+    }
+    saltados++;
+  }
+  if (!abierto) {
+    console.error(
+      `Ninguno de los ${masViejos.data.length} casos más viejos de ${TENANT_ID} devolvió detalle.\n` +
+        "Sin él no hay celda de detalle que medir, y salir verde sería no haberla medido."
+    );
+    process.exit(1);
+  }
+  const someCase: string = abierto;
 
   const escenarios: Escenario[] = [
     {
@@ -478,30 +504,30 @@ async function prepararLectura(): Promise<{
     },
   ];
 
-  if (someCase && (await getCaseDetail(TENANT_ID!, someCase))) {
-    escenarios.push({
-      name: "detalle de un caso",
-      run: async () => {
-        /*
-         * Se afirma sobre el resultado, no se llama y listo.
-         *
-         * `getCaseDetail` se traga TODOS los errores de base y devuelve `null`
-         * — es deliberado: un 404 es mejor que un 500 para el analista. Pero
-         * acá eso significaba que la operacion no podia fallar: `measure()` la
-         * registraba siempre como `ok: true`.
-         *
-         * Y peor: cuando la base falla, el detalle devuelve `null` ANTES de
-         * hacer las tres consultas siguientes, asi que la columna se pone MAS
-         * RAPIDA. Una base caida se leia como una mejora de rendimiento.
-         */
-        const detalle = await getCaseDetail(TENANT_ID!, someCase);
-        if (!detalle) throw new Error("getCaseDetail devolvio null");
-      },
-    });
-    notas.push("El detalle mide siempre el caso más viejo, para que dos corridas se comparen.");
-  } else if (someCase) {
-    notas.push("El detalle no se midió: el caso más viejo del listado no se pudo leer.");
-  }
+  escenarios.push({
+    name: "detalle de un caso",
+    run: async () => {
+      /*
+       * Se afirma sobre el resultado, no se llama y listo.
+       *
+       * `getCaseDetail` se traga TODOS los errores de base y devuelve `null`
+       * — es deliberado: un 404 es mejor que un 500 para el analista. Pero
+       * acá eso significaba que la operacion no podia fallar: `measure()` la
+       * registraba siempre como `ok: true`.
+       *
+       * Y peor: cuando la base falla, el detalle devuelve `null` ANTES de
+       * hacer las tres consultas siguientes, asi que la columna se pone MAS
+       * RAPIDA. Una base caida se leia como una mejora de rendimiento.
+       */
+      const detalle = await getCaseDetail(TENANT_ID!, someCase);
+      if (!detalle) throw new Error("getCaseDetail devolvio null");
+    },
+  });
+  notas.push(
+    saltados === 0
+      ? "El detalle mide siempre el caso más viejo, para que dos corridas se comparen."
+      : `El detalle mide el caso más viejo que abre: se saltaron ${saltados} que no devolvieron detalle.`
+  );
 
   return { escenarios, casos, notas };
 }

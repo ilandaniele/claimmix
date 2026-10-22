@@ -19,12 +19,11 @@
 #
 # ── Por qué acá y no en Vercel ────────────────────────────────────────────────
 #
-# `vercel.json` ya tiene dos crons y los dos son diarios: ése es el techo del
-# plan Hobby —dos tareas, una vez por día— y no vamos a plan pago. GitHub
-# Actions corre programado sin plan pago —el repo es privado desde el
-# 2026-09-26, así que gasta del cupo gratuito de minutos—, y el barrido vive
-# acá. No es un rodeo: es el único lugar sin costo donde esto puede correr
-# seguido.
+# En el plan Hobby cada cron de `vercel.json` corre a lo sumo una vez por día,
+# en cualquier minuto de su hora, y no vamos a plan pago. GitHub Actions corre
+# programado sin costo —el repo es público desde el 2026-10-16 y sus minutos no
+# se cobran—, así que la cadencia vive acá. No es un rodeo: es el único lugar
+# sin costo donde esto puede correr seguido.
 #
 # El cron de Vercel se deja igual. Éste puede no correr —GitHub demora las
 # tareas programadas cuando está cargado, y lo dice— y entonces el diario sigue
@@ -182,9 +181,10 @@ jobs:
           # El log puede ser público: sólo contadores y estado, nunca los caseIds ni las listas.
           # Lo que no es JSON (la página de error de Vercel) sale en corto.
           resumen() {
-            jq -c '{ok, reaped, retomados, abandoned_closed, recordatorios_enviados, desvios_nuevos, desvios_fallidas: (.desvios_fallidas | if type == "array" then length else null end), error} | with_entries(select(.value != null))' respuesta.json 2>/dev/null ||
+            jq -c '{ok, reaped, retomados, abandoned_closed, recordatorios_enviados, desvios_nuevos, desvios_fallidas: (.desvios_fallidas | if type == "array" then length else null end), fallas, bases, error} | with_entries(select(.value != null))' respuesta.json 2>/dev/null ||
               { head -c 300 respuesta.json 2>/dev/null; echo; }
           }
+          rojo=0
 
           # Tres intentos: la red de un runner se corta sola de vez en cuando, y
           # un barrido que no salió no es una incidencia — lo es que no salga
@@ -211,15 +211,23 @@ jobs:
                 echo "::warning::Se escalaron ${reaped} caso(s) trabado(s)."
               fi
 
+              # Un barrido que no pudo consultar devuelve cero, igual que una noche sin
+              # nada que hacer: `fallas` es lo único que los separa. No se reintenta.
+              fallas=$(jq -r '.fallas // 0' respuesta.json 2>/dev/null || echo 0)
+              if [ "${fallas}" != "0" ]; then
+                echo "::error::${fallas} barrido(s) o base(s) no se pudieron consultar; el código está en los logs de Vercel (reap_stuck.*_failed, close_abandoned.failed)."
+                rojo=1
+              fi
+
               # La revisión nocturna (B22) corre con la primera llamada del día. Si una
               # regla falló, el barrido corrió igual, pero esto se pone rojo: el log de
               # Vercel solo no lo mira nadie. No se reintenta: el cupo del día ya se gastó.
               fallidas=$(grep -o '"desvios_fallidas":\[[^]]*]' respuesta.json | head -1 | cut -d: -f2-)
               if [ -n "${fallidas:-}" ] && [ "${fallidas}" != "[]" ]; then
                 echo "::error::La revisión nocturna (B22) no corrió estas reglas: ${fallidas}. El barrido sí corrió; el código está en los logs de Vercel (desvios.regla_fallo)."
-                exit 1
+                rojo=1
               fi
-              exit 0
+              exit "${rojo}"
             fi
 
             echo "intento ${intento}: HTTP ${codigo}"
@@ -263,6 +271,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: ¿A dónde apunta esto?
+        id: host
         env:
           URL: ${{ vars.PRD_URL }}
         run: |
@@ -278,7 +287,18 @@ jobs:
           node scripts/lib/hosts-vetados.mjs --conocido "$URL" ||
             { echo "::error::Host fuera de la lista: ${HOST}"; exit 1; }
 
+      # Antes del barrido y con su propio `if:`, como en `barrer`: después, un
+      # barrido rojo la salteaba, y uno colgado se la llevaba puesta.
+      - name: Preguntarle al deploy que alcanza a ver
+        id: salud
+        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
+        env:
+          CRON_SECRET: ${{ secrets.PRD_CRON_SECRET }}
+          URL: ${{ vars.PRD_URL }}
+        run: node scripts/mirar-salud.mjs
+
       - name: Pedirle al barredor que pase
+        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
         env:
           CRON_SECRET: ${{ secrets.PRD_CRON_SECRET }}
           URL: ${{ vars.PRD_URL }}
@@ -290,9 +310,10 @@ jobs:
           # El log puede ser público: sólo contadores y estado, nunca los caseIds ni las listas.
           # Lo que no es JSON (la página de error de Vercel) sale en corto.
           resumen() {
-            jq -c '{ok, reaped, retomados, abandoned_closed, recordatorios_enviados, desvios_nuevos, desvios_fallidas: (.desvios_fallidas | if type == "array" then length else null end), error} | with_entries(select(.value != null))' respuesta.json 2>/dev/null ||
+            jq -c '{ok, reaped, retomados, abandoned_closed, recordatorios_enviados, desvios_nuevos, desvios_fallidas: (.desvios_fallidas | if type == "array" then length else null end), fallas, bases, error} | with_entries(select(.value != null))' respuesta.json 2>/dev/null ||
               { head -c 300 respuesta.json 2>/dev/null; echo; }
           }
+          rojo=0
 
           for intento in 1 2 3; do
             codigo=$(curl -sS -o respuesta.json -w '%{http_code}' \
@@ -309,12 +330,18 @@ jobs:
                 echo "::warning::Se escalaron ${reaped} caso(s) trabado(s)."
               fi
 
+              fallas=$(jq -r '.fallas // 0' respuesta.json 2>/dev/null || echo 0)
+              if [ "${fallas}" != "0" ]; then
+                echo "::error::${fallas} barrido(s) o base(s) no se pudieron consultar; el código está en los logs de Vercel (reap_stuck.*_failed, close_abandoned.failed)."
+                rojo=1
+              fi
+
               fallidas=$(grep -o '"desvios_fallidas":\[[^]]*]' respuesta.json | head -1 | cut -d: -f2-)
               if [ -n "${fallidas:-}" ] && [ "${fallidas}" != "[]" ]; then
                 echo "::error::La revisión nocturna (B22) no corrió estas reglas: ${fallidas}. El barrido sí corrió; el código está en los logs de Vercel (desvios.regla_fallo)."
-                exit 1
+                rojo=1
               fi
-              exit 0
+              exit "${rojo}"
             fi
 
             echo "intento ${intento}: HTTP ${codigo}"
@@ -325,8 +352,12 @@ jobs:
           resumen
           exit 1
 
-      - name: Preguntarle al deploy que alcanza a ver
-        env:
-          CRON_SECRET: ${{ secrets.PRD_CRON_SECRET }}
-          URL: ${{ vars.PRD_URL }}
-        run: node scripts/mirar-salud.mjs
+      - name: Que significa que esto falle
+        if: ${{ failure() && steps.salud.outcome == 'failure' }}
+        run: |
+          echo "::error::PRD no está sano, y no hubo ningún deploy que lo causara."
+          echo ""
+          echo "  La salida de arriba trae cada chequeo con su nombre y su estado; el detalle"
+          echo "  no se imprime porque el log puede ser publico: correr scripts/mirar-salud.mjs a mano."
+          echo "  Lo que este endpoint ve se rompe solo — token de WhatsApp vencido,"
+          echo "  push de Gmail caido, R2 sin credenciales, presupuesto de IA agotado."

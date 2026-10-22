@@ -42,10 +42,10 @@ export function getDb(): Db {
 /**
  * Decir a qué base se conectó. Una vez, sin la contraseña, y nunca en producción.
  *
- * `next dev` lee `.env.local`, donde vive la cadena de PRODUCCIÓN, y eso está
- * bien: es un proyecto con un solo ambiente desplegado. Lo que no está bien es
- * que no se note. Un `pnpm dev` olvidado corriendo tres días contra la base de
- * los clientes se ve igual que uno contra el ensayo — la pantalla es la misma.
+ * `next dev` lee `.env.local`, que es de dev: dev, QA y prd tienen cada uno su
+ * base, y la cadena de prd va sólo en `.env.prd.local`. Este aviso es para notar
+ * si alguien apuntó a otra base. Un `pnpm dev` olvidado corriendo tres días contra
+ * la base de los clientes se ve igual que uno contra el ensayo — la pantalla es la misma.
  *
  * Ya pasó de la otra punta: los e2e escribían en la base real porque heredaban
  * `DATABASE_URL` de `.env.local`, y se descubrió por un login que fallaba, no

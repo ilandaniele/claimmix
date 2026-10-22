@@ -5,7 +5,7 @@
  * lista) y `dbDeBase`, que devuelve un objeto con el nombre de la base. Lo que se
  * prueba es lo que importa sin una base de verdad: con la bandera apagada corre una
  * vez y sin inquilino, con ella una vez por base `lista`, en serie, rotando cada
- * hora, cortando en `hasta` sin perder la cuenta y sin que una base caída frene a las
+ * hora y cada día, cortando en `hasta` sin perder la cuenta y sin que una base caída frene a las
  * otras.
  */
 
@@ -134,6 +134,20 @@ describe("paraCadaBase con la bandera prendida", () => {
       [TERCERO, TENANT, OTRO],
       [TENANT, OTRO, TERCERO],
     ]);
+  });
+
+  it("a la misma hora, cada día empieza por otra base aunque la cantidad divida a 24: los barridos diarios también rotan", async () => {
+    vi.useFakeTimers();
+    listadas(TENANT, OTRO, TERCERO);
+    const primeras: string[] = [];
+    for (const dia of [0, 1, 2, 3]) {
+      vi.setSystemTime(dia * 24 * HORA + 4 * HORA);
+      const visitadas: string[] = [];
+      await paraCadaBase(async (_db, tenantId) => void visitadas.push(tenantId!), { hasta: Date.now() + 60_000 });
+      primeras.push(visitadas[0]!);
+    }
+
+    expect(primeras).toEqual([OTRO, TERCERO, TENANT, OTRO]);
   });
 
   it("corta en `hasta` y cuenta como pendientes las bases que no alcanzó, sin contarlas como falla", async () => {

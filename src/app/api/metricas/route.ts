@@ -6,8 +6,11 @@
  * valor que el tablero no ofrezca cae al mes en curso.
  */
 
-import { requireRole, ALL_ROLES } from "@/lib/auth/require-role";
+import { ALL_ROLES } from "@/lib/auth/require-role";
+import { entrar } from "@/lib/api/entrada";
 import { ok, err } from "@/lib/api/respond";
+import { AppError } from "@/lib/errors";
+import { RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { periodoDe } from "@/core/metricas/periodo";
 import { getTenantKpis } from "@/server/metrics/kpis";
 
@@ -23,7 +26,9 @@ import { getTenantKpis } from "@/server/metrics/kpis";
  */
 export async function GET(request: Request) {
   try {
-    const { userRow } = await requireRole(...ALL_ROLES);
+    const { ctx, rl } = await entrar("metricas", RATE_LIMIT_CONFIGS.CASES_API, ...ALL_ROLES);
+    if (!rl.allowed) return err(new AppError("RATE_LIMITED"));
+    const { userRow } = ctx;
     const periodo = periodoDe(new URL(request.url).searchParams.get("periodo"));
     return ok(await getTenantKpis({ tenantId: userRow.tenant_id }, { periodo }));
   } catch (e) {

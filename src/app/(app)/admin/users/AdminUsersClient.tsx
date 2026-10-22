@@ -5,6 +5,7 @@
  *   - Fetching full user list (with emails) from GET /api/admin/users
  *   - Create user dialog (POST /api/admin/users)
  *   - Role badge display
+ *   - Dar de baja (DELETE /api/admin/users/:id) y volver a habilitar (PATCH)
  *   - Toast notifications
  */
 
@@ -25,6 +26,8 @@ interface UserRow {
   email: string;
   role: UserRole;
   created_at: string;
+  /** null = activo. Sin el dato (la lista del servidor) no se pinta el estado. */
+  dado_de_baja_en?: string | null;
 }
 
 type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
@@ -305,6 +308,7 @@ export function AdminUsersClient({
   const [error, setError] = useState<string | null>(null);
   const [changingUserId, setChangingUserId] = useState<string | null>(null);
   const [closingSessionsId, setClosingSessionsId] = useState<string | null>(null);
+  const [bajaId, setBajaId] = useState<string | null>(null);
 
   // Fetch full user list (with emails) from the API route on mount
   const refreshUsers = useCallback(async () => {
@@ -383,6 +387,46 @@ export function AdminUsersClient({
     }
   }
 
+  async function handleBaja(user: UserRow, baja: boolean) {
+    if (
+      baja &&
+      !window.confirm(t("usuarios.darDeBajaConfirmar").replace("{nombre}", user.full_name))
+    ) {
+      return;
+    }
+    setError(null);
+    setBajaId(user.id);
+    try {
+      const res = await fetch(
+        `/api/admin/users/${user.id}`,
+        baja
+          ? { method: "DELETE" }
+          : {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ activo: true }),
+            }
+      );
+
+      if (!res.ok) {
+        throw new Error(await readApiError(res, t("usuarios.error.baja")));
+      }
+
+      const data = await res.json().catch(() => null);
+      const dado_de_baja_en: string | null =
+        data?.user?.dado_de_baja_en ?? (baja ? new Date().toISOString() : null);
+      setUsers((prev) =>
+        prev.map((item) => (item.id === user.id ? { ...item, dado_de_baja_en } : item))
+      );
+      setToast(t(baja ? "usuarios.toast.dadoDeBaja" : "usuarios.toast.habilitado"));
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("usuarios.error.baja"));
+    } finally {
+      setBajaId(null);
+    }
+  }
+
   return (
     <>
       {/* Toast */}
@@ -455,6 +499,7 @@ export function AdminUsersClient({
                 const ownerProtected =
                   user.role === "owner" && currentUserRole !== "owner";
                 const canChangeRole = !isSelf && !ownerProtected;
+                const deBaja = Boolean(user.dado_de_baja_en);
 
                 return (
                   <tr
@@ -496,7 +541,7 @@ export function AdminUsersClient({
                             {isSelf ? t("usuarios.propio") : t("usuarios.bloqueado")}
                           </span>
                         )}
-                        {canChangeRole && (
+                        {canChangeRole && !deBaja && (
                           <button
                             type="button"
                             onClick={() => void handleCloseSessions(user)}
@@ -508,12 +553,30 @@ export function AdminUsersClient({
                               : t("usuarios.cerrarSesiones")}
                           </button>
                         )}
+                        {canChangeRole && user.dado_de_baja_en !== undefined && (
+                          <button
+                            type="button"
+                            onClick={() => void handleBaja(user, !deBaja)}
+                            disabled={bajaId === user.id}
+                            className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+                          >
+                            {bajaId === user.id
+                              ? t(deBaja ? "usuarios.habilitando" : "usuarios.dandoDeBaja")
+                              : t(deBaja ? "usuarios.habilitar" : "usuarios.darDeBaja")}
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td className="px-5 py-3">
-                      <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
-                        {t("usuarios.activo")}
-                      </span>
+                      {user.dado_de_baja_en !== undefined && (
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            deBaja ? "bg-slate-100 text-slate-700" : "bg-green-100 text-green-800"
+                          }`}
+                        >
+                          {t(deBaja ? "usuarios.deBaja" : "usuarios.activo")}
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-slate-500">
                       {formatDate(user.created_at, locale)}

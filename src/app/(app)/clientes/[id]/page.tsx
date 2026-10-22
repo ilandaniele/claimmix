@@ -28,6 +28,7 @@ import type { CaseStatus } from "@/lib/schemas/cases";
 import { esRamoNativo } from "@/core/case/ramos";
 import { nombreDeTipo } from "@/lib/i18n/tipos-de-siniestro";
 import { cargarRamosDelInquilino } from "@/server/cases/ramos-del-inquilino";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 interface CustomerDetailPageProps {
   params: Promise<{ id: string }>;
@@ -72,6 +73,8 @@ const POLICY_STATUS_CLASSES: Record<string, string> = {
 
 /** Cuántos siniestros se dibujan. El total se cuenta aparte y se muestra igual. */
 const MAX_CASOS = 50;
+
+export const generateMetadata = tituloDePantalla("nav.clientes");
 
 export default async function CustomerDetailPage({
   params,

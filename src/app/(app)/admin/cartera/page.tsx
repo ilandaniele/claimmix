@@ -25,6 +25,7 @@ import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { mesDeParametro } from "@/core/billing/mes-de-parametro";
 import { nombreDePlan } from "@/lib/billing/plan-label";
 import { topeEntero } from "@/lib/topes";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,8 @@ const BASE_LABELS: Record<NonNullable<TenantSummary["base_estado"]>, Translation
   fallida: "cartera.base.fallida",
   borrada: "cartera.base.borrada",
 };
+
+export const generateMetadata = tituloDePantalla("nav.cartera");
 
 export default async function CarteraPage({
   searchParams,

@@ -28,23 +28,23 @@ export async function leerEstadoDelAgente(
   ctx: TenantContext
 ): Promise<EstadoDelAgente | null> {
   try {
-    const estado: EstadoDelAgente["estado"] =
-      modoDeIa() === "mock"
-        ? "modo_prueba"
-        : (await checkBudget(ctx.tenantId, null, { llamadas: 0 })).exceeded
-          ? "sin_presupuesto"
-          : "activo";
-
-    const row = firstRow(
-      await enTenant(ctx, (db) =>
+    const [presupuesto, filas] = await Promise.all([
+      modoDeIa() === "mock" ? null : checkBudget(ctx.tenantId, null, { llamadas: 0 }),
+      enTenant(ctx, (db) =>
         db
           .select({ n: sql<number>`count(*)::int` })
           .from(cases)
           .where(inArray(cases.status, [...ESTADOS_DE_LA_OPCION.procesando]))
-      )
-    );
+      ),
+    ]);
 
-    return { estado, procesando: row?.n ?? 0 };
+    const estado: EstadoDelAgente["estado"] = !presupuesto
+      ? "modo_prueba"
+      : presupuesto.exceeded
+        ? "sin_presupuesto"
+        : "activo";
+
+    return { estado, procesando: firstRow(filas)?.n ?? 0 };
   } catch {
     return null;
   }

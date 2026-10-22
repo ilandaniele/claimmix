@@ -11,9 +11,10 @@
  * inquilino: exactamente lo de antes, y si tira, tira.
  *
  * Con la bandera, una base que falla se cuenta y no frena a las demás. El recorrido
- * empieza cada hora por otra base (igual que `espejarTodas`), así que si `hasta` no
- * alcanza no quedan siempre las mismas afuera; las que no entraron se informan como
- * `pendientes` y salen en la próxima corrida.
+ * empieza cada hora por otra base y, a la misma hora, un lugar más adelante cada
+ * día: los barridos diarios (purga, retención) también rotan, aunque la cantidad de
+ * bases divida a 24. Así, si `hasta` no alcanza, no quedan siempre las mismas
+ * afuera; las que no entraron se informan como `pendientes` y salen en otra corrida.
  */
 
 import "server-only";
@@ -27,6 +28,12 @@ import { logger } from "@/lib/observability/logger";
 import { codigoPg } from "@/server/core-sync/config";
 
 const HORA_MS = 60 * 60_000;
+const DIA_MS = 24 * HORA_MS;
+
+/** Avanza uno por hora y, a la misma hora del día, uno por día. */
+function vuelta(ahora: number): number {
+  return Math.floor(ahora / DIA_MS) + (Math.floor(ahora / HORA_MS) % 24);
+}
 
 export async function paraCadaBase<T>(
   trabajo: (db: DbDueno, tenantId: string | null) => Promise<T>,
@@ -48,7 +55,7 @@ export async function paraCadaBase<T>(
     return { resultados: [], pendientes: 0, fallas: 1 };
   }
 
-  const desde = ids.length > 0 ? Math.floor(Date.now() / HORA_MS) % ids.length : 0;
+  const desde = ids.length > 0 ? vuelta(Date.now()) % ids.length : 0;
   const orden = [...ids.slice(desde), ...ids.slice(0, desde)];
   const resultados: T[] = [];
   let recorridas = 0;

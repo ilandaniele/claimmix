@@ -13,7 +13,7 @@ import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 import { identificarConElIdp, urlDeAutorizacion, type MotivoDeRechazo } from "@/server/sso/callback";
 import { configVigenteDelInquilino, configVigentePorDominio, descubrir } from "@/server/sso/config";
-import { CODIGO_SSO_OTRO_INQUILINO, CODIGO_SSO_REQUERIDO } from "@/server/sso/exigir";
+import { CODIGO_SSO_OTRO_INQUILINO, CODIGO_SSO_REQUERIDO, CODIGO_USUARIO_DE_BAJA } from "@/server/sso/exigir";
 import { duenoDelMail } from "@/server/sso/usuarios";
 
 import { provisionUserProfile } from "./provision";
@@ -39,7 +39,7 @@ const LOGIN_POR_OMISION = "/login";
 
 /** Lo único que /login sabe decir. Cualquier otro motivo queda en el log, no en la pantalla. */
 const FALLO = "sso_fallo";
-const CODIGOS_PARA_LA_PANTALLA = new Set([CODIGO_SSO_REQUERIDO, CODIGO_SSO_OTRO_INQUILINO]);
+const CODIGOS_PARA_LA_PANTALLA = new Set([CODIGO_SSO_REQUERIDO, CODIGO_SSO_OTRO_INQUILINO, CODIGO_USUARIO_DE_BAJA]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

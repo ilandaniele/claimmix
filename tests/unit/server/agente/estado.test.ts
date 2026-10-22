@@ -93,6 +93,19 @@ describe("leerEstadoDelAgente", () => {
     }
   });
 
+  it("el presupuesto y la cuenta de procesando van juntos, no uno detrás del otro", async () => {
+    mockModoDeIa.mockReturnValue("gemini");
+    let soltar!: (b: { exceeded: boolean }) => void;
+    mockCheckBudget.mockReturnValue(new Promise((r) => (soltar = r)));
+    conProcesando(2);
+
+    const pendiente = leerEstadoDelAgente(TENANT);
+    expect(mockDbSelect).toHaveBeenCalled();
+
+    soltar({ exceeded: false });
+    await expect(pendiente).resolves.toEqual({ estado: "activo", procesando: 2 });
+  });
+
   it("un error de la base nunca tira: devuelve null", async () => {
     mockModoDeIa.mockReturnValue("gemini");
     mockCheckBudget.mockResolvedValue({ exceeded: false });

@@ -25,7 +25,7 @@ import { UserAiKeyPanel } from "./UserAiKeyPanel";
 import { AlertasPanel } from "./AlertasPanel";
 import { GoogleVinculo } from "./GoogleVinculo";
 import { getUserGeminiKey } from "@/server/ai/provider";
-import { topeMensualDelProyecto } from "@/server/ai/tope-mensual";
+import { topeMensualDelProyecto } from "@/lib/topes";
 import { getT } from "@/lib/i18n";
 import { ETIQUETA_DE_ROL } from "@/lib/i18n/etiqueta-de-rol";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
@@ -44,6 +44,7 @@ import { panelDelNumero } from "@/server/alta/numero-resultados";
 import { pasosHechos } from "@/server/alta/pasos-hechos";
 import { leerWabaPublica, metodoDelEspacio } from "@/server/alta/waba-publica";
 import { esExitoDeGmail, esResultadoGmail } from "./gmail-resultados";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,8 @@ function Paso({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+
+export const generateMetadata = tituloDePantalla("nav.configuracion");
 
 export default async function ConfiguracionPage({
   searchParams,

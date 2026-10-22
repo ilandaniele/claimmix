@@ -84,39 +84,79 @@ export function exigirDestinoSeguro(nombre) {
 }
 
 /**
- * Los umbrales que comparten todos los escenarios.
+ * El selector de las submétricas de lectura: lo que mira cada umbral y lo que
+ * lee el reporte, para que hablen del mismo número.
  *
- * `http_req_failed` mira los que no llegaron. `http_req_duration` deja afuera
- * el tiempo de `setup()` porque ahí se hace el login, que es un pedido lento y
- * uno solo: promediarlo con diez mil lecturas corre el p95 hacia arriba por
- * algo que el analista no espera nunca.
+ * Con `fase`, sólo cuentan los pedidos de esa fase (`plano`, `despues`…).
  */
-export function umbrales(extra = {}) {
+export function selectorDeLectura(fase = null) {
+  return fase ? `escenario:lectura,fase:${fase}` : "escenario:lectura";
+}
+
+/**
+ * Los umbrales de las LECTURAS, que son lo que se mide.
+ *
+ * Miran `{escenario:lectura}` y no el global: el login de `setup()` es un
+ * pedido lento y uno solo, y promediarlo con diez mil lecturas corre el p95
+ * hacia arriba por algo que el analista no espera nunca. Si el login falla,
+ * `entrar()` corta la corrida antes de medir nada.
+ *
+ * Con `fase`, además, sólo cuenta esa fase. Las rampas mezclan pocos usuarios
+ * con muchos y bajan el p95: un verde armado con ellas no dice nada de la carga
+ * que se fue a probar.
+ *
+ * `http_reqs … count>0` es la guarda de que la fase se alcanzó: en k6 un umbral
+ * sobre una submétrica SIN muestras pasa, y una meseta que nunca llegó saldría
+ * verde. Además hace que el reporte tenga el conteo de pedidos de la lectura.
+ */
+export function umbralesDeLectura(fase = null) {
+  const selector = selectorDeLectura(fase);
   return {
-    http_req_failed: ["rate<0.01"],
-    "http_req_duration{escenario:lectura}": [`p(95)<${PRESUPUESTO_P95_MS}`],
+    [`http_req_failed{${selector}}`]: ["rate<0.01"],
+    [`http_req_duration{${selector}}`]: [`p(95)<${PRESUPUESTO_P95_MS}`],
+    [`http_reqs{${selector}}`]: ["count>0"],
+  };
+}
+
+/** Los umbrales que comparten los escenarios que miden una carga pareja. */
+export function umbrales(extra = {}, fase = null) {
+  return {
+    ...umbralesDeLectura(fase),
     ...umbralesComunes(),
     ...extra,
   };
 }
 
 /**
+ * Un pedido al listado de casos. `filtros` va armado y sin el `&` del principio
+ * (`status=info_faltante`). Los escenarios no escriben `/api/cases?…` a mano.
+ */
+export function listado(porPagina, filtros = "") {
+  return `/api/cases?page=1&per_page=${porPagina}${filtros ? `&${filtros}` : ""}`;
+}
+
+/**
  * Las rutas que se miden, y de dónde salen.
  *
  * Todas verificadas contra el deploy: contestan 401 sin sesión, no 404. No hay
- * ninguna inventada, y no hay `/api/products` de ningún template.
+ * ninguna inventada, y no hay `/api/products` de ningún template. Un test
+ * (`tests/unit/carga-constantes.test.ts`) comprueba que cada una exista en
+ * `src/app`.
  *
  * Sólo LECTURAS. Una prueba de carga que abre casos deja basura en la bandeja
  * de alguien, y contra producción le escribiría a personas reales; el intake se
  * ensaya por los canales simulados, que es lo que hace `pnpm rehearse`.
  */
 export const RUTAS = {
-  /** La bandeja. La sondea cada pestaña abierta cada 5-30 s: la más caliente. */
-  bandeja: "/api/cases?page=1&per_page=50",
+  /**
+   * La bandeja. La sondea cada pestaña abierta cada 5-30 s: la más caliente.
+   * Pide de a 100, como `useCasesRealtime` (`POR_PEDIDO`); el tope del listado.
+   */
+  bandeja: listado(100),
   /** El mismo listado con filtros puestos, que es como se usa de verdad. */
-  bandejaFiltrada: "/api/cases?page=1&per_page=50&status=info_faltante",
+  bandejaFiltrada: listado(100, "status=info_faltante"),
   /** La búsqueda por texto, que no puede usar el índice del listado. */
-  busqueda: "/api/cases?page=1&per_page=25&q=choque",
+  busqueda: listado(25, "q=choque"),
   /** Los KPI. Nueve consultas en un lote desde el PR #110. */
   metricas: "/api/metricas",
   /** El padrón. */
@@ -156,22 +196,40 @@ export const RUTAS_DE_CASO = {
  */
 export const PERCENTILES = ["avg", "min", "med", "p(90)", "p(95)", "p(99)", "max"];
 
-/** Cuánto espera un analista entre dos acciones. La bandeja sondea cada 5 s. */
+/**
+ * Cuánto espera un analista entre dos acciones.
+ *
+ * Cinco segundos es el piso del sondeo de la bandeja (`POLL_MIN_MS` en
+ * `useCasesRealtime`); con la bandeja quieta el intervalo sube hasta 30 s. Se
+ * mide el peor caso a propósito: es el que más gasta el cupo y el que más carga
+ * tiene el servidor. No se le agrega un backoff al azar, que aliviaría
+ * justamente lo que se fue a medir.
+ */
 export const PAUSA_S = 5;
 
 /**
  * Cuántos pedidos por minuto aguanta UNA sesión contra `/api/cases`.
  *
  * Es `RATE_LIMIT_CONFIGS.CASES_API` del producto: 100 por minuto, con la clave
- * POR USUARIO. Y las tres rutas más pesadas de la mezcla comparten esa
- * etiqueta, o sea el mismo balde.
+ * POR USUARIO Y POR RUTA (`user:<id>:<etiqueta>`): `cases-list`, `cases-get` y
+ * `cases-messages-get` tienen cada una su balde. Los escenarios pasan a
+ * `iniciarSesiones` los pedidos por minuto del balde más cargado, o los de
+ * todas las rutas juntas si no las separan: de más, nunca de menos.
  *
- * Está acá para que los escenarios avisen cuando los VUs que piden no entran
- * en las cuentas que hay. Si allá cambia, acá también.
+ * Está acá para que los escenarios corten cuando los VUs que piden no entran
+ * en las cuentas que hay. `tests/unit/carga-constantes.test.ts` lo ata al
+ * producto: si allá cambia, el test avisa.
  */
 export function cupoPorSesion() {
   return Number(__ENV.CUPO_POR_SESION || 100);
 }
+
+/**
+ * Logins por minuto que el producto deja pasar desde una misma IP
+ * (`RATE_LIMIT_CONFIGS.AUTH_POR_IP`), y desde una máquina de k6 salen todos de
+ * la misma. Atado al producto por el mismo test que `cupoPorSesion`.
+ */
+export const TOPE_LOGIN_POR_MIN = 30;
 
 /**
  * Los umbrales que TODO escenario comparte, aparte de los suyos.
@@ -183,10 +241,16 @@ export function cupoPorSesion() {
  *
  * `rechazados_por_cupo` es la otra mitad: una corrida que se comió el cupo
  * tiene que decir eso, y no «la aplicación se cae con cincuenta analistas».
+ *
+ * Van sueltos para el escenario que tolera fallos a propósito (`stress`,
+ * `spike`): cambia la mitad de `checks` y se queda con la del cupo.
  */
+export const CHECKS_SIN_FALLAS = ["rate==1.00"];
+
+export function cupoSinRechazos(maxRechazos = 0) {
+  return { rechazados_por_cupo: [`count<=${maxRechazos}`] };
+}
+
 export function umbralesComunes(maxRechazos = 0) {
-  return {
-    checks: ["rate==1.00"],
-    rechazados_por_cupo: [`count<=${maxRechazos}`],
-  };
+  return { checks: CHECKS_SIN_FALLAS, ...cupoSinRechazos(maxRechazos) };
 }

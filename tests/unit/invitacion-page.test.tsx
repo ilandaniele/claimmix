@@ -107,7 +107,14 @@ describe("/invitacion sin sesión y con un enlace bueno", () => {
     expect(container.querySelector('input[name="password"]')).toBeRequired();
   });
 
-  it.each(["jefa@googlemail.com", "jefa+analista@example.com"])(
+  it("con una variante de Gmail con puntos tampoco ofrece Google, que volvería con la casilla sin puntos", async () => {
+    await pintar(sellarInvitacion({ ...base, e: "je.fa@gmail.com" }, Date.now()));
+
+    expect(screen.queryByRole("button", { name: "Aceptar con Google" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Aceptar con contraseña" })).toBeInTheDocument();
+  });
+
+  it.each(["jefa@googlemail.com", "jefa+analista@example.com", "je.fa@example.com"])(
     "con %s, sin alias de Gmail, sigue ofreciendo Google",
     async (direccion) => {
       await pintar(sellarInvitacion({ ...base, e: direccion }, Date.now()));

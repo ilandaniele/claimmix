@@ -117,6 +117,12 @@ export const AuditEvent = {
    * Payload: { sesiones_cerradas }. El actor es el admin; el objetivo, el usuario.
    */
   USER_SESSIONS_REVOKED: "auth.user_sessions_revoked",
+  /**
+   * USER_DEACTIVATED: un admin dio de baja a otra persona; no entra más por ningún
+   * camino. Payload: { sesiones_cerradas }. USER_REACTIVATED la vuelve a habilitar.
+   */
+  USER_DEACTIVATED: "auth.user_deactivated",
+  USER_REACTIVATED: "auth.user_reactivated",
 
   // ── Case lifecycle ─────────────────────────────────────────────────────────
   CASE_CREATED: "case.created",

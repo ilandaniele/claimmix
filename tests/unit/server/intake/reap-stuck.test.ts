@@ -117,6 +117,20 @@ describe("reapStuckProcessingCases", () => {
     expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
   });
 
+  it("marca la falla: un cero por base caída no es un cero por nada trabado", async () => {
+    const caida = {
+      select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.reject(new Error("no anda")) }) }) }),
+    } as unknown as DbDueno;
+    expect(await reapStuckProcessingCases(undefined, caida)).toEqual({ reaped: 0, caseIds: [], fallo: true });
+
+    state.stuckRows = [{ id: "c1", tenant_id: "t1", status: "procesando" }];
+    const sinUpdate = {
+      select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve(state.stuckRows) }) }) }),
+      update: () => ({ set: () => ({ where: () => ({ returning: () => Promise.reject(new Error("no anda")) }) }) }),
+    } as unknown as DbDueno;
+    expect(await reapStuckProcessingCases(undefined, sinUpdate)).toEqual({ reaped: 0, caseIds: [], fallo: true });
+  });
+
   it("honors SIMULATE_STUCK_REAP_AFTER_MS within bounds", () => {
     process.env.SIMULATE_STUCK_REAP_AFTER_MS = "60000";
     expect(getStuckReapAfterMs()).toBe(60000);

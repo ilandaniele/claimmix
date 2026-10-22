@@ -47,13 +47,13 @@ describe("InsigniaDeVencimiento", () => {
   it("vence hoy: ámbar", () => {
     conIdioma(<InsigniaDeVencimiento vence="2026-09-30T02:59:59.999Z" ahora={AHORA} />);
     const el = screen.getByText("Vence hoy");
-    expect(el.className).toContain("text-amber-600");
+    expect(el.className).toContain("text-amber-700");
   });
 
   it("por vencer dentro de cinco días: ámbar y con los días que faltan", () => {
     conIdioma(<InsigniaDeVencimiento vence="2026-10-02T02:59:59.999Z" ahora={AHORA} />);
     const el = screen.getByText("Vence en 2 d");
-    expect(el.className).toContain("text-amber-600");
+    expect(el.className).toContain("text-amber-700");
   });
 
   it("en plazo: gris", () => {
@@ -82,8 +82,8 @@ describe("InsigniaDeComplejidad", () => {
   it.each([
     [0, "Baja 0", "text-slate-500"],
     [33, "Baja 33", "text-slate-500"],
-    [34, "Media 34", "text-amber-600"],
-    [66, "Media 66", "text-amber-600"],
+    [34, "Media 34", "text-amber-700"],
+    [66, "Media 66", "text-amber-700"],
     [67, "Alta 67", "text-red-600"],
     [100, "Alta 100", "text-red-600"],
   ])("puntaje %d es «%s»", (puntaje, texto, color) => {
@@ -116,7 +116,7 @@ describe("InsigniaDeDenuncia", () => {
   it("al superarlo: ámbar, con los días y para revisar", () => {
     conIdioma(<InsigniaDeDenuncia resultado={{ dias: 9, superaArt46: true }} />);
     const el = screen.getByText("9 d del hecho a la denuncia · revisar");
-    expect(el.className).toContain("text-amber-600");
+    expect(el.className).toContain("text-amber-700");
     expect(el.getAttribute("title")).toContain("no una decisión");
   });
 

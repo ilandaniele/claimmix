@@ -36,6 +36,7 @@ import { PLANTILLA_REABRIR } from "@/core/mensajes/reabrir-denuncia";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import { canonicalFieldKey, isDocument } from "@/lib/labels/claim-fields";
 import { clavesQueSatisfacen } from "@/core/case/required-fields";
+import { mapaDeCampos, mejorEntreClaves } from "@/core/case/faltantes-requeridos";
 import { valorLegible } from "@/core/mensajes/valor-legible";
 import { enmascararCampo } from "@/server/email/render";
 import { esValorVago } from "@/core/mensajes/lo-dicho";
@@ -219,32 +220,9 @@ export function deFilasDelReenvio(filas: readonly unknown[]): DatosDelReenvio {
   };
 }
 
-type Campo = { field_value: string; confidence: number };
-
-/** La entrada de mayor confianza entre las claves que satisfacen la pedida. */
-function mejorEntreClaves(fieldMap: Map<string, Campo>, claves: readonly string[]): Campo | undefined {
-  let mejor: Campo | undefined;
-  for (const clave of claves) {
-    const campo = fieldMap.get(canonicalFieldKey(clave));
-    if (campo && (!mejor || campo.confidence > mejor.confidence)) mejor = campo;
-  }
-  return mejor;
-}
-
 function nombreDelReclamante(campos: DatosDelReenvio["campos"]): string | null {
-  const mejor = mejorEntreClaves(construirFieldMap(campos), ["full_name"]);
+  const mejor = mejorEntreClaves(mapaDeCampos(campos), ["full_name"]);
   return mejor && mejor.confidence >= MEDIUM_CONFIDENCE_HIGH ? mejor.field_value : null;
-}
-
-/** Mapa por clave canónica, mejor confianza gana. Igual que `fieldMap` en gap-analyzer.ts. */
-function construirFieldMap(campos: DatosDelReenvio["campos"]): Map<string, Campo> {
-  const fieldMap = new Map<string, Campo>();
-  for (const c of campos) {
-    const key = canonicalFieldKey(c.field_key);
-    const existing = fieldMap.get(key);
-    if (!existing || c.confidence >= existing.confidence) fieldMap.set(key, c);
-  }
-  return fieldMap;
 }
 
 /**
@@ -258,7 +236,7 @@ export function clavesAbiertas(
   d: DatosDelReenvio,
   hoy: string
 ): { claves: string[]; conocidos: Record<string, string> } {
-  const fieldMap = construirFieldMap(d.campos);
+  const fieldMap = mapaDeCampos(d.campos);
   const porConfirmacion = new Map(
     d.confirmaciones.map((c) => [canonicalFieldKey(c.field_name), c] as const)
   );

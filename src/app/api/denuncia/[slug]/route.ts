@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { direccionCanonica } from "@/core/email/direccion-canonica";
 import { sinControlNiAngulares } from "@/core/text/sin-control";
 import { PATRON_DE_CORREO, PATRON_DE_TELEFONO, slugValido } from "@/core/web/formulario";
 import { ok, err } from "@/lib/api/respond";
@@ -108,9 +109,11 @@ function cuerpoDelFormulario(texto: string): Record<string, string> {
   return cuerpo;
 }
 
-/** Sólo el hash: la dirección de un tercero no se guarda en la tabla de cupos. */
+/** Sólo el hash, de la dirección canónica: la de un tercero no se guarda en la tabla de cupos, y sus alias comparten cupo. */
 const huellaDelCorreo = (email: string) =>
-  createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
+  createHash("sha256")
+    .update(direccionCanonica(email) ?? email.trim().toLowerCase())
+    .digest("hex");
 
 const rechazoPorCupo = (cupo: { retryAfterSeconds: number }) =>
   err(new AppError("RATE_LIMITED"), undefined, {

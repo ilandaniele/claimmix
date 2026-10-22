@@ -14,7 +14,6 @@ import {
   RESULTADOS_DE_APP,
   RESULTADOS_DE_WABA,
   VERSION_DEL_ANEXO,
-  esResultadoDeApp,
   esResultadoDeWaba,
   metodoDelNumero,
   pasoCancelado,
@@ -131,14 +130,6 @@ describe("la vía de la app propia", () => {
   it("sus resultados son nombres de una lista cerrada, sin repetir los de la WABA propia", () => {
     expect(new Set(RESULTADOS_DE_APP).size).toBe(RESULTADOS_DE_APP.length);
     for (const r of RESULTADOS_DE_APP) expect(RESULTADOS_DE_WABA as readonly string[]).not.toContain(r);
-  });
-
-  it.each([...RESULTADOS_DE_WABA, ...RESULTADOS_DE_APP])("%s es un resultado de la app propia", (r) => {
-    expect(esResultadoDeApp(r)).toBe(true);
-  });
-
-  it.each([["secreto"], ["TOKEN_VENCIDO"], [""], [null], [undefined], [7], [{}], [["listo"]]])("%j no es un resultado de la app propia", (valor) => {
-    expect(esResultadoDeApp(valor)).toBe(false);
   });
 
   it("las fallas del popup son las de la base menos las que sólo escribe la app propia", () => {

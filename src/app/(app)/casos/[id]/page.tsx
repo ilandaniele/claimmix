@@ -13,6 +13,7 @@
  * — wrong tenant returns null → 404.
  */
 
+import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRow } from "@/lib/auth/user-row";
@@ -96,6 +97,12 @@ interface ExtractedFieldRow {
   field_value: string;
   confidence: number;
   extracted_at: string;
+}
+
+/** El título de la pestaña es el número del caso, que se calcula del id sin tocar la base. */
+export async function generateMetadata({ params }: Pick<CaseDetailPageProps, "params">): Promise<Metadata> {
+  const { id } = await params;
+  return { title: formatCaseNumber(id) };
 }
 
 export default async function CaseDetailPage({ params, searchParams }: CaseDetailPageProps) {

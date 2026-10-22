@@ -781,6 +781,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "correo.recuperar.noFuiste": "If it was not you, you do not need to do anything: your current password still works and the link expires on its own. If you keep getting this without having asked for it, tell whoever manages your account.",
   "login.errores.registro_cerrado": "We can't create an account with that address right now. If someone invited you, open the link in your invitation; otherwise, write to us and we'll look into it.",
   "login.errores.sso_requerido": "Your company requires signing in with its SSO. Use “Sign in with my company's SSO” and enter your work email.",
+  "login.errores.usuario_de_baja": "Your user was deactivated. Ask an admin in your organization to re-enable you.",
   "login.errores.sso_otro_inquilino": "That email already belongs to another ClaimMix account, so we couldn't give you access from here. Write to us if you think this is a mistake.",
   "login.errores.sso_fallo": "We couldn't complete sign-in with your company's SSO. Check that the email is your work email and try again in a while, or sign in with your password.",
   "login.errores.alta_cerrada": "We can't create new workspaces right now. Try again later or write to us.",

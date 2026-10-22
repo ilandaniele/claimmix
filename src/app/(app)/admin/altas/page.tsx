@@ -47,6 +47,7 @@ import {
   suspenderElInquilino,
   suspenderElNumero,
 } from "./actions";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +95,8 @@ const TARJETA = "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-9
 const TARJETA_ROJA = "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30";
 
 const dia = { hour: undefined, minute: undefined } as const;
+
+export const generateMetadata = tituloDePantalla("nav.altas");
 
 export default async function AltasPage({
   searchParams,

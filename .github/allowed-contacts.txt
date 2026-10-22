@@ -59,6 +59,10 @@ someone@gmail.com
 original-msg@gmail.com
 s@gmail.com
 
+# Variante con puntos inventada: el test de la invitación necesita una Gmail con
+# puntos para comprobar que no se ofrece Google (tests/unit/invitacion-page.test.tsx).
+je.fa@gmail.com
+
 # El límite del bloque reservado, en tests/unit/specialist-alert.test.ts.
 # Empieza igual que `5490000` pero no lo es, y existe para comprobar que la
 # guarda no sea demasiado ancha: si se comiera este número, silenciaría avisos

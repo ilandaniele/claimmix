@@ -3,8 +3,8 @@
  *
  * `tenant_bases` no entra en la misma transacción que el alta del inquilino, así
  * que hay tres maneras de quedar sin base lista: sin fila (el alta cayó antes de
- * registrarla), `fallida` (con intentos por gastar) y `creando` con el lease
- * vencido (el flujo murió a mitad de camino). Un `LEFT JOIN` desde `tenants` las
+ * registrarla), `fallida` y `creando` con el lease vencido (el flujo murió a mitad
+ * de camino), estas dos con intentos por gastar. Un `LEFT JOIN` desde `tenants` las
  * encuentra a las tres. Lo que corre es `iniciarBase`, el mismo camino que el
  * botón «Reintentar»; si otro flujo ya tiene la base, el lease de `tomarBase` lo
  * frena.
@@ -25,7 +25,10 @@ import { codigoPg } from "@/server/core-sync/config";
 import { MINUTOS_PARA_REINTENTAR } from "./espera";
 import { iniciarBase } from "./iniciar";
 
-/** A los cinco fallos la base deja de reintentarse sola: queda para que alguien la mire. */
+/**
+ * A las cinco tomas (fallidas o muertas a mitad de camino) la base deja de
+ * reintentarse sola: queda para que alguien la mire, y no le tapa el lugar a las altas nuevas.
+ */
 const INTENTOS_MAXIMOS = 5;
 
 /** Cuántas por corrida: cada una es un flujo nuevo, y lo que hoy no entra entra en la próxima. */
@@ -42,9 +45,10 @@ export async function reintentarBases(hasta: number): Promise<{ lanzadas: number
       from public.tenants t
       left join public.tenant_bases b on b.tenant_id = t.id
       where b.tenant_id is null
-         or (b.estado = 'fallida' and b.intentos < ${INTENTOS_MAXIMOS}::int)
-         or (b.estado = 'creando'
-             and coalesce(b.tomada_at, b.creada_at) < now() - make_interval(mins => ${MINUTOS_PARA_REINTENTAR}::int))
+         or (b.intentos < ${INTENTOS_MAXIMOS}::int
+             and (b.estado = 'fallida'
+                  or (b.estado = 'creando'
+                      and coalesce(b.tomada_at, b.creada_at) < now() - make_interval(mins => ${MINUTOS_PARA_REINTENTAR}::int))))
       order by t.created_at, t.id
       limit ${POR_CORRIDA}::int
     `);

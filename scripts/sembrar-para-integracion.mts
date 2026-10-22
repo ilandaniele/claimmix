@@ -333,11 +333,15 @@ try {
       console.log(`   ✓ ${rol}: contraseña puesta al día`);
     } else {
       const { auth } = await import("@/lib/auth");
+      const { enAlta } = await import("@/lib/auth/registro-permitido");
       // Con autoSignIn en false no hay token ni sesión; sólo se usa r.user.id.
-      const r = await auth.api.signUpEmail({
-        body: { name: nombre, email: correo, password: clave },
-        headers: new Headers(),
-      });
+      // Fuera de `enAlta` el gancho de alta la rechaza con 422, como a toda alta sin puerta.
+      const r = await enAlta("correo", () =>
+        auth.api.signUpEmail({
+          body: { name: nombre, email: correo, password: clave },
+          headers: new Headers(),
+        })
+      );
       id = r.user.id;
       console.log(`   ✓ ${rol}: cuenta creada (${id.slice(0, 8)})`);
     }

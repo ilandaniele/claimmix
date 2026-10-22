@@ -18,9 +18,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { interpretarSalud } from "../../scripts/lib/salud.mjs";
+import { interpretarSalud, pedirSalud } from "../../scripts/lib/salud.mjs";
 
 const sano = {
   status: "ok",
@@ -130,6 +130,133 @@ describe("interpretarSalud sin detalle (log público de Actions)", () => {
     expect(corto.errores).toHaveLength(entero.errores.length);
     expect(corto.avisos).toHaveLength(entero.avisos.length);
     expect(entero.lineas[0]).toContain("5555");
+  });
+});
+
+describe("pedirSalud: el pedido que comparten mirar-salud y paridad", () => {
+  const SECRETO = "secreto-de-prueba-que-no-sale";
+  const INFORME = { status: "ok", checks: [] };
+  const informe = () => Response.json(INFORME);
+  // El 503 de la plataforma (FUNCTION_THROTTLED, un deploy pausado) no trae el informe.
+  const plataforma503 = () => new Response("<html>Service Unavailable</html>", { status: 503 });
+
+  // Un paso por intento; el último se repite. Un paso que tira simula un corte de red.
+  const simular = (...pasos: Array<() => Response>) => {
+    let i = 0;
+    const falso = vi.fn(async (_url: string, _init?: RequestInit) => pasos[Math.min(i++, pasos.length - 1)]());
+    vi.stubGlobal("fetch", falso);
+    return falso;
+  };
+  const silenciar = () => vi.spyOn(console, "log").mockImplementation(() => {});
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("pide /api/health con el Bearer", async () => {
+    const falso = simular(informe);
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 200, cuerpo: INFORME });
+    const [url, init] = falso.mock.calls[0];
+    expect(url).toBe("https://x.example/api/health");
+    expect(init?.headers).toEqual({ Authorization: `Bearer ${SECRETO}` });
+  });
+
+  it("un 503 con HTML (la plataforma, no la ruta) se reintenta", async () => {
+    const falso = simular(plataforma503, informe);
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 200, cuerpo: INFORME });
+    expect(falso).toHaveBeenCalledTimes(2);
+  });
+
+  it("un 503 con el informe de la ruta (algo está `down`) vale y no se reintenta", async () => {
+    const caido = { status: "down", checks: [{ name: "db", status: "down", detail: "x" }] };
+    const falso = simular(() => Response.json(caido, { status: 503 }));
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 503, cuerpo: caido });
+    expect(falso).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["cortado a la mitad", "{\"status\":\"ok\",\"chec"],
+    ["null", "null"],
+    ["una lista", "[]"],
+    ["un número", "42"],
+  ])("un 200 con el cuerpo %s no es el informe y se reintenta", async (_caso, cuerpo) => {
+    const falso = simular(() => new Response(cuerpo, { status: 200 }), informe);
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 200, cuerpo: INFORME });
+    expect(falso).toHaveBeenCalledTimes(2);
+  });
+
+  it("un 401 vuelve enseguida: reintentar no cambia la llave", async () => {
+    const falso = simular(() => new Response("", { status: 401 }));
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 401, cuerpo: null });
+    expect(falso).toHaveBeenCalledTimes(1);
+  });
+
+  it("agota tres intentos y devuelve el último código sin cuerpo", async () => {
+    const falso = simular(plataforma503);
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 503, cuerpo: null });
+    expect(falso).toHaveBeenCalledTimes(3);
+  });
+
+  it("si nunca contestó, el código es 0", async () => {
+    const falso = simular(() => {
+      throw new Error("fetch failed");
+    });
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 0, cuerpo: null });
+    expect(falso).toHaveBeenCalledTimes(3);
+  });
+
+  it("si el último intento se corta por la red, no pierde el código HTTP que ya vio", async () => {
+    const falso = simular(
+      () => new Response("", { status: 502 }),
+      () => {
+        throw new Error("fetch failed");
+      },
+    );
+    silenciar();
+
+    expect(await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 })).toEqual({ codigo: 502, cuerpo: null });
+    expect(falso).toHaveBeenCalledTimes(3);
+  });
+
+  it("estricto: no sigue redirecciones y el log no lleva nada del error", async () => {
+    const falso = simular(() => {
+      throw new Error(`https://x.example redirigió, Bearer ${SECRETO}`);
+    });
+    const log = silenciar();
+
+    await pedirSalud("https://x.example", SECRETO, { etiqueta: "prd", estricto: true, esperaMs: 0 });
+
+    expect(falso.mock.calls[0][1]?.redirect).toBe("error");
+    const salida = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(salida).toContain("prd: intento 1: sin respuesta");
+    expect(salida).not.toMatch(/redirigió|Bearer|secreto-de-prueba/);
+  });
+
+  it("sin `estricto`: sigue redirecciones y el log dice qué falló", async () => {
+    const falso = simular(() => {
+      throw new Error("fetch failed");
+    });
+    const log = silenciar();
+
+    await pedirSalud("https://x.example", SECRETO, { esperaMs: 0 });
+
+    expect(falso.mock.calls[0][1]?.redirect).toBe("follow");
+    expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("intento 1: fetch failed");
   });
 });
 

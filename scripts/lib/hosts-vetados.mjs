@@ -15,12 +15,15 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// Dev tiene datos reales: está vetado, igual que prd.
+export const HOST_DEV = "claimmix-dev.vercel.app";
+
 /**
  * Los tres alias con datos reales, más el host de `PRD_URL` si hay. Si la URL no
  * se lee, también cuenta como vetada.
  */
 export const HOSTS_WEB = new Set(
-  ["claimmix.vercel.app", "claimmix-dev.vercel.app", "claimmix-prd.vercel.app", hostDePrd()].filter(Boolean),
+  ["claimmix.vercel.app", HOST_DEV, "claimmix-prd.vercel.app", hostDePrd()].filter(Boolean),
 );
 
 // QA es de ClaimMix pero no está vetado: ahí sí se ataca y se escribe.

@@ -6,6 +6,7 @@ import {
   HOSTS_WEB,
   HOST_DE_BASE_PRD,
   HOST_DE_BASE_QA,
+  HOST_DEV,
   HOST_QA,
   conocido,
   endpointDe,
@@ -44,6 +45,12 @@ describe("vetadoWeb: dónde no se ataca ni se escribe", () => {
       expect(HOSTS_WEB.has(host)).toBe(true);
     }
     expect(HOSTS_WEB.has("claimmix-qa.vercel.app")).toBe(false);
+  });
+
+  it("HOST_DEV es el alias de dev, y está en la lista de vetados", () => {
+    expect(HOST_DEV).toBe("claimmix-dev.vercel.app");
+    expect(HOSTS_WEB.has(HOST_DEV)).toBe(true);
+    expect(vetadoWeb(`https://${HOST_DEV}`)).toBe(true);
   });
 
   it.each([

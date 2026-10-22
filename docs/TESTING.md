@@ -807,7 +807,7 @@ El resto de B5 vive en `pnpm verify`, sin red ni base:
 | `tests/unit/migracion-0036.test.ts` | RLS, CHECKs y permisos de la 0036, leídos del SQL |
 | `tests/integration/api-v1-cases.test.ts` | la clave: 401 sin tocar la base, cupo, 404 ajeno y comparación de tiempo constante; fechas ISO, cursor, sin simulados ni pruebas |
 | `tests/integration/sync-to-core.test.ts` | el envío; la ruta admite los mismos roles que ven el botón (`CORE_SYNC_ROLES`); `updatedAt` en ISO; un caso simulado no sale al webhook real; el 2xx gana sobre `error_core` |
-| `tests/integration/export-to-core.test.ts` | el JSON a mano: la forma entera, fechas ISO, un lote, 404 ajeno |
+| `tests/integration/export-to-core.test.ts` | el JSON a mano: la forma entera, fechas ISO, un lote, 404 ajeno; deja el evento en el mismo lote, sin PII; si falla, no sale el JSON |
 | `tests/integration/admin/core-sync.test.ts` | la ruta admin: rol y cupo por `entrar`, URL, CHECK, `motivo` de cada rechazo, clave una sola vez y con el formato que lee `/api/v1`, auditoría sin secretos |
 
 `pnpm pentest` suma sondas sin credenciales: `/api/v1` con Bearer basura y con

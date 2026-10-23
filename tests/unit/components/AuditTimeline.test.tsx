@@ -19,7 +19,9 @@ import { render, screen } from "@testing-library/react";
 // persona. Si mañana alguien cambia la frase del rechazo, este test se entera.
 import { AuditTimeline } from "@/app/(app)/casos/[id]/components/AuditTimeline";
 import { AuditEvent } from "@/lib/audit/log";
-import { esAR } from "@/lib/i18n";
+import { textosDelHistorial, esAR } from "@/lib/i18n";
+
+const TEXTOS = textosDelHistorial("es-AR");
 
 // Prefijos y valores exactos que no necesitan traducción propia: son técnicos
 // (`auth.`, `health.`, `assistant.`) o entrenamiento/IA que no pasa por acá.
@@ -77,7 +79,7 @@ const CERRADO_POR_SILENCIO = {
 
 describe("AuditTimeline", () => {
   it("traduce el código de rechazo de adjunto en vez de pintarlo crudo", () => {
-    render(<AuditTimeline events={[ADJUNTO_RECHAZADO]} />);
+    render(<AuditTimeline textos={TEXTOS} events={[ADJUNTO_RECHAZADO]} />);
 
     expect(screen.getByText(/pesa más de 10 MB/i)).toBeInTheDocument();
     expect(screen.getByText(/mande más chico/i)).toBeInTheDocument();
@@ -90,6 +92,7 @@ describe("AuditTimeline", () => {
   it("traduce los eventos de «Para responder»", () => {
     render(
       <AuditTimeline
+        textos={TEXTOS}
         events={[
           { id: 3, event_type: "claim.message_not_read", created_at: "2026-09-01T10:02:00Z", reason: null },
           { id: 4, event_type: "case.marked_answered", created_at: "2026-09-01T10:03:00Z", reason: null },
@@ -103,7 +106,7 @@ describe("AuditTimeline", () => {
   });
 
   it("un motivo escrito en prosa pasa tal cual", () => {
-    render(<AuditTimeline events={[CERRADO_POR_SILENCIO]} />);
+    render(<AuditTimeline textos={TEXTOS} events={[CERRADO_POR_SILENCIO]} />);
 
     expect(
       screen.getByText("sin respuesta del denunciante")
@@ -124,25 +127,25 @@ describe("AuditTimeline", () => {
     const EVENTO = { id: 8, event_type: "case.assigned", created_at: "2026-09-01T10:07:00Z", reason: null };
 
     it("muestra el nombre de la persona", () => {
-      render(<AuditTimeline events={[{ ...EVENTO, actor_name: "Lucía Ramallo", con_actor: true }]} />);
+      render(<AuditTimeline textos={TEXTOS} events={[{ ...EVENTO, actor_name: "Lucía Ramallo", con_actor: true }]} />);
 
       expect(screen.getByTestId("autor-del-evento")).toHaveTextContent("Lucía Ramallo");
     });
 
     it("un evento sin persona detrás se lee «Automático»", () => {
-      render(<AuditTimeline events={[{ ...EVENTO, actor_name: null, con_actor: false }]} />);
+      render(<AuditTimeline textos={TEXTOS} events={[{ ...EVENTO, actor_name: null, con_actor: false }]} />);
 
       expect(screen.getByTestId("autor-del-evento")).toHaveTextContent("Automático");
     });
 
     it("una persona que ya no tiene nombre se lee «Alguien del equipo»", () => {
-      render(<AuditTimeline events={[{ ...EVENTO, actor_name: null, con_actor: true }]} />);
+      render(<AuditTimeline textos={TEXTOS} events={[{ ...EVENTO, actor_name: null, con_actor: true }]} />);
 
       expect(screen.getByTestId("autor-del-evento")).toHaveTextContent("Alguien del equipo");
     });
 
     it("sin dato de autoría no afirma nada", () => {
-      render(<AuditTimeline events={[EVENTO]} />);
+      render(<AuditTimeline textos={TEXTOS} events={[EVENTO]} />);
 
       expect(screen.queryByTestId("autor-del-evento")).not.toBeInTheDocument();
     });
@@ -151,6 +154,7 @@ describe("AuditTimeline", () => {
   it("un mensaje de WhatsApp se lee como tal, no como email", () => {
     render(
       <AuditTimeline
+        textos={TEXTOS}
         events={[
           { id: 5, event_type: "email.received", created_at: "2026-09-01T10:04:00Z", reason: null },
         ]}
@@ -164,6 +168,7 @@ describe("AuditTimeline", () => {
   it("la severidad alta se lee «Severidad: Alto»", () => {
     render(
       <AuditTimeline
+        textos={TEXTOS}
         events={[
           { id: 6, event_type: "case.status_changed", created_at: "2026-09-01T10:05:00Z", reason: "severidad high" },
         ]}
@@ -192,6 +197,7 @@ describe("AuditTimeline", () => {
   ])("el motivo %s se traduce", (reason, esperado) => {
     render(
       <AuditTimeline
+        textos={TEXTOS}
         events={[
           { id: 7, event_type: "case.status_changed", created_at: "2026-09-01T10:06:00Z", reason },
         ]}

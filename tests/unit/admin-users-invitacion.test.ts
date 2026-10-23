@@ -46,9 +46,7 @@ vi.mock("@/server/notify/remitente-sistema", () => ({
 import { NextRequest } from "next/server";
 
 import { POST } from "@/app/api/admin/users/route";
-import { enUS } from "@/lib/i18n/en-US";
 import { enUSServidor } from "@/lib/i18n/en-US.servidor";
-import { esAR } from "@/lib/i18n/es-AR";
 import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 import { abrirInvitacion } from "@/server/alta/invitacion";
 
@@ -512,14 +510,16 @@ describe("la ayuda junto al correo del formulario de invitar", () => {
    * de otro camino), así que no se lo da por hecho.
    */
   it("está en las dos lenguas, habla de la misma dirección y no da por hecha la cuenta", () => {
-    expect(esAR["usuarios.form.emailAyuda"]).toMatch(/^Si la persona ya .*misma dirección/);
-    expect(enUS["usuarios.form.emailAyuda"]).toMatch(/^If the person has already .*same address/);
+    expect(esARServidor["usuarios.form.emailAyuda"]).toMatch(/^Si la persona ya .*misma dirección/);
+    expect(enUSServidor["usuarios.form.emailAyuda"]).toMatch(/^If the person has already .*same address/);
   });
 
   it("el formulario la muestra y la liga al campo", () => {
+    const pagina = readFileSync("src/app/(app)/admin/users/page.tsx", "utf8");
     const formulario = readFileSync("src/app/(app)/admin/users/AdminUsersClient.tsx", "utf8");
 
-    expect(formulario).toContain('t("usuarios.form.emailAyuda")');
+    expect(pagina).toContain('emailAyuda={t("usuarios.form.emailAyuda")}');
+    expect(formulario).toContain("{emailAyuda}");
     expect(formulario).toContain('aria-describedby="email-ayuda"');
     expect(formulario).toContain('id="email-ayuda"');
   });

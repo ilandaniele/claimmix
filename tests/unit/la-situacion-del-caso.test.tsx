@@ -14,7 +14,7 @@ import { CaseDetailClient } from "../../src/app/(app)/casos/[id]/CaseDetailClien
 import { AuditTimeline } from "../../src/app/(app)/casos/[id]/components/AuditTimeline";
 import { EscalateDialog } from "../../src/app/(app)/casos/[id]/components/EscalateDialog";
 import { LocaleProvider } from "../../src/lib/i18n/LocaleContext";
-import { esAR } from "../../src/lib/i18n/index";
+import { esAR, textosDelHistorial } from "../../src/lib/i18n/index";
 import type { CaseRow } from "../../src/server/cases/list";
 import { SIN_ACCIONES } from "../../src/server/cases/acciones";
 
@@ -93,6 +93,7 @@ describe("la situación del caso", () => {
     render(
       <LocaleProvider locale="es-AR">
         <AuditTimeline
+          textos={textosDelHistorial("es-AR")}
           events={[{ id: 1, event_type: "case.status_changed", created_at: "2026-09-06T00:00:00Z", reason: null }]}
         />
       </LocaleProvider>

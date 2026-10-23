@@ -9,6 +9,7 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 const { mockGetSessionContext, mockGetUserRowOrThrow, mockCookie, mockResumen } = vi.hoisted(() => ({
   mockGetSessionContext: vi.fn(),
   mockGetUserRowOrThrow: vi.fn(),
+  /** El valor de la cookie `cm_invitacion`; la lee `invitacionDeLaSesion` por dentro, así que se simula `cookies()`. */
   mockCookie: vi.fn(),
   mockResumen: vi.fn(),
 }));
@@ -17,8 +18,15 @@ vi.mock("@/lib/auth/session", () => ({ getSessionContext: mockGetSessionContext 
 vi.mock("@/lib/auth/user-row", () => ({ getUserRowOrThrow: mockGetUserRowOrThrow }));
 vi.mock("@/server/alta/invitacion", async (original) => ({
   ...(await original<typeof import("@/server/alta/invitacion")>()),
-  leerCookieDeInvitacion: mockCookie,
   resumenDeInvitacion: mockResumen,
+}));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: () => {
+      const valor = mockCookie();
+      return valor === undefined ? undefined : { value: valor };
+    },
+  }),
 }));
 vi.mock("@/data/scope", () => ({ enTenant: vi.fn() }));
 vi.mock("server-only", () => ({}));
@@ -44,7 +52,7 @@ describe("PendientePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("BETTER_AUTH_SECRET", "test-better-auth-secret-key");
-    mockCookie.mockResolvedValue(undefined);
+    mockCookie.mockReturnValue(undefined);
     mockResumen.mockResolvedValue({ espacio: "Seguros Ejemplo", quien: "Jefa Ejemplo", exigeSso: false });
   });
 
@@ -72,7 +80,7 @@ describe("PendientePage", () => {
   it("sin perfil y con la invitación vigente de su dirección, vuelve a /invitacion", async () => {
     mockGetSessionContext.mockResolvedValue({ user: { id: "u-1", email: "Lucia@Example.com" } });
     mockGetUserRowOrThrow.mockResolvedValue(null);
-    mockCookie.mockResolvedValue(enlace());
+    mockCookie.mockReturnValue(enlace());
 
     await expect(PendientePage()).rejects.toThrow("REDIRECT:/invitacion");
   });
@@ -80,7 +88,7 @@ describe("PendientePage", () => {
   it("la invitación de otra dirección no la lleva a /invitacion", async () => {
     mockGetSessionContext.mockResolvedValue({ user: { id: "u-1", email: "otra@example.com" } });
     mockGetUserRowOrThrow.mockResolvedValue(null);
-    mockCookie.mockResolvedValue(enlace());
+    mockCookie.mockReturnValue(enlace());
 
     await expect(PendientePage()).rejects.toThrow("REDIRECT:/alta");
   });
@@ -88,7 +96,7 @@ describe("PendientePage", () => {
   it("una invitación que ya no sirve tampoco: va a /alta", async () => {
     mockGetSessionContext.mockResolvedValue({ user: { id: "u-1", email: "lucia@example.com" } });
     mockGetUserRowOrThrow.mockResolvedValue(null);
-    mockCookie.mockResolvedValue(enlace());
+    mockCookie.mockReturnValue(enlace());
     mockResumen.mockResolvedValue(null);
 
     await expect(PendientePage()).rejects.toThrow("REDIRECT:/alta");

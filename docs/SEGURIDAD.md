@@ -57,6 +57,8 @@ la sección 13.
 |---|---|---|
 | ¿Qué roles hay? | Cinco: `owner`, `admin`, `specialist`, `analyst`, `viewer`. Cada acción tiene una constante de roles propia (ver datos del padrón, editar el padrón, entregar al Core, revisar desvíos), y la guarda vive en el servidor. Esconder un enlace no es una defensa. | `src/lib/auth/roles.ts`, `require-role.ts` |
 | ¿Quién puede registrarse? | Nadie por su cuenta: el alta la cierra una lista de permitidos, en un solo lugar (el hook de creación de usuario), que cubre también la primera entrada con Google. | `src/lib/auth/registro-permitido.ts`, `provision.ts` |
+| ¿Cómo es el alta en dos pasos y qué controles conserva? | Paso 1, `/registro`: sólo la cuenta (nombre, correo y términos, o Google). El enlace del correo viaja sellado (AES-256-GCM, una hora) y lleva únicamente el correo, el nombre y el idioma: no crea espacio, cupo ni fila hasta que se abre. Paso 2, `/alta`: la persona elige entre dar de alta su empresa (empresa y WhatsApp) o entrar a una que ya usa ClaimMix. Siguen todos los controles: desafío Turnstile, topes por IP y por correo (`auth:up`, `auth:ip`, `alta:correo-ip`, `alta:ip`), el correo de operador, el dominio con SSO, el alta cerrada, el tope global de 24 horas dentro de la función de la base y `provisionUserProfile`. | `src/server/alta/cuenta-del-enlace.ts`, `src/server/alta/crear-espacio.ts`, `src/app/alta/page.tsx`, `tests/unit/alta/` |
+| ¿`/alta` revela qué empresas existen? | **No.** El camino «Mi empresa ya usa ClaimMix» es un texto fijo, sin consulta a la base: pide al administrador que invite la dirección de la sesión; no manda al SSO, que rechaza a una cuenta sin perfil. No busca ni lista empresas. El enlace «Seguir con tu invitación», que reemplaza ese pedido, aparece sólo si el propio navegador trae la cookie `cm_invitacion` de esa dirección (se lee la cookie, no la base) y lleva a `/invitacion` sin el token en la URL. | `src/app/alta/page.tsx`, `src/server/alta/invitacion.ts`, `tests/unit/alta/alta-page.test.tsx` |
 | ¿Autenticación? | Email y contraseña, Google y, por inquilino, el IdP OIDC de la aseguradora (sección 5). | `src/lib/auth/index.ts` |
 | ¿Sesiones? | Cookie de sesión de Better Auth con un caché de 60 segundos. Revocar una sesión tarda hasta un minuto en llegar a todas las pantallas. Cambiar la contraseña cierra las otras sesiones. | `src/lib/auth/index.ts` |
 | ¿Límite de intentos? | Por IP y por cuenta, en Postgres, con un alcance propio para el SSO (`auth:sso`) y tope por IP. | `src/lib/rate-limit/` |
@@ -278,6 +280,25 @@ Okta o Google Workspace de una aseguradora. Lo prueba el piloto.
     nocturna. La migración 0045 ya está aplicada en las tres bases (30/09). Lo que
     esa prueba no cubre, porque simula R2 y no enciende ningún modo, es del
     dueño (sección 12).
+12. **Cuatro puntos del alta en dos pasos.** (a) Una persona con cuenta
+    sin espacio cuyo dominio exige SSO (`sin_perfil` con SSO) ve el mismo texto
+    fijo que las demás: no se cambió, y la decisión de qué mostrarle es del
+    dueño. (b) Hay una variante que listaría las invitaciones vigentes para la
+    dirección de la sesión en `/alta`; no se hizo, porque agrega una consulta y
+    una fuga posible, y queda como opción B pendiente del dueño. (c) Durante la
+    hora siguiente al despliegue, un enlace del correo emitido con la forma
+    vieja (que llevaba la empresa y el número) abre sólo la cuenta y la empresa
+    escrita se pierde: se pide de nuevo en `/alta`. Una cookie `cm_alta` vieja
+    ya no tiene lector y vence sola. (d) Una cuenta del paso 1 no tiene perfil y
+    puede ser sólo de Google. Si pide recuperar el acceso
+    (`src/server/notify/password-reset.ts`), recibe el mail de «recuperar»
+    (antes, sin perfil, recibía el de «activar») con un texto que no dice que la
+    contraseña actual sigue funcionando (`correo.recuperar.noFuisteSinPerfil`).
+    Ese mail ahora cuenta contra el cupo del remitente del tipo `recuperacion`
+    (antes, el de `alta`). No cambia ningún tope: `ALTA_TOPE_CORREOS_DIA` y
+    `ALTA_TOPE_POR_DESTINATARIO_DIA` valen igual, y lo que cambia es en qué
+    contador se gasta: las recuperaciones de cuentas sin perfil comparten el
+    cupo del día con las demás recuperaciones y ya no con las altas.
 
 ## 12. Pendientes del dueño (no son código)
 

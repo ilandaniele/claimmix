@@ -1,11 +1,9 @@
 /**
- * Server Actions de /registro.
+ * Server Actions de /registro: el primer paso del alta, que crea sólo la cuenta.
+ * El espacio de la empresa se pide después, en /alta.
  *
- * Los dos caminos empiezan sin escribir ninguna cuenta:
- *
- * - Google guarda lo que escribió la persona en la cookie sellada `cm_alta` y la
- *   manda a Google; al volver, /alta crea el espacio.
- * - El correo sólo manda un enlace sellado con todo lo que hace falta. La cuenta
+ * - Google manda a la persona a Google y, al volver, a /alta.
+ * - El correo sólo manda un enlace sellado con el nombre y la dirección. La cuenta
  *   se crea cuando la persona vuelve de ese enlace (/alta/correo). Quien tipea
  *   direcciones ajenas no deja filas en la base: sólo cupos del limitador.
  *
@@ -44,11 +42,8 @@ import {
 } from "@/lib/rate-limit/index";
 import { SignUpSchema } from "@/lib/schemas/auth";
 import { topeEntero } from "@/lib/topes";
-import { PARAMETRO_DE_VUELTA, ponerCookieDeAlta } from "@/server/alta/cookie";
-import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
 import { DURACION_DEL_TOKEN_MS, sellarToken } from "@/server/alta/token-de-registro";
 import { verificarTurnstile } from "@/server/alta/turnstile";
-import { faltaElNueveArgentino, normalizarE164, validarEmpresa, type ErrorDeAlta } from "@/server/alta/validar";
 import { correoDeEnlace, correoYaTenesCuenta } from "@/server/notify/correos-de-alta";
 import { enviarCorreoDelSistema } from "@/server/notify/remitente-sistema";
 import { dominioExigeSsoEnAlgunInquilino } from "@/server/sso/usuarios";
@@ -56,23 +51,12 @@ import { dominioExigeSsoEnAlgunInquilino } from "@/server/sso/usuarios";
 const AVISO_NEUTRO = "/login?aviso=revisa_tu_correo";
 const ERROR_DE_GOOGLE = "/login?error=google_signin_failed";
 
-const conError = (e: Extract<ErrorDeAlta, "datos" | "intentos" | "celular">) => `/registro?e=${e}`;
+const conError = (e: "datos" | "intentos" | "terminos") => `/registro?e=${e}`;
 
 const DIA_MS = 24 * 60 * 60_000;
 
-/**
- * Lo que piden los dos caminos: la empresa, su WhatsApp y los términos aceptados. Con el número
- * automático prendido, un +54 sin el 9 de los celulares no se acepta y se dice por qué.
- */
-function datosDeLaEmpresa(
-  formData: FormData,
-): { empresa: string; numero: string } | { error: "datos" | "celular" } {
-  const empresa = validarEmpresa(formData.get("empresa"));
-  const numero = normalizarE164(formData.get("whatsapp"));
-  if (!empresa.ok || numero === null || formData.get("terminos") !== "on") return { error: "datos" };
-  if (numeroAutomatico() && faltaElNueveArgentino(numero)) return { error: "celular" };
-  return { empresa: empresa.empresa, numero };
-}
+/** Los términos son de los dos caminos; el nombre y el correo, sólo del segundo. */
+const aceptoLosTerminos = (formData: FormData) => formData.get("terminos") === "on";
 
 async function existeCuenta(email: string): Promise<boolean> {
   // sin-inquilino: la tabla de usuarios de Better Auth no tiene columna de
@@ -89,12 +73,10 @@ async function existeCuenta(email: string): Promise<boolean> {
 async function mandarElCorreo(input: {
   email: string;
   nombre: string;
-  empresa: string;
-  numero: string;
   locale: Locale;
   ip: string;
 }): Promise<void> {
-  const { email, nombre, empresa, numero, locale, ip } = input;
+  const { email, nombre, locale, ip } = input;
   const t = getT(locale);
   const base = resolveBaseURL();
 
@@ -106,7 +88,7 @@ async function mandarElCorreo(input: {
     if (!altaAbierta(email) || isOperatorEmail(email) || (await dominioExigeSsoEnAlgunInquilino(email))) {
       return;
     }
-    const enlace = `${base}/alta/correo?t=${sellarToken({ e: email, empresa, numero, nombre, locale })}`;
+    const enlace = `${base}/alta/correo?t=${sellarToken({ e: email, nombre, locale })}`;
     correo = correoDeEnlace(t, "activar", enlace, DURACION_DEL_TOKEN_MS / 60_000);
   }
 
@@ -117,13 +99,11 @@ async function mandarElCorreo(input: {
 
 /** La ruta a la que sigue el pedido por correo. Nunca redirige: de eso se ocupa quien la llama, fuera de todo try/catch. */
 async function destinoDelCorreo(formData: FormData): Promise<string> {
-  const empresa = datosDeLaEmpresa(formData);
   const cuenta = SignUpSchema.safeParse({
     full_name: formData.get("full_name"),
     email: formData.get("email"),
   });
-  if ("error" in empresa) return conError(empresa.error);
-  if (!cuenta.success) return conError("datos");
+  if (!cuenta.success || !aceptoLosTerminos(formData)) return conError("datos");
 
   const headerStore = await headers();
   // La misma resolución que la ruta HTTP: prefiere `x-vercel-forwarded-for`,
@@ -161,7 +141,7 @@ async function destinoDelCorreo(formData: FormData): Promise<string> {
   const locale = await getServerLocale();
   const { email, full_name } = cuenta.data;
   after(() =>
-    mandarElCorreo({ email, nombre: full_name, ...empresa, locale, ip }).catch((e) => {
+    mandarElCorreo({ email, nombre: full_name, locale, ip }).catch((e) => {
       // Ya se contestó «revisá tu correo»: sin esta línea, una falla de la base
       // o del remitente no deja rastro ni mail.
       logger.error({ detalle: e instanceof Error ? e.name : "unknown" }, "registro.alta_no_terminada");
@@ -176,22 +156,20 @@ export async function signUp(formData: FormData): Promise<void> {
 
 /** La ruta a la que sigue el pedido con Google: la URL de Google, o el error. Nunca redirige. */
 async function destinoDeGoogle(formData: FormData): Promise<string> {
-  const empresa = datosDeLaEmpresa(formData);
-  if ("error" in empresa) return conError(empresa.error);
+  // Con Google no hay nombre ni correo que revisar: lo único que puede faltar son los términos.
+  if (!aceptoLosTerminos(formData)) return conError("terminos");
 
   const headerStore = await headers();
   const porIp = await topePorIp(clientIpFromHeaders(headerStore));
   if (!porIp.allowed) return conError("intentos");
 
   try {
-    const v = await ponerCookieDeAlta({ ...empresa, locale: await getServerLocale(), origen: "google" });
-    // /alta toma la cookie por suya sólo si llega por este viaje (ver cookie.ts).
-    const vuelta = `/alta?${PARAMETRO_DE_VUELTA}=${v}`;
     const resultado = await auth.api.signInSocial({
       body: {
         provider: "google",
-        callbackURL: vuelta,
-        newUserCallbackURL: vuelta,
+        // Con la cuenta hecha, la persona dice en /alta qué vino a hacer.
+        callbackURL: "/alta",
+        newUserCallbackURL: "/alta",
         // Sin query propia: Better Auth le agrega el código y un parámetro repetido llega como array.
         errorCallbackURL: "/login",
       },

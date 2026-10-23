@@ -39,6 +39,7 @@ interface Props {
   initialUsers: UserRow[];
   currentUserId: string;
   currentUserRole: string;
+  emailAyuda: string;
 }
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -117,10 +118,12 @@ function CreateUserDialog({
   onClose,
   onCreated,
   currentUserRole,
+  emailAyuda,
 }: {
   onClose: () => void;
   onCreated: () => void;
   currentUserRole: string;
+  emailAyuda: string;
 }) {
   const t = useT();
 
@@ -234,7 +237,11 @@ function CreateUserDialog({
               required
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
               placeholder={t("usuarios.form.emailPlaceholder")}
+              aria-describedby="email-ayuda"
             />
+            <p id="email-ayuda" className="mt-1 text-xs text-slate-500">
+              {emailAyuda}
+            </p>
           </div>
 
           <div>
@@ -298,6 +305,7 @@ export function AdminUsersClient({
   initialUsers,
   currentUserId,
   currentUserRole,
+  emailAyuda,
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
@@ -455,6 +463,7 @@ export function AdminUsersClient({
           onClose={() => setShowDialog(false)}
           onCreated={handleCreated}
           currentUserRole={currentUserRole}
+          emailAyuda={emailAyuda}
         />
       )}
 

@@ -16,7 +16,9 @@ const TABLA = {
   registro_ok: { nivel: "bien", texto: "el formulario de registro coincide con el ambiente" },
   enlace_ajeno_rechazado: { nivel: "bien", texto: "el despliegue rechaza un enlace sellado con otro secreto" },
   margen_ok: { nivel: "bien", texto: "hay margen en el tope de altas del día" },
-  alta_ok: { nivel: "bien", texto: "el alta por el enlace del correo dejó el espacio completo" },
+  enlace_ok: { nivel: "bien", texto: "el enlace del correo dejó la cuenta con el correo verificado y la sesión, sin espacio" },
+  enlace_viejo_ok: { nivel: "bien", texto: "un enlace de antes de separar los dos pasos abre sólo la cuenta" },
+  alta_ok: { nivel: "bien", texto: "pedir el espacio con la cuenta ya hecha dejó el espacio completo" },
   segunda_vez_ok: { nivel: "bien", texto: "abrir de nuevo el mismo enlace no creó nada" },
   contadores_ok: { nivel: "bien", texto: "los cupos por red se contaron como corresponde" },
   cupo_devuelto: { nivel: "bien", texto: "el cupo de un alta que no creó nada se devolvió" },
@@ -45,12 +47,14 @@ const TABLA = {
   sin_banderas: { nivel: "rojo", texto: "el despliegue no informó su configuración" },
   alta_apagada: { nivel: "rojo", texto: "el alta automática está apagada en el ambiente de prueba" },
   registro_sin_formulario: { nivel: "rojo", texto: "la pantalla de registro no trae el formulario" },
+  registro_pide_empresa: { nivel: "rojo", texto: "la pantalla de registro pide la empresa o el número, que van en el segundo paso" },
   registro_correo_incoherente: { nivel: "rojo", texto: "el campo del correo en el registro no coincide con el ambiente" },
   registro_turnstile_incoherente: { nivel: "rojo", texto: "el desafío del registro no coincide con el ambiente" },
   token_ajeno_aceptado: { nivel: "rojo", texto: "el despliegue aceptó un enlace sellado con otro secreto" },
   enlace_ilegible: { nivel: "rojo", texto: "la pantalla del enlace no mostró ni el formulario ni el aviso de vencido" },
   tope_0: { nivel: "rojo", texto: "el tope de altas del día cierra el alta" },
-  destino_inesperado: { nivel: "rojo", texto: "el recorrido del enlace terminó en un destino que no corresponde" },
+  destino_inesperado: { nivel: "rojo", texto: "el enlace o el pedido del espacio terminó en un destino que no corresponde" },
+  enlace_creo_espacio: { nivel: "rojo", texto: "el enlace del correo creó un espacio, un perfil o un número, y sólo tenía que crear la cuenta" },
   correo_sin_verificar: { nivel: "rojo", texto: "la cuenta quedó sin el correo verificado" },
   sin_perfil_de_dueno: { nivel: "rojo", texto: "el espacio quedó sin perfil de dueño" },
   inquilino_mal_creado: { nivel: "rojo", texto: "el espacio se creó con datos que no corresponden" },
@@ -100,7 +104,7 @@ export const PREFIJO_EMPRESA = "zz-alta-probar-";
 export const CUPOS_DE_LA_RED_DE_PRUEBA = /(^|:)203\.0\.113\.[0-9]{1,3}($|:)/;
 
 /** Un desplazamiento fijo por escenario: dos corridas distintas no comparten red salvo que la base coincida. */
-export const LETRAS = { g: 0, a: 1, b: 2, r: 3 } as const;
+export const LETRAS = { g: 0, a: 1, b: 2, r: 3, v: 4 } as const;
 export type Letra = keyof typeof LETRAS;
 
 export function esCorrida(s: unknown): s is string {
@@ -183,15 +187,17 @@ export function leerSalud(
 }
 
 /**
- * /registro: los campos que el HTML del servidor tiene que traer, y que el correo y
- * el desafío aparezcan si y sólo si el ambiente los tiene cargados. El desafío
- * vive dentro del camino por correo (SignUpForm), así que necesita las dos cosas.
+ * /registro: el HTML del servidor trae los términos y NO pide la empresa ni el
+ * número (van en /alta), y el correo y el desafío aparecen si y sólo si el
+ * ambiente los tiene cargados. El desafío vive dentro del camino por correo
+ * (SignUpForm), así que necesita las dos cosas.
  */
 export function revisarRegistro(codigo: number, html: string, b: Record<string, unknown>): Hallazgo[] {
   if (codigo !== 200) return [hallazgo("registro_no_contesta")];
   const hallazgos: Hallazgo[] = [];
-  if (!html.includes('name="empresa"') || !html.includes('name="whatsapp"')) {
-    hallazgos.push(hallazgo("registro_sin_formulario"));
+  if (!html.includes('name="terminos"')) hallazgos.push(hallazgo("registro_sin_formulario"));
+  if (html.includes('name="empresa"') || html.includes('name="whatsapp"')) {
+    hallazgos.push(hallazgo("registro_pide_empresa"));
   }
   const conCorreo =
     b.ALTA_REMITENTE_CORREO === true &&
@@ -229,6 +235,30 @@ export function clasificarError(codigo: string | undefined, mensaje: string): "p
 }
 
 /**
+ * Las rutas con que los módulos de verdad devuelven un error de la base o de la
+ * red que se tragaron: `/alta?e=falla` (el espacio no se creó), `…&e=falla` (la
+ * cuenta no se creó) y `/login` (la cuenta se creó y la sesión no se abrió).
+ */
+export function esFallaTragada(destino: string): boolean {
+  return destino === "/login" || /[?&]e=falla$/.test(destino);
+}
+
+/**
+ * Qué se anota cuando un paso terminó donde no debía. Con el logger apagado la
+ * causa de una falla tragada no sale, así que se mira la base aparte
+ * (`baseContesta`, una consulta suelta hecha al momento): si no contesta, es un
+ * parpadeo de la red, «no se pudo probar» como cuando el error llegaba entero y
+ * era de transporte; si contesta, el paso falló con la base arriba y eso es un
+ * defecto, que pone rojo. Cualquier otra ruta es un destino que no corresponde.
+ */
+export function codigoDeDestinoInesperado(
+  destino: string,
+  baseContesta: boolean
+): "pasajero" | "destino_inesperado" {
+  return esFallaTragada(destino) && !baseContesta ? "pasajero" : "destino_inesperado";
+}
+
+/**
  * Por qué `crearInquilino` dio `alta_cerrada` sin conteos, en el orden en que
  * `crear-inquilino.ts` los corta: falta la migración (42883, 42P01, 42703), el tope
  * de bases, el tope de MB. Si nada de eso, fue un 23505 de dos altas pisándose y
@@ -261,6 +291,17 @@ export function margenDelTope(c: number, tope: number, llegoAlAviso: (c: number,
   if (llegoAlAviso(c + 2, tope)) return hallazgo("cerca_del_aviso");
   return hallazgo("margen_ok");
 }
+
+/**
+ * Cuánto sube cada cupo de la red, contado desde antes del primer paso: el enlace
+ * gasta `auth:ip` y ningún cupo de alta; pedir el espacio gasta `alta:ip`; abrir el
+ * mismo enlace otra vez gasta `auth:ip` y nada más.
+ */
+export const CUPOS_ESPERADOS = {
+  enlace: { "auth:ip": 1, "alta:ip": 0 },
+  espacio: { "auth:ip": 1, "alta:ip": 1 },
+  enlaceOtraVez: { "auth:ip": 2, "alta:ip": 1 },
+} as const;
 
 /** Lo que subió cada contador entre antes y después contra lo que tenía que subir. Un contador que no existía vale 0. */
 export function compararContadores(

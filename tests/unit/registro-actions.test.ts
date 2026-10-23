@@ -1,15 +1,19 @@
 /**
  * Las acciones de /registro: `signUp` (por correo) y `empezarAltaConGoogle`.
+ * /registro es el primer paso del alta y crea sólo la cuenta: nombre, correo y
+ * términos. La empresa y el WhatsApp se piden después, en /alta.
  *
  * Lo que se prueba es lo que importa de afuera hacia adentro:
  *   - `signUp` NO crea nada: no llama a `signUpEmail`, no escribe ninguna fila (la
  *     base de la prueba sólo sabe leer) y termina siempre en el mismo aviso;
  *   - lo que depende de la dirección corre en `after`, y de ahí sale el mail
- *     correcto: «Activar tu cuenta» con un enlace que abre con lo que se escribió,
- *     o «Ya tenés cuenta» con los dos caminos para entrar;
+ *     correcto: «Activar tu cuenta» con un enlace que abre con el nombre y el
+ *     correo (y nada más), o «Ya tenés cuenta» con los dos caminos para entrar;
+ *   - el orden de los controles: `auth:up`, tope por IP, Turnstile y recién
+ *     entonces el tope del día de la red;
  *   - el desafío de Turnstile sólo existe con las dos claves, y sólo frena el correo;
- *   - Google deja la cookie sellada, sale con los destinos de /alta y el
- *     `redirect` va afuera de todo try/catch.
+ *   - Google no deja ninguna cookie: vuelve a /alta, donde se elige qué hacer, y
+ *     el `redirect` va afuera de todo try/catch.
  *
  * Que dos finales no se distingan desde afuera lo repite `registro-no-enumera.test.ts`
  * desde el punto de vista del atacante.
@@ -26,7 +30,6 @@ const h = vi.hoisted(() => ({
   topePorIp: vi.fn(),
   dominioExigeSso: vi.fn(),
   enviar: vi.fn(),
-  ponerCookie: vi.fn(),
   locale: vi.fn(),
   fetch: vi.fn(),
   error: vi.fn(),
@@ -83,7 +86,6 @@ vi.mock("@/lib/rate-limit/index", async (importOriginal) => ({
   rateLimit: h.rateLimit,
   topePorIp: h.topePorIp,
 }));
-vi.mock("@/server/alta/cookie", () => ({ ponerCookieDeAlta: h.ponerCookie, PARAMETRO_DE_VUELTA: "v" }));
 vi.mock("@/server/notify/remitente-sistema", () => ({ enviarCorreoDelSistema: h.enviar }));
 vi.mock("@/server/sso/usuarios", () => ({ dominioExigeSsoEnAlgunInquilino: h.dominioExigeSso }));
 
@@ -99,11 +101,8 @@ const IP = "203.0.113.7";
 const LIBRE = { allowed: true, remaining: 2, resetAt: 0, retryAfterSeconds: 0 };
 const AGOTADO = { allowed: false, remaining: 0, resetAt: 0, retryAfterSeconds: 3600 };
 const URL_DE_GOOGLE = "https://accounts.example.com/o/oauth2/v2/auth?state=fake-estado";
-const V_DE_LA_COOKIE = "aBcDeFgHiJkLmNoPqRsTuV";
 
 const BUENOS = {
-  empresa: "  Seguros del Sur  ",
-  whatsapp: "+54 9 (291) 642-6930",
   terminos: "on",
   full_name: "Ana Pérez",
   email: "Ana@Example.com",
@@ -136,7 +135,7 @@ async function pedir(
   throw new Error("signUp no redirigió");
 }
 
-async function conGoogle(campos: Record<string, string | undefined> = BUENOS): Promise<string> {
+async function conGoogle(campos: Record<string, string | undefined> = { terminos: "on" }): Promise<string> {
   const { empezarAltaConGoogle } = await import("@/app/registro/actions");
   try {
     await empezarAltaConGoogle(formulario(campos));
@@ -173,7 +172,6 @@ beforeEach(() => {
   h.buscar.mockResolvedValue([]);
   h.dominioExigeSso.mockResolvedValue(false);
   h.enviar.mockResolvedValue({ enviado: true });
-  h.ponerCookie.mockResolvedValue(V_DE_LA_COOKIE);
   h.signInSocial.mockResolvedValue({ url: URL_DE_GOOGLE, redirect: true });
 });
 
@@ -212,7 +210,7 @@ describe("signUp no crea nada", () => {
 });
 
 describe("signUp: la dirección nueva", () => {
-  it("recibe «Activar tu cuenta» con un enlace que abre con lo que escribió", async () => {
+  it("recibe «Activar tu cuenta» con un enlace que abre con el nombre y el correo", async () => {
     await pedir();
     const mail = elMail();
 
@@ -222,13 +220,24 @@ describe("signUp: la dirección nueva", () => {
     expect(mail.texto).toContain(`${BASE}/alta/correo?t=${mail.token}`);
 
     const datos = abrirToken(mail.token);
-    expect(datos).toMatchObject({
-      e: "ana@example.com",
-      empresa: "Seguros del Sur",
-      numero: "+5492916426930",
-      nombre: "Ana Pérez",
-      locale: "es-AR",
-    });
+    expect(datos).toMatchObject({ e: "ana@example.com", nombre: "Ana Pérez", locale: "es-AR" });
+  });
+
+  it("el enlace sellado no lleva la empresa ni el número: sólo {e, nombre, locale, exp}", async () => {
+    await pedir();
+    const datos = abrirToken(elMail().token);
+
+    expect(Object.keys(datos ?? {}).sort()).toEqual(["e", "exp", "locale", "nombre"]);
+  });
+
+  it("un formulario viejo con empresa y WhatsApp se acepta, pero esos campos no viajan", async () => {
+    expect(
+      await pedir({ ...BUENOS, empresa: "Seguros del Sur", whatsapp: "+54 9 (291) 642-6930" })
+    ).toBe(AVISO);
+
+    const mail = elMail();
+    expect(Object.keys(abrirToken(mail.token) ?? {}).sort()).toEqual(["e", "exp", "locale", "nombre"]);
+    expect(mail.texto).not.toContain("Seguros del Sur");
   });
 
   it("en inglés, el mail y el enlace salen en inglés", async () => {
@@ -358,10 +367,7 @@ describe("signUp: lo que no manda ningún mail, con el mismo final", () => {
 describe("signUp: lo que valida y lo que cuenta", () => {
   it.each([
     ["sin términos", { terminos: undefined }],
-    ["sin empresa", { empresa: "" }],
-    ["con una empresa que es un enlace", { empresa: "http://example.com" }],
-    ["sin WhatsApp", { whatsapp: "" }],
-    ["con un WhatsApp sin código de país", { whatsapp: "291 642 6930" }],
+    ["con los términos en otra cosa que «on»", { terminos: "true" }],
     ["sin nombre", { full_name: "" }],
     ["sin correo", { email: "" }],
     ["con un correo que no es un correo", { email: "no-es-un-correo" }],
@@ -372,6 +378,19 @@ describe("signUp: lo que valida y lo que cuenta", () => {
     expect(h.topePorIp).not.toHaveBeenCalled();
     expect(h.pendientes).toHaveLength(0);
     expect(h.enviar).not.toHaveBeenCalled();
+  });
+
+  it("ya no pide la empresa ni el WhatsApp: sin ellos el pedido sigue", async () => {
+    expect(await pedir({ terminos: "on", full_name: "Ana Pérez", email: "ana@example.com" })).toBe(AVISO);
+
+    expect(h.enviar).toHaveBeenCalledTimes(1);
+  });
+
+  it("y no mira lo que haya en esos campos: ni «celular» ni «datos» por ellos", async () => {
+    process.env.ALTA_NUMERO_AUTOMATICO = "1";
+
+    expect(await pedir({ ...BUENOS, empresa: "", whatsapp: "+54 11 1234-5678" })).toBe(AVISO);
+    expect(await conGoogle({ terminos: "on", empresa: "", whatsapp: "+54 11 1234-5678" })).toBe(URL_DE_GOOGLE);
   });
 
   it("cuenta `auth:up` y el tope por IP, con la IP de la red", async () => {
@@ -421,6 +440,28 @@ describe("signUp: lo que valida y lo que cuenta", () => {
     expect(await pedir({ ...BUENOS, "cf-turnstile-response": "fake-respuesta-del-desafio" })).toBe(AVISO);
 
     expect(h.rateLimit.mock.calls.map((c) => c[0])).toEqual([claveDeCupo("auth:up", IP)]);
+  });
+
+  it("el orden de los controles: `auth:up`, tope por IP, Turnstile y el tope del día de la red", async () => {
+    process.env.TURNSTILE_SITE_KEY = "test-turnstile-site-key";
+    process.env.TURNSTILE_SECRET_KEY = "test-turnstile-secret-key";
+    const orden: string[] = [];
+    h.rateLimit.mockImplementation(async (clave: string) => {
+      orden.push(clave.split(":").slice(0, 2).join(":"));
+      return LIBRE;
+    });
+    h.topePorIp.mockImplementation(async () => {
+      orden.push("topePorIp");
+      return LIBRE;
+    });
+    h.fetch.mockImplementation(async () => {
+      orden.push("turnstile");
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    });
+
+    expect(await pedir({ ...BUENOS, "cf-turnstile-response": "fake-respuesta-del-desafio" })).toBe(AVISO);
+
+    expect(orden).toEqual(["auth:up", "topePorIp", "turnstile", "alta:correo-ip"]);
   });
 
   it("el mail sale con el tipo `alta` y la IP de la red, para sus cupos", async () => {
@@ -555,39 +596,35 @@ describe("Turnstile", () => {
   it("sólo frena el correo: Google sale sin desafío", async () => {
     claves();
 
-    expect(await conGoogle(BUENOS)).toBe(URL_DE_GOOGLE);
+    expect(await conGoogle()).toBe(URL_DE_GOOGLE);
 
     expect(h.fetch).not.toHaveBeenCalled();
   });
 });
 
 describe("empezarAltaConGoogle", () => {
-  it("deja la cookie sellada con lo que escribió y manda a Google", async () => {
+  it("manda a Google y, al volver, a /alta: sin cookie ni nada de lo que haya escrito", async () => {
     expect(await conGoogle()).toBe(URL_DE_GOOGLE);
 
-    expect(h.ponerCookie).toHaveBeenCalledWith({
-      empresa: "Seguros del Sur",
-      numero: "+5492916426930",
-      locale: "es-AR",
-      origen: "google",
-    });
+    expect(h.signInSocial).toHaveBeenCalledTimes(1);
     expect(h.signInSocial).toHaveBeenCalledWith({
       body: {
         provider: "google",
-        callbackURL: `/alta?v=${V_DE_LA_COOKIE}`,
-        newUserCallbackURL: `/alta?v=${V_DE_LA_COOKIE}`,
+        callbackURL: "/alta",
+        newUserCallbackURL: "/alta",
         errorCallbackURL: "/login",
       },
       headers: expect.any(Headers),
     });
   });
 
-  it("la cookie lleva el idioma de quien se registra", async () => {
-    h.locale.mockResolvedValue("en-US");
-
+  it("las URL de vuelta no llevan parámetros propios", async () => {
     await conGoogle();
 
-    expect(h.ponerCookie).toHaveBeenCalledWith(expect.objectContaining({ locale: "en-US" }));
+    const { body } = h.signInSocial.mock.calls[0][0] as { body: Record<string, string> };
+    for (const url of [body.callbackURL, body.newUserCallbackURL, body.errorCallbackURL]) {
+      expect(url).not.toContain("?");
+    }
   });
 
   it("el redirect está afuera del try: la URL de Google no se confunde con una falla", async () => {
@@ -597,15 +634,12 @@ describe("empezarAltaConGoogle", () => {
   });
 
   it("no pide nombre ni correo: el nombre y el correo son de Google", async () => {
-    expect(await conGoogle({ empresa: BUENOS.empresa, whatsapp: BUENOS.whatsapp, terminos: "on" })).toBe(
-      URL_DE_GOOGLE
-    );
+    expect(await conGoogle({ terminos: "on" })).toBe(URL_DE_GOOGLE);
   });
 
   it.each([
     ["Better Auth tira", () => h.signInSocial.mockRejectedValue(new Error("sin red"))],
     ["Better Auth no devuelve URL", () => h.signInSocial.mockResolvedValue({ url: undefined })],
-    ["la cookie no se puede sellar", () => h.ponerCookie.mockRejectedValue(new Error("Falta BETTER_AUTH_SECRET"))],
   ])("si %s: /login?error=google_signin_failed", async (_caso, preparar) => {
     preparar();
 
@@ -620,30 +654,20 @@ describe("empezarAltaConGoogle", () => {
     expect(h.error).toHaveBeenCalledWith({ detalle: "sin red" }, "auth.google.signin_start_failed");
   });
 
-  it("si la cookie no se pudo dejar, no se va a Google", async () => {
-    h.ponerCookie.mockRejectedValue(new Error("Falta BETTER_AUTH_SECRET"));
-
-    await conGoogle();
-
-    expect(h.signInSocial).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["sin términos", { terminos: undefined }],
-    ["sin empresa", { empresa: "" }],
-    ["con un WhatsApp que no vale", { whatsapp: "1234" }],
-  ])("%s va a /registro?e=datos, sin cookie ni Google", async (_caso, cambio) => {
-    expect(await conGoogle({ ...BUENOS, ...cambio })).toBe("/registro?e=datos");
+    ["con los términos en otra cosa que «on»", { terminos: "true" }],
+  ])("%s va a /registro?e=terminos, sin Google: es lo único que le puede faltar", async (_caso, cambio) => {
+    expect(await conGoogle({ ...cambio })).toBe("/registro?e=terminos");
 
-    expect(h.ponerCookie).not.toHaveBeenCalled();
+    expect(h.topePorIp).not.toHaveBeenCalled();
     expect(h.signInSocial).not.toHaveBeenCalled();
   });
 
-  it("sin cupo por IP: /registro?e=intentos, sin cookie ni Google", async () => {
+  it("sin cupo por IP: /registro?e=intentos, sin Google", async () => {
     h.topePorIp.mockResolvedValue(AGOTADO);
 
     expect(await conGoogle()).toBe("/registro?e=intentos");
-    expect(h.ponerCookie).not.toHaveBeenCalled();
     expect(h.signInSocial).not.toHaveBeenCalled();
   });
 
@@ -654,61 +678,5 @@ describe("empezarAltaConGoogle", () => {
     expect(h.enviar).not.toHaveBeenCalled();
     expect(h.escribir).not.toHaveBeenCalled();
     expect(h.signUpEmail).not.toHaveBeenCalled();
-  });
-});
-
-describe("un +54 sin el 9 de los celulares", () => {
-  const SIN_NUEVE = { whatsapp: "+54 11 1234-5678" };
-
-  describe("con el número automático prendido", () => {
-    beforeEach(() => {
-      process.env.ALTA_NUMERO_AUTOMATICO = "1";
-    });
-
-    it("por correo va a /registro?e=celular, sin gastar cupo ni mandar nada", async () => {
-      expect(await pedir({ ...BUENOS, ...SIN_NUEVE })).toBe("/registro?e=celular");
-
-      expect(h.rateLimit).not.toHaveBeenCalled();
-      expect(h.topePorIp).not.toHaveBeenCalled();
-      expect(h.pendientes).toHaveLength(0);
-      expect(h.enviar).not.toHaveBeenCalled();
-    });
-
-    it("con Google va a /registro?e=celular, sin cookie ni Google", async () => {
-      expect(await conGoogle({ ...BUENOS, ...SIN_NUEVE })).toBe("/registro?e=celular");
-
-      expect(h.topePorIp).not.toHaveBeenCalled();
-      expect(h.ponerCookie).not.toHaveBeenCalled();
-      expect(h.signInSocial).not.toHaveBeenCalled();
-    });
-
-    it("con el 9 sigue como siempre, por correo y con Google", async () => {
-      expect(await pedir()).toBe(AVISO);
-      expect(await conGoogle()).toBe(URL_DE_GOOGLE);
-    });
-
-    it("otro país sigue como siempre", async () => {
-      expect(await pedir({ ...BUENOS, whatsapp: "+1 202-555-0123" })).toBe(AVISO);
-      expect(await conGoogle({ ...BUENOS, whatsapp: "+1 202-555-0123" })).toBe(URL_DE_GOOGLE);
-    });
-
-    it("un dato malo sigue siendo `datos`, aunque el número también falte del 9", async () => {
-      expect(await pedir({ ...BUENOS, ...SIN_NUEVE, terminos: undefined })).toBe("/registro?e=datos");
-      expect(await conGoogle({ ...BUENOS, ...SIN_NUEVE, empresa: "" })).toBe("/registro?e=datos");
-    });
-  });
-
-  describe("con el número automático apagado", () => {
-    it("por correo se acepta como hoy y el enlace lleva el número tal cual", async () => {
-      expect(await pedir({ ...BUENOS, ...SIN_NUEVE })).toBe(AVISO);
-
-      expect(abrirToken(elMail().token)?.numero).toBe("+541112345678");
-    });
-
-    it("con Google se acepta como hoy", async () => {
-      expect(await conGoogle({ ...BUENOS, ...SIN_NUEVE })).toBe(URL_DE_GOOGLE);
-
-      expect(h.ponerCookie).toHaveBeenCalledWith(expect.objectContaining({ numero: "+541112345678" }));
-    });
   });
 });

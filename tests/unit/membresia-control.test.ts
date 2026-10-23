@@ -4,8 +4,8 @@
  *
  * Con `BASE_POR_CLIENTE` prendida la identidad vive en `neondb` y la copia en
  * `t_<hex>` la escribe sólo `espejar`. Acá se afirma, sitio por sitio, que la
- * escritura sale por `enControl` (no por `enTenant`, que caería en la base del
- * cliente), que el espejo corre DESPUÉS de la escritura y con el inquilino
+ * escritura sale por `enControl` o `enControlVarias` (no por `enTenant`, que
+ * caería en la base del cliente), que el espejo corre DESPUÉS de la escritura y con el inquilino
  * correcto, y que si el espejo falla la operación igual contesta bien: el cambio
  * ya está en control y el barrido levanta la copia.
  */
@@ -42,7 +42,15 @@ vi.mock("@/data/scope", async () => {
     h.contextos.push(ctx);
     return await armar(base);
   };
-  return { enTenant: puerta("enTenant"), enControl: puerta("enControl") };
+  // Una tras otra, en el orden del lote: así cada consulta recibe su tanda.
+  const lote = async (ctx: unknown, armar: (db: unknown) => PromiseLike<unknown>[]) => {
+    h.orden.push("enControlVarias");
+    h.contextos.push(ctx);
+    const resultados: unknown[] = [];
+    for (const consulta of armar(base)) resultados.push(await consulta);
+    return resultados;
+  };
+  return { enTenant: puerta("enTenant"), enControl: puerta("enControl"), enControlVarias: lote };
 });
 vi.mock("@/lib/db", async () => ({
   db: {
@@ -120,6 +128,39 @@ describe("espejarSinFallar", () => {
     expect(h.warn).toHaveBeenCalledWith({ tenantId: ESPACIO, detalle: "08006" }, "bases.espejo_pendiente");
     expect(JSON.stringify(h.warn.mock.calls)).not.toContain("ana@example.com");
   });
+
+  it("si la copia falla una vez y la segunda entra, devuelve true y no anota nada", async () => {
+    h.espejar.mockRejectedValueOnce(Object.assign(new Error("falló la fila de ana@example.com"), { code: "08006" }));
+
+    expect(await espejarSinFallar(ESPACIO)).toBe(true);
+
+    expect(h.espejar).toHaveBeenCalledTimes(2);
+    expect(h.espejar).toHaveBeenNthCalledWith(2, ESPACIO);
+    expect(h.warn).not.toHaveBeenCalled();
+  });
+
+  it("si falla las dos veces devuelve false con un solo aviso, y el aviso no lleva el mensaje", async () => {
+    espejoCaido();
+
+    expect(await espejarSinFallar(ESPACIO)).toBe(false);
+
+    expect(h.espejar).toHaveBeenCalledTimes(2);
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    expect(h.warn).toHaveBeenCalledWith({ tenantId: ESPACIO, detalle: "08006" }, "bases.espejo_pendiente");
+    expect(JSON.stringify(h.warn.mock.calls)).not.toContain("ana@example.com");
+  });
+
+  it.each([
+    ["en el error", { code: "3D000" }],
+    ["en su causa", { cause: { code: "3D000" } }],
+  ])("con la base inexistente (3D000 %s) no reintenta", async (_donde, extra) => {
+    h.espejar.mockRejectedValue(Object.assign(new Error("database does not exist"), extra));
+
+    expect(await espejarSinFallar(ESPACIO)).toBe(false);
+
+    expect(h.espejar).toHaveBeenCalledTimes(1);
+    expect(h.warn).toHaveBeenCalledWith({ tenantId: ESPACIO, detalle: "3D000" }, "bases.espejo_pendiente");
+  });
 });
 
 describe("la invitación", () => {
@@ -173,15 +214,16 @@ describe("PATCH /api/admin/users/:id", () => {
 
   beforeEach(() => {
     h.requireAdmin.mockResolvedValue({ user: { id: ADMIN }, userRow: { role: "admin", tenant_id: ESPACIO } });
-    h.respuestas.push([[OBJETIVO, "viewer"]], [[OBJETIVO, "Ana", "analyst", "2026-01-01T00:00:00.000Z", null]]);
+    // Una tanda por sentencia del lote: el candado, el rol de antes y la fila ya cambiada.
+    h.respuestas.push([], [["viewer"]], [[OBJETIVO, "Ana", "analyst", "2026-01-01T00:00:00.000Z", null]]);
   });
 
-  it("lee y escribe por control, y espeja el espacio de quien cambia el rol cuando ya escribió", async () => {
+  it("lee y escribe por control en un solo lote, y espeja el espacio de quien cambia el rol cuando ya escribió", async () => {
     const res = await pedir();
 
     expect(res.status).toBe(200);
-    expect(h.orden).toEqual(["enControl", "enControl", `espejar:${ESPACIO}`]);
-    expect(h.contextos).toEqual([{ tenantId: ESPACIO }, { tenantId: ESPACIO }]);
+    expect(h.orden).toEqual(["enControlVarias", `espejar:${ESPACIO}`]);
+    expect(h.contextos).toEqual([{ tenantId: ESPACIO }]);
   });
 
   it("si el espejo falla el cambio de rol contesta bien", async () => {
@@ -200,6 +242,7 @@ describe("PATCH /api/admin/users/:id", () => {
     const res = await pedir();
 
     expect(res.status).toBe(404);
+    expect(h.orden).toEqual(["enControlVarias"]);
     expect(h.espejar).not.toHaveBeenCalled();
   });
 });
@@ -216,7 +259,7 @@ describe("provisionUserProfile", () => {
     expect(h.contextos).toEqual([{ tenantId: ESPACIO }]);
   });
 
-  it("si el espejo falla el alta por SSO no se cae", async () => {
+  it("si el espejo falla el alta por SSO no se cae, y el login paga dos intentos, no más", async () => {
     espejoCaido();
 
     await expect(
@@ -224,6 +267,9 @@ describe("provisionUserProfile", () => {
         provisionUserProfile({ id: PERSONA, name: "Ana", email: "ana@example.com", emailVerified: true })
       )
     ).resolves.toBeUndefined();
+
+    expect(h.espejar).toHaveBeenCalledTimes(2);
+    expect(h.warn).toHaveBeenCalledTimes(1);
   });
 
   it("el perfil del operador se escribe por control en el inquilino por omisión y se espeja ahí", async () => {
@@ -307,13 +353,13 @@ describe("ningún sitio de membresía vuelve a enTenant", () => {
       .split(/\r?\n/)
       .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
       .join("\n");
-    return codigo.split(`${puerta}(`).length - 1;
+    return codigo.split(`${puerta}(`).length - 1 + codigo.split(`${puerta}Varias(`).length - 1;
   };
 
   it.each([
     ["src/server/alta/invitacion.ts", 2],
-    // Cuatro, y se corren dos: rol o baja (marcarBaja con su repregunta para el 404/403).
-    ["src/app/api/admin/users/[id]/route.ts", 4],
+    // Una: baja, alta y rol van en un solo lote con el candado del espacio.
+    ["src/app/api/admin/users/[id]/route.ts", 1],
     ["src/lib/auth/provision.ts", 2],
     // Dos, y se corre una: la lectura con la WABA y la de respaldo para cuando falta la 0051.
     ["src/server/whatsapp/numeros.ts", 2],

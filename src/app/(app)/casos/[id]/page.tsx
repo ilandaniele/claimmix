@@ -58,7 +58,7 @@ import {
 } from "@/app/(app)/_components/plazo-y-complejidad";
 import { Card, Field, FieldGrid, Pill } from "@/app/(app)/_components/ui";
 import { formatAge, formatDate } from "@/lib/utils";
-import { getT, type TranslationKey } from "@/lib/i18n";
+import { getT, textosDelHistorial, type TranslationKey } from "@/lib/i18n";
 import { textoDelMotivo } from "@/lib/i18n/motivo-de-core";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { parseEmailClaimFields } from "@/lib/email/claim-parser";
@@ -828,7 +828,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
 
           {/* Historial */}
           <PanelSection id="audit-log" titulo={t("case.detail.auditLog")}>
-            <AuditTimeline events={audit_log} channel={caseRow.channel} />
+            <AuditTimeline events={audit_log} channel={caseRow.channel} textos={textosDelHistorial(locale)} />
           </PanelSection>
         </div>
       </div>

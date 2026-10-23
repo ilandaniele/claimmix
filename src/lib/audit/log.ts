@@ -150,6 +150,8 @@ export const AuditEvent = {
   CASE_HUMAN_REPLY: "case.human_reply",
   /** CASE_READY_CONFIRMED: una persona confirmó que el caso queda listo para Core. */
   CASE_READY_CONFIRMED: "case.ready_confirmed",
+  /** CASE_EXPORTED_TO_CORE: una persona bajó el JSON para el sistema central; payload vacío, sin PII. */
+  CASE_EXPORTED_TO_CORE: "case.exported_to_core",
 
   // ── AI extraction ──────────────────────────────────────────────────────────
   AI_EXTRACTED: "ai.extracted",

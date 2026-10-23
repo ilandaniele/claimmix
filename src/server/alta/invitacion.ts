@@ -103,6 +103,16 @@ export async function borrarCookieDeInvitacion(): Promise<void> {
 }
 
 /**
+ * La invitación que trae la cookie de este navegador, si es para la dirección con
+ * la que la persona entró; si no, null. Lee sólo la cookie: no consulta la base ni
+ * dice nada de ninguna empresa, así que no sirve para averiguar cuáles existen.
+ */
+export async function invitacionDeLaSesion(email: string): Promise<DatosDeInvitacion | null> {
+  const invitacion = abrirInvitacion(await leerCookieDeInvitacion());
+  return invitacion?.e === email.trim().toLowerCase() ? invitacion : null;
+}
+
+/**
  * ¿Puede quien tiene este rol invitar con aquel? Un admin invita a todos menos a
  * un owner. La misma regla está escrita en SQL en `aceptarInvitacion`.
  */

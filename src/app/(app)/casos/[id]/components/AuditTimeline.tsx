@@ -2,7 +2,8 @@
 
 import { formatDate } from "@/lib/utils";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
-import { esAR, type ClaveDelCliente } from "@/lib/i18n/es-AR";
+import type { ClaveDelCliente } from "@/lib/i18n/es-AR";
+import type { ClaveDeHistorial } from "@/lib/i18n/es-AR.servidor";
 import { claveDeMotivoDeRechazo } from "../_components/AttachmentsPanel";
 
 /*
@@ -26,26 +27,30 @@ interface AuditLogEntry {
   con_actor?: boolean;
 }
 
+type TextosDelHistorial = Record<ClaveDeHistorial, string>;
+
 interface AuditTimelineProps {
   events: AuditLogEntry[];
   channel?: string;
+  /** Las etiquetas de cada evento: llegan del servidor, no en el JS de todas las páginas. */
+  textos: TextosDelHistorial;
 }
 
 function eventLabel(
   eventType: string,
   channel: string | undefined,
-  t: (key: ClaveDelCliente) => string
+  textos: TextosDelHistorial
 ): string {
   // El correo por WhatsApp lo llevan las mismas tablas que el correo real, así
   // que el evento es igual — «email.received» — pero para quien lee la
   // pantalla es un mensaje de WhatsApp, no un mail.
   if (eventType === "email.received" && channel?.startsWith("whatsapp")) {
-    return t("audit.whatsapp.received");
+    return textos["audit.whatsapp.received"];
   }
 
-  const i18nKey = `audit.${eventType}` as ClaveDelCliente;
-  if (i18nKey in esAR) {
-    return t(i18nKey);
+  const i18nKey = `audit.${eventType}` as ClaveDeHistorial;
+  if (i18nKey in textos) {
+    return textos[i18nKey];
   }
   return eventType
     .split(".")
@@ -63,7 +68,6 @@ const MOTIVOS_DEL_CASO: Record<string, ClaveDelCliente> = {
   tope_por_formulario: "case.detail.motivo.topePorFormulario",
   marcado_relevante: "case.detail.motivo.marcadoRelevante",
   clasificador: "case.detail.motivo.clasificador",
-  budget_exceeded: "audit.ai.budget_exceeded",
   devolver_al_agente: "case.detail.devolverAlAgente",
   entregado_por_fuera: "case.detail.motivo.entregadoPorFuera",
   plantilla_sin_aprobar: "reenvio.motivo.plantilla_sin_aprobar",
@@ -77,10 +81,13 @@ const SEVERIDAD = /^severidad (high|critical)$/;
 
 function motivoLegible(
   reason: string,
-  t: (key: ClaveDelCliente) => string
+  t: (key: ClaveDelCliente) => string,
+  textos: TextosDelHistorial
 ): string {
   const clave = claveDeMotivoDeRechazo(reason);
   if (clave) return t(clave);
+
+  if (reason === "budget_exceeded") return textos["audit.ai.budget_exceeded"];
 
   const propio = MOTIVOS_DEL_CASO[reason];
   if (propio) return t(propio);
@@ -93,10 +100,10 @@ function motivoLegible(
 }
 
 /** Quién hizo el evento. Sin dato de autoría (`con_actor` ausente) no se afirma nada. */
-function Autor({ event, t }: { event: AuditLogEntry; t: (key: ClaveDelCliente) => string }) {
+function Autor({ event, textos }: { event: AuditLogEntry; textos: TextosDelHistorial }) {
   const autor =
     event.actor_name ||
-    (event.con_actor === undefined ? null : t(event.con_actor ? "audit.actor.persona" : "audit.actor.sistema"));
+    (event.con_actor === undefined ? null : textos[event.con_actor ? "audit.actor.persona" : "audit.actor.sistema"]);
   if (!autor) return null;
   return (
     <p className="text-xs text-slate-500" data-testid="autor-del-evento">
@@ -113,7 +120,7 @@ function dotColor(eventType: string): string {
   return "bg-slate-300";
 }
 
-export function AuditTimeline({ events, channel }: AuditTimelineProps) {
+export function AuditTimeline({ events, channel, textos }: AuditTimelineProps) {
   const t = useT();
   const { locale } = useLocale();
 
@@ -138,7 +145,7 @@ export function AuditTimeline({ events, channel }: AuditTimelineProps) {
           />
           <div className="flex flex-col gap-0.5">
             <p className="text-xs font-medium text-slate-700 leading-tight">
-              {eventLabel(event.event_type, channel, t)}
+              {eventLabel(event.event_type, channel, textos)}
             </p>
             <time
               dateTime={event.created_at}
@@ -146,7 +153,7 @@ export function AuditTimeline({ events, channel }: AuditTimelineProps) {
             >
               {formatDate(event.created_at, locale)}
             </time>
-            <Autor event={event} t={t} />
+            <Autor event={event} textos={textos} />
             {/*
               * El motivo, traducido cuando es un código de rechazo de adjunto.
               *
@@ -160,7 +167,7 @@ export function AuditTimeline({ events, channel }: AuditTimelineProps) {
             {event.reason != null && (
               <p className="text-xs text-slate-500 mt-0.5">
                 {t("case.detail.auditReason")}:{" "}
-                <span className="font-medium">{motivoLegible(event.reason, t)}</span>
+                <span className="font-medium">{motivoLegible(event.reason, t, textos)}</span>
               </p>
             )}
           </div>

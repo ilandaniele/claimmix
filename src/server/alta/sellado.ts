@@ -4,8 +4,9 @@
  *
  * La clave sale de BETTER_AUTH_SECRET por HKDF con un `info` propio de cada uso,
  * así que un valor sellado para un fin no abre en otro y no se agrega ninguna
- * variable que rotar. Lo comparten `cm_alta` (cookie.ts) y el enlace de alta por
- * correo (token-de-registro.ts); cada uno revisa la forma de lo que abre.
+ * variable que rotar. Lo comparten el enlace de alta por correo
+ * (token-de-registro.ts) y la invitación (invitacion.ts); cada uno revisa la forma
+ * de lo que abre.
  */
 
 import "server-only";

@@ -21,7 +21,7 @@
  */
 
 import { esAR as esARCliente, type ClaveDelCliente } from "./es-AR";
-import { esARServidor, type ClaveDelServidor, type ClaveDePagina } from "./es-AR.servidor";
+import { esARServidor, type ClaveDelServidor, type ClaveDePagina, type ClaveDeHistorial } from "./es-AR.servidor";
 import { enUS as enUSCliente } from "./en-US";
 import { enUSServidor } from "./en-US.servidor";
 
@@ -58,5 +58,14 @@ export function textosDePagina(locale: Locale): Record<ClaveDePagina, string> {
   return Object.fromEntries(CLAVES_DE_PAGINA.map((clave) => [clave, t(clave)])) as Record<ClaveDePagina, string>;
 }
 
+const CLAVES_DEL_HISTORIAL = (Object.keys(esARServidor) as ClaveDelServidor[]).filter(
+  (clave): clave is ClaveDeHistorial => clave.startsWith("audit."),
+);
+
+export function textosDelHistorial(locale: Locale): Record<ClaveDeHistorial, string> {
+  const t = getT(locale);
+  return Object.fromEntries(CLAVES_DEL_HISTORIAL.map((clave) => [clave, t(clave)])) as Record<ClaveDeHistorial, string>;
+}
+
 // Re-export for consumers that need the raw maps or types.
-export { esAR, enUS, type ClaveDelCliente, type ClaveDelServidor, type ClaveDePagina };
+export { esAR, enUS, type ClaveDelCliente, type ClaveDelServidor, type ClaveDePagina, type ClaveDeHistorial };

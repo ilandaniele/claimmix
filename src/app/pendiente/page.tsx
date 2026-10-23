@@ -20,7 +20,7 @@
 import { redirect } from "next/navigation";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRowOrThrow } from "@/lib/auth/user-row";
-import { abrirInvitacion, leerCookieDeInvitacion, resumenDeInvitacion } from "@/server/alta/invitacion";
+import { invitacionDeLaSesion, resumenDeInvitacion } from "@/server/alta/invitacion";
 
 export default async function PendientePage() {
   const session = await getSessionContext();
@@ -30,9 +30,7 @@ export default async function PendientePage() {
   const fila = await getUserRowOrThrow(session.user.id);
   if (fila) redirect("/bandeja");
 
-  const invitacion = abrirInvitacion(await leerCookieDeInvitacion());
-  if (invitacion?.e === session.user.email.trim().toLowerCase() && (await resumenDeInvitacion(invitacion))) {
-    redirect("/invitacion");
-  }
+  const invitacion = await invitacionDeLaSesion(session.user.email);
+  if (invitacion && (await resumenDeInvitacion(invitacion))) redirect("/invitacion");
   redirect("/alta");
 }

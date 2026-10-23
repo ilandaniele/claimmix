@@ -114,16 +114,15 @@ export async function sendPasswordResetEmail(
   try {
     const perfil = await filaDeUsuario(input.userId);
     const locale: Locale = perfil?.locale === "en-US" ? "en-US" : "es-AR";
-    // Sin perfil es una cuenta de alta sin contraseña: el enlace la activa.
-    const correo = correoDeEnlace(getT(locale), perfil ? "recuperar" : "activar", input.url, input.duraMinutos);
+    // Una cuenta sin perfil es una recién creada (con contraseña o con Google) que todavía no armó su espacio: pidió recuperar, no activar.
+    const correo = correoDeEnlace(getT(locale), "recuperar", input.url, input.duraMinutos, !perfil);
 
     const envio: Envio =
       perfil && !perfil.autoalta && !remitenteDelSistema()
         ? await porLaCasillaDelInquilino(perfil.tenant_id, input.email, correo)
         : await enviarCorreoDelSistema(
             { to: input.email, ...correo },
-            // Sin perfil el enlace activa una cuenta de alta, y es del cupo de las altas.
-            { tipo: perfil ? "recuperacion" : "alta", ip: await ipDelPedido(input.request) }
+            { tipo: "recuperacion", ip: await ipDelPedido(input.request) }
           );
 
     /*

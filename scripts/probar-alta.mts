@@ -1,14 +1,17 @@
 /**
- * `pnpm alta:probar` — ¿anda el alta por el enlace del correo, de punta a punta, en QA?
+ * `pnpm alta:probar` — ¿anda el alta en dos pasos, de punta a punta, en QA?
  *
  * Tres cosas, en este orden:
  *
  * 1. Le pregunta al despliegue de QA qué configuración tiene (`/api/health`), si el
  *    registro coincide con ella (`/registro`) y si rechaza un enlace sellado con
  *    otro secreto (`/alta/correo`).
- * 2. Recorre en este proceso la acción de `/alta/correo`, con el código de la rama
- *    y la base de QA: la cuenta, el correo verificado, el espacio, el número, la
- *    auditoría, la sesión, los cupos por red y el segundo uso del mismo enlace.
+ * 2. Recorre en este proceso los dos pasos del alta, con el código de la rama y la
+ *    base de QA. Primero el enlace del correo (`crearCuentaDelEnlace`): la cuenta,
+ *    el correo verificado y la sesión, y ni un espacio. Después el pedido del
+ *    espacio (`crearEspacio`): el perfil, el número, la auditoría y los cupos por
+ *    red. Y además el segundo uso del mismo enlace, el tope por red y un enlace
+ *    de antes de separar los pasos, que abre sólo la cuenta.
  * 3. Barre lo que dejó. Siempre, también si algo falló.
  *
  * Escribe en la base de QA y en ninguna otra: la URL tiene que ser el origen de QA
@@ -19,6 +22,13 @@
  * Los logs de Actions son públicos: lo que sale por pantalla es un código de la
  * tabla cerrada de `scripts/lib/probar-alta-reglas.mts` y nada más. Ni banderas, ni
  * conteos, ni correos, ni ids, ni el enlace, ni la clave, ni las cadenas.
+ *
+ * Los módulos de verdad escriben en el logger, que sale por `console`: acá se les
+ * apaga, y ellos se tragan los errores de la base y devuelven la ruta de «falla».
+ * La causa no sale, así que cuando un paso termina en esa ruta se prueba la base
+ * aparte (`baseContesta`): si no contesta, es `pasajero` (no se pudo probar); si
+ * contesta, el paso falló con la base arriba y es `destino_inesperado`, que pone
+ * rojo. Un defecto que rompe siempre ese paso no se confunde con un parpadeo.
  *
  * Lee de `process.env` CRON_SECRET, BETTER_AUTH_SECRET (el workflow lo genera),
  * QA_DATABASE_URL y QA_DATABASE_URL_APP (si faltan, de `.env.local`) y, si está,
@@ -39,9 +49,12 @@ import { endpointDe, esUrlDeQa, motivoDeVetoDeBases } from "./lib/hosts-vetados.
 import { ROL_APP } from "./lib/permisos-por-perfil.mjs";
 import {
   CUPOS_DE_LA_RED_DE_PRUEBA,
+  CUPOS_ESPERADOS,
+  LETRAS,
   PREFIJO_CORREO,
   PREFIJO_EMPRESA,
   clasificarError,
+  codigoDeDestinoInesperado,
   compararContadores,
   correoDe,
   diagnosticarCierre,
@@ -72,9 +85,8 @@ neonConfig.webSocketConstructor = globalThis.WebSocket as never;
 
 type Fila = Record<string, unknown>;
 
-/** Las copias de `src/app/alta/correo/actions.ts`: `"use server"` no deja exportarlas. */
-const YA_TENES_CUENTA = "/login?aviso=ya_tenes_cuenta";
-const conMotivo = (enlace: string, e: "clave" | "distintas" | "intentos" | "falla") => `${enlace}&e=${e}`;
+/** Adónde deja el enlace del correo a quien acaba de crear la cuenta: al segundo paso. */
+const DESTINO_DEL_ENLACE = "/alta";
 
 /** Lo mismo que `DIA_MS` de `src/server/alta/cupo-por-ip.ts`. */
 const DIA_MS = 24 * 60 * 60_000;
@@ -162,6 +174,18 @@ function deError(e: unknown): Hallazgo {
   return hallazgo(COMO_HALLAZGO[clasificarError(SQLSTATE.test(codigo) ? codigo : undefined, `${codigo} ${mensaje}`)]);
 }
 
+/**
+ * Apaga la consola de los módulos de verdad: escriben en el logger y los logs de
+ * Actions son públicos. Lo que esta prueba imprime sale por `console.log`.
+ */
+function atajarLaConsola(): void {
+  const nada = () => {};
+  console.error = nada;
+  console.warn = nada;
+  console.info = nada;
+  console.debug = nada;
+}
+
 /* ───── Lo que se pide al despliegue ───── */
 
 async function pedir(ruta: string, init: RequestInit = {}): Promise<{ codigo: number; texto: string }> {
@@ -213,6 +237,21 @@ async function comoApp(texto: string): Promise<Fila[]> {
   } finally {
     await pool.end();
   }
+}
+
+/** ¿Contesta la base de la app ahora? Distingue un parpadeo de la red de un defecto cuando el módulo tragó la falla. */
+async function baseContesta(): Promise<boolean> {
+  try {
+    await comoApp("select 1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Un destino que no se esperaba: `pasajero` sólo si el módulo tragó una falla y la base no contesta. */
+async function destinoInesperado(destino: string) {
+  return codigoDeDestinoInesperado(destino, await baseContesta());
 }
 
 /**
@@ -346,129 +385,64 @@ async function probarTodo(): Promise<void> {
   process.env.ALTA_AUTOMATICA = "1";
   Object.assign(process.env, topesDesdeBanderas(banderas));
 
-  const { APIError } = await import("better-auth/api");
-  const { ipValida } = await import("@/lib/audit/log");
-  const { auth } = await import("@/lib/auth");
-  const { marcarCorreoVerificado } = await import("@/lib/auth/on-password-reset");
-  const { altaAbierta, enAlta } = await import("@/lib/auth/registro-permitido");
+  atajarLaConsola();
+  const { altaAbierta } = await import("@/lib/auth/registro-permitido");
   const { diasDePrueba } = await import("@/lib/billing/plans");
   const { claveDeCupo } = await import("@/lib/rate-limit/clave");
-  const { clientIpFromHeaders, topePorIp } = await import("@/lib/rate-limit/index");
   const { topeEntero } = await import("@/lib/topes");
   const { llegoAlAviso } = await import("@/server/alta/aviso-operador");
-  const { crearInquilino, topeDeBases, topeDeMb, topeGlobalDelDia } = await import("@/server/alta/crear-inquilino");
-  const { soltarCupoDeAlta, tomarCupoDeAlta } = await import("@/server/alta/cupo-por-ip");
-  const { conError, prepararEspacio, SIN_ESPACIO } = await import("@/server/alta/destinos");
-  const { abrirToken, sellarToken } = await import("@/server/alta/token-de-registro");
+  const { topeDeBases, topeDeMb, topeGlobalDelDia } = await import("@/server/alta/crear-inquilino");
+  const { conError, crearEspacio, SIN_ESPACIO } = await import("@/server/alta/crear-espacio");
+  const { crearCuentaDelEnlace, YA_TENES_CUENTA } = await import("@/server/alta/cuenta-del-enlace");
+  const { tomarCupoDeAlta } = await import("@/server/alta/cupo-por-ip");
+  const { sellarToken } = await import("@/server/alta/token-de-registro");
 
-  type AltaCreada = Awaited<ReturnType<typeof crearInquilino>>;
-  type CupoDeAlta = Awaited<ReturnType<typeof tomarCupoDeAlta>>["cupo"];
-  interface Recorrido {
-    destino: string;
-    userId: string | null;
-    alta: AltaCreada | null;
-    cupo: CupoDeAlta | null;
-    error: unknown;
-  }
+  type Espacio = Awaited<ReturnType<typeof crearEspacio>>;
 
   /**
-   * La acción de `/alta/correo` (`destinoDelEnlace`), copiada línea a línea. Cambia
-   * lo que no se puede correr fuera de un pedido de Next: la IP sale de una
-   * cabecera armada acá, el aviso al operador pasa a ser un hallazgo, no hay logger
-   * y los errores se guardan para clasificarlos. Un test ata el orden de las
-   * llamadas al de la acción.
+   * El primer paso: lo que hace quien abre el enlace del correo. Es el módulo de la
+   * acción de `/alta/correo`, no una copia; acá sólo se arma la cabecera de la red.
+   * De lo que pasó adentro se ve adónde sigue la persona y lo que quedó en la base.
    */
-  async function recorrerElEnlace(crudo: string, password: string, ipDeOrigen: string): Promise<Recorrido> {
-    let userId: string | null = null;
-    let error: unknown = null;
-    const sin = (destino: string): Recorrido => ({ destino, userId, alta: null, cupo: null, error });
+  const recorrerElEnlace = (crudo: string, password: string, ipDeOrigen: string): Promise<string> =>
+    crearCuentaDelEnlace({
+      token: crudo,
+      clave: password,
+      repetida: password,
+      headerStore: new Headers({ "x-vercel-forwarded-for": ipDeOrigen }),
+    });
 
-    const token = abrirToken(crudo);
-    // Sin `t`, la pantalla dice «enlace vencido».
-    if (!token) return sin("/alta/correo");
-    const enlace = `/alta/correo?t=${crudo}`;
+  /** El segundo paso: lo que hace `crearMiEspacio` cuando la sesión ya se miró. */
+  const pedirElEspacio = (userId: string, l: Letra): Promise<Espacio> =>
+    crearEspacio({
+      userId,
+      empresa: empresaDe(corrida, l),
+      whatsapp: numeroDe(corrida, l),
+      terminos: true,
+      numeroAutomatico: false,
+      ip: ipDe(corrida, l),
+    });
 
-    if (!altaAbierta(token.e)) return sin("/login?error=registro_cerrado");
+  const datosDe = (l: Letra) => ({ e: correoDe(corrida, l), nombre: "Prueba del alta", locale: "es-AR" as const });
+  const claveAleatoria = () => randomBytes(18).toString("base64url");
+  const ventanaDelDia = () => Math.floor(Date.now() / DIA_MS) * DIA_MS;
 
-    const headerStore = new Headers({ "x-vercel-forwarded-for": ipDeOrigen });
-    const ip = clientIpFromHeaders(headerStore);
-    const porIp = await topePorIp(ip);
-    if (!porIp.allowed) return sin(conMotivo(enlace, "intentos"));
-
-    try {
-      const creada = await enAlta("correo", () =>
-        auth.api.signUpEmail({
-          body: { name: token.nombre, email: token.e, password },
-          // Sin cookies: la sesión se abre abajo, cuando la cuenta ya tiene el correo verificado.
-          headers: new Headers(),
-        })
-      );
-      userId = creada.user.id;
-      const { internalAdapter } = await auth.$context;
-      if (!(await internalAdapter.findUserById(userId))) return sin(YA_TENES_CUENTA);
-    } catch (e) {
-      const code = e instanceof APIError ? e.body?.code : undefined;
-      if (code === "USER_ALREADY_EXISTS") return sin(YA_TENES_CUENTA);
-      error = e;
-      return sin(conMotivo(enlace, "falla"));
-    }
-
-    await marcarCorreoVerificado(userId);
-
-    let alta: AltaCreada | null = null;
-    const { clave, cupo } = await tomarCupoDeAlta(ip);
-    const con = (destino: string): Recorrido => ({ destino, userId, alta, cupo, error });
-    if (cupo.allowed) {
-      try {
-        alta = await crearInquilino({
-          userId,
-          empresa: token.empresa,
-          numero: token.numero,
-          ip: ipValida(ip),
-        });
-      } catch (e) {
-        error = e;
-      }
-      if (alta === null || (alta.resultado !== "ok" && alta.resultado !== "ok_numero_en_revision")) {
-        await soltarCupoDeAlta(clave, cupo.ventana);
-      }
-    }
-
-    try {
-      await auth.api.signInEmail({ body: { email: token.e, password }, headers: headerStore });
-    } catch (e) {
-      error = e;
-      return con("/login");
-    }
-
-    // `ventana: 0` es que el contador no contestó: no hubo «demasiados intentos».
-    if (!cupo.allowed) return con(conError(cupo.ventana === 0 ? "falla" : "intentos"));
-    if (alta === null) return con(conError("falla"));
-    if (alta.resultado !== "ok" && alta.resultado !== "ok_numero_en_revision") return con(SIN_ESPACIO[alta.resultado]);
-
-    if (alta.creadas24h !== null && alta.tope !== null && llegoAlAviso(alta.creadas24h, alta.tope)) {
-      anotar("cerca_del_aviso");
-    }
-    return con(await prepararEspacio(alta, DESTINO_DE_ALTA));
+  /** Cuántas altas lleva el día contra el tope y el aviso al operador. */
+  async function margenDeHoy(c: PoolClient): Promise<Hallazgo> {
+    const [dia] = await filas(c, "select count(*)::int as n from public.tenants where autoalta and created_at > now() - interval '24 hours'");
+    return margenDelTope(Number(dia?.n ?? 0), topeGlobalDelDia(), llegoAlAviso);
   }
 
-  const datosDe = (l: Letra) => ({
-    e: correoDe(corrida, l),
-    empresa: empresaDe(corrida, l),
-    numero: numeroDe(corrida, l),
-    nombre: "Prueba del alta",
-    locale: "es-AR" as const,
-  });
-  const claveAleatoria = () => randomBytes(18).toString("base64url");
-
-  /** Por qué el recorrido no dejó el espacio: el hallazgo, o el cierre sin conteo que hay que diagnosticar. */
-  function fallaDelRecorrido(r: Recorrido): CodigoDeHallazgo | "cierre_sin_conteo" | null {
-    if (r.error !== null) return deError(r.error).codigo;
-    if (r.cupo && !r.cupo.allowed && r.cupo.ventana === 0) return "contador_sin_respuesta";
-    if (r.alta?.resultado === "alta_cerrada") return r.alta.creadas24h !== null ? "tope_lleno" : "cierre_sin_conteo";
-    if (r.alta?.resultado === "no_verificado") return "correo_sin_verificar";
-    if (r.alta && r.alta.resultado !== "ok") return "resultado_inesperado";
-    return r.alta && r.destino === DESTINO_DE_ALTA ? null : "destino_inesperado";
+  /** Por qué el pedido no dejó el espacio, o el cierre sin conteo que hay que diagnosticar. Null si lo dejó. */
+  async function fallaDelEspacio(c: PoolClient, r: Espacio): Promise<CodigoDeHallazgo | "cierre_sin_conteo" | null> {
+    if (r.alta) {
+      if (r.alta.resultado !== "ok") return "resultado_inesperado";
+      return r.destino === DESTINO_DE_ALTA ? null : "destino_inesperado";
+    }
+    if (r.destino === SIN_ESPACIO.ya_tiene_espacio) return "resultado_inesperado";
+    if (r.destino !== SIN_ESPACIO.alta_cerrada) return destinoInesperado(r.destino);
+    const margen = await margenDeHoy(c);
+    return margen.codigo === "tope_lleno" || margen.codigo === "tope_0" ? margen.codigo : "cierre_sin_conteo";
   }
 
   /** Cuánto subió cada contador de la red: la suma de todas las ventanas de la clave, que no se mueve con el reloj. */
@@ -499,12 +473,42 @@ async function probarTodo(): Promise<void> {
     return JSON.stringify(f);
   }
 
+  /**
+   * Después del enlace hay cuenta, con el correo verificado y la sesión abierta, y
+   * ni espacio, ni perfil, ni número. Devuelve el id de la cuenta si está todo bien;
+   * si no, anota lo que falta y devuelve null.
+   */
+  async function comprobarCuenta(c: PoolClient, letra: Letra, bien: "enlace_ok" | "enlace_viejo_ok"): Promise<string | null> {
+    const [f] = await filas(
+      c,
+      `select
+         (select id::text from public."user" where email = $1) as id,
+         (select email_verified from public."user" where email = $1) as verificado,
+         (select count(*)::int from public.session s join public."user" a on a.id = s.user_id where a.email = $1) as sesiones,
+         (select count(*)::int from public.users u join public."user" a on a.id = u.id where a.email = $1) as perfiles,
+         (select count(*)::int from public.tenants where starts_with(name, $2)) as inquilinos,
+         (select count(*)::int from public.whatsapp_numeros where numero_e164 = $3) as numeros`,
+      [correoDe(corrida, letra), empresaDe(corrida, letra), numeroDe(corrida, letra)]
+    );
+    const id = typeof f?.id === "string" ? f.id : null;
+    const fallas: CodigoDeHallazgo[] = [];
+    if (id === null) fallas.push("destino_inesperado");
+    else {
+      if (f?.verificado !== true) fallas.push("correo_sin_verificar");
+      if (Number(f?.sesiones) < 1) fallas.push("sin_sesion");
+      if (Number(f?.perfiles) + Number(f?.inquilinos) + Number(f?.numeros) > 0) fallas.push("enlace_creo_espacio");
+    }
+    for (const falla of fallas) anotar(falla);
+    if (fallas.length > 0) return null;
+    anotar(bien);
+    return id;
+  }
+
   async function comprobarAlta(c: PoolClient, userId: string, tenantId: string, letra: Letra): Promise<void> {
     const ip = ipDe(corrida, letra);
     const [f] = await filas(
       c,
       `select
-         (select email_verified from public."user" where id = $1::uuid) as verificado,
          (select count(*)::int from public.users where id = $1::uuid and role = 'owner' and tenant_id = $2::uuid) as perfil,
          (select count(*)::int from public.tenants
            where id = $2::uuid and name = $3 and autoalta and plan = 'piloto' and billing_status = 'trial'
@@ -512,18 +516,16 @@ async function probarTodo(): Promise<void> {
          (select count(*)::int from public.whatsapp_numeros where tenant_id = $2::uuid and numero_e164 = $5) as numero,
          (select count(*)::int from public.audit_log
            where tenant_id = $2::uuid and event_type = 'tenant.created' and payload->>'origen' = 'autoalta'
-             and payload->>'numero_en_revision' = 'false' and host(ip) = $6) as auditoria,
-         (select count(*)::int from public.session where user_id = $1::uuid) as sesiones`,
+             and payload->>'numero_en_revision' = 'false' and host(ip) = $6) as auditoria`,
       [userId, tenantId, empresaDe(corrida, letra), diasDePrueba(), numeroDe(corrida, letra), ip]
     );
-    const antes = hallazgos.length;
-    if (f?.verificado !== true) anotar("correo_sin_verificar");
-    if (Number(f?.perfil) !== 1) anotar("sin_perfil_de_dueno");
-    if (Number(f?.inquilino) !== 1) anotar("inquilino_mal_creado");
-    if (Number(f?.numero) !== 1) anotar("sin_numero");
-    if (Number(f?.auditoria) !== 1) anotar("sin_auditoria");
-    if (Number(f?.sesiones) < 1) anotar("sin_sesion");
-    if (hallazgos.length === antes) anotar("alta_ok");
+    const fallas: CodigoDeHallazgo[] = [];
+    if (Number(f?.perfil) !== 1) fallas.push("sin_perfil_de_dueno");
+    if (Number(f?.inquilino) !== 1) fallas.push("inquilino_mal_creado");
+    if (Number(f?.numero) !== 1) fallas.push("sin_numero");
+    if (Number(f?.auditoria) !== 1) fallas.push("sin_auditoria");
+    for (const falla of fallas) anotar(falla);
+    if (fallas.length === 0) anotar("alta_ok");
   }
 
   /** Por qué `alta_cerrada` vino sin conteos: falta la migración, un tope de la base, o fue un 23505. */
@@ -553,92 +555,104 @@ async function probarTodo(): Promise<void> {
     });
   }
 
-  /** El alta por el enlace, y abrirlo otra vez. Con `cierre_sin_conteo` no anota nada: lo decide quien llama. */
-  async function altaPorElEnlace(c: PoolClient, letra: "g" | "r"): Promise<{ userId: string | null; cierreSinConteo: boolean }> {
+  /**
+   * Los dos pasos del alta y abrir otra vez el enlace, con lo que cada uno gasta de
+   * los cupos de la red. Con `cierre_sin_conteo` no anota nada: lo decide quien llama.
+   */
+  async function altaEnDosPasos(c: PoolClient, letra: "g" | "r"): Promise<{ userId: string | null; cierreSinConteo: boolean }> {
     const ip = ipDe(corrida, letra);
     const antes = await leerCupos(c, ip);
     const enlace = sellarToken(datosDe(letra));
+    const cupos: Hallazgo[] = [];
+    const sinAlta = { userId: null, cierreSinConteo: false };
 
+    // Primer paso: el enlace crea la cuenta y nada más.
     const primera = await recorrerElEnlace(enlace, claveAleatoria(), ip);
-    const falla = fallaDelRecorrido(primera);
-    if (falla === "cierre_sin_conteo") return { userId: null, cierreSinConteo: true };
-    const { alta, userId } = primera;
-    if (falla !== null || alta === null || userId === null) {
-      anotar(falla ?? "destino_inesperado");
-      return { userId: null, cierreSinConteo: false };
+    if (primera !== DESTINO_DEL_ENLACE) {
+      anotar(await destinoInesperado(primera));
+      return sinAlta;
     }
+    const userId = await comprobarCuenta(c, letra, "enlace_ok");
+    if (userId === null) return sinAlta;
+    cupos.push(compararContadores(antes, await leerCupos(c, ip), CUPOS_ESPERADOS.enlace));
 
+    // Segundo paso: la persona dice que viene a dar de alta su empresa.
+    const espacio = await pedirElEspacio(userId, letra);
+    const falla = await fallaDelEspacio(c, espacio);
+    if (falla === "cierre_sin_conteo") return { userId: null, cierreSinConteo: true };
+    if (falla !== null || espacio.alta === undefined) {
+      anotar(falla ?? "destino_inesperado");
+      return sinAlta;
+    }
+    const { alta } = espacio;
+    if (alta.creadas24h !== null && alta.tope !== null && llegoAlAviso(alta.creadas24h, alta.tope)) anotar("cerca_del_aviso");
     await comprobarAlta(c, userId, alta.tenantId, letra);
-    const despuesDeLaPrimera = await leerCupos(c, ip);
-    const delPrimero = compararContadores(antes, despuesDeLaPrimera, { "auth:ip": 1, "alta:ip": 1 });
+    cupos.push(compararContadores(antes, await leerCupos(c, ip), CUPOS_ESPERADOS.espacio));
 
+    // Abrir otra vez el mismo enlace: la cuenta ya existe y no cambia nada.
     const foto = await fotoDeLaPrueba(c);
     const segunda = await recorrerElEnlace(enlace, claveAleatoria(), ip);
     if ((await fotoDeLaPrueba(c)) !== foto) anotar("segunda_vez_creo_algo");
-    else if (segunda.error !== null) anotar(deError(segunda.error));
-    else anotar(segunda.destino === YA_TENES_CUENTA ? "segunda_vez_ok" : "destino_inesperado");
+    else anotar(segunda === YA_TENES_CUENTA ? "segunda_vez_ok" : await destinoInesperado(segunda));
+    cupos.push(compararContadores(antes, await leerCupos(c, ip), CUPOS_ESPERADOS.enlaceOtraVez));
 
-    const delSegundo = compararContadores(antes, await leerCupos(c, ip), { "auth:ip": 2, "alta:ip": 1 });
-    anotar(delPrimero.codigo === "contadores_ok" ? delSegundo : delPrimero);
+    anotar(cupos.find((h) => h.codigo !== "contadores_ok") ?? hallazgo("contadores_ok"));
     return { userId, cierreSinConteo: false };
   }
 
   /** Un cupo que no dejó un espacio se devuelve: pedir un espacio a quien ya tiene uno no gasta el cupo del día. */
   async function cupoDevuelto(c: PoolClient, userId: string): Promise<void> {
-    const ip = ipDe(corrida, "a");
-    const antes = await leerCupos(c, ip);
-    const { clave, cupo } = await tomarCupoDeAlta(ip);
-    if (!cupo.allowed) return anotar(cupo.ventana === 0 ? "contador_sin_respuesta" : "cupos_mal_contados");
+    const ventana = ventanaDelDia();
+    const antes = await leerCupos(c, ipDe(corrida, "a"));
 
-    try {
-      const alta = await crearInquilino({
-        userId,
-        empresa: empresaDe(corrida, "a"),
-        numero: numeroDe(corrida, "a"),
-        ip: ipValida(ip),
-      });
-      if (alta.resultado !== "ya_tiene_espacio") anotar("resultado_inesperado");
-    } finally {
-      await soltarCupoDeAlta(clave, cupo.ventana);
-    }
+    const r = await pedirElEspacio(userId, "a");
+    if (r.alta !== undefined) return anotar("resultado_inesperado");
+    if (r.destino !== SIN_ESPACIO.ya_tiene_espacio) return anotar(await destinoInesperado(r.destino));
 
-    if (cupo.ventana !== Math.floor(Date.now() / DIA_MS) * DIA_MS) return anotar("contador_movido");
-    const despues = await leerCupos(c, ip);
+    if (ventanaDelDia() !== ventana) return anotar("contador_movido");
+    const despues = await leerCupos(c, ipDe(corrida, "a"));
     anotar(compararContadores(antes, despues, { "alta:ip": 0 }).codigo === "contadores_ok" ? "cupo_devuelto" : "cupo_no_devuelto");
   }
 
-  /** Con el cupo del día de la red lleno, el enlace deja la cuenta con sesión pero sin espacio. */
+  /** Con el cupo del día de la red lleno, pedir el espacio vuelve a /alta con «intentos» y no crea nada. */
   async function topePorRed(c: PoolClient): Promise<void> {
     const ip = ipDe(corrida, "b");
     const tope = topeEntero("ALTA_TOPE_IP_DIA");
     const antes = await leerCupos(c, ip);
+    const ventana = ventanaDelDia();
+
+    // La cuenta nace por el enlace, como en la vida real; el cupo se llena a mano.
+    const destinoDelEnlace = await recorrerElEnlace(sellarToken(datosDe("b")), claveAleatoria(), ip);
+    if (destinoDelEnlace !== DESTINO_DEL_ENLACE) return anotar(await destinoInesperado(destinoDelEnlace));
+    const userId = await comprobarCuenta(c, "b", "enlace_ok");
+    if (userId === null) return;
 
     const ventanas = new Set<number>();
     for (let i = 0; i < tope; i++) ventanas.add((await tomarCupoDeAlta(ip)).cupo.ventana);
-
-    const r = await recorrerElEnlace(sellarToken(datosDe("b")), claveAleatoria(), ip);
-    if (r.error !== null) return anotar(deError(r.error));
-    ventanas.add(r.cupo?.ventana ?? 0);
+    const r = await pedirElEspacio(userId, "b");
     if (ventanas.has(0)) return anotar("contador_sin_respuesta");
-    if (ventanas.size > 1) return anotar("contador_movido");
+    if (ventanas.size > 1 || ventanaDelDia() !== ventana) return anotar("contador_movido");
+    // El cupo está lleno: `crearInquilino` no corre, así que «falla» sólo puede venir del contador.
+    if (r.destino === conError("falla")) return anotar("contador_sin_respuesta");
 
-    const [f] = await filas(
-      c,
-      `select
-         (select email_verified from public."user" where email = $1) as verificado,
-         (select count(*)::int from public.session s join public."user" a on a.id = s.user_id where a.email = $1) as sesiones,
-         (select count(*)::int from public.users u join public."user" a on a.id = u.id where a.email = $1) as perfiles`,
-      [correoDe(corrida, "b")]
-    );
-    if (f?.verificado !== true) anotar("correo_sin_verificar");
-    if (Number(f?.sesiones) < 1) anotar("sin_sesion");
-
+    const [f] = await filas(c, "select count(*)::int as perfiles from public.users where id = $1::uuid", [userId]);
     const cortado =
       r.destino === conError("intentos") &&
-      r.alta === null &&
+      r.alta === undefined &&
       Number(f?.perfiles) === 0 &&
       compararContadores(antes, await leerCupos(c, ip), { "alta:ip": tope + 1 }).codigo === "contadores_ok";
     anotar(cortado ? "tope_por_ip_ok" : "tope_por_ip_no_corta");
+  }
+
+  /**
+   * Un enlace emitido antes de separar los pasos todavía lleva la empresa y el
+   * número. Sellado con el secreto propio, abre como uno nuevo: la cuenta y nada más.
+   */
+  async function enlaceConFormaVieja(c: PoolClient): Promise<void> {
+    const viejo = { ...datosDe("v"), empresa: empresaDe(corrida, "v"), numero: numeroDe(corrida, "v") };
+    const destino = await recorrerElEnlace(sellarToken(viejo), claveAleatoria(), ipDe(corrida, "v"));
+    if (destino !== DESTINO_DEL_ENLACE) return anotar(await destinoInesperado(destino));
+    await comprobarCuenta(c, "v", "enlace_viejo_ok");
   }
 
   /** Un escenario que tira no frena a los demás. */
@@ -667,12 +681,11 @@ async function probarTodo(): Promise<void> {
     await barrer(c, null);
 
     try {
-      const [dia] = await filas(c, "select count(*)::int as n from public.tenants where autoalta and created_at > now() - interval '24 hours'");
-      const margen = margenDelTope(Number(dia?.n ?? 0), topeGlobalDelDia(), llegoAlAviso);
+      const margen = await margenDeHoy(c);
       anotar(margen);
       if (margen.codigo !== "margen_ok") return;
 
-      const numeros = (["g", "a", "b", "r"] as const).map((l) => numeroDe(corrida, l));
+      const numeros = (Object.keys(LETRAS) as Letra[]).map((l) => numeroDe(corrida, l));
       const [ocupados] = await filas(
         c,
         `select count(*)::int as n from public.whatsapp_numeros
@@ -693,18 +706,20 @@ async function probarTodo(): Promise<void> {
 
     let alta = { userId: null as string | null, cierreSinConteo: false };
     await escenario(async () => {
-      alta = await altaPorElEnlace(c, "g");
+      alta = await altaEnDosPasos(c, "g");
       if (!alta.cierreSinConteo) return;
       const causa = await diagnosticarElCierre(c);
       if (causa !== "posible_23505") return anotar(causa);
-      alta = await altaPorElEnlace(c, "r");
+      alta = await altaEnDosPasos(c, "r");
       if (alta.cierreSinConteo) anotar("alta_cerrada_sin_conteo");
     });
 
     const userId = alta.userId;
-    if (userId === null) return;
-    await escenario(() => cupoDevuelto(c, userId));
-    await escenario(() => topePorRed(c));
+    if (userId !== null) {
+      await escenario(() => cupoDevuelto(c, userId));
+      await escenario(() => topePorRed(c));
+    }
+    await escenario(() => enlaceConFormaVieja(c));
   } catch (e) {
     anotar(deError(e));
   } finally {

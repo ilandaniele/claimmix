@@ -1,12 +1,11 @@
 /**
- * Server Action de /alta: crea el espacio de quien se dio de alta sola.
+ * Server Action de /alta: crea el espacio de quien eligió «dar de alta mi empresa».
  *
- * El orden es el que no regala nada: primero lo que se mira sin gastar cupos
- * (sesión, correo verificado, que no sea de operación, que el alta esté abierta
- * para esa dirección, que no tenga ya espacio, que los datos valgan), después el
- * cupo por IP, y recién entonces la función de la base. Quien ya tiene espacio
- * vuelve a /bandeja sin tocar ningún contador, y lo que se libera es SÓLO lo que
- * esta llamada tomó. El tope global de 24 h no se cuenta acá: lo cuenta la base.
+ * Acá se mira lo que no gasta cupos (sesión, correo verificado, que no sea de
+ * operación, que el alta esté abierta para esa dirección, que no tenga ya
+ * espacio); quien ya tiene espacio vuelve a /bandeja sin tocar ningún contador.
+ * El resto (datos, cupo por IP, la función de la base) está en `crearEspacio`, un
+ * módulo de servidor: un archivo con "use server" publica todos sus exports.
  *
  * NOTE: redirect() must NOT be wrapped in try/catch — it throws a special
  * Next.js internal error to trigger the redirect.
@@ -16,20 +15,25 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 
-import { ipValida } from "@/lib/audit/log";
 import { altaAbierta } from "@/lib/auth/registro-permitido";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRowOrThrow } from "@/lib/auth/user-row";
 import { logger } from "@/lib/observability/logger";
 import { clientIpFromHeaders } from "@/lib/rate-limit/index";
-import { borrarCookieDeAlta } from "@/server/alta/cookie";
-import { crearInquilino, type AltaCreada } from "@/server/alta/crear-inquilino";
-import { soltarCupoDeAlta, tomarCupoDeAlta } from "@/server/alta/cupo-por-ip";
-import { avisarSiLlegoAlTope, conError, prepararEspacio, SIN_ESPACIO } from "@/server/alta/destinos";
+import { avisarAlOperador, llegoAlAviso } from "@/server/alta/aviso-operador";
+import { conError, crearEspacio } from "@/server/alta/crear-espacio";
+import type { AltaCreada } from "@/server/alta/crear-inquilino";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
-import { faltaElNueveArgentino, normalizarE164, validarEmpresa } from "@/server/alta/validar";
+
+/** Avisa al operador, ya con la respuesta enviada, si con este espacio el día llega al aviso. No se exporta: todo export de este archivo es un endpoint. */
+function avisarSiLlegoAlTope({ creadas24h, tope }: AltaCreada): void {
+  if (creadas24h !== null && tope !== null && llegoAlAviso(creadas24h, tope)) {
+    after(() => avisarAlOperador(creadas24h, tope));
+  }
+}
 
 /** La ruta a la que sigue el pedido. Nunca redirige: de eso se ocupa quien la llama, fuera de todo try/catch. */
 async function destinoDelAlta(formData: FormData): Promise<string> {
@@ -50,42 +54,16 @@ async function destinoDelAlta(formData: FormData): Promise<string> {
   }
   if (tienePerfil) return "/bandeja";
 
-  const empresa = validarEmpresa(formData.get("empresa"));
-  const numero = normalizarE164(formData.get("whatsapp"));
-  if (!empresa.ok || numero === null || formData.get("terminos") !== "on") return conError("datos");
-  if (numeroAutomatico() && faltaElNueveArgentino(numero)) return conError("celular");
-
-  const ip = clientIpFromHeaders(await headers());
-  const { clave, cupo } = await tomarCupoDeAlta(ip);
-  // `ventana: 0` es que el contador no contestó: no hubo «demasiados intentos».
-  if (!cupo.allowed) return conError(cupo.ventana === 0 ? "falla" : "intentos");
-
-  let alta: AltaCreada;
-  try {
-    alta = await crearInquilino({
-      userId: usuario.id,
-      empresa: empresa.empresa,
-      numero,
-      ip: ipValida(ip),
-    });
-  } catch (e) {
-    logger.error({ error: e instanceof Error ? e.name : "UnknownError" }, "alta.crear_inquilino_fallo");
-    await soltarCupoDeAlta(clave, cupo.ventana);
-    return conError("falla");
-  }
-
-  if (alta.resultado !== "ok" && alta.resultado !== "ok_numero_en_revision") {
-    if (alta.resultado === "alta_cerrada") {
-      logger.warn({ creadas24h: alta.creadas24h, tope: alta.tope }, "alta.cerrada");
-    }
-    await soltarCupoDeAlta(clave, cupo.ventana);
-    return SIN_ESPACIO[alta.resultado];
-  }
-
-  // Los dos resultados dicen lo mismo: no se confirma que el número ya lo había pedido otro.
-  await borrarCookieDeAlta();
-  avisarSiLlegoAlTope(alta);
-  return prepararEspacio(alta, "/bandeja?bienvenida=1");
+  const { destino, alta } = await crearEspacio({
+    userId: usuario.id,
+    empresa: formData.get("empresa"),
+    whatsapp: formData.get("whatsapp"),
+    terminos: formData.get("terminos") === "on",
+    numeroAutomatico: numeroAutomatico(),
+    ip: clientIpFromHeaders(await headers()),
+  });
+  if (alta) avisarSiLlegoAlTope(alta);
+  return destino;
 }
 
 export async function crearMiEspacio(formData: FormData): Promise<void> {

@@ -206,14 +206,14 @@ respaldo para cualquier caso que no cierre solo.
 
 ### Lo que hace la persona
 
-1. Se da de alta en `/alta` con un **móvil argentino** (`+549` y diez dígitos más)
+1. Crea su cuenta en `/registro` y, en el segundo paso del alta (`/alta`, «Dar de alta mi empresa»), escribe su empresa y un **móvil argentino** (`+549` y diez dígitos más)
    que reciba SMS o llamada y que **no esté en la app de WhatsApp ni en WhatsApp
    Business**. Si lo está, tiene que borrar esa cuenta y esperar unos minutos; los
    chats se pierden.
 2. En **Configuración** aprieta «Por SMS» o «Por llamada». El panel sólo se ve si es
    owner o admin, el espacio es del alta automática, la prueba sigue vigente (o está
    activo; suspendido o dado de baja no), la 0049 está en la base y el número está en
-   `pedido`. En `/registro` el aviso de que el móvil no puede estar en la app de
+   `pedido`. En `/alta` el aviso de que el móvil no puede estar en la app de
    WhatsApp aparece con la bandera prendida.
 3. Escribe el código de seis números y aprieta «Conectar».
 4. Listo: lo que le escriban a ese número entra como caso en la bandeja de su espacio.

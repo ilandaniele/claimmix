@@ -9,6 +9,8 @@
  * Tampoco hay forma de averiguar desde acá quién opera la plataforma: la dirección
  * de un operador contesta igual que cualquier otra, después del cupo.
  */
+import { readFileSync } from "node:fs";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -496,5 +498,29 @@ describe("una prueba gratuita", () => {
       expect(h.writeAuditLog).toHaveBeenCalledOnce();
       expect(h.writeAuditLog.mock.calls[0][0].payload).toEqual({ rol: "analyst", bloqueada: true });
     });
+  });
+});
+
+describe("la ayuda junto al correo del formulario de invitar", () => {
+  /*
+   * El alta es en dos pasos y la cuenta se crea antes de que la persona diga a qué
+   * empresa viene. Si el admin invita otra dirección que la que ella usó, la
+   * invitación no le aparece: la ayuda lo dice donde se escribe la dirección. Es
+   * condicional: quien invita no sabe si la persona ya tiene cuenta (puede venir
+   * de otro camino), así que no se lo da por hecho.
+   */
+  it("está en las dos lenguas, habla de la misma dirección y no da por hecha la cuenta", () => {
+    expect(esARServidor["usuarios.form.emailAyuda"]).toMatch(/^Si la persona ya .*misma dirección/);
+    expect(enUSServidor["usuarios.form.emailAyuda"]).toMatch(/^If the person has already .*same address/);
+  });
+
+  it("el formulario la muestra y la liga al campo", () => {
+    const pagina = readFileSync("src/app/(app)/admin/users/page.tsx", "utf8");
+    const formulario = readFileSync("src/app/(app)/admin/users/AdminUsersClient.tsx", "utf8");
+
+    expect(pagina).toContain('emailAyuda={t("usuarios.form.emailAyuda")}');
+    expect(formulario).toContain("{emailAyuda}");
+    expect(formulario).toContain('aria-describedby="email-ayuda"');
+    expect(formulario).toContain('id="email-ayuda"');
   });
 });

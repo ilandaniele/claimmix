@@ -303,6 +303,8 @@ describe("getCaseDetail — el historial no lleva de más", () => {
         { ...mockAuditEntries[0], event_type: "ai.extraction_complete", actor_name: "Lucía Ramallo" },
         { ...mockAuditEntries[1], event_type: "ai.extracted", actor_name: "Lucía Ramallo" },
         { ...mockAuditEntries[0], id: 3, event_type: "case.re_analyze_triggered", actor_name: "Lucía Ramallo" },
+        // Bajar el JSON lo hace una persona, aunque no sea una intervención.
+        { ...mockAuditEntries[0], id: 4, event_type: "case.exported_to_core", actor_name: "Lucía Ramallo" },
       ],
     });
 
@@ -311,6 +313,7 @@ describe("getCaseDetail — el historial no lleva de más", () => {
     expect(res!.audit_log[0]).toMatchObject({ actor_name: null, con_actor: false });
     expect(res!.audit_log[1]).toMatchObject({ actor_name: null, con_actor: false });
     expect(res!.audit_log[2]).toMatchObject({ actor_name: "Lucía Ramallo", con_actor: true });
+    expect(res!.audit_log[3]).toMatchObject({ actor_name: "Lucía Ramallo", con_actor: true });
   });
 
   it("el nombre sale de la misma consulta, por la PK de users", async () => {
@@ -379,6 +382,13 @@ describe("getCaseDetail — el historial no se llena con los cambios del agente"
     const { sql } = await dondeDelHistorial();
 
     expect(sql).not.toMatch(/->>'trigger' <> /);
+  });
+
+  it("las exportaciones al sistema central entran todas: la consulta no las filtra", async () => {
+    const { sql, params } = await dondeDelHistorial();
+
+    expect(params).not.toContain("case.exported_to_core");
+    expect(sql).not.toContain("max(");
   });
 });
 

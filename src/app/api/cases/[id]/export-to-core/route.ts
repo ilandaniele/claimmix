@@ -7,25 +7,33 @@
  *
  * Auth: required.
  * IDOR: case must belong to authenticated user's tenant.
+ * Deja `case.exported_to_core` en el mismo lote.
  */
 
 import { type NextRequest } from "next/server";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { CASE_EDITOR_ROLES, type RoleContext } from "@/lib/auth/require-role";
 import { enTenantVarias, type TenantContext } from "@/data/scope";
 import { entrar } from "@/lib/api/entrada";
 import { ok, err } from "@/lib/api/respond";
+import { AuditEvent } from "@/lib/audit/log";
 import { AppError } from "@/lib/errors";
-import { RATE_LIMIT_CONFIGS, type RateLimitResult } from "@/lib/rate-limit/index";
+import { getClientIp, RATE_LIMIT_CONFIGS, type RateLimitResult } from "@/lib/rate-limit/index";
+import { auditoriaSiExiste } from "@/server/cases/auditoria-si-quedo";
 import { consultasDelCaso, type DelCaso } from "@/server/core-sync/lectura";
 
 const ParamsSchema = z.object({
   id: z.guid("ID de caso inválido."),
 });
 
+// El registro va último: el desarmado de `[[caso], fields, docs]` no se mueve.
+// No es `[...DelCaso, unknown]`: TS aplana DelCaso en un arreglo y pierde el orden.
+type Lote = [DelCaso[0], DelCaso[1], DelCaso[2], unknown];
+
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   const rawParams = await context.params;
@@ -51,7 +59,29 @@ export async function POST(
   const tenantCtx: TenantContext = { tenantId: userRow.tenant_id };
 
   // Caso, campos y documentos en un solo viaje; la forma es la de /api/v1.
-  const [[caso], fields, docs] = await enTenantVarias<DelCaso>(tenantCtx, (db) => consultasDelCaso(db, caseId));
+  // Mismo lote: si el registro no entra, tampoco sale el JSON. El catch sólo da la
+  // forma de error de siempre (p. ej. 23503 si el actor aún no está espejado): nunca devuelve el caso.
+  let lote: Lote;
+  try {
+    lote = await enTenantVarias<Lote>(tenantCtx, (db) => [
+      ...consultasDelCaso(db, caseId),
+      auditoriaSiExiste(
+        db,
+        {
+          caseId,
+          actorId: userRow.id,
+          eventType: AuditEvent.CASE_EXPORTED_TO_CORE,
+          ip: getClientIp(request),
+          ua: request.headers.get("user-agent"),
+          payload: sql<Record<string, unknown>>`'{}'::jsonb`,
+        },
+        caseId
+      ),
+    ]);
+  } catch (e) {
+    return err(e);
+  }
+  const [[caso], fields, docs] = lote;
   if (!caso) return err(new AppError("NOT_FOUND"));
 
   // ── Build core-system payload ─────────────────────────────────────────────────

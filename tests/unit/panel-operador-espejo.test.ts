@@ -38,6 +38,7 @@ import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 import {
   RESULTADOS_DEL_PANEL,
   activarInquilino,
+  bajaDeWaba,
   conectarNumero,
   darDeBajaNumero,
   extenderPrueba,
@@ -57,6 +58,7 @@ const OP: Operador = { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ip: "203.
 const CLIENTE = "22222222-2222-4222-8222-222222222222";
 const PLATAFORMA = "33333333-3333-4333-8333-333333333333";
 const NUMERO = "44444444-4444-4444-8444-444444444444";
+const OTRO_CLIENTE = "55555555-5555-4555-8555-555555555555";
 const ID_PLATAFORMA = "100000000000001";
 const WABA = "200000000000001";
 const ID_DEL_CLIENTE = "100000000000777";
@@ -142,6 +144,9 @@ describe.each(ACCIONES)("$nombre", (a) => {
 
     expect(await a.correr()).toBe("espejo_pendiente");
 
+    // Dos intentos en el acto y un solo aviso: el reintento no duplica el registro.
+    expect(h.espejar).toHaveBeenCalledTimes(2);
+    expect(h.warn).toHaveBeenCalledTimes(1);
     expect(h.warn).toHaveBeenCalledWith({ tenantId: CLIENTE, detalle: "08006" }, "bases.espejo_pendiente");
     expect(JSON.stringify(h.warn.mock.calls)).not.toContain("ana@example.com");
   });
@@ -207,6 +212,35 @@ describe("conectarNumero", () => {
     expect(await pedir()).toBe(resultado);
 
     expect(h.espejar).not.toHaveBeenCalled();
+  });
+});
+
+describe("bajaDeWaba", () => {
+  const baja = (tenant_id: string) => ({
+    tenant_id,
+    waba_id: null,
+    origen: null,
+    app_id: null,
+    phone_number_id: ID_DEL_CLIENTE,
+    numero_estado: "conectado",
+  });
+
+  it("espeja a cada cliente con número, uno tras otro, una sola vez cada uno si la copia entra", async () => {
+    h.execute.mockResolvedValue(filas(baja(CLIENTE), baja(OTRO_CLIENTE)));
+
+    expect(await bajaDeWaba({ fbUserId: "1234567890" }, "meta")).toHaveLength(2);
+
+    expect(h.orden).toEqual(["escribe", `espejar:${CLIENTE}`, `espejar:${OTRO_CLIENTE}`]);
+  });
+
+  it("con la copia caída cada cliente cuesta dos intentos y la baja igual las devuelve todas", async () => {
+    espejoCaido();
+    h.execute.mockResolvedValue(filas(baja(CLIENTE), baja(OTRO_CLIENTE)));
+
+    expect(await bajaDeWaba({ fbUserId: "1234567890" }, "meta")).toHaveLength(2);
+
+    expect(h.espejar.mock.calls).toEqual([[CLIENTE], [CLIENTE], [OTRO_CLIENTE], [OTRO_CLIENTE]]);
+    expect(h.warn).toHaveBeenCalledTimes(2);
   });
 });
 

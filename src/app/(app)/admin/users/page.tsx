@@ -85,6 +85,7 @@ export default async function AdminUsersPage() {
         initialUsers={initialUsers}
         currentUserId={ctx.user.id}
         currentUserRole={userRow.role}
+        emailAyuda={t("usuarios.form.emailAyuda")}
       />
     </div>
   );

@@ -2,11 +2,11 @@
  * SignUpForm — el formulario de /registro, de servidor. El único JavaScript
  * propio es el del desafío (`DesafioTurnstile`).
  *
- * Un solo paso con dos botones que mandan a acciones distintas: «Continuar con
- * Google» (empezarAltaConGoogle) y «Crear cuenta con mi correo» (signUp). La
- * empresa, el WhatsApp y los términos son de los dos; el nombre y el correo, sólo
- * del segundo, así que no llevan `required`: el navegador no puede frenar a quien
- * va por Google. Los valida la acción.
+ * Dos botones que mandan a acciones distintas: «Continuar con Google»
+ * (empezarAltaConGoogle) y «Crear cuenta con mi correo» (signUp). Los términos son
+ * de los dos; el nombre y el correo, sólo del segundo, así que no llevan
+ * `required`: el navegador no puede frenar a quien va por Google. Los valida la
+ * acción. La empresa y el WhatsApp se piden en /alta.
  *
  * El botón del correo existe sólo si hay remitente del sistema: sin él no hay
  * cómo mandar el enlace. El desafío de Turnstile, sólo si están las dos claves, y
@@ -16,8 +16,6 @@
 import Link from "next/link";
 
 import type { getT } from "@/lib/i18n";
-import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
-import { wabaPropia } from "@/server/alta/waba-propia-activa";
 
 import { empezarAltaConGoogle, signUp } from "./actions";
 import { DesafioTurnstile } from "./DesafioTurnstile";
@@ -41,41 +39,6 @@ export function SignUpForm({
 }) {
   return (
     <form aria-label={t("registro.titulo")} className="space-y-4">
-      <div>
-        <label htmlFor="registro-empresa" className={CLASE_DE_LA_ETIQUETA}>
-          {t("alta.empresa")}
-        </label>
-        <input
-          id="registro-empresa"
-          name="empresa"
-          type="text"
-          autoComplete="organization"
-          required
-          minLength={2}
-          maxLength={80}
-          className={CLASE_DEL_CAMPO}
-        />
-      </div>
-      <div>
-        <label htmlFor="registro-whatsapp" className={CLASE_DE_LA_ETIQUETA}>
-          {t("alta.whatsapp")}
-        </label>
-        <input
-          id="registro-whatsapp"
-          name="whatsapp"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          required
-          placeholder="+54 9 …"
-          aria-describedby="registro-whatsapp-ayuda"
-          className={CLASE_DEL_CAMPO}
-        />
-        <p id="registro-whatsapp-ayuda" className="mt-1.5 text-xs text-slate-500">
-          {t("alta.whatsapp.ayuda")}
-          {wabaPropia() ? ` ${t("alta.whatsapp.avisoPropia")}` : numeroAutomatico() ? ` ${t("alta.whatsapp.aviso")}` : null}
-        </p>
-      </div>
       <label className="flex items-start gap-2.5 text-sm text-slate-600">
         <input
           type="checkbox"

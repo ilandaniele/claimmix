@@ -3,28 +3,28 @@
  * que abre el mail.
  *
  * Lo que importa es lo que NO abre: un enlace vencido, adulterado, de otra clave,
- * de otro uso (la cookie `cm_alta`) o con datos que /registro nunca habría sellado
- * es un enlace que no existe. Y que el correo y el teléfono no viajan a la vista.
+ * de otro uso o con datos que /registro nunca habría sellado es un enlace que no
+ * existe. Que el correo y el nombre no viajan a la vista. Y que no lleva empresa
+ * ni número: la cuenta se crea sola, el espacio se pide después en /alta.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-vi.mock("next/headers", () => ({ cookies: async () => ({}) }));
 
-import { abrirAlta, sellarAlta } from "@/server/alta/cookie";
-import { sellar } from "@/server/alta/sellado";
+import { abrir, sellar } from "@/server/alta/sellado";
 import { abrirToken, DURACION_DEL_TOKEN_MS, sellarToken } from "@/server/alta/token-de-registro";
 
 const SECRETO = "fake-secreto-del-enlace-de-alta-0123456789";
 const AHORA = 1_800_000_000_000;
 const DATOS = {
   e: "ana@example.com",
-  empresa: "Seguros del Sur",
-  numero: "+5492916426930",
   nombre: "Ana Pérez",
   locale: "es-AR" as const,
 };
+
+/** Lo que sellaba el enlace antes de separar la cuenta del espacio, además de lo de arriba. */
+const FORMA_VIEJA = { empresa: "Seguros del Sur", numero: "+5492916426930" };
 
 /** Cambia un carácter de un tramo del enlace por otro distinto. */
 function adulterar(valor: string, tramo: number): string {
@@ -69,15 +69,19 @@ describe("sellarToken y abrirToken", () => {
     expect(abrirToken(valor, AHORA)).toEqual(abrirToken(valor, AHORA));
   });
 
-  it("no deja a la vista ni el correo, ni la empresa, ni el número, ni el nombre", () => {
+  it("no deja a la vista ni el correo ni el nombre", () => {
     const valor = sellarToken(DATOS, AHORA);
 
     expect(valor.startsWith("v1.")).toBe(true);
     for (const tramo of valor.split(".")) {
-      expect(Buffer.from(tramo, "base64url").toString("utf8")).not.toMatch(
-        /ana@example|Seguros|5492916426930|Pérez/
-      );
+      expect(Buffer.from(tramo, "base64url").toString("utf8")).not.toMatch(/ana@example|Pérez/);
     }
+  });
+
+  it("el enlace nuevo no lleva empresa ni número, ni a la vista ni sellados", () => {
+    const sellado = abrir("alta-correo", sellarToken(DATOS, AHORA)) as Record<string, unknown>;
+
+    expect(Object.keys(sellado).sort()).toEqual(["e", "exp", "locale", "nombre"]);
   });
 
   it("es seguro de poner en una URL", () => {
@@ -108,13 +112,10 @@ describe("sellarToken y abrirToken", () => {
   });
 
   it("lo sellado para otro uso no abre acá, ni al revés", () => {
-    const deLaCookie = sellarAlta(
-      { empresa: DATOS.empresa, numero: DATOS.numero, locale: "es-AR", origen: "google", v: "aBcDeFgHiJkLmNoPqRsTuV" },
-      AHORA
-    );
+    const deOtroUso = sellar("invitacion", { ...DATOS, exp: AHORA + DURACION_DEL_TOKEN_MS });
 
-    expect(abrirToken(deLaCookie, AHORA)).toBeNull();
-    expect(abrirAlta(sellarToken(DATOS, AHORA), AHORA)).toBeNull();
+    expect(abrirToken(deOtroUso, AHORA)).toBeNull();
+    expect(abrir("invitacion", sellarToken(DATOS, AHORA))).toBeNull();
   });
 
   it.each([undefined, null, 42, {}, "", "basura", "v1.a.b", "v2.a.b.c", "a.b.c.d"])(
@@ -141,15 +142,22 @@ describe("lo que abre tiene la forma que /registro sella", () => {
     ["sin correo", { e: undefined }],
     ["con un nombre de una letra", { nombre: "A" }],
     ["sin nombre", { nombre: undefined }],
-    ["con una empresa que es un enlace", { empresa: "http://example.com" }],
-    ["con una empresa de una letra", { empresa: "A" }],
-    ["sin empresa", { empresa: undefined }],
-    ["con un número sin normalizar", { numero: "+54 9 291 642-6930" }],
-    ["con un número que no es E.164", { numero: "1234" }],
-    ["con el número como entero", { numero: 5492916426930 }],
-    ["sin número", { numero: undefined }],
   ])("%s da null", (_caso, cambio) => {
     expect(abrirToken(sellarDatos(cambio), AHORA)).toBeNull();
+  });
+
+  it("un enlace con la forma vieja (empresa y número) abre como sólo cuenta", () => {
+    const abierto = abrirToken(sellarDatos(FORMA_VIEJA), AHORA);
+
+    expect(abierto).toEqual({ ...DATOS, exp: AHORA + DURACION_DEL_TOKEN_MS });
+    expect(abierto).not.toHaveProperty("empresa");
+    expect(abierto).not.toHaveProperty("numero");
+  });
+
+  it("claves de más, de cualquier tipo, se descartan y no hacen fallar la apertura", () => {
+    const abierto = abrirToken(sellarDatos({ empresa: 42, numero: { x: 1 }, otra: "cosa" }), AHORA);
+
+    expect(abierto).toEqual({ ...DATOS, exp: AHORA + DURACION_DEL_TOKEN_MS });
   });
 
   it("un idioma que no se soporta cae en el de siempre", () => {

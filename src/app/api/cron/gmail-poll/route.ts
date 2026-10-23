@@ -12,9 +12,9 @@
  *
  * AC1:  Calls pollGmail which ingests new messages into claim_messages.
  * AC6:  Missing or incorrect Authorization header → 401 (Gmail API never called).
- * AC9:  watch_expiration within 24h AND PUBSUB_TOPIC set → setupGmailWatch called;
- *       response includes watch_renewed:true.
- * AC10: watch_expiration >24h away AND PUBSUB_TOPIC set → setupGmailWatch NOT called;
+ * AC9:  watch_expiration within 48h AND PUBSUB_TOPIC set → setupGmailWatch called;
+ *       response includes watch_renewed:true, or watch_error when it fails.
+ * AC10: watch_expiration >48h away AND PUBSUB_TOPIC set → setupGmailWatch NOT called;
  *       response includes watch_renewed:false.
  * AC11: PUBSUB_TOPIC unset → skip watch renewal; response includes
  *       watch_renewed:false and watch_skipped_reason:'PUBSUB_TOPIC_UNSET'.
@@ -30,7 +30,7 @@
  * que es la clase de resto que invita a volver a escribirla a mano.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { isInternalRequest } from "@/lib/security/internal-auth";
 import { pollAllGmailAccounts } from "@/server/email/gmail/gmail-poller";
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
@@ -38,8 +38,12 @@ import { setupGmailWatch } from "@/server/email/gmail/watch";
 import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
 import { logger } from "@/lib/observability/logger";
 
-/** 24 hours in milliseconds — renew if the watch expires within this window. */
-const RENEWAL_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+/**
+ * 48 hours — renew if the watch expires within this window. Vercel runs the
+ * daily cron at any minute of its hour, so 24h left weeks with the watch
+ * expired for up to an hour.
+ */
+const RENEWAL_THRESHOLD_MS = 48 * 60 * 60 * 1000;
 
 /** Required: mark route as dynamic so Vercel doesn't statically optimize it. */
 export const dynamic = "force-dynamic";
@@ -92,6 +96,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     let watchRenewed = false;
     let watchSkippedReason: string | undefined;
+    let watchError: string | undefined;
 
     if (!pubsubTopic) {
       // AC11: PUBSUB_TOPIC unset — skip renewal without error.
@@ -111,7 +116,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         Date.now() + RENEWAL_THRESHOLD_MS > new Date(expiration).getTime();
 
       if (needsRenewal) {
-        // AC9: expiration null or within 24h → renew.
+        // AC9: expiration null or within 48h → renew.
         try {
           await setupGmailWatch(pubsubTopic, account);
           watchRenewed = true;
@@ -120,10 +125,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           const errName =
             (watchErr as { name?: string })?.name ?? "UNKNOWN";
           logger.error({ error_name: errName }, "cron_gmail_poll.watch_renewal_failed");
+          watchError = errName;
         }
       }
       }
-      // AC10: expiration >24h away → skip renewal (watchRenewed stays false).
+      // AC10: expiration >48h away → skip renewal (watchRenewed stays false).
     }
 
     // ── Poll ─────────────────────────────────────────────────────────────────
@@ -133,6 +139,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (watchSkippedReason !== undefined) {
       watchPayload.watch_skipped_reason = watchSkippedReason;
     }
+    if (watchError !== undefined) watchPayload.watch_error = watchError;
 
     return NextResponse.json({ ok: true, ...watchPayload, ...result });
   } catch (err: unknown) {

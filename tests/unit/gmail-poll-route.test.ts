@@ -9,9 +9,9 @@
  *   - pollAllGmailAccounts called exactly once on success
  *
  * AC1: Route calls pollAllGmailAccounts on success and returns its result.
- * AC9: watch_expiration within 24h + PUBSUB_TOPIC set → setupGmailWatch called;
- *      response includes watch_renewed:true.
- * AC10: watch_expiration >24h away + PUBSUB_TOPIC set → setupGmailWatch NOT called;
+ * AC9: watch_expiration within 48h + PUBSUB_TOPIC set → setupGmailWatch called;
+ *      response includes watch_renewed:true, or watch_error when it fails.
+ * AC10: watch_expiration >48h away + PUBSUB_TOPIC set → setupGmailWatch NOT called;
  *       response includes watch_renewed:false.
  * AC11: PUBSUB_TOPIC not set → setupGmailWatch NOT called; response includes
  *       watch_renewed:false and watch_skipped_reason:'PUBSUB_TOPIC_UNSET'.
@@ -235,10 +235,10 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(mockPollAllGmailAccounts).not.toHaveBeenCalled();
   });
 
-  // ── AC9: Watch renewal when expiring within 24h ────────────────────────────
+  // ── AC9: Watch renewal when expiring within 48h ────────────────────────────
 
-  it("AC9: calls setupGmailWatch when watch_expiration is within 24h", async () => {
-    // Expiration is 12 hours from now — inside the 24h renewal window.
+  it("AC9: calls setupGmailWatch when watch_expiration is within 48h", async () => {
+    // Expiration is 12 hours from now — inside the 48h renewal window.
     mockGetWatchExpiration.mockResolvedValue(
       new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
     );
@@ -256,6 +256,19 @@ describe("GET /api/cron/gmail-poll", () => {
     const body = await res.json();
     expect(body.watch_renewed).toBe(true);
     expect(body.watch_skipped_reason).toBeUndefined();
+    expect(body.watch_error).toBeUndefined();
+  });
+
+  it("AC9: calls setupGmailWatch when watch_expiration is 30h away", async () => {
+    // A daily cron that skipped at 30h could find the watch expired tomorrow.
+    mockGetWatchExpiration.mockResolvedValue(
+      new Date(Date.now() + 30 * 60 * 60 * 1000).toISOString()
+    );
+
+    const res = await GET(makeRequest(`Bearer ${CRON_SECRET}`));
+
+    expect(mockSetupGmailWatch).toHaveBeenCalledTimes(1);
+    expect((await res.json()).watch_renewed).toBe(true);
   });
 
   it("AC9: calls setupGmailWatch when watch_expiration is exactly now", async () => {
@@ -285,10 +298,10 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(body.watch_renewed).toBe(true);
   });
 
-  // ── AC10: Watch renewal skipped when expiration is >24h away ──────────────
+  // ── AC10: Watch renewal skipped when expiration is >48h away ──────────────
 
   it("AC10: does NOT call setupGmailWatch when watch_expiration is 5 days away", async () => {
-    // 5 days from now — well outside the 24h renewal window.
+    // 5 days from now — well outside the 48h renewal window.
     mockGetWatchExpiration.mockResolvedValue(
       new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
     );
@@ -304,10 +317,10 @@ describe("GET /api/cron/gmail-poll", () => {
     expect(body.watch_skipped_reason).toBeUndefined();
   });
 
-  it("AC10: does NOT call setupGmailWatch when watch_expiration is exactly 25h away", async () => {
-    // 25 hours from now — just outside the 24h threshold.
+  it("AC10: does NOT call setupGmailWatch when watch_expiration is exactly 49h away", async () => {
+    // 49 hours from now — just outside the 48h threshold.
     mockGetWatchExpiration.mockResolvedValue(
-      new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString()
+      new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString()
     );
 
     const req = makeRequest(`Bearer ${CRON_SECRET}`);
@@ -352,7 +365,7 @@ describe("GET /api/cron/gmail-poll", () => {
   // ── Non-blocking renewal error ─────────────────────────────────────────────
 
   it("logs error name and continues to call pollAllGmailAccounts when setupGmailWatch throws", async () => {
-    // Expiration is within 24h, so renewal is attempted.
+    // Expiration is within 48h, so renewal is attempted.
     mockGetWatchExpiration.mockResolvedValue(
       new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
     );
@@ -371,6 +384,7 @@ describe("GET /api/cron/gmail-poll", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.watch_renewed).toBe(false);
+    expect(body.watch_error).toBe("QuotaExceededError");
 
     // pollAllGmailAccounts must still have been called despite the watch error.
     expect(mockPollAllGmailAccounts).toHaveBeenCalledTimes(1);

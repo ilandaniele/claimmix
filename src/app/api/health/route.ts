@@ -35,7 +35,7 @@ import { filasDe } from "@/lib/db/filas";
 import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
-import { topeMensualDelProyecto } from "@/server/ai/tope-mensual";
+import { topeMensualDelProyecto } from "@/lib/topes";
 import { basePorCliente } from "@/data/bases";
 import { enControl, enTenant } from "@/data/scope";
 
@@ -47,8 +47,10 @@ import {
   chequearCasosTrabados,
   chequearEnvios,
   chequearExtraccion,
+  chequearPendientesSinLeer,
 } from "./trabajo";
 const UNA_HORA_MS = 60 * 60 * 1000;
+const DOCE_HORAS_MS = 12 * UNA_HORA_MS;
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -83,7 +85,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     checkAgentConfig(),
     checkPresupuesto(),
     /*
-     * Y cuatro que preguntan si el producto está HACIENDO su trabajo.
+     * Y cinco que preguntan si el producto está HACIENDO su trabajo.
      *
      * Los nueve de arriba preguntan «¿alcanzo a X?», y todos pueden estar en
      * verde con el producto sin hacer nada. El 09/09, con 80 timeouts del
@@ -93,6 +95,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
      * Ver `./trabajo.ts`.
      */
     chequearCasosTrabados(),
+    chequearPendientesSinLeer(),
     chequearExtraccion(),
     chequearEnvios(),
     chequearAdjuntos(),
@@ -541,7 +544,18 @@ async function checkGmail(): Promise<Check> {
           `${account.email} conectada, pero sin aviso de push: el correo entra por el cron`
         );
       }
-      const registrado = new Date(expiration).getTime() - SIETE_DIAS_MS;
+      // El cron diario lo renueva cuando le quedan 48 h, así que con menos de
+      // 12 h fallaron las renovaciones. Vencido, Gmail ya no avisa nada.
+      const vence = new Date(expiration).getTime();
+      if (vence - Date.now() < DOCE_HORAS_MS) {
+        return degraded(
+          "gmail",
+          vence <= Date.now()
+            ? `${account.email}: el aviso de push venció: el correo entra por el cron`
+            : `${account.email}: el aviso de push vence en menos de 12 h y el cron no lo renovó`
+        );
+      }
+      const registrado = vence - SIETE_DIAS_MS;
       const conectado = account.lastConnectedAt
         ? new Date(account.lastConnectedAt).getTime()
         : 0;

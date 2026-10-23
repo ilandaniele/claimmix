@@ -13,8 +13,8 @@
  * exige el SSO para el dominio invitado (ni Google ni la contraseña se ofrecen:
  * la cuenta nacería y la sesión se le negaría); con la sesión de la dirección
  * invitada, el botón de aceptar; y sin sesión, las tres opciones. Una dirección
- * Gmail con «+» no ofrece Google: la cuenta vuelve con la casilla base y no
- * coincide con la invitada, así que sólo queda la contraseña.
+ * Gmail con «+» o con puntos no ofrece Google: la cuenta vuelve con la casilla
+ * base y no coincide con la invitada, así que sólo queda la contraseña.
  *
  * El enlace es una credencial de un solo destinatario: `referrer: no-referrer`
  * evita que viaje a los sitios a los que se llegue desde esta pantalla.
@@ -159,7 +159,8 @@ export default async function InvitacionPage({
   const motivo = ultimo(e);
   const claveError = motivo !== undefined && Object.hasOwn(ERRORES, motivo) ? ERRORES[motivo] : null;
   const conSesion = usuario !== undefined && usuario.emailVerified === true;
-  const conGoogle = !(datos.e.includes("+") && casillaDeGmail(datos.e) !== null);
+  const casilla = casillaDeGmail(datos.e);
+  const conGoogle = casilla === null || casilla === datos.e.trim().toLowerCase();
 
   return (
     <Tarjeta titulo={t("invitacion.titulo")} locale={locale}>

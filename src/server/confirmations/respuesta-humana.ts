@@ -12,6 +12,7 @@ import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { cases, claimMessages, outboundMessages } from "@/lib/db/schema";
 import { firstRow } from "@/lib/db/helpers";
 import type { RoleContext } from "@/lib/auth/require-role";
+import { puedeCambiarEstado } from "@/lib/auth/roles";
 import { estadoDeRespuesta, type MotivoSinRespuesta } from "@/core/whatsapp/puede-responder";
 import { PLANTILLA_RESPUESTA_HUMANA } from "@/core/whatsapp/plantillas";
 import { sendWhatsAppText } from "@/server/whatsapp/cloud-api";
@@ -36,7 +37,13 @@ export async function responderPorWhatsApp(
 
   const [filaCaso, filaEntrante] = await enTenantVarias<
     [
-      Array<{ id: string; status: string; channel: string; email_thread_id: string | null }>,
+      Array<{
+        id: string;
+        status: string;
+        channel: string;
+        email_thread_id: string | null;
+        assigned_to: string | null;
+      }>,
       Array<{ received_at: string }>,
     ]
   >(tenantCtx, (db) => [
@@ -46,6 +53,7 @@ export async function responderPorWhatsApp(
         status: cases.status,
         channel: cases.channel,
         email_thread_id: cases.email_thread_id,
+        assigned_to: cases.assigned_to,
       })
       .from(cases)
       .where(eq(cases.id, caseId))
@@ -66,6 +74,11 @@ export async function responderPorWhatsApp(
 
   const caso = firstRow(filaCaso);
   if (!caso) return { ok: false, motivo: "no_encontrado" };
+
+  // Misma respuesta que el PATCH: un analista no distingue «no existe» de «es de otro».
+  if (!puedeCambiarEstado(ctx.userRow, caso.assigned_to)) {
+    return { ok: false, motivo: "no_encontrado" };
+  }
 
   const estado = estadoDeRespuesta({
     plan: ctx.userRow.plan,

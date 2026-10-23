@@ -136,10 +136,23 @@ describe("closeAbandonedConversations — what it will and will not touch", () =
       throw new Error("connection lost");
     });
 
+    // Con `fallo`: el cron tiene que poder distinguir este cero de «no había nada».
     await expect(closeAbandonedConversations()).resolves.toEqual({
       closed: 0,
       caseIds: [],
+      fallo: true,
     });
+  });
+
+  it("never closes a case with an answer still unread", () => {
+    // La persona contestó: cerrarlo diría «sin respuesta del denunciante». En las
+    // dos guardas, la del UPDATE y la de la subconsulta, como el estado.
+    const fuente = readFileSync("src/server/intake/close-abandoned.ts", "utf8");
+    const update = fuente.slice(
+      fuente.indexOf("const closed = await db"),
+      fuente.indexOf(".returning({ id: cases.id, tenant_id: cases.tenant_id })")
+    );
+    expect(update.split("eq(cases.extraction_pending, false)").length - 1).toBe(2);
   });
 });
 

@@ -29,6 +29,7 @@ import { formatDate } from "@/lib/utils";
 import { type Desvio, etiquetaDeDocumento, listarDesvios, PaginaDeDesviosSchema } from "@/server/desvios/listar";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { Card } from "../_components/ui";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 const TEXTOS: Record<Regla, { titulo: TranslationKey; detalle: TranslationKey; horas?: number }> = {
   doc_sin_recibir: {
@@ -75,6 +76,8 @@ function etiquetaDelDato(
       return sinGuiones;
   }
 }
+
+export const generateMetadata = tituloDePantalla("nav.desvios");
 
 export default async function DesviosPage({ searchParams }: DesviosPageProps) {
   const session = await getSessionContext();

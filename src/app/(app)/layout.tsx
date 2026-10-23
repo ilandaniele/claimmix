@@ -11,6 +11,7 @@
  */
 
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { esPlanPro } from "@/core/billing/plan-pro";
@@ -28,6 +29,9 @@ import { getT } from "@/lib/i18n";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { ThemeProvider } from "@/lib/theme/ThemeContext";
+
+/** Cada pantalla pone su nombre y el layout le suma la marca: «Bandeja — ClaimMix». */
+export const metadata: Metadata = { title: { template: "%s — ClaimMix", default: "ClaimMix" } };
 
 export default async function AppLayout({
   children,

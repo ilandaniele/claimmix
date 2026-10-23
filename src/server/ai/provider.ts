@@ -8,9 +8,10 @@
  *
  * El orden es:
  *   1. MOCK_AI / AI_MOCK → "mock" (demo, sin llamadas de verdad)
- *   2. tenant_ai_settings.provider del inquilino
- *   3. AI_PROVIDER
- *   4. "gemini"
+ *   2. Vertex configurado → "gemini", sin consultar la base
+ *   3. tenant_ai_settings.provider del inquilino
+ *   4. AI_PROVIDER
+ *   5. "gemini"
  *
  * Defensivo de punta a punta: si falta la tabla `tenant_ai_settings` —la
  * migración no aplicada— o la consulta falla, se cae al default del entorno en
@@ -293,6 +294,9 @@ export async function resolveExtractionEngine(
   if (process.env.MOCK_AI === "true" || process.env.AI_MOCK === "true") {
     return "mock";
   }
+  // Vertex autentica con su cuenta de servicio y hay un solo proveedor: no hace
+  // falta leer la preferencia del inquilino.
+  if (isVertexConfigured()) return DEFAULT_AI_PROVIDER;
 
   const uid = userId ?? undefined;
   const preferred = await getTenantAiProvider(tenantId);

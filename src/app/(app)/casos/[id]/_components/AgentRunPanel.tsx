@@ -70,6 +70,8 @@ interface AgentRunResponse {
     confidence: number;
   }>;
   already_approved: boolean;
+  /** Alguna consulta falló: una lista vacía puede no estar vacía. */
+  parcial?: boolean;
 }
 
 type LoadState = "loading" | "ready" | "error";
@@ -233,6 +235,12 @@ export function AgentRunPanel({ caseId, canConfirmTraining }: AgentRunPanelProps
 
   return (
     <div className="space-y-5" data-testid="agent-run-panel">
+      {data.parcial && (
+        <div role="status" className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {t("agente.cargaParcial")}
+        </div>
+      )}
+
       {/* ── Run metadata ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-mono">{run.model_name}</span>

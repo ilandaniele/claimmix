@@ -369,10 +369,18 @@ jobs:
           # la que la cuenta tiene puesta. La otra tendría que coincidir y no hay
           # forma de comprobarlo sin gastar un deploy.
           #
-          # UNA sesión para todos los VUs: el login tiene tope de cinco intentos
-          # cada diez segundos y doscientos VUs logueándose miden ese tope. Ver
-          # `helpers/auth.js`. Ojo que este `env` cuelga del paso entero, así que
-          # los perfiles de 50 VUs también miden con la cuenta admin.
+          # UNA cuenta, la admin: es la única cuyos secretos ya están cargados.
+          # Alcanza para `smoke` (un VU) y para `publico`, y no para los perfiles
+          # con muchos VUs: cada cuenta aguanta 100 pedidos por minuto contra
+          # `/api/cases`, y con una sola `load`, `peak`, `soak`, `spike` y
+          # `stress` medirían el limitador. Por eso `iniciarSesiones`
+          # (`helpers/auth.js`) corta el `setup()` ANTES de loguearse si los
+          # pedidos previstos pasan el cupo, y dice cuántas cuentas hacen falta.
+          #
+          # Para correrlos desde acá hay que pasar `LOAD_TEST_EMAILS` y
+          # `LOAD_TEST_PASSWORDS` (separados por coma) con cuentas admin de un
+          # inquilino de carga. Las de `sembrar --carga` son analistas, y
+          # `/api/customers` y `/api/policies` les contestan 403.
           LOAD_TEST_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL }}
           LOAD_TEST_PASSWORD: ${{ secrets.INTEGRATION_ADMIN_PASSWORD }}
           # Sólo lo lee `aseguradoras`: la clave de sus 700 cuentas. Sin el secreto el
@@ -400,6 +408,26 @@ jobs:
         env:
           BASE_URL: ${{ steps.destino.outputs.url }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      # ── El soak mide la deriva, y k6 no la puede cortar ────────────────────
+      #
+      # El umbral de `soak.js` es absoluto (la última ventana, bajo un segundo).
+      # La comparación contra la primera —el `veredicto`— se calcula en
+      # `handleSummary`, que no cambia el código de salida de k6: una latencia
+      # que se duplica con el tiempo sale verde si no llega al corte. Este paso
+      # lee el veredicto del reporte y falla si no es «estable». Si el reporte
+      # no está o no trae veredicto, también falla: no se midió.
+      - name: La deriva del soak
+        if: >-
+          success() && steps.plan.outputs.escenario == 'soak'
+          && steps.base.outputs.hay == '1'
+        run: |
+          VEREDICTO=$(jq -r '.notas.veredicto // "sin veredicto"' resultados/carga-soak.json)
+          echo "veredicto: $VEREDICTO"
+          if [ "$VEREDICTO" != "estable" ]; then
+            echo "::error title=Soak::$VEREDICTO"
+            exit 1
+          fi
 
       # ── Cuando el login se cae, preguntar qué más está caído ───────────────
       #

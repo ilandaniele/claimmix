@@ -1,9 +1,11 @@
 /**
  * DELETE /api/admin/users/:id/sessions - cierra todas las sesiones de una persona del inquilino.
  *
- * Sirve cuando alguien perdió el teléfono o se fue de la empresa: sin esto, una
- * sesión robada seguía viva hasta treinta días. La persona queda afuera dentro
- * de los 60 s del `cookieCache` de Better Auth, no al instante.
+ * Sirve cuando alguien perdió el teléfono: sin esto, una sesión robada seguía
+ * viva hasta treinta días. Las sesiones abiertas caen dentro de los 60 s del
+ * `cookieCache` de Better Auth, no al instante, y la persona puede volver a
+ * entrar. Para dejarla afuera (se fue de la empresa) está la baja:
+ * DELETE /api/admin/users/:id.
  */
 
 import { NextRequest } from "next/server";

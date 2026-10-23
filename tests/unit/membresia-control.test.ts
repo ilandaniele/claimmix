@@ -173,7 +173,7 @@ describe("PATCH /api/admin/users/:id", () => {
 
   beforeEach(() => {
     h.requireAdmin.mockResolvedValue({ user: { id: ADMIN }, userRow: { role: "admin", tenant_id: ESPACIO } });
-    h.respuestas.push([[OBJETIVO, "viewer"]], [[OBJETIVO, "Ana", "analyst", "2026-01-01T00:00:00.000Z"]]);
+    h.respuestas.push([[OBJETIVO, "viewer"]], [[OBJETIVO, "Ana", "analyst", "2026-01-01T00:00:00.000Z", null]]);
   });
 
   it("lee y escribe por control, y espeja el espacio de quien cambia el rol cuando ya escribió", async () => {
@@ -312,7 +312,8 @@ describe("ningún sitio de membresía vuelve a enTenant", () => {
 
   it.each([
     ["src/server/alta/invitacion.ts", 2],
-    ["src/app/api/admin/users/[id]/route.ts", 2],
+    // Cuatro, y se corren dos: rol o baja (marcarBaja con su repregunta para el 404/403).
+    ["src/app/api/admin/users/[id]/route.ts", 4],
     ["src/lib/auth/provision.ts", 2],
     // Dos, y se corre una: la lectura con la WABA y la de respaldo para cuando falta la 0051.
     ["src/server/whatsapp/numeros.ts", 2],

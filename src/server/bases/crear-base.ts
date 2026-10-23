@@ -170,6 +170,9 @@ export async function darPermisos(base: string): Promise<void> {
 /**
  * Cierra el intento: la base queda `lista` o `fallida`. En los dos casos se suelta
  * el lease, porque el workflow ya terminó y el reintento no tiene que esperar.
+ *
+ * Sólo toca una fila `creando` o `fallida`: un workflow vencido, cuyo lease ya
+ * retomó otro, no baja a `fallida` la base que el otro dejó `lista`, ni revive una `borrada`.
  */
 export async function marcarBase(
   tenantId: string,
@@ -184,7 +187,7 @@ export async function marcarBase(
       ultimo_error = ${datos.error?.slice(0, MAX_ERROR) ?? null}::text,
       lista_at = case when ${estado === "lista"}::boolean then now() else lista_at end,
       tomada_at = null
-    where tenant_id = ${tenantId}::uuid
+    where tenant_id = ${tenantId}::uuid and estado in ('creando', 'fallida')
   `);
 }
 

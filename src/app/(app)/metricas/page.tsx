@@ -48,6 +48,7 @@ import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
 import { logger } from "@/lib/observability/logger";
 import { SerieDeActividad } from "./_components/SerieDeActividad";
 import { ResumenDeAyer } from "./_components/ResumenDeAyer";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 /*
  * Los números salen de `getTenantKpis`, que también usa /api/metricas, y el
@@ -191,6 +192,8 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 // ── Page component ────────────────────────────────────────────────────────────
+
+export const generateMetadata = tituloDePantalla("nav.metricas");
 
 export default async function MetricasPage({
   searchParams,

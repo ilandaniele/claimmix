@@ -15,7 +15,7 @@
  */
 
 import "server-only";
-import { and, eq, inArray, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 
 import { ReglasSchema, candidatasDeAsignacion, type Candidata, type Reglas } from "@/core/case/asignacion";
@@ -118,8 +118,8 @@ export interface PersonaConCarga {
 
 /**
  * Cuántos casos abiertos tiene cada persona que edita, de menos a más. Es la
- * carga con la que se reparte y la que muestra la pantalla de asignar.
- * `personas` acota a un pool.
+ * carga con la que se reparte y la que muestra la pantalla de asignar. Quien
+ * está de baja no entra. `personas` acota a un pool.
  */
 export function consultaDeCarga(db: ClienteDatos, personas?: readonly string[]) {
   return db
@@ -131,7 +131,13 @@ export function consultaDeCarga(db: ClienteDatos, personas?: readonly string[]) 
     })
     .from(users)
     .leftJoin(cases, and(eq(cases.assigned_to, users.id), notInArray(cases.status, [...ESTADOS_CERRADOS])))
-    .where(and(inArray(users.role, CASE_EDITOR_ROLES), personas ? inArray(users.id, [...personas]) : undefined))
+    .where(
+      and(
+        inArray(users.role, CASE_EDITOR_ROLES),
+        isNull(users.dado_de_baja_en),
+        personas ? inArray(users.id, [...personas]) : undefined,
+      ),
+    )
     .groupBy(users.id, users.full_name, users.role)
     .orderBy(sql`count(${cases.id})`, users.full_name, users.id);
 }

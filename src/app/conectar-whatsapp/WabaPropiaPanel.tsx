@@ -161,6 +161,7 @@ function Panel({ locale, nombre: nombreDelEspacio, numeroTipeado, inicial, conec
   const [categoria, setCategoria] = useState(CATEGORIA_INICIAL);
   const sdk = useRef<SdkDeFacebook | null>(null);
   const apertura = useRef<Apertura | null>(null);
+  const cancelarBaja = useRef<HTMLButtonElement>(null);
 
   const idNombre = useId();
   const idWeb = useId();
@@ -511,6 +512,7 @@ function Panel({ locale, nombre: nombreDelEspacio, numeroTipeado, inicial, conec
           titulo={t("waba.desconectar.titulo")}
           texto={t("waba.desconectar.texto")}
           alCerrar={() => setConfirmandoBaja(false)}
+          foco={cancelarBaja}
         >
           <div className="flex flex-col gap-2">
             <button
@@ -526,7 +528,7 @@ function Panel({ locale, nombre: nombreDelEspacio, numeroTipeado, inicial, conec
             >
               {t("waba.desconectar.confirmar")}
             </button>
-            <button type="button" className={BOTON_SUAVE} onClick={() => setConfirmandoBaja(false)}>
+            <button ref={cancelarBaja} type="button" className={BOTON_SUAVE} onClick={() => setConfirmandoBaja(false)}>
               {t("waba.cancelar")}
             </button>
           </div>

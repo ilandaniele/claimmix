@@ -19,7 +19,7 @@
 
 import "server-only";
 
-import { and, inArray, lt, sql, type AnyColumn } from "drizzle-orm";
+import { and, eq, inArray, lt, sql, type AnyColumn } from "drizzle-orm";
 
 import { db as dbDueno, type DbDueno } from "@/lib/db";
 import { caseRecordatorios, cases, outboundMessages } from "@/lib/db/schema";
@@ -56,6 +56,8 @@ export function getAbandonAfterDays(): number {
 export interface CloseAbandonedResult {
   closed: number;
   caseIds: string[];
+  /** La consulta falló: el cero no es «no había nada». */
+  fallo?: true;
 }
 
 /** Cuándo escribió por última vez el denunciante; si nunca, cuándo se abrió el caso. */
@@ -162,9 +164,15 @@ export async function closeAbandonedConversations(db: DbDueno = dbDueno): Promis
        *
        * `reap-stuck` lo hace bien desde siempre. Este no.
        */
+      /*
+       * Y nunca uno con una respuesta marcada sin leer: la persona contestó,
+       * y cerrarlo diría «sin respuesta del denunciante». Si `retomar-pendientes`
+       * no lo levantó en catorce días, lo tiene que ver alguien, no el cierre.
+       */
       .where(
         and(
           inArray(cases.status, [...AWAITING_CLAIMANT]),
+          eq(cases.extraction_pending, false),
           inArray(
             cases.id,
             // sin-inquilino: la subconsulta que elige QUÉ cerrar, del mismo barrido
@@ -175,6 +183,7 @@ export async function closeAbandonedConversations(db: DbDueno = dbDueno): Promis
               .where(
                 and(
                   inArray(cases.status, [...AWAITING_CLAIMANT]),
+                  eq(cases.extraction_pending, false),
                   lt(
                     sql`coalesce(${cases.updated_at}, ${cases.created_at})`,
                     sql`now() - interval '${sql.raw(String(days))} days'`
@@ -223,7 +232,7 @@ export async function closeAbandonedConversations(db: DbDueno = dbDueno): Promis
     return { closed: closed.length, caseIds: closed.map((r) => r.id) };
   } catch (err) {
     logger.error({ code: errorCode(err) }, "close_abandoned.failed");
-    return { closed: 0, caseIds: [] };
+    return { closed: 0, caseIds: [], fallo: true };
   }
 }
 

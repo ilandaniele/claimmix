@@ -79,14 +79,14 @@ describe("reintentarBases", () => {
     expect(sql).toContain("b.tenant_id is null");
   });
 
-  it("toma las fallidas con intentos por gastar y las que están creando con el lease vencido", async () => {
+  it("toma las fallidas y las que están creando con el lease vencido, las dos con intentos por gastar", async () => {
     conPendientes();
 
     await reintentarBases(Date.now() + 60_000);
 
     const { sql, params } = consulta();
-    expect(sql).toContain("b.estado = 'fallida' and b.intentos < $1::int");
-    expect(sql).toContain("b.estado = 'creando'");
+    // El tope cubre también a `creando`: las trabadas no se relanzan para siempre ni les tapan el lugar a las nuevas.
+    expect(sql).toMatch(/b\.intentos < \$1::int\s+and \(b\.estado = 'fallida'\s+or \(b\.estado = 'creando'/);
     // Sin lease (la fila recién registrada) cuenta desde que se creó, no como vencida desde siempre.
     expect(sql).toContain("coalesce(b.tomada_at, b.creada_at) < now() - make_interval(mins => $2::int)");
     expect(params).toEqual([5, MINUTOS_PARA_REINTENTAR, 20]);

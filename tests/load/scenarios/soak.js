@@ -11,15 +11,19 @@
  * final. Una aplicación que arranca en 200 ms y termina en 400 tiene un p95
  * total perfectamente presentable y una fuga.
  *
- * Las dos ventanas se miden aparte y el umbral compara una contra otra. Es el
- * único escenario cuyo umbral no es un número absoluto.
+ * Las dos ventanas se miden aparte. k6 no deja escribir un umbral que compare
+ * una contra otra, así que el umbral es un corte absoluto sobre la última y la
+ * comparación (`deriva`, `veredicto`) se calcula en `handleSummary`. Esa
+ * comparación NO cambia el código de salida de k6: el workflow
+ * `.github/workflows/load-tests.yml` lee el `veredicto` del reporte y falla si
+ * no es «estable». Corrido a mano, el veredicto hay que leerlo.
  */
 
 import http from "k6/http";
 import { check, sleep } from "k6";
 import { Counter, Trend } from "k6/metrics";
 
-import { BASE_URL, PAUSA_S, PERCENTILES, RUTAS, exigirDestinoSeguro } from "../config/base.js";
+import { BASE_URL, PAUSA_S, PERCENTILES, RUTAS, exigirDestinoSeguro, umbrales } from "../config/base.js";
 import { comoAnalista, esRechazoDeCupo, iniciarSesiones } from "../helpers/auth.js";
 import { guardar } from "../helpers/reporte.js";
 
@@ -45,8 +49,9 @@ export const options = {
     { duration: "2m", target: 0 },
   ],
   summaryTrendStats: PERCENTILES,
-  thresholds: {
-    http_req_failed: ["rate<0.01"],
+  // Un 302 al login no se sigue como si fuera la respuesta.
+  maxRedirects: 0,
+  thresholds: umbrales({
     /*
      * El umbral de la deriva.
      *
@@ -55,23 +60,21 @@ export const options = {
      * —la última ventana no puede duplicar el presupuesto— y la comparación
      * fina se calcula en `handleSummary`, que es donde se lee.
      */
+    soak_ultima_ventana_ms: ["p(95)<1000"],
     /*
      * Un contador aparte, y no `min>0` sobre el Trend.
      *
      * En k6, un umbral sobre una métrica SIN MUESTRAS pasa: un Trend vacío da
      * p(95)=0 y nadie se queja. Así que una fase que nunca se llenó salía
-     * verde, que es el peor de los verdes.
+     * verde, que es el peor de los verdes. Un contador no tiene esa
+     * ambigüedad: o hubo muestras o no hubo.
      *
-     * `min>0` parecía la guarda barata y no lo es: contra un servidor local
-     * una respuesta puede tardar menos de un milisegundo, `min` da 0, y el
-     * umbral rompe con las fases perfectamente llenas. Lo comprobé.
-     *
-     * Un contador no tiene esa ambigüedad: o hubo muestras o no hubo.
+     * (`min>0` sobre el Trend no sirve: contra un servidor local una respuesta
+     * puede tardar menos de un milisegundo y `min` da 0 con la fase llena.)
      */
-    soak_ultima_ventana_ms: ["p(95)<1000"],
     soak_muestras_primera: ["count>0"],
     soak_muestras_ultima: ["count>0"],
-  },
+  }),
 };
 
 export function setup() {

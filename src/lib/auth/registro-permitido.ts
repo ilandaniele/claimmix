@@ -3,8 +3,6 @@
 // No list → nobody. Las invitaciones y el SSO entran por sus propias puertas.
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { dominioDelMail } from "@/core/sso";
-
 export type Permiso =
   | { tipo: "dominio"; valor: string }
   | { tipo: "direccion"; valor: string };
@@ -88,11 +86,4 @@ export function enAlta<T>(camino: CaminoDeAltaEnCurso, fn: () => Promise<T>): Pr
 
 export function altaEnCursoPorServidor(): CaminoDeAltaEnCurso | undefined {
   return altaEnCurso.getStore();
-}
-
-export function altaHabilitada(email: string): boolean {
-  // El dominio verificado del inquilino hace de allowlist, y nada más que esa.
-  const sso = ingresoPorSso();
-  if (sso) return dominioDelMail(email) === sso.dominio;
-  return puedeRegistrarse(email, permitidosConfigurados());
 }

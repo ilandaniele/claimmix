@@ -29,6 +29,7 @@ import {
   type TipoDeVencimiento,
 } from "@/server/cases/agenda";
 import { Card } from "../_components/ui";
+import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 const TIPO_LABEL: Record<TipoDeVencimiento, TranslationKey> = {
   ventana_whatsapp: "agenda.tipo.ventanaWhatsapp",
@@ -72,6 +73,8 @@ function agrupar(
 
   return [...grupos.values()];
 }
+
+export const generateMetadata = tituloDePantalla("nav.agenda");
 
 export default async function AgendaPage({ searchParams }: AgendaPageProps) {
   const session = await getSessionContext();

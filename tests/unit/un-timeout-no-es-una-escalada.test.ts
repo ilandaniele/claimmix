@@ -35,13 +35,17 @@ describe("el reintento por timeout", () => {
     ["un TIMEOUT", new GeminiExtractionError("plazo", { code: "TIMEOUT" }), true],
     ["un 429", new GeminiExtractionError("cupo", { status: 429, code: "RESOURCE_EXHAUSTED" }), true],
     ["una conexión que no abrió", new GeminiExtractionError("red", { code: "ECONNRESET", red: true }), true],
+    ["un 503", new GeminiExtractionError("caído", { status: 503, code: "UNAVAILABLE" }), true],
+    ["un 500", new GeminiExtractionError("interno", { status: 500, code: "INTERNAL" }), true],
+    ["un token que no se pudo pedir", new GeminiExtractionError("Vertex: sin token", { red: true }), true],
     ["un 400", new GeminiExtractionError("400", { status: 400, code: "INVALID_ARGUMENT" }), false],
+    ["un 404", new GeminiExtractionError("404", { status: 404, code: "NOT_FOUND" }), false],
     ["un error que no es del proveedor", Object.assign(new Error("x"), { cause: { status: 429 } }), false],
-  ])("sólo para TIMEOUT, 429 y red, no para cualquier error: %s", (_, err, pasajero) => {
+  ])("sólo para TIMEOUT, 429, 5xx y red, no para cualquier error: %s", (_, err, pasajero) => {
     // Vertex es pospago sobre un cupo compartido y dinámico: un 429 es tan
-    // transitorio como un TIMEOUT, con el mismo tope de por vida. Un socket
-    // que no abrió tras los reintentos de transporte también. Un 400 sigue
-    // escalando.
+    // transitorio como un TIMEOUT, con el mismo tope de por vida. Un 5xx, un
+    // socket que no abrió tras los reintentos de transporte o un token que no
+    // salió también. Un 400 sigue escalando.
     expect(esPasajero(err)).toBe(pasajero);
     expect(WORKER).toContain(REINTENTA);
   });

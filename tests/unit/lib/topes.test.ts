@@ -124,6 +124,7 @@ describe("topeDecimal", () => {
     expect(topeMensualDelProyecto({})).toBe(200);
     expect(topeMensualDelProyecto({ MONTHLY_BUDGET_USD: "0" })).toBe(0);
     expect(topeMensualDelProyecto({ MONTHLY_BUDGET_USD: "35" })).toBe(35);
+    expect(topeMensualDelProyecto({ MONTHLY_BUDGET_USD: "49.5" })).toBe(49.5);
   });
 });
 

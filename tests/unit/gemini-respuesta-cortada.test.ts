@@ -219,6 +219,13 @@ describe("una falla pasajera del primer intento no se pierde", () => {
       headers: new Headers(),
       json: async () => ({ error: { status: "RESOURCE_EXHAUSTED", message: "cupo" } }),
     }) as unknown as Response;
+  const http503 = () =>
+    ({
+      ok: false,
+      status: 503,
+      headers: new Headers(),
+      json: async () => ({ error: { status: "UNAVAILABLE", message: "caído" } }),
+    }) as unknown as Response;
   const http400 = () =>
     ({
       ok: false,
@@ -280,6 +287,14 @@ describe("una falla pasajera del primer intento no se pierde", () => {
     expect(errMeta(err).status).toBe(429);
   });
 
+  it("un 503 y después un MAX_TOKENS sigue siendo pasajero", async () => {
+    guion([http503, cortada]);
+    const { err, esPasajero, errMeta } = await falla();
+
+    expect(esPasajero(err)).toBe(true);
+    expect(errMeta(err).status).toBe(503);
+  });
+
   it("la red caída en los dos intentos es pasajero", async () => {
     guion([sinRed, sinRed]);
     const { err, esPasajero } = await falla();
@@ -301,8 +316,11 @@ describe("una falla pasajera del primer intento no se pierde", () => {
     expect(esPasajero(err)).toBe(false);
   });
 
-  it("tras un 429 el reintento va con el prompt limpio, sin lo del JSON inválido", async () => {
-    const prompts = guion([http429, bien]);
+  it.each([
+    ["429", http429],
+    ["503", http503],
+  ])("tras un %s el reintento va con el prompt limpio, sin lo del JSON inválido", async (_, primero) => {
+    const prompts = guion([primero, bien]);
 
     const { extractEmailClaimGemini } = await import("@/server/ai/gemini-extractor");
     await extractEmailClaimGemini({

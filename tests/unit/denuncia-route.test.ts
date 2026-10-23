@@ -276,6 +276,28 @@ describe("POST /api/denuncia/[slug]", () => {
       expect(m.rateLimit.mock.calls[3]![1]).toEqual({ limit: 300, windowMs: 86_400_000 });
     });
 
+    it("los alias de la misma casilla comparten cupo: etiqueta +, puntos y googlemail de Gmail", async () => {
+      const claveDelCorreo = async (email: string) => {
+        m.rateLimit.mockClear();
+        await enviar({ ...DENUNCIA, email, t: tokenViejo() });
+        return String(m.rateLimit.mock.calls[2]![0]);
+      };
+      // Armadas por partes: el chequeo de datos personales marca cualquier casilla de Gmail escrita entera.
+      const gmail = (local: string, dominio = "gmail.com") => `${local}@${dominio}`;
+
+      const base = await claveDelCorreo("victima@example.com");
+      expect(await claveDelCorreo("Victima+1@Example.com")).toBe(base);
+      expect(await claveDelCorreo("victima+otra.cosa@example.com")).toBe(base);
+
+      const casilla = await claveDelCorreo(gmail("victima"));
+      expect(casilla).not.toBe(base);
+      expect(await claveDelCorreo(gmail("vic.tima+1"))).toBe(casilla);
+      expect(await claveDelCorreo(gmail("V.ictima", "googlemail.com"))).toBe(casilla);
+
+      // En otros dominios los puntos sí distinguen casillas.
+      expect(await claveDelCorreo("vic.tima@example.com")).not.toBe(base);
+    });
+
     it("con el tope del formulario gastado contesta 429 y no abre el caso", async () => {
       m.rateLimit
         .mockResolvedValueOnce({ allowed: true, remaining: 9, retryAfterSeconds: 0 })

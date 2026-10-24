@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPage() {
-  const lastUpdated = "14 de junio de 2026";
+  const lastUpdated = "24 de octubre de 2026";
 
   return (
     <div className="min-h-screen bg-white">
@@ -72,12 +72,9 @@ export default function PrivacyPage() {
             </p>
             <ul className="ml-5 mt-2 list-disc space-y-1">
               <li>
-                <strong>Lectura de correos entrantes</strong> (<code>gmail.readonly</code>): para
-                detectar nuevos reclamos enviados por asegurados al buzón corporativo configurado.
-              </li>
-              <li>
-                <strong>Modificación de estado</strong> (<code>gmail.modify</code>): para marcar
-                correos como leídos una vez procesados, evitando duplicados.
+                <strong>Lectura y modificación de estado</strong> (<code>gmail.modify</code>): para
+                detectar nuevos reclamos enviados por asegurados al buzón corporativo configurado y
+                marcarlos como leídos una vez procesados, evitando duplicados.
               </li>
               <li>
                 <strong>Envío de correos</strong> (<code>gmail.send</code>): para enviar respuestas

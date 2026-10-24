@@ -71,6 +71,8 @@ export async function avisarAlOperador(creadas24h: number, tope: number): Promis
  * Por qué un número del alta automática se mira a mano.
  *
  * `sin_nombre`: la plataforma no dio su nombre visible, y sin él no se agrega nada.
+ * `pais`: el código de país no se reconoce (tabla UIT, sin los no geográficos) o, en el número por
+ * código, es un +54 sin el 9 y los diez dígitos de un celular.
  * `sin_fila` y `sin_credencial`: el espacio no tiene su número pedido, o falta el
  * token o la WABA de la plataforma; quien lee «lo revisamos» tiene que tener a
  * alguien del otro lado.

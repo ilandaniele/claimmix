@@ -230,7 +230,8 @@ tarda algo, la guía lo dice así.
         probando y apagar «Activa» en `/configuracion` de los otros. Con «Activa» apagada, el
         ambiente no lee esa casilla.
       - En prd, primero hay que sacarla de `CASILLAS_DE_DEV` de prd (lo hace Claude con el OK
-        del dueño); si no, el connect vuelve con `otro_ambiente`.
+        del dueño); si no, el connect vuelve con `otro_ambiente`. 24/10: la casilla del agente
+        (veltra) salió de `CASILLAS_DE_DEV` en prd.
     - Por ambiente:
       - dev: la Gmail de Veltra para el agente; administrador y analista, alias de la Gmail
         del dueño.
@@ -244,13 +245,20 @@ tarda algo, la guía lo dice así.
       rechaza por dominio.
     - El administrador y el analista nunca son alias de la Gmail del agente: los mails de alta
       y de invitación caerían en la bandeja que lee el agente.
-    - Ninguna de las nueve está en `ADMIN_EMAILS`. Si la del analista lo está, la pantalla
-      dice «invitación enviada», pero la invitación se bloquea sin aviso y el mail nunca llega.
+    - Ni el administrador ni el analista de ningún ambiente están en `ADMIN_EMAILS`. Si el
+      analista lo está, la pantalla dice «invitación enviada», pero la invitación se bloquea
+      sin aviso y el mail nunca llega.
+    - En dev, `ADMIN_EMAILS` tiene dos direcciones: la Gmail de Veltra y la Gmail del dueño
+      sin alias, que es la del operador (D8). No choca con la prueba: la comparación es
+      exacta, así que los alias `+` del administrador y del analista no son operadores, y la
+      Gmail de Veltra entra como mail agente por «Conectar Gmail», que no mira
+      `ADMIN_EMAILS`. Los avisos al operador llegan a las dos.
     - Los alias de la Gmail personal del dueño no reciben avisos de derivación (veto en
       `src/lib/email/reserved.ts`); la prueba no los necesita.
     - La casilla de la plataforma de dev no se conecta en ningún otro lado.
-  - **Salió bien si:** hay nueve direcciones: seis alias y tres cuentas de Gmail, ninguna en
-    `ADMIN_EMAILS` y ninguna repetida entre ambientes. El dueño avisa «listo» sin escribirlas.
+  - **Salió bien si:** los seis alias (dos por ambiente) existen, ninguno se repite entre
+    ambientes y ninguno está en `ADMIN_EMAILS`; en dev, `ADMIN_EMAILS` tiene sólo la Gmail de
+    Veltra y la Gmail del dueño sin alias. El dueño avisa «listo» sin escribirlas.
   - **Si falla:** una persona tiene un solo espacio por ambiente. Con una dirección repetida,
     el alta termina en `ya_tiene_espacio`; con una de `ADMIN_EMAILS`, `/alta` muestra el
     aviso de operador en vez de abrir un espacio.
@@ -276,12 +284,17 @@ tarda algo, la guía lo dice así.
     PIN de dos pasos»), `:283-299` («El tope de Meta»).
 - [ ] **A5. La verificación del negocio Veltra en Meta.**
   - **Quién:** [Dueño].
-  - **Dónde:** Meta Business Suite > Centro de seguridad.
+  - **Dónde:** Meta Business Suite > Centro de seguridad
+    (https://www.facebook.com/business/help/216940652189296). Guías de Meta: cómo pedirla
+    (https://www.facebook.com/business/help/2058515294227817), qué es
+    (https://www.facebook.com/business/help/1095661473946872) y qué documentos acepta
+    (https://www.facebook.com/business/help/159334372093366).
   - **Qué hacer:** pedirla con la constancia de CUIT con la razón social exacta y un
     comprobante de domicilio. El tope de números lo cuenta Meta por portfolio de negocio, no por
     WABA; la documentación de la Cloud API
-    (https://developers.facebook.com/docs/whatsapp/cloud-api/phone-numbers) dice: «New business
-    portfolios are initially capped at two registered business phone numbers.» Veltra es un
+    (https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/phone-numbers)
+    dice: «New business portfolios are initially capped at two registered business phone
+    numbers.» Veltra es un
     solo portfolio y ya usa un lugar con el número de la plataforma, así que una WABA nueva
     dentro de Veltra no suma lugares. Con Veltra verificada, el dueño decidió que cada ambiente
     tenga su propia WABA y su propio usuario del sistema. Los pasos están en «Después de A5:
@@ -289,8 +302,11 @@ tarda algo, la guía lo dice así.
   - **Salió bien si:** Meta muestra el negocio como verificado. Los docs no dicen cuánto
     tarda.
   - **Si falla:** no bloquea esta guía. Hasta que salga, hay un solo número automático para
-    los tres ambientes.
-  - **Fuentes:** `docs/whatsapp-setup.md:435-436`.
+    los tres ambientes. Si Meta la rechaza, lo que se puede hacer está en
+    https://www.facebook.com/business/help/2342133782492969.
+  - **Fuentes:** `docs/whatsapp-setup.md:462-463`, `:283`.
+  - **Después:** seguir con T2 en
+    [Meta: una organización por cliente](#meta-una-organización-por-cliente).
 - [ ] **A6. La pantalla de consentimiento de Google, publicada.**
   - **Quién:** [Dueño].
   - **Dónde:** consola de Google Cloud, en los dos proyectos de los clientes OAuth (dev y QA
@@ -343,7 +359,9 @@ tarda algo, la guía lo dice así.
     figura en ningún doc.
   - **Si falla:** en QA nadie pasa el desafío y queda el log `registro.turnstile_no_paso`.
   - **Fuentes:** `docs/PROJECT_STATUS.md:5095`.
-- [ ] **A9. Una alerta de gasto de Vertex.**
+- [x] **A9. Una alerta de gasto de Vertex.** 24/10.
+  - **Hecho:** presupuesto de US$ 20 por mes, con alertas al 50, 90 y 100 %; sólo aviso, sin
+    tope.
   - **Quién:** [Dueño].
   - **Dónde:** consola de Google Cloud > Facturación > Presupuestos y alertas.
   - **Qué hacer:** crear una alerta para el proyecto que paga Vertex.
@@ -482,7 +500,7 @@ ningún doc lo dice.
 | `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`, `GMAIL_USER_EMAIL`, `GMAIL_REFRESH_TOKEN` | valor y secreto | excepción: sólo dev tiene número y casilla de la plataforma | prd vacías según `docs/PROMOCION.md:736-738` | Vercel |
 | `PUBSUB_TOPIC`, `PUBSUB_AUDIENCE`, `PUBSUB_SERVICE_ACCOUNT` (`.env.example:327-339`) | valor | excepción: un tópico por ambiente; QA sin Pub/Sub | dev y prd cargadas | log `webhooks.gmail.sin_audiencia_en_produccion` |
 | `NEXT_PUBLIC_SITE_URL` (`.env.example:187`), `DEFAULT_TENANT_ID`, `GOOGLE_DEFAULT_TENANT_ID` (`:47-49`) | valor | excepción: uno por ambiente | cargadas | login; respuestas 403 `INVALID_ORIGIN` de `/api/auth` |
-| `SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV`, `URL_DEL_OTRO_AMBIENTE` (`.env.example:291-297`) | valor | sólo en prd | cargadas en prd | Vercel |
+| `SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV`, `URL_DEL_OTRO_AMBIENTE` (`.env.example:291-297`) | valor | sólo en prd | cargadas en prd; 24/10: la casilla del agente (veltra) salió de `CASILLAS_DE_DEV` en prd | Vercel |
 | `CRON_SECRET`, `BETTER_AUTH_SECRET`, `DATABASE_URL`, `DATABASE_URL_APP`, `R2_*`, `WHATSAPP_APP_SECRETS_KEY` | secreto | excepción: uno por ambiente. El `CRON_SECRET` de prd tiene que ser igual al secreto `PRD_CRON_SECRET` de GitHub (`.github/workflows/post-deploy.yml:660`) | cargadas (salvo `WHATSAPP_APP_SECRETS_KEY`, que espera a la app propia) | smoke y `/api/health` |
 | Migraciones (hasta la 0051) | esquema | igual | 0050 y 0051 en las bases (`docs/PROJECT_STATUS.md:4761-4762`, `:5076`) | A11; `pnpm esquemas` (`package.json:43`) compara dos bases |
 
@@ -1102,7 +1120,8 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/configuracion`, «Conectar Gmail».
   - **Qué hacer:** la Gmail del mail agente de prd (A3): por ahora la de Veltra (decisión del
-    22/10), que antes sale de `CASILLAS_DE_DEV` de prd. **Aviso:** Google muestra una
+    22/10), que antes sale de `CASILLAS_DE_DEV` de prd. 24/10: la casilla del agente (veltra)
+    salió de `CASILLAS_DE_DEV` en prd. **Aviso:** Google muestra una
     pantalla de app no verificada; es esperable. Para seguir, entrar al enlace de opciones
     avanzadas de esa pantalla y continuar hacia la app.
   - **Cambiar el mail agente más adelante:** en `/configuracion`, «Conectar otra cuenta» con
@@ -1382,8 +1401,9 @@ que tenía en la versión anterior de esta guía.
 **Lo que no se puede automatizar, y por qué.**
 
 - Los trámites de Meta: la verificación del negocio, Tech Provider, App Review y la configuración
-  de Embedded Signup (`META_ES_CONFIG_ID`, `.env.example:270`). Los hace una persona en la
-  consola de Meta.
+  de Embedded Signup (`META_ES_CONFIG_ID`, `.env.example:308`). Los hace una persona en la
+  consola de Meta, con el paso a paso de
+  [Meta: una organización por cliente](#meta-una-organización-por-cliente).
 - El código por SMS o llamada: lo tipea el cliente, que es quien tiene la SIM. La aprobación de
   plantillas la decide Meta.
 - Borrar números de la WABA: ClaimMix no lo hace; se hace en WhatsApp Manager.
@@ -1400,6 +1420,227 @@ que tenía en la versión anterior de esta guía.
 - Leer los transcriptos del ensayo y juzgar si una respuesta suena bien.
 - Las altas de punta a punta con correo y SIM reales.
 - Las decisiones del dueño.
+
+## Meta: una organización por cliente
+
+Hoy los números que se conectan por código quedan dentro de la WABA de Veltra, y ahí entran
+pocos. Esta parte arma la otra forma de conectar WhatsApp: el cliente, desde «Conectar
+WhatsApp», entra con su propio Facebook en una ventana de Meta. En esa ventana Meta le crea, o
+le deja elegir, su propio portfolio de negocio y su propia WABA, y el cliente verifica su
+número con un SMS. El número queda en la organización del cliente, no en la de Veltra, y el
+cliente le paga a Meta directamente. Cada portfolio tiene su propio tope: dos números mientras
+el cliente no verifica su negocio, y veinte cuando lo verifica, sin pedirlo. La bandera que
+prende esto, `ALTA_WABA_PROPIA`, hoy está apagada en los tres ambientes, y el código ya está en
+prd: lo que falta son los trámites en la consola de Meta y una prueba en dev, que son los pasos
+de abajo.
+
+Los pasos van en orden, salvo T5 (la configuración básica de la app), que conviene dejar lista
+antes de mandar T3, para no cambiarla con la revisión abierta. Esta parte es la vía 1
+(`ALTA_WABA_PROPIA`). La vía 2 (`ALTA_APP_PROPIA`, en la que el cliente arma su propia app de
+Meta) espera al abogado (T6) y no frena a la vía 1. En `docs/whatsapp-setup.md` las dos son la
+parte G y la parte H.
+
+- [ ] **T1. La verificación del negocio Veltra (A5 hecho).**
+  - **Quién:** [Dueño].
+  - **Dónde:** A5, en [Antes de empezar](#antes-de-empezar).
+  - **Qué hacer:** nada aparte de A5, que ya trae los links de Meta. Meta pide el negocio
+    verificado para T2 y para el acceso avanzado de T3.
+  - **Salió bien si:** A5 está marcado `- [x]`.
+  - **Si falla:** si Meta rechaza la verificación, A5 dice qué hacer. Mientras tanto, T5 y T6
+    se pueden adelantar.
+  - **Fuentes:** `docs/whatsapp-setup.md:462-463`.
+- [ ] **T2. La app ClaimMix como Tech Provider.**
+  - **Quién:** [Dueño].
+  - **Dónde:** panel de la app ClaimMix en Meta for Developers > Casos de uso > WhatsApp; la
+    conexión con el negocio, en Configuración > Básica > Verificación. Guías de Meta:
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers/
+    (Tech Provider),
+    https://developers.facebook.com/documentation/development/release/business-verification
+    (conectar la app al negocio verificado) y
+    https://developers.facebook.com/documentation/development/release/access-verification
+    (verificación de acceso).
+  - **Qué hacer:** empezar el onboarding de Tech Provider desde el caso de uso WhatsApp y
+    completar lo que pida la pantalla. Conectar la app al negocio Veltra ya verificado. La
+    verificación de acceso se pide en el mismo panel cuando Meta la habilita, aunque eso llegue
+    después de T3: sin ella, un cliente que no tiene un rol en la app recibe el error 100 al
+    conectar. T9 no arranca sin ella.
+  - **Salió bien si:** el caso de uso WhatsApp no muestra pasos pendientes del onboarding, la
+    app figura conectada al negocio Veltra verificado y, al final, la verificación de acceso
+    figura aprobada.
+  - **Si falla:** si el negocio no aparece para conectar, la app tiene que estar dentro del
+    portfolio Veltra (ahí está hoy) y quien la conecta tiene que ser administrador de ese
+    portfolio. Si Meta pide la verificación del negocio, volver a T1.
+  - **Fuentes:** `docs/whatsapp-setup.md:467`, `:501`.
+- [ ] **T3. La revisión de la app (App Review).**
+  - **Quién:** [Dueño].
+  - **Dónde:** panel de la app > Revisión de la app. Guías de Meta:
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/app-review
+    (qué pide WhatsApp),
+    https://developers.facebook.com/docs/resp-plat-initiatives/individual-processes/app-review/submission-guide
+    (cómo mandarla),
+    https://developers.facebook.com/docs/app-review/submission-guide/screen-recordings/
+    (los videos), https://developers.facebook.com/docs/permissions (los permisos) y
+    https://developers.facebook.com/docs/graph-api/overview/access-levels (acceso estándar y
+    avanzado).
+  - **Qué hacer:** pedir acceso avanzado a `whatsapp_business_management` y
+    `whatsapp_business_messaging`. Meta pide un video por permiso que muestre cómo lo usa la
+    app: se graban sobre el número de producción que ya atiende, con lo que pide la guía de
+    WhatsApp para cada uno. Grabar no le cambia nada al número: no se registra de nuevo ni se
+    mueve de WABA.
+  - **Salió bien si:** los dos permisos figuran con acceso avanzado en el panel.
+  - **Si falla:** Meta devuelve el pedido con el motivo. Corregir el video o la explicación y
+    mandarlo de nuevo. Mientras la revisión está abierta, no tocar la configuración básica
+    (T5).
+  - **Fuentes:** `docs/whatsapp-setup.md:468-469`.
+- [ ] **T4. Embedded Signup: el login y la configuración.**
+  - **Quién:** [Dueño] hace (a) y (b), y le pasa a [Claude] el dato de (c).
+  - **Dónde:** panel de la app > Facebook Login for Business > Configuración, para (a), y
+    Facebook Login for Business > Configuraciones, para (b). Guías de Meta:
+    https://developers.facebook.com/documentation/facebook-login/facebook-login-for-business
+    (el login),
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/overview/
+    (qué es Embedded Signup),
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/implementation/
+    (cómo se arma),
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/version-4
+    (la versión 4),
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/versions/
+    (las versiones vigentes) y
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens
+    (los tokens).
+  - **Qué hacer:**
+    - (a) Prender Client OAuth login, Web OAuth login, Enforce HTTPS, Embedded Browser OAuth
+      Login, Strict Mode y Login with the JavaScript SDK. En los dominios permitidos del SDK y
+      en las URI de redirección válidas, cargar `https://claimmix.vercel.app` (prd) y
+      `https://claimmix-dev.vercel.app` (dev).
+    - (b) Crear una configuración nueva con «Create configuration», no la plantilla de 60
+      días: Embedded Signup versión 4, producto WhatsApp Cloud API y token del usuario del
+      sistema que no vence. Nada de coexistencia: el código no manda `featureType`. Elegir v4
+      aunque la pantalla ofrezca v5 (salió el 20/10): el código está escrito para v4, y las
+      versiones 2 y 3 dejaron de andar el 15/10. El token de cada cliente lo canjea la
+      plataforma al conectar: no tocar «Generar token» en el usuario del sistema de Veltra.
+    - (c) Copiar el `config_id` de la configuración y pasárselo a Claude por el chat: no es
+      secreto. Es `META_ES_CONFIG_ID`, y Claude lo carga en T7.
+  - **Salió bien si:** la configuración figura con la versión 4, la Cloud API y el token sin
+    vencimiento, y Claude tiene el `config_id`.
+  - **Si falla:** si la pantalla sólo ofrece un token de 60 días, parar y avisarle a Claude: el
+    código da por hecho que el token no vence. Los errores de la ventana de Meta están en
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/errors/.
+  - **Fuentes:** `docs/whatsapp-setup.md:439`, `:473-476`; `.env.example:308`;
+    `src/app/conectar-whatsapp/meta-sdk.ts:184-197`.
+- [ ] **T5. La configuración básica de la app.**
+  - **Quién:** [Dueño].
+  - **Dónde:** panel de la app > Configuración > Básica. Guías de Meta:
+    https://developers.facebook.com/documentation/development/create-an-app/app-dashboard/basic-settings
+    (la pantalla),
+    https://developers.facebook.com/documentation/pages-api/create-an-app (el ícono),
+    https://developers.facebook.com/documentation/development/terms-and-policies/privacy-policy
+    (la política de privacidad) y
+    https://developers.facebook.com/docs/development/create-an-app/app-dashboard/data-deletion-callback
+    (la URL de borrado).
+  - **Qué hacer:** antes de mandar T3, cargar el ícono (de 512 a 1024 px y menos de 5 MB), la
+    categoría, la política de privacidad `https://claimmix.vercel.app/privacy`, las condiciones
+    `https://claimmix.vercel.app/terms` y, como URL de devolución de llamada para la
+    eliminación de datos, `https://claimmix.vercel.app/api/meta/borrado`.
+  - **Salió bien si:** Meta guarda la pantalla sin marcar errores, y las páginas de privacidad
+    y de condiciones abren en el navegador.
+  - **Si falla:** si Meta no acepta la URL de borrado, avisarle a Claude, que mira el registro
+    de prd. `docs/whatsapp-setup.md:617-618` todavía dice que esa URL apunta a `/privacy#meta`;
+    vale la de arriba (`:466`), que es la ruta que atiende el borrado.
+  - **Fuentes:** `docs/whatsapp-setup.md:464-466`, `:586-613`;
+    `src/app/api/meta/borrado/route.ts:1-18`.
+- [ ] **T6. El abogado revisa los textos de la vía 2.**
+  - **Quién:** [Dueño], con el abogado.
+  - **Dónde:** el borrador es el artifact «Revisión legal de WABA propia» del 15/10, privado,
+    en el claude.ai del dueño; el link no va acá porque el repo es público. Lo que hay que
+    mirar está en los §6.a.iv y §5.a de los Términos de la Plataforma de Meta (Platform Terms)
+    y en la cláusula 4.1(b) de los Meta Terms for WhatsApp Business Platform.
+  - **Qué hacer:** que el abogado revise el anexo y las páginas legales de la vía 2
+    (`ALTA_APP_PROPIA`), en la que el cliente arma su propia app de Meta y le pasa a la
+    plataforma su App ID, su App Secret, su token y su WABA ID. La vía 1, la de esta parte, no
+    depende de esto: T7 a T9 siguen sin esperar al abogado.
+  - **Salió bien si:** el abogado devuelve los textos aprobados o corregidos, y el dueño se los
+    pasa a Claude.
+  - **Si falla:** `ALTA_APP_PROPIA` queda apagada en los tres ambientes. No frena nada más.
+  - **Fuentes:** `docs/whatsapp-setup.md:660-665`, `:728-729`; `.env.example:312-318`.
+- [ ] **T7. Prender la WABA propia sólo en dev.**
+  - **Quién:** [Claude], con el OK del dueño.
+  - **Dónde:** el proyecto de dev en Vercel y la terminal.
+  - **Qué hacer:** cargar en dev `META_APP_ID` (el id de la app ClaimMix) y
+    `META_ES_CONFIG_ID` (el de T4), poner `ALTA_WABA_PROPIA=1` sólo en dev, un redeploy, y
+    después del deploy un `pnpm check` completo. `WHATSAPP_APP_SECRET` ya está y no se toca. QA
+    y prd quedan en 0, porque la app de Meta tiene un solo webhook y la bandera va prendida en
+    un solo ambiente por app (T9). Ya está hecho de antes: los campos `account_update` y
+    `phone_number_name_update` del webhook (Graph los mostró suscritos el 15/10) y la 0051 en
+    las bases. `pnpm paridad` va a avisar que la bandera difiere entre ambientes: es esperado,
+    y sólo avisa.
+  - **Salió bien si:** `/api/health` de dev, pedido con el `CRON_SECRET` de dev, muestra
+    `ALTA_WABA_PROPIA` en `true` entre las banderas; `/conectar-whatsapp` de dev ofrece la
+    ventana de Meta, y el `pnpm check` queda verde.
+  - **Si falla:** si la ventana de Meta no se ofrece, falta una de las tres credenciales. Si el
+    `pnpm check` queda rojo, seguir `docs/TESTING.md`.
+  - **Fuentes:** `docs/whatsapp-setup.md:485-486`, `:508-517`; `.env.example:296-308`;
+    `src/server/alta/waba-propia-activa.ts`; `src/app/api/health/banderas.ts:54`;
+    `scripts/lib/paridad.mjs:48`; `docs/PROJECT_STATUS.md:5346`.
+- [ ] **T8. Probar en dev con un portfolio de prueba.**
+  - **Quién:** [Dueño], como administrador de la app.
+  - **Dónde:** `https://claimmix-dev.vercel.app/conectar-whatsapp`, la bandeja de dev y
+    `/admin/altas` de dev.
+  - **Qué hacer:** crear en Meta un portfolio de negocio de prueba nuevo (la WABA de Veltra se
+    rechaza) y usar un chip libre, que no esté en ninguna cuenta de WhatsApp. Nunca el número
+    de producción de la plataforma ni un número personal. Conectar desde la ventana de Meta. El
+    borrado y «Desvincular la WABA» dan de baja la WABA los dos, así que el borrado se prueba
+    en una segunda conexión: conectar otra vez (si la plataforma no deja reconectar la misma
+    WABA, con otro portfolio de prueba y otro chip) y pedir desde Facebook que la app borre los
+    datos. Para eso la URL de borrado de T5 apunta a dev mientras dura la prueba: el dueño la
+    cambia a `https://claimmix-dev.vercel.app/api/meta/borrado` con T3 ya aprobada, y T9 la
+    vuelve a prd. La lista que hay que ver es la del paso 8 de la parte G:
+    - el estado llega a `conectada`;
+    - un mensaje que el dueño manda desde su celular al número de prueba llega a la bandeja de
+      dev;
+    - la plantilla `reabrir_denuncia` se crea en la WABA de prueba;
+    - «Desvincular la WABA», en `/admin/altas`, borra el token;
+    - la revisión nocturna de casos trabados (`reap-stuck`) corre;
+    - el `user_id` del pedido de borrado coincide con el `authResponse.userID` que devolvió la
+      ventana de Meta.
+  - **Salió bien si:** se ven los seis puntos, y el registro de dev muestra
+    `meta_borrado.atendido` con una baja y no `meta_borrado.sin_coincidencia`.
+  - **Si falla:** si los ids no calzan, no pasar a T9 y avisarle a Claude; mientras tanto los
+    pedidos de borrado se atienden a mano, como dice «Si un cliente pide que se borren sus
+    datos» (`docs/whatsapp-setup.md:586`). Un error 100 al conectar quiere decir que falta la
+    verificación de acceso (T2) o que quien conecta no tiene un rol en la app. Los demás
+    errores de la ventana de Meta, en el link de errores de T4.
+  - **Fuentes:** `docs/whatsapp-setup.md:485-500`, `:597-613`;
+    `src/app/conectar-whatsapp/meta-sdk.ts:184-197`; `src/app/api/meta/borrado/route.ts`;
+    `src/server/alta/panel-operador.ts:921-961`.
+- [ ] **T9. QA y prd.**
+  - **Quién:** [Claude], con el OK del dueño. El modo Live, el Data Use Checkup y la URL de
+    borrado los hace el [Dueño] en el panel de la app.
+  - **Dónde:** Vercel (QA y prd), el repo y el panel de la app. Guías de Meta:
+    https://developers.facebook.com/docs/development/build-and-test/app-modes (modos de la
+    app), https://developers.facebook.com/documentation/development/release (publicar la
+    app),
+    https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/data-use-checkup
+    (Data Use Checkup) y https://www.facebook.com/business/help/488291839463771 (cómo paga el
+    cliente).
+  - **Qué hacer:** arrancar sólo con T3 aprobada, la verificación de acceso hecha y el borrado
+    de T8 calzando. Como la app de Meta tiene un solo webhook, la bandera va prendida en un
+    solo ambiente por app: en el mismo lote, `ALTA_WABA_PROPIA=1` en prd y `0` en dev. QA queda
+    en 0, con `META_APP_ID` y `META_ES_CONFIG_ID` cargados como en prd. Es una excepción
+    declarada a la regla de ambientes iguales: Claude suma `ALTA_WABA_PROPIA` a las excepciones
+    de `pnpm paridad` en un PR a qa, sigue a main y hace una sola promoción a prd, con las
+    variables cargadas antes para que entren en ese mismo build. El dueño vuelve la URL de
+    borrado a `https://claimmix.vercel.app/api/meta/borrado`, hace el Data Use Checkup y pasa
+    la app a modo Live; si Meta no muestra el interruptor de modo, avisarle a Claude. Cada
+    cliente carga su medio de pago en su propio WhatsApp Manager. La otra salida, si el dueño
+    quiere la WABA propia en más de un ambiente, es una app de Meta por ambiente, repitiendo
+    T2 a T5 para cada una.
+  - **Salió bien si:** `/api/health` muestra la bandera en `true` en prd y en `false` en dev y
+    QA, el Post-deploy de prd queda verde y el primer cliente llega a `conectada`.
+  - **Si falla:** marcha atrás con `ALTA_WABA_PROPIA=0` en prd y un redeploy. Frena el alta
+    nueva; los clientes ya conectados siguen enviando y recibiendo, porque el envío nunca mira
+    la bandera.
+  - **Fuentes:** `docs/whatsapp-setup.md:501-513`; `scripts/lib/paridad.mjs:48`.
 
 ## Cuando entra un cliente real
 
@@ -1555,8 +1796,9 @@ arriba.
 - `docs/whatsapp-setup.md`: Parte B, la app de Meta (`:38`); Parte D, el MCP (`:93`); Parte E,
   reabrir tras 24 h y la plantilla (`:130`); Parte F, el número por código (`:162`), con «Antes
   de prenderlo» (`:178`), «Lo que hace la persona» (`:207`), «El tope de Meta» (`:283`), «Los
-  topes» (`:301`), «Qué hace el operador ante cada aviso» (`:326`) y «Prueba real en QA»
-  (`:359`); Parte G, la WABA propia (`:389`); Parte H, la app propia (`:608`).
+  topes» (`:309`), «Qué hace el operador ante cada aviso» (`:334`) y «Prueba real en QA»
+  (`:386`); Parte G, la WABA propia (`:416`), con «Configurar Meta» (`:458`) y «Si un cliente
+  pide que se borren sus datos» (`:586`); Parte H, la app propia (`:636`).
 - `docs/PROMOCION.md`: «Las diecisiete variables de claimmix-qa» (`:234`), «Los ambientes»
   (`:556`), «El camino a prd» (`:577`), «Las dos fases» (`:632`), «BASE_POR_CLIENTE es de ida»
   (`:779`), «Migrar después de un cambio de esquema» (`:786`) y «Lo que queda abierto» (`:801`).
@@ -1567,3 +1809,51 @@ arriba.
   que todavía no es igual (`:5051-5053`), «El agente aprende de la consola» (`:5055`), las
   decisiones de A1 (`:5190-5196`), lo que espera al dueño (`:5209`) y el número por código
   (`:5256-5261`).
+- Meta, las guías oficiales que usan A5 y «Meta: una organización por cliente»:
+  - La verificación del negocio:
+    https://www.facebook.com/business/help/2058515294227817 (cómo pedirla),
+    https://www.facebook.com/business/help/1095661473946872 (qué es),
+    https://www.facebook.com/business/help/159334372093366 (documentos que acepta),
+    https://www.facebook.com/business/help/2342133782492969 (si la rechazan) y
+    https://www.facebook.com/business/help/216940652189296 (Centro de seguridad).
+  - La app y su publicación:
+    https://developers.facebook.com/documentation/development/release/business-verification
+    (conectar la app al negocio),
+    https://developers.facebook.com/documentation/development/release/access-verification
+    (verificación de acceso),
+    https://developers.facebook.com/documentation/development/create-an-app/app-dashboard/basic-settings
+    (configuración básica),
+    https://developers.facebook.com/documentation/pages-api/create-an-app (el ícono),
+    https://developers.facebook.com/documentation/development/terms-and-policies/privacy-policy
+    (política de privacidad),
+    https://developers.facebook.com/docs/development/create-an-app/app-dashboard/data-deletion-callback
+    (URL de borrado),
+    https://developers.facebook.com/docs/development/build-and-test/app-modes (modos),
+    https://developers.facebook.com/documentation/development/release (publicar) y
+    https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/data-use-checkup
+    (Data Use Checkup).
+  - Tech Provider y la revisión:
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers/,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/app-review,
+    https://developers.facebook.com/docs/resp-plat-initiatives/individual-processes/app-review/submission-guide,
+    https://developers.facebook.com/docs/app-review/submission-guide/screen-recordings/,
+    https://developers.facebook.com/docs/permissions y
+    https://developers.facebook.com/docs/graph-api/overview/access-levels.
+  - Embedded Signup, el login y los tokens:
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/overview/,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/versions/,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/version-4,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/version-5,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/implementation/,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/default-flow,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/errors/,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-tech-provider,
+    https://developers.facebook.com/documentation/facebook-login/facebook-login-for-business y
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens.
+  - Números, cuentas y límites:
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/phone-numbers,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/whatsapp-business-accounts,
+    https://developers.facebook.com/documentation/business-messaging/whatsapp/messaging-limits
+    y https://www.facebook.com/business/help/488291839463771 (cómo paga el cliente).
+  - Los Términos de la Plataforma de Meta (Platform Terms, §6.a.iv y §5.a) no tienen un link
+    comprobado en esta guía: el abogado los busca en el sitio de Meta.

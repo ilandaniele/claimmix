@@ -21,6 +21,8 @@ import { logger } from "@/lib/observability/logger";
 import {
   agregarNumero,
   clasificar,
+  CODIGOS_DE_PAIS,
+  codigoDePais,
   codigoYaVerificado,
   fijarWebhookDelNumero,
   numeroYaRegistrado,
@@ -92,6 +94,15 @@ describe("agregarNumero", () => {
     expect(init.headers).toEqual(CON_CUERPO);
     expect(JSON.parse(init.body as string)).toEqual({ cc: "54", phone_number: "92915550000", verified_name: "Veltra" });
     expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("con el código de otro país manda ese código y el resto del número, no el 54", async () => {
+    const fetchFalso = graphContesta({ id: ID });
+
+    const r = await agregarNumero(CRED, { cc: "1", numero: "2025550000" }, "Veltra");
+
+    expect(r).toEqual({ ok: true, valor: ID });
+    expect(JSON.parse(unicaLlamada(fetchFalso).init.body as string)).toEqual({ cc: "1", phone_number: "2025550000", verified_name: "Veltra" });
   });
 
   it("un id que no son dígitos, o que no viene, es «meta» y no se devuelve", async () => {
@@ -593,15 +604,21 @@ describe("ids de forma rara y el número de la plataforma", () => {
 });
 
 describe("partirNumero", () => {
-  it("un móvil argentino queda con el país y el resto, con el 9", () => {
-    expect(partirNumero("+5491100000000")).toEqual({ cc: "54", numero: "91100000000" });
-    expect(partirNumero("+5491100000001")).toEqual({ cc: "54", numero: "91100000001" });
+  it.each([
+    ["un móvil argentino, con el 9", "+5491100000000", { cc: "54", numero: "91100000000" }],
+    ["otro móvil argentino", "+5491100000001", { cc: "54", numero: "91100000001" }],
+    ["Estados Unidos (código de un dígito)", "+12025550000", { cc: "1", numero: "2025550000" }],
+    ["Rusia (código de un dígito)", "+79161234567", { cc: "7", numero: "9161234567" }],
+    ["España (dos dígitos)", "+34600000000", { cc: "34", numero: "600000000" }],
+    ["Reino Unido (dos dígitos)", "+447700900123", { cc: "44", numero: "7700900123" }],
+    ["Uruguay: corta en tres dígitos y no en el 59", "+59899123456", { cc: "598", numero: "99123456" }],
+    ["Italia: conserva el 0 del número", "+390612345678", { cc: "39", numero: "0612345678" }],
+  ])("%s", (_caso, e164, partes) => {
+    expect(partirNumero(e164)).toEqual(partes);
   });
 
-  it("todo lo demás es null: otros países, fijos, largos raros y sin el +", () => {
+  it("es null si no tiene forma de número, si el código no existe o si un +54 no es celular", () => {
     for (const raro of [
-      "+12025550000",
-      "+34600000000",
       "5491100000000",
       "+541100000000",
       "+54911000000",
@@ -609,8 +626,59 @@ describe("partirNumero", () => {
       "+5491100a0000",
       "+54 9 11 0000-0000",
       "",
+      "+2101234567",
+      "+28012345678",
+      "+42212345678",
+      "+999123456789",
+      "+80012345678",
     ]) {
       expect(partirNumero(raro)).toBeNull();
+    }
+  });
+});
+
+describe("codigoDePais", () => {
+  it.each([
+    ["+541112345678", "54"],
+    ["+59899123456", "598"],
+    ["+12025550000", "1"],
+  ])("%s tiene el código %s", (e164, cc) => {
+    expect(codigoDePais(e164)).toBe(cc);
+  });
+
+  it("no le exige el 9 al +54: un fijo da el código aunque partirNumero lo rechace", () => {
+    expect(codigoDePais("+541112345678")).toBe("54");
+    expect(partirNumero("+541112345678")).toBeNull();
+  });
+
+  it("es null para un código que no es geográfico o no existe, y para lo que no es E.164", () => {
+    for (const raro of ["+80012345678", "+28012345678", "5491100000000", "+54 9 11 0000-0000", ""]) {
+      expect(codigoDePais(raro)).toBeNull();
+    }
+  });
+});
+
+describe("CODIGOS_DE_PAIS", () => {
+  const codigos = [...CODIGOS_DE_PAIS];
+
+  it("ningún código es el comienzo de otro: así se puede buscar por prefijo", () => {
+    const pares = codigos.flatMap((a) => codigos.filter((b) => a !== b && b.startsWith(a)).map((b) => [a, b]));
+    expect(pares).toEqual([]);
+  });
+
+  it("cada código tiene forma de código de país: uno a tres dígitos sin cero adelante", () => {
+    for (const cc of codigos) expect(cc).toMatch(/^[1-9]\d{0,2}$/);
+  });
+
+  it("no trae los códigos no geográficos", () => {
+    for (const cc of ["800", "808", "870", "878", "881", "882", "883", "888", "979", "991"]) {
+      expect(CODIGOS_DE_PAIS.has(cc)).toBe(false);
+    }
+  });
+
+  it("cada código se parte como sí mismo", () => {
+    for (const cc of codigos) {
+      expect(partirNumero(`+${cc}91100000000`)).toEqual({ cc, numero: "91100000000" });
     }
   });
 });

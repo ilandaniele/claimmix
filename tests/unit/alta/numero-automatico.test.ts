@@ -472,6 +472,16 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
     expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
+  it("el número ya está en la WABA con un código de otro país: revision y aviso ya_en_la_waba, sin agregar", async () => {
+    h.leer.mockResolvedValue([fila({ numero_e164: "+12025550000" })]);
+    h.recorrer.mockResolvedValue(waba([{ id: "100000000000555", display: "+1 202-555-0000", nombre: null }]));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
+
+    expect(h.aviso).toHaveBeenCalledWith("ya_en_la_waba", TENANT);
+    expect(h.agregar).not.toHaveBeenCalled();
+  });
+
   it("la WABA llena (2 números con el de la plataforma): revision y aviso sin_lugar, sin agregar ni tomar cupos de alta", async () => {
     h.recorrer.mockResolvedValue(waba([{ id: "100000000000555", display: "+54 9 11 5555-1111", nombre: null }]));
 
@@ -530,11 +540,11 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
   });
 
   it.each([
-    ["de Estados Unidos", "+12025550000"],
-    ["de España", "+34612345678"],
     ["fijo argentino", "+541100000001"],
     ["móvil argentino corto", "+5491155"],
     ["sin forma de número", "no es un número"],
+    ["de un código de país que no existe", "+28012345678"],
+    ["de un código no geográfico", "+80012345678"],
   ])("un número %s: revision y aviso pais, sin recorrer la WABA", async (_cual, numero) => {
     h.leer.mockResolvedValue([fila({ numero_e164: numero })]);
 
@@ -544,6 +554,16 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
     expect(h.recorrer).not.toHaveBeenCalled();
     sinGraphMenosRecorrer();
     expect(clavesLiberadas()).toHaveLength(3);
+  });
+
+  it("un número de otro país sigue como cualquiera: se agrega con su código y se pide el código", async () => {
+    h.leer.mockResolvedValue([fila({ numero_e164: "+12025550000" })]);
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
+
+    expect(h.agregar).toHaveBeenCalledWith(CRED, { cc: "1", numero: "2025550000" }, "Veltra");
+    expect(h.pedirAMeta).toHaveBeenCalledWith(CRED, ID, "SMS", "es-AR");
+    expect(h.aviso).not.toHaveBeenCalledWith("pais", TENANT);
   });
 
   it("un espacio que ya pidió un número en la última hora: esperar; vuelven los cupos de alta, también el rechazado, y los de código se quedan", async () => {
@@ -607,14 +627,36 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
     expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
-  it("agregar rechazado: revision y aviso rechazo; ni los cupos de alta ni los de código vuelven", async () => {
+  it("agregar rechazado: revision y aviso rechazo; vuelve sólo el tope diario de números nuevos (no entró ninguno) y se quedan el cupo del espacio y los de código", async () => {
     h.agregar.mockResolvedValue(falla("rechazo", 100));
 
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
 
     expect(h.aviso).toHaveBeenCalledWith("rechazo", TENANT);
     expect(h.pedirAMeta).not.toHaveBeenCalled();
-    expect(h.liberarCupo).not.toHaveBeenCalled();
+    expect(clavesLiberadas()).toEqual(["wa:altas-numero"]);
+  });
+
+  it("los números que Meta rechaza no agotan el tope diario de la plataforma: tras tres rechazos, otro espacio todavía puede sumar el suyo", async () => {
+    const cuenta = new Map<string, number>();
+    h.rateLimit.mockImplementation(async (clave: string, { limit }: { limit: number }) => {
+      const n = (cuenta.get(clave) ?? 0) + 1;
+      cuenta.set(clave, n);
+      return { allowed: n <= limit, remaining: 0, resetAt: 0, retryAfterSeconds: 0, ventana: VENTANA };
+    });
+    h.liberarCupo.mockImplementation(async (clave: string) => {
+      cuenta.set(clave, (cuenta.get(clave) ?? 1) - 1);
+    });
+    const espacio = (n: number): QuienPide => ({ ...QUIEN, tenantId: `3333333${n}-3333-4333-8333-333333333333` });
+
+    h.agregar.mockResolvedValue(falla("rechazo", 100));
+    for (const n of [1, 2, 3]) expect(await pedirCodigo(espacio(n), "SMS")).toBe("revision");
+    expect(topesDelNumero().numerosDia).toBe(2);
+
+    h.agregar.mockResolvedValue(ok(ID));
+    expect(await pedirCodigo(espacio(4), "SMS")).toBe("codigo_enviado");
+    expect(h.aviso).not.toHaveBeenCalledWith("sin_lugar", expect.anything());
+    expect(cuenta.get("wa:altas-numero")).toBe(1);
   });
 
   it("Graph devuelve el id de la plataforma: revision y aviso sin_dueno, sin guardar, sin pedir el código", async () => {

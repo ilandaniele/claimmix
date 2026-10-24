@@ -206,7 +206,7 @@ respaldo para cualquier caso que no cierre solo.
 
 ### Lo que hace la persona
 
-1. Crea su cuenta en `/registro` y, en el segundo paso del alta (`/alta`, «Dar de alta mi empresa»), escribe su empresa y un **móvil argentino** (`+549` y diez dígitos más)
+1. Crea su cuenta en `/registro` y, en el segundo paso del alta (`/alta`, «Dar de alta mi empresa»), escribe su empresa y el **WhatsApp de la empresa con el código de su país** (no el celular personal de un admin; si es `+54`, con el 9 y diez dígitos más)
    que reciba SMS o llamada y que **no esté en la app de WhatsApp ni en WhatsApp
    Business**. Si lo está, tiene que borrar esa cuenta y esperar unos minutos; los
    chats se pierden.
@@ -241,7 +241,7 @@ texto de Graph.
    guarda se espeja a la base del cliente (con `BASE_POR_CLIENTE` apagado no hace
    nada) y, si la copia no entra, el paso sale igual y la levanta el barrido.
 3. Si la fila todavía no tiene `phone_number_id`:
-   - parte el número (sólo `+549…`; otro formato, aviso `pais`);
+   - parte el número con la tabla de códigos de país (un `+54`, sólo con el 9; si no, aviso `pais`);
    - recorre la WABA (`GET /{waba}/phone_numbers?fields=id,display_phone_number,verified_name`);
    - si el número ya está ahí, no lo adopta (aviso `ya_en_la_waba`); si la WABA ya
      tiene el máximo de números, aviso `sin_lugar`; si no aparece el nombre de la
@@ -249,8 +249,9 @@ texto de Graph.
    - toma los cupos de alta y agrega el número
      (`POST /{waba}/phone_numbers` con `cc`, `phone_number` y `verified_name`). Si
      Meta pide aflojar, «esperar» y los cupos de alta vuelven; si rechaza, aviso
-     `rechazo`; si no contesta, da 5xx o contesta sin id, el número pudo haber
-     entrado: aviso `incierto` y los cupos se quedan gastados;
+     `rechazo` y vuelve sólo el tope diario (no entró ningún número); si no contesta,
+     da 5xx o contesta sin id, el número pudo haber entrado: aviso `incierto` y los
+     cupos se quedan gastados;
    - guarda el id que Graph devolvió con la función de la 0049 (paso `agregado`) y
      avisa al operador (aviso `agregado`).
 4. Pide el código: `POST /{id}/request_code` con `code_method` (`SMS` o `VOICE`) y
@@ -322,12 +323,14 @@ Además hay dos cupos fijos, sin variable: **un número nuevo por hora por espac
 **tres `register` por día por espacio** (Meta admite unos diez por número cada 72 h).
 Todos fallan cerrados: si el contador no contesta, no sale nada. Los cupos de código
 sólo se devuelven si ningún pedido a Graph salió: una compuerta cortó antes (la fila,
-el espacio, la migración, las credenciales o un móvil que no es argentino). Desde el
+el espacio, la migración, las credenciales o un código de país que no se reconoce). Desde el
 recorrido de la WABA se quedan gastados, aunque el recorrido falle, porque cada
 vuelta cuesta contra los topes de Meta; un timeout o una respuesta rara en
 `request_code` también cuentan como código pedido, porque Meta pudo haber mandado el
-SMS. Los cupos de alta (un número por hora por espacio y el tope diario) vuelven sólo
-cuando Meta pide aflojar.
+SMS. Los cupos de alta (un número por hora por espacio y el tope diario) vuelven cuando
+Meta pide aflojar. Si Meta rechaza el pedido de agregar vuelve sólo el tope diario: no entró
+ningún número y, sin esto, un solo número mal tipeado o de un país donde WhatsApp Business no
+opera lo agotaría para toda la plataforma. El cupo del espacio se queda.
 Las ventanas de 24 h son fijas (cortan a las 00:00 UTC): en el borde del día el tope
 puede duplicarse.
 
@@ -341,9 +344,9 @@ El mail dice sólo el motivo; qué espacio fue queda en el log `alta.numero_en_r
 |---|---|---|
 | `sin_lugar` | La WABA llegó a `ALTA_NUMEROS_MAXIMOS_WABA`, o se agotó `ALTA_TOPE_NUMEROS_DIA`. | Mirar WhatsApp Manager y borrar a mano los números sobrantes, o verificar la empresa en Meta y subir el tope. Mientras, conectar el espacio desde `/admin/altas`: ahora fija el webhook propio del número, ya no hace falta ponerlo a mano. |
 | `ya_en_la_waba` | El número ya estaba en la WABA; no se adopta solo. | Ver de quién es. Si es del cliente, conectarlo desde `/admin/altas` (se comprueba contra Meta); si no, aclararlo con quien lo agregó. |
-| `rechazo` | Meta dijo que no (el número está en la app de WhatsApp, nombre rechazado, PIN de otro proveedor…). | Leer el `code` en el log `whatsapp.alta_numero.graph` (trae el paso). Si es la app de WhatsApp, el cliente borra esa cuenta; si no, `/admin/altas`. |
+| `rechazo` | Meta dijo que no (el número está en la app de WhatsApp, nombre rechazado, PIN de otro proveedor, un número mal tipeado o de un país donde WhatsApp Business no opera…). | Leer el `code` en el log `whatsapp.alta_numero.graph` (trae el paso). Si es la app de WhatsApp, el cliente borra esa cuenta; si no, `/admin/altas`. |
 | `sin_dueno` | Meta tiene el número, pero la base no pudo asignárselo al espacio. | Ver `alta.numero_automatico_no_guardado` (dice el resultado de la función) y conectarlo desde `/admin/altas`. Mientras la fila siga en `pedido`, el webhook descarta lo que entre. |
-| `pais` | No es un móvil argentino; no se mandó nada a Meta. | Corregir el número del espacio o conectarlo a mano. |
+| `pais` | El código de país no es válido o no se reconoce, o es un `+54` sin el 9 y diez dígitos; el alta no sigue. | Corregir el número del espacio o conectarlo a mano. |
 | `sin_nombre` | Graph no devolvió el nombre visible del número de la plataforma; no se agregó nada. | Revisar `WHATSAPP_PHONE_NUMBER_ID` y el permiso `whatsapp_business_management` del token. |
 | `agregado` | No es una falla: un número entró a la WABA. | Si el espacio no llega a conectarlo, borrarlo a mano en WhatsApp Manager, porque ocupa lugar del tope. |
 | `incierto` | Se pidió agregar el número y Meta no contestó o contestó algo que no se entiende: pudo haber entrado. | Buscarlo en WhatsApp Manager. Si está, conectar el espacio desde `/admin/altas` o borrarlo; si no, repetir. Los cupos del espacio quedan gastados. |
@@ -427,7 +430,7 @@ apagada todo anda como antes.
   ahí. No hay migración de uno a otro. Tampoco se soporta la coexistencia con la app de
   WhatsApp Business: si el número sigue en esa app, la conexión queda en falla
   `coexistencia`.
-- **Solo celulares argentinos (+54).**
+- **Cualquier código de país.**
 
 ### Cómo funciona, en una pasada
 
@@ -656,7 +659,7 @@ bandera apagada todo anda como antes.
   número a otra WABA: Meta no deja elegir después, en Embedded Signup, una cuenta creada
   desde una app de desarrollador.
 - **Sin coexistencia** con la app de WhatsApp Business (exige ser Solution Partner o Tech
-  Provider). **Solo celulares argentinos (+54).**
+  Provider). **Cualquier código de país.**
 - **Riesgo de política.** Pedirle credenciales al cliente es zona gris en las Platform
   Terms de Meta (§6.a.iv). ClaimMix entra en la excepción solo si actúa como proveedor de
   servicios del cliente, con acuerdo escrito previo (§5.a). Por eso la bandera **no se

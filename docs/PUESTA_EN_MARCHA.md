@@ -244,13 +244,20 @@ tarda algo, la guía lo dice así.
       rechaza por dominio.
     - El administrador y el analista nunca son alias de la Gmail del agente: los mails de alta
       y de invitación caerían en la bandeja que lee el agente.
-    - Ninguna de las nueve está en `ADMIN_EMAILS`. Si la del analista lo está, la pantalla
-      dice «invitación enviada», pero la invitación se bloquea sin aviso y el mail nunca llega.
+    - Ni el administrador ni el analista de ningún ambiente están en `ADMIN_EMAILS`. Si el
+      analista lo está, la pantalla dice «invitación enviada», pero la invitación se bloquea
+      sin aviso y el mail nunca llega.
+    - En dev, `ADMIN_EMAILS` tiene dos direcciones: la Gmail de Veltra y la Gmail del dueño
+      sin alias, que es la del operador (D8). No choca con la prueba: la comparación es
+      exacta, así que los alias `+` del administrador y del analista no son operadores, y la
+      Gmail de Veltra entra como mail agente por «Conectar Gmail», que no mira
+      `ADMIN_EMAILS`. Los avisos al operador llegan a las dos.
     - Los alias de la Gmail personal del dueño no reciben avisos de derivación (veto en
       `src/lib/email/reserved.ts`); la prueba no los necesita.
     - La casilla de la plataforma de dev no se conecta en ningún otro lado.
-  - **Salió bien si:** hay nueve direcciones: seis alias y tres cuentas de Gmail, ninguna en
-    `ADMIN_EMAILS` y ninguna repetida entre ambientes. El dueño avisa «listo» sin escribirlas.
+  - **Salió bien si:** los seis alias (dos por ambiente) existen, ninguno se repite entre
+    ambientes y ninguno está en `ADMIN_EMAILS`; en dev, `ADMIN_EMAILS` tiene sólo la Gmail de
+    Veltra y la Gmail del dueño sin alias. El dueño avisa «listo» sin escribirlas.
   - **Si falla:** una persona tiene un solo espacio por ambiente. Con una dirección repetida,
     el alta termina en `ya_tiene_espacio`; con una de `ADMIN_EMAILS`, `/alta` muestra el
     aviso de operador en vez de abrir un espacio.

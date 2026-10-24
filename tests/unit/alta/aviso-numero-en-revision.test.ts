@@ -150,6 +150,19 @@ describe("avisarNumeroEnRevision", () => {
     expect(enUS["alta.avisoNumero.motivo.waba_huerfana"]).not.toContain("that the database does not have");
   });
 
+  it("pais habla del código de país y de los +54 sin celular, no de un país solo", () => {
+    const es = esAR["alta.avisoNumero.motivo.pais"];
+    const en = enUS["alta.avisoNumero.motivo.pais"];
+    expect(es).toContain("código de país");
+    expect(es).toContain("+54");
+    expect(es).not.toContain("móvil argentino");
+    expect(es).not.toContain("no se mandó a Meta");
+    expect(en).toContain("country code");
+    expect(en).toContain("+54");
+    expect(en).not.toContain("Argentine mobile");
+    expect(en).not.toContain("not sent to Meta");
+  });
+
   it("anota el espacio sólo en el registro, aunque no pueda mandar el mail", async () => {
     h.remitente.mockReturnValue(null);
 
@@ -274,7 +287,7 @@ describe("avisarNumeroEnRevision", () => {
     expect(h.rateLimit.mock.calls.map(([clave]) => clave)).toEqual(["alta:aviso-numero:cupo_semanal", "alta:aviso-numero:cupo_semanal"]);
   });
 
-  it.each(["sin_fila", "sin_credencial", "de_otro_ambiente"] as const)("%s: un solo aviso por día para todos los espacios", async (motivo) => {
+  it.each(["sin_fila", "sin_credencial", "de_otro_ambiente", "pais"] as const)("%s: un solo aviso por día para todos los espacios", async (motivo) => {
     await avisarNumeroEnRevision(motivo, TENANT);
     await avisarNumeroEnRevision(motivo, OTRO_TENANT);
 

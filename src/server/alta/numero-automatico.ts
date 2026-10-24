@@ -284,15 +284,21 @@ async function sumarALaWaba(
   const nombre = waba.filas.find((f) => f.id === entorno.plataforma)?.nombre;
   if (!nombre) return corta(aRevision("sin_nombre", tenantId));
 
+  const claveGlobal = claveDeCupo("wa:altas-numero");
   const toma = await tomar([
     { cual: "inquilino", clave: claveDeCupo("wa:alta-numero", tenantId), limit: 1, windowMs: HORA_MS },
-    { cual: "global", clave: claveDeCupo("wa:altas-numero"), limit: topes.numerosDia, windowMs: DIA_MS },
+    { cual: "global", clave: claveGlobal, limit: topes.numerosDia, windowMs: DIA_MS },
   ]);
   if (!toma.ok) return corta(toma.cual === "inquilino" ? "esperar" : aRevision("sin_lugar", tenantId));
 
   const agregado = await agregarNumero(entorno.cred, partes, nombre);
   if (!agregado.ok) {
-    if (agregado.falla === "rechazo") return corta(aRevision("rechazo", tenantId));
+    if (agregado.falla === "rechazo") {
+      // Meta dijo que no: no entró ningún número. El tope diario es de toda la plataforma y cuenta números
+      // nuevos, así que vuelve; si no, un solo espacio con un número mal tipeado lo agota. El del espacio (uno por hora) se queda.
+      await soltar(toma.tomados.filter((t) => t.clave === claveGlobal));
+      return corta(aRevision("rechazo", tenantId));
+    }
     // Sólo «esperar» es seguro de que Meta no hizo nada. Un timeout, un 5xx o un 2xx sin id
     // pueden haber dejado el número en la WABA: los cupos se quedan y lo mira el operador.
     if (agregado.falla === "meta") return corta(aRevision("incierto", tenantId));

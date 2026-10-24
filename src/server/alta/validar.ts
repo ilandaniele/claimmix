@@ -11,7 +11,7 @@ export const EMPRESA_MINIMA = 2;
 export const EMPRESA_MAXIMA = 80;
 
 /** Un número E.164: «+», un dígito que no es cero y entre 7 y 14 más. */
-const E164 = /^\+[1-9][0-9]{7,14}$/;
+export const E164 = /^\+[1-9][0-9]{7,14}$/;
 /** Los de control de C0 y C1 y los separadores de línea y de párrafo, que la base también rechaza. */
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 /** Una URL o una dirección de correo pegada donde va un nombre. */

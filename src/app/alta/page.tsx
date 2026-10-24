@@ -155,7 +155,7 @@ export default async function AltaPage({ searchParams }: { searchParams: Promise
                 inputMode="tel"
                 autoComplete="tel"
                 required
-                placeholder="+54 9 …"
+                placeholder="+…"
                 aria-describedby="alta-whatsapp-ayuda"
                 className={CLASE_DEL_CAMPO}
               />

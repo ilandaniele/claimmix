@@ -164,8 +164,9 @@ tarda algo, la guía lo dice así.
         por ambiente»).
     - **D2:** `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada a «iguales».
     - **D3:** QA con la casilla de Gmail de prueba de Gonzalo. **Cambiado el 22/10:** el mail
-      agente es la Gmail de Veltra en los tres ambientes (ver A3). Sin número de WhatsApp hasta
-      que QA tenga su propia WABA y su propio token (después de A5).
+      agente es la Gmail de Veltra en los tres ambientes (ver A3). **24/10:** prd tiene su
+      propio mail agente, una Gmail propia del dueño; dev y QA siguen con la de Veltra. Sin
+      número de WhatsApp hasta que QA tenga su propia WABA y su propio token (después de A5).
     - **D4: (d).** Corregido otra vez el 21/10 (#489). El 17/10 quedó anotada (a), pero no hay
       dominio propio (todo es Gmail y `claimmix.vercel.app` es de Vercel); el 20/10 pasó a (b),
       activar cada espacio con cuota 0 antes de invitar al analista. Ahora, en un espacio en
@@ -223,7 +224,8 @@ tarda algo, la guía lo dice así.
       `mailbox_taken`.
     - **Decisión del 22/10:** el mail agente es la Gmail de Veltra, la misma que manda los
       correos del sistema, en dev, QA y prd. prd la cambia más adelante por una propia (ver el
-      paso 9 de prd).
+      paso 9 de prd). **24/10:** prd ya tiene la suya, una Gmail propia del dueño; dev y QA
+      siguen con la de Veltra.
       - Cada ambiente tiene su base y no ve los casos de los otros: un correo que llega a esa
         casilla abre un caso en cada ambiente donde esté activa, y el agente contesta una vez
         por ambiente. Mientras tanto, dejarla «Activa» sólo en el ambiente que se está
@@ -237,8 +239,15 @@ tarda algo, la guía lo dice así.
         del dueño.
       - QA: la Gmail de Veltra para el agente; administrador y analista, alias de una cuenta
         de Gonzalo.
-      - prd: la Gmail de Veltra para el agente, hasta que el dueño la cambie; administrador y
-        analista, alias de la Gmail del dueño o de una Gmail del cliente ficticio.
+      - prd: desde el 24/10, una Gmail propia del dueño para el agente. El dueño eligió su
+        Gmail personal como administrador y analista, y una dirección de otro dominio como
+        segundo analista. Tres choques, con su salida:
+        - Si la Gmail personal sin alias está en `ADMIN_EMAILS` de prd (operador, D8), `/alta`
+          le muestra el aviso de operador: el administrador va con un alias `+` de esa Gmail.
+        - Una dirección tiene un solo usuario por ambiente: no puede ser administrador y
+          analista a la vez. El analista va con otro alias `+` de la misma Gmail.
+        - Una dirección de otro dominio se rechaza mientras el espacio está en prueba (D4 d):
+          se invita después de activar el espacio desde `/admin/altas`.
     - El administrador y el analista son alias de la misma Gmail: el servidor compara la
       casilla de fondo, sin puntos ni alias, y gmail.com no se cruza con googlemail.com.
       Además la casilla del administrador tiene que estar verificada; si no, la invitación se
@@ -1119,9 +1128,10 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
 - [ ] **9. Gmail.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/configuracion`, «Conectar Gmail».
-  - **Qué hacer:** la Gmail del mail agente de prd (A3): por ahora la de Veltra (decisión del
-    22/10), que antes sale de `CASILLAS_DE_DEV` de prd. 24/10: la casilla del agente (veltra)
-    salió de `CASILLAS_DE_DEV` en prd. **Aviso:** Google muestra una
+  - **Qué hacer:** la Gmail del mail agente de prd (A3). Desde el 24/10 es una Gmail propia
+    del dueño, no la de Veltra; no puede estar en `CASILLAS_DE_DEV` ni conectada en dev o QA.
+    Si la de Veltra ya estaba conectada en prd, seguir «Cambiar el mail agente más adelante».
+    **Aviso:** Google muestra una
     pantalla de app no verificada; es esperable. Para seguir, entrar al enlace de opciones
     avanzadas de esa pantalla y continuar hacia la app.
   - **Cambiar el mail agente más adelante:** en `/configuracion`, «Conectar otra cuenta» con
@@ -1708,6 +1718,7 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   el 17/10:** la casilla de Gmail de prueba de Gonzalo; sin número de WhatsApp hasta que QA
   tenga su propia WABA y su propio token (después de A5). **Cambiado el 22/10:** el mail
   agente es la Gmail de Veltra en los tres ambientes, hasta que prd tenga la suya (A3).
+  **24/10:** prd tiene la suya, una Gmail propia del dueño.
 - **D4. Invitaciones en un espacio en prueba.** Con gmail.com se rechazan, salvo en la opción
   (d). Opciones: (a) usar direcciones de un dominio propio que no sea un proveedor abierto;
   (b) activar el espacio desde `/admin/altas` con cuota 0, que levanta los topes de la prueba
@@ -1747,12 +1758,17 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   es operador en los tres y Gonzalo no lo es en QA.
 - **D9.** Pedir la verificación del negocio en Meta (A5).
 - **D10.** Seguir con el tope de 100 usuarios de Google o pedir la verificación, que puede ser
-  paga.
+  paga. **24/10:** el dueño la está evaluando. `gmail.modify` es un permiso restringido:
+  pasar el tope pide la verificación de la app y una evaluación de seguridad anual de un
+  tercero (CASA).
 - **D11.** Vercel Hobby es de uso no comercial y prd con clientes que pagan choca con eso
-  (`docs/PROMOCION.md:809-810`).
-- **D12.** La política de privacidad nombra `gmail.readonly`, que el código no pide
-  (`src/app/privacy/page.tsx:75`): ese texto lo cambia el dueño.
-- **D13.** Las decisiones de los ítems 7, 10, 14, 15, 16, 17, 18 y 19 del plan.
+  (`docs/PROMOCION.md:809-810`). **Elegido el 24/10:** seguir en Hobby por ahora.
+- **D12.** La política de privacidad nombraba `gmail.readonly`, que el código no pide.
+  **Hecho el 24/10:** `src/app/privacy/page.tsx` nombra `gmail.modify` (leer y marcar como
+  leídos) y `gmail.send`.
+- **D13.** Las decisiones de los ítems 7, 10, 14, 15, 16, 17, 18 y 19 del plan. **24/10:** el
+  dueño pidió aplicar las recomendaciones; 10 y 14 ya estaban hechos y el resto se hace de a
+  uno.
 - **D14. MCP de WhatsApp.** Opcional, sobre la API oficial; no hace falta para el alta y le da
   el token permanente a código de terceros (`docs/whatsapp-setup.md:93-128`).
   **Recomendación: no instalarlo por ahora.** Si el dueño lo quiere, el paso M1. **Elegido el

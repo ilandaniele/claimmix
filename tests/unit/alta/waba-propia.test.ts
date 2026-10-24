@@ -381,7 +381,7 @@ describe("iniciarWaba", () => {
     sinGraph();
   });
 
-  it("sin sitio web, sin correo o con un número que no es un móvil argentino, el popup no los precarga", async () => {
+  it("sin sitio web, sin correo o con un +54 que no es celular, el popup no los precarga", async () => {
     lecturas(filaDb({ emailDeContacto: null, numeroTipeado: "+541123456789" }));
 
     const r = await iniciarWaba(QUIEN, { nombre: "Seguros Sur" });
@@ -389,6 +389,20 @@ describe("iniciarWaba", () => {
     expect(r).toMatchObject({ resultado: "listo" });
     if (r.resultado !== "listo" || !("setup" in r)) throw new Error("falta el setup");
     expect(r.setup.business).toEqual({ name: "Seguros Sur", address: { country: "AR" }, timezone: "UTC-03:00" });
+  });
+
+  it.each([
+    ["+447700900123", { code: 44, number: "7700900123" }],
+    ["+390612345678", { code: 39, number: "0612345678" }],
+  ])("con un número %s el popup precarga su código de país, sin sacarle el 0", async (numeroTipeado, phone) => {
+    lecturas(filaDb({ numeroTipeado }));
+
+    const r = await iniciarWaba(QUIEN, { nombre: "Seguros Sur" });
+
+    if (r.resultado !== "listo" || !("setup" in r)) throw new Error("falta el setup");
+    expect(r.setup.business.phone).toEqual(phone);
+    expect(r.setup.business.address).toEqual({ country: "AR" });
+    expect(r.setup.business.timezone).toBe("UTC-03:00");
   });
 
   it("la descripción sale del idioma de quien pide", async () => {
@@ -952,13 +966,25 @@ describe("vincularWaba: qué número es", () => {
     expect(pasosEscritos()).toEqual(["estado"]);
   });
 
-  it("un número que no es de Argentina se mira a mano", async () => {
-    h.datos.mockResolvedValue(datosDelNumero({ display: "+1 415 555 0100" }));
+  it("un número con un código de país que no existe se mira a mano", async () => {
+    h.datos.mockResolvedValue(datosDelNumero({ display: "+280 1234 5678" }));
 
     expect(await vincularWaba(QUIEN, PEDIDO)).toEqual({ resultado: "revision" });
 
     expect(h.aviso).toHaveBeenCalledWith("pais", TENANT);
     expect(pasosEscritos()).toEqual([]);
+  });
+
+  it("un número de otro país se conecta como cualquiera", async () => {
+    h.datos.mockResolvedValue(datosDelNumero({ display: "+1 415 555 0100" }));
+    lecturas(
+      filaDb({ numeroTipeado: "+14155550100" }),
+      vinculada({ numeroTipeado: "+14155550100", numeroMeta: "+14155550100" }),
+    );
+
+    expect(await vincularWaba(QUIEN, PEDIDO)).toEqual({ resultado: "conectado" });
+
+    expect(h.aviso).not.toHaveBeenCalledWith("pais", TENANT);
   });
 
   it("un número de otro ambiente (el de desarrollo en producción o al revés) se mira a mano", async () => {

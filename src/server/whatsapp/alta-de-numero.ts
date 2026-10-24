@@ -23,6 +23,7 @@
 import "server-only";
 import { randomInt } from "node:crypto";
 import type { Locale } from "@/lib/i18n";
+import { E164 } from "@/server/alta/validar";
 import { clienteDeGraph, SIN_PEDIDO, type Pedido, type RespuestaDeAlta } from "@/server/whatsapp/graph";
 import { idDeLaPlataforma, type WebhookDelEntorno } from "@/server/whatsapp/numeros";
 import { ID_DE_GRAPH } from "@/server/whatsapp/verificar-en-meta";
@@ -38,23 +39,53 @@ export interface CredencialDeAlta {
   prueba?: string;
 }
 
-/** Un móvil argentino como lo pide Graph: el código de país y el resto, con el 9 adelante. */
+/** Un número como lo pide Graph: el código de país y el resto, tal cual (sin sacarle ningún 0: en Italia es parte del número). */
 export interface PartesDelNumero {
-  cc: "54";
+  cc: string;
   numero: string;
 }
 
 /** Cómo le pide Meta el idioma del SMS o de la llamada a cada idioma de la cuenta. */
 const IDIOMA_DEL_CODIGO = { "es-AR": "es", "en-US": "en" } as const satisfies Record<Locale, string>;
 
-const MOVIL_ARGENTINO = /^\+54(9\d{10})$/;
 /** El código de verificación del número y el PIN de registro: seis dígitos, ni más ni menos. */
 export const CODIGO_DE_SEIS = /^\d{6}$/;
 
-/** Sólo móviles argentinos: `+549` y diez dígitos más. Cualquier otra cosa, null. */
+/**
+ * Los códigos de país de la UIT. Se asignan sin prefijos (ninguno empieza como otro): a lo sumo uno coincide.
+ * Sin los no geográficos (+800, +870, +881…): no reciben el código de Meta y van a revisión antes de gastar cupos.
+ */
+export const CODIGOS_DE_PAIS: ReadonlySet<string> = new Set(
+  `
+  1 7
+  20 211 212 213 216 218 220 221 222 223 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255 256 257 258 260 261 262 263 264 265 266 267 268 269 27 290 291 297 298 299
+  30 31 32 33 34 350 351 352 353 354 355 356 357 358 359 36 370 371 372 373 374 375 376 377 378 379 380 381 382 383 385 386 387 389 39
+  40 41 420 421 423 43 44 45 46 47 48 49
+  500 501 502 503 504 505 506 507 508 509 51 52 53 54 55 56 57 58 590 591 592 593 594 595 596 597 598 599
+  60 61 62 63 64 65 66 670 672 673 674 675 676 677 678 679 680 681 682 683 685 686 687 688 689 690 691 692
+  81 82 84 850 852 853 855 856 86 880 886
+  90 91 92 93 94 95 960 961 962 963 964 965 966 967 968 970 971 972 973 974 975 976 977 98 992 993 994 995 996 998
+  `
+    .trim()
+    .split(/\s+/)
+);
+
+/** El código de país de un E.164, o null si no tiene forma de número o el código no está en la tabla. */
+export function codigoDePais(e164: string): string | null {
+  if (!E164.test(e164)) return null;
+  return [1, 2, 3].map((n) => e164.slice(1, 1 + n)).find((cc) => CODIGOS_DE_PAIS.has(cc)) ?? null;
+}
+
+/**
+ * Un E.164 con un código de país de la tabla; un +54 sólo si es celular (`+549` y diez dígitos más).
+ * Si no, null. El largo fino lo valida Meta.
+ */
 export function partirNumero(e164: string): PartesDelNumero | null {
-  const m = MOVIL_ARGENTINO.exec(e164);
-  return m ? { cc: "54", numero: m[1] } : null;
+  const cc = codigoDePais(e164);
+  if (!cc) return null;
+  const numero = e164.slice(1 + cc.length);
+  // Sin el 9 Meta registra un fijo, y `mismoNumero` y el índice de 0048 dan +549 y +54 por el mismo número.
+  return cc !== "54" || /^9\d{10}$/.test(numero) ? { cc, numero } : null;
 }
 
 type Paso =

@@ -1075,8 +1075,12 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
 - [ ] **4. Alta.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** una ventana privada, `https://claimmix.vercel.app/registro`.
-  - **Qué hacer:** en dos pasos, como el paso 3 de dev. En `/registro`: el alias de
-    administrador de A3 y el nombre de quien hace de cliente. Camino del correo: el mail del
+  - **Qué hacer:** en dos pasos, como el paso 3 de dev. En `/registro`: la Gmail personal del
+    dueño, sin alias (decisión del 24/10), y el nombre de quien hace de cliente. Esa dirección
+    no puede estar en `ADMIN_EMAILS` de prd: una cuenta de operador no crea empresa
+    (`/registro` no manda el correo y `/alta` vuelve a sí misma). Si figura, con el OK del
+    dueño [Claude] deja `ADMIN_EMAILS` de prd sólo con la casilla de Veltra y redeploya, y esa
+    casilla pasa a ser la cuenta de operador del paso 6. Camino del correo: el mail del
     remitente trae el enlace a `/alta/correo?t=` (60 minutos), donde se elige la contraseña. En
     `/alta`, «Dar de alta mi empresa»: la empresa de A2 y el celular de la SIM de A4, con el 9.
   - **Salió bien si:** pasa a `/preparando`.
@@ -1145,9 +1149,10 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
 - [ ] **10. Segundo usuario.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/admin/users`, «Invitar usuario».
-  - **Qué hacer:** invitar al alias de analista de A3, sin activar el espacio (D4 d).
-    - En prueba, un alias `+` de la misma Gmail que el alias de administrador entra directo.
-      El paso ya no tiene que esperar al 14.
+  - **Qué hacer:** invitar a quien el dueño elija como analista, sin activar el espacio
+    (D4 d). No hace falta que sea de Brimonte.
+    - En prueba sólo entra directo un alias `+` de la Gmail del administrador del paso 4. El
+      paso ya no tiene que esperar al 14. Otra dirección, después de activar el espacio.
     - El analista acepta con una contraseña: `/invitacion` no ofrece Google para un alias `+`.
     - El espacio sigue en prueba, así que el tope de un dólar del paso 14 sigue valiendo.
     - SSO no sirve para esto: pide un dominio corporativo verificado por DNS y un proveedor

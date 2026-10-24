@@ -5350,6 +5350,11 @@ Quien crea una cuenta puede venir a dar de alta su empresa o a sumarse a una que
   `user_id` de `debug_token` es el mismo que trae el `signed_request` del borrado. (9)
   Cambiar el texto de `src/app/privacy/page.tsx` con la sección `#meta` propuesta en la
   Parte G: ese archivo lo toca el dueño. (10) La app en modo Live y una sola promoción.
+- **24/10: A9, `CASILLAS_DE_DEV` de prd y los pasos de Meta.** A9 está hecho: un presupuesto
+  de US$ 20 por mes, sólo aviso (alertas al 50, 90 y 100 %), sin tope. La casilla del agente
+  (veltra) salió de `CASILLAS_DE_DEV` en prd. `docs/PUESTA_EN_MARCHA.md` tiene el paso a paso
+  de Meta para la WABA propia por cliente, de T1 a T9, en «Meta: una organización por
+  cliente».
 - **Ambiente prd: lo que queda del dueño.** (R2 de prd y los hostnames de Turnstile ya
   están.) Un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
   propios; la verificación del negocio en Meta para pasar de 2 números en la WABA; y avisar

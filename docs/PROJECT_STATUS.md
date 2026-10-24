@@ -5375,8 +5375,8 @@ Quien crea una cuenta puede venir a dar de alta su empresa o a sumarse a una que
   están.) Un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
   propios; la verificación del negocio en Meta para pasar de 2 números en la WABA; y avisar
   a los clientes de dev con SSO o API v1 del dominio nuevo. La política de privacidad
-  todavía nombra el permiso `gmail.readonly`, que el alta corta ya no pide: ese texto lo
-  cambia el dueño. Lista completa en `docs/PROMOCION.md`, sección «Prd».
+  nombraba el permiso `gmail.readonly`, que el alta corta ya no pide; desde el 24/10 nombra
+  `gmail.modify` y `gmail.send` (D12). Lista completa en `docs/PROMOCION.md`, sección «Prd».
 - **Número por código.** La 0049 (`claimmix_numero_automatico`) ya está en QA, dev,
   staging y prd (comprobado el 15/10). La bandera está prendida en prd desde el 09/10, y el alta
   del cliente ficticio de prd es la prueba en vivo (receta en `docs/whatsapp-setup.md`). El 17/10

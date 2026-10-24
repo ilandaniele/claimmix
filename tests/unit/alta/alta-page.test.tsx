@@ -38,6 +38,7 @@ vi.mock("@/server/alta/invitacion", () => ({ invitacionDeLaSesion: h.invitacion 
 vi.mock("@/app/login/actions", () => ({ signOut: vi.fn() }));
 vi.mock("@/app/alta/actions", () => ({ crearMiEspacio: vi.fn() }));
 
+import { enUS, esAR } from "@/lib/i18n";
 import AltaPage, { generateMetadata } from "@/app/alta/page";
 
 const UNIRME_ES = /Pedile a un administrador de tu empresa que invite a/;
@@ -207,12 +208,28 @@ describe("/alta con los dos caminos", () => {
     expect(screen.getByRole("checkbox")).toBeRequired();
   });
 
-  it("la ayuda del WhatsApp es la de hoy sin ninguna bandera", async () => {
+  it("la ayuda del WhatsApp es la del diccionario sin ninguna bandera", async () => {
     const { container } = await pintar();
 
-    expect(container.querySelector("#alta-whatsapp-ayuda")?.textContent).toBe(
-      "Es el número donde te van a escribir tus clientes. Con código de país, por ejemplo +54 9 11 5555 0000."
-    );
+    expect(container.querySelector("#alta-whatsapp-ayuda")?.textContent).toBe(esAR["alta.whatsapp.ayuda"]);
+  });
+
+  it("la ayuda del WhatsApp aclara que no es el celular personal, da un ejemplo de otro país y cierra con punto", () => {
+    expect(esAR["alta.whatsapp.ayuda"]).toContain("celular personal");
+    expect(enUS["alta.whatsapp.ayuda"]).toContain("personal phone");
+    for (const ayuda of [esAR["alta.whatsapp.ayuda"], enUS["alta.whatsapp.ayuda"]]) {
+      expect(ayuda).toContain("+54 9 11 5555 0000");
+      expect(ayuda).toContain("+1 202 555 0123");
+      expect(ayuda.endsWith(".")).toBe(true);
+    }
+  });
+
+  it("el campo del WhatsApp no sugiere un país: el placeholder es sólo el signo más", async () => {
+    await pintar();
+
+    const campo = screen.getByLabelText("WhatsApp de tu empresa");
+    expect(campo).toHaveAttribute("placeholder", "+…");
+    expect(campo.getAttribute("placeholder")).not.toMatch(/^\+54/);
   });
 
   it("con el número por código prendido, la ayuda del WhatsApp suma que tiene que recibir SMS o llamada", async () => {
@@ -220,8 +237,7 @@ describe("/alta con los dos caminos", () => {
     const { container } = await pintar();
 
     const ayuda = container.querySelector("#alta-whatsapp-ayuda");
-    expect(ayuda).toHaveTextContent("Es el número donde te van a escribir tus clientes.");
-    expect(ayuda).toHaveTextContent("Con código de país, por ejemplo +54 9 11 5555 0000.");
+    expect(ayuda).toHaveTextContent(esAR["alta.whatsapp.ayuda"]);
     // Dice para qué hace falta poder recibir el SMS o la llamada, no sólo que hace falta.
     expect(ayuda).toHaveTextContent(
       "Meta manda un código por SMS o por llamada para verificarlo: tiene que poder recibirlo y no puede estar en uso en la app de WhatsApp ni en WhatsApp Business."
@@ -235,7 +251,7 @@ describe("/alta con los dos caminos", () => {
     const { container } = await pintar();
 
     expect(container.querySelector("#alta-whatsapp-ayuda")).toHaveTextContent(
-      "This is the number your customers will write to. With country code, for example +54 9 11 5555 0000. Meta sends a code by SMS or phone call to verify it: it must be able to receive it, and it can't be in use in the WhatsApp or WhatsApp Business app."
+      `${enUS["alta.whatsapp.ayuda"]} Meta sends a code by SMS or phone call to verify it: it must be able to receive it, and it can't be in use in the WhatsApp or WhatsApp Business app.`
     );
   });
 

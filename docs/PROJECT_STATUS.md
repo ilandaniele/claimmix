@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-22. This file is the single source of truth for "where things stand."
+_Last updated: 2026-10-24. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5304,6 +5304,22 @@ Quien crea una cuenta puede venir a dar de alta su empresa o a sumarse a una que
 - **A probar en QA.** El destino de Google (`newUserCallbackURL`): si no llega a `/alta`, el respaldo es `/bandeja`, luego `/pendiente` y luego `/alta`.
 - **Tests.** `registro-page`, `registro-actions`, `invitacion`, `pendiente-page`, `admin-users-invitacion`, `probar-alta-orden`, `probar-alta-reglas` y `tests/unit/alta/` (`alta-page`, `correo-actions`, `crear-mi-espacio`, `preparar-espacio`, `token-de-registro`, `cuenta-del-enlace`, `crear-espacio`, `acciones-de-alta-sin-reexportar`). No hay specs de Playwright para `/registro`, `/alta`, `/alta/correo` ni `/invitacion`.
 
+### Número por código para cualquier código de país (24/10, rama `alta/numero-cualquier-pais`)
+
+`/alta` y el número por código sólo aceptaban celulares argentinos. Ahora aceptan el número de la empresa con el código de cualquier país. La rama todavía no está mergeada.
+
+- **Qué cambia.** `partirNumero` (`src/server/whatsapp/alta-de-numero.ts`) corta el número con una tabla de códigos de país de la UIT que vive sólo en el servidor (`CODIGOS_DE_PAIS`, un `Set`, sin dependencias nuevas). La tabla es libre de prefijo: probando 1, 2 y 3 dígitos, a lo sumo un código coincide. Quedan afuera los no geográficos (800, 808, 870, 878, 881, 882, 883, 888, 979, 991) y el 997. `PartesDelNumero.cc` pasa a ser un `string`. La parte nacional se deja entera: el 0 troncal no se saca (Italia lo conserva).
+- **+54 sigue igual.** Un `+54` sigue pidiendo el 9 y diez dígitos (`+549…`). `aRevision("pais")` queda sólo para un código que no es válido o no se reconoce, y para un `+54` que no es celular.
+- **El desvío de `waba-propia.ts`.** El plan decía usar `partirNumero` en `vincularWaba` (`src/server/alta/waba-propia.ts`, donde antes había `startsWith("+54")`). Se usa `codigoDePais`, que sólo mira el código. Motivo: ahí el corte por `pais` viene después de canjear el código de Meta, así que cortar con `partirNumero` por un `+54` sin el 9 que Meta ya registró (un fijo) perdería el token y gastaría el cupo. El centinela `waba-propia.test.ts` («el mismo número con o sin el 9…») lo cuida. En `numero-automatico.ts`, en cambio, el corte viene antes de Graph, así que ahí `partirNumero` sigue bien y los cupos de código vuelven con `pais`.
+- **Textos.** `alta.whatsapp.ayuda`, `alta.error.datos` y `alta.avisoNumero.motivo.pais`, en es-AR y en-US juntos, con ejemplos ficticios: dicen que es el número de la empresa y no el celular personal de quien administra, y que lleva el código de su país. El placeholder del campo en `/alta` es `+…`: ya no sugiere un país. `E164` se exporta de `src/server/alta/validar.ts` para no repetir la expresión.
+- **Qué no cambia.** El 9 argentino: `alta.error.celular`, `faltaElNueveArgentino`, `mismoNumero` y el `'^[+]549'` del SQL siguen igual, porque tratan a `+549` y `+54` como el mismo número. No hay migración: 0048 y 0051 ya aceptan cualquier E.164. El bundle queda intacto: la tabla es de servidor y `TOPE_KB` (310 y 48) no se mueve.
+- **Residuos.** (1) No hay largo por país: un número mal tipeado con un código válido llega a Meta y termina en `rechazo`. Para que eso no agote `ALTA_TOPE_NUMEROS_DIA` (de toda la plataforma, 2 por defecto), en `sumarALaWaba` (`src/server/alta/numero-automatico.ts`) un `rechazo` de Graph al agregar devuelve ese tope diario: no entró ningún número. El cupo del espacio (uno por hora) y los de código se quedan gastados, porque el pedido sí salió a Graph; un `meta` (timeout, 5xx, 2xx sin id) no devuelve nada, porque el número pudo entrar. (2) El popup de la WABA propia precarga país AR y zona horaria `UTC-03:00`. (3) `mismoNumero` sólo normaliza el 9 argentino. (4) El 997 queda afuera. (5) La plantilla `reabrir_denuncia` está en español y el agente atiende en es y en en-US: el dueño tiene que saberlo antes de prender un cliente de otro país.
+- **Tests.** `tests/unit/whatsapp/alta-de-numero.test.ts` (válidos y nulos de `partirNumero`, libre de prefijo, `codigoDePais`), `tests/unit/alta/numero-automatico.test.ts`, `tests/unit/alta/waba-propia.test.ts`, `tests/unit/alta/aviso-numero-en-revision.test.ts` y `tests/unit/alta/alta-page.test.tsx`.
+- **Guía.** `docs/whatsapp-setup.md` (seis líneas editadas en el lugar, sin mover ninguna) y `docs/PUESTA_EN_MARCHA.md` A3 (qué tiene `ADMIN_EMAILS` en dev, sin direcciones).
+- **Número de la plataforma, verificado el 24/10 sin tocar nada.** Conectado, Cloud API, calidad verde, TIER_250, con el webhook de la app apuntando a dev hasta A5. Los datos de la línea están en «The real number is live», más arriba.
+- **Comprobación.** `pnpm verify` en verde (tipos, lint, 16013 pruebas, flujos, datos personales, arquitectura) y `pnpm check --local` en verde, con las 26 conversaciones del ensayo sin diferencias al primer intento. El `pnpm check` completo (con el smoke de producción) queda para después del deploy.
+- **Ambientes.** Entra a qa por PR y sigue a main y a prd el mismo día, por la regla de ambientes iguales.
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
@@ -5350,6 +5366,11 @@ Quien crea una cuenta puede venir a dar de alta su empresa o a sumarse a una que
   `user_id` de `debug_token` es el mismo que trae el `signed_request` del borrado. (9)
   Cambiar el texto de `src/app/privacy/page.tsx` con la sección `#meta` propuesta en la
   Parte G: ese archivo lo toca el dueño. (10) La app en modo Live y una sola promoción.
+- **24/10: A9, `CASILLAS_DE_DEV` de prd y los pasos de Meta.** A9 está hecho: un presupuesto
+  de US$ 20 por mes, sólo aviso (alertas al 50, 90 y 100 %), sin tope. La casilla del agente
+  (veltra) salió de `CASILLAS_DE_DEV` en prd. `docs/PUESTA_EN_MARCHA.md` tiene el paso a paso
+  de Meta para la WABA propia por cliente, de T1 a T9, en «Meta: una organización por
+  cliente».
 - **Ambiente prd: lo que queda del dueño.** (R2 de prd y los hostnames de Turnstile ya
   están.) Un alta de punta a punta en `claimmix.vercel.app` con un correo y un celular
   propios; la verificación del negocio en Meta para pasar de 2 números en la WABA; y avisar

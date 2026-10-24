@@ -88,6 +88,7 @@ import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { codigoPg } from "@/server/core-sync/config";
 import {
   CODIGO_DE_SEIS,
+  codigoDePais,
   codigoYaVerificado,
   numeroYaRegistrado,
   partirNumero,
@@ -210,7 +211,7 @@ export interface SetupDeMeta {
     name: string;
     email?: string;
     website?: string;
-    phone?: { code: 54; number: string };
+    phone?: { code: number; number: string };
     address: { country: "AR" };
     timezone: "UTC-03:00";
   };
@@ -696,7 +697,7 @@ export async function iniciarWaba(
         name: nombre,
         ...(fila.emailDeContacto ? { email: fila.emailDeContacto } : {}),
         ...(web ? { website: web } : {}),
-        ...(partes ? { phone: { code: 54 as const, number: partes.numero } } : {}),
+        ...(partes ? { phone: { code: Number(partes.cc), number: partes.numero } } : {}),
         address: { country: "AR" },
         timezone: "UTC-03:00",
       },
@@ -815,7 +816,7 @@ export async function vincularWaba(
     }
     const numeroMeta = normalizarE164(datos.valor.display);
     if (!numeroMeta) return { resultado: "meta" };
-    if (!numeroMeta.startsWith("+54")) return { resultado: revisar("pais", tenantId) };
+    if (!codigoDePais(numeroMeta)) return { resultado: revisar("pais", tenantId) };
     if (esNumeroDeOtroAmbiente(phoneNumberId, numeroMeta)) return { resultado: revisar("de_otro_ambiente", tenantId) };
 
     // El portfolio lo cuenta el cupo semanal: sale de Meta, no del navegador. Si Meta no lo informa la WABA cuenta como el suyo.

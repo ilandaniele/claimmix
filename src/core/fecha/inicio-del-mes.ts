@@ -1,11 +1,11 @@
+import { mesArgentino } from "@/core/fecha/dia-argentino";
+
 /**
- * El primer instante del mes en curso, con la hora del servidor (UTC en Vercel): desde ahí se suma el
- * gasto mensual y se fecha el aviso de cada tope. No es el mes argentino de `mesArgentino`: el
- * guardia del gasto cuenta así y el aviso tiene que contar con la misma cuenta.
+ * El primer instante del mes argentino de `ahora`: desde ahí se suma el gasto mensual y se fecha el
+ * aviso de cada tope. Es el mismo mes con el que el acumulador de IA (0046) y el tablero cuentan, así
+ * que el guardia, el aviso, /api/health y /metricas dicen el mismo número; en Vercel, que corre en
+ * UTC, la cuenta con la hora del servidor arrancaba el mes tres horas tarde.
  */
 export function inicioDelMes(ahora = new Date()): Date {
-  const inicio = new Date(ahora);
-  inicio.setDate(1);
-  inicio.setHours(0, 0, 0, 0);
-  return inicio;
+  return new Date(mesArgentino(ahora).inicio);
 }

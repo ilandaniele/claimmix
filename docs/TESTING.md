@@ -1357,7 +1357,8 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   la cifra no se redondee hasta el tope y que el texto no lleve datos de nadie, y el SQL se comprueba
   por su forma. Que el mail llegue lo prueba el dueño en QA (`docs/PUESTA_EN_MARCHA.md`, ítem 7): baja
   `ALTA_TOPE_MB` a 1, redeploya QA para que la variable rija, espera al barrido y, al terminar, vuelve
-  a 350 y redeploya de nuevo.
+  a 350 y redeploya de nuevo. El día y el mes son los argentinos y los tests usan instantes UTC fijos, así
+  que dicen lo mismo en cualquier zona: `TZ=UTC` y `TZ=Asia/Tokyo` dan el mismo resultado que la máquina de acá.
 - **El tablero de métricas contra el volumen real.** Los escenarios de `pnpm load`
   existen, pero no se corrieron contra una base con meses de auditoría, así que
   el p95 del tablero del año sigue sin medirse.

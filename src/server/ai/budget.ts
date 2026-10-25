@@ -31,7 +31,7 @@ import "server-only";
 import { and, eq, gte, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { QueryBuilder } from "drizzle-orm/pg-core";
 import { after } from "next/server.js";
-import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { diaArgentino, medianocheHaceDias } from "@/core/fecha/dia-argentino";
 import { inicioDelMes } from "@/core/fecha/inicio-del-mes";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import {
@@ -188,9 +188,9 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
   const dailyTokenCap = topeDecimal("AI_DEMO_DAILY_TOKEN_CAP");
   const monthlyCapUsd = topeDecimal("DEMO_MONTHLY_BUDGET_USD");
 
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-  const monthStart = inicioDelMes();
+  const ahora = new Date();
+  const dayStart = new Date(medianocheHaceDias(1, ahora));
+  const monthStart = inicioDelMes(ahora);
 
   try {
     const [day] = await enTenant(tenantCtx, (db) =>
@@ -294,7 +294,10 @@ export async function checkBudget(
   const anonimoDailyTokenCap = topeAnonimo();
 
   // ── Los cupos: mensual del proyecto, diario del inquilino, diario sin persona y diario de la persona ──
-  const monthStart = inicioDelMes();
+  // Un solo `ahora` para el día, el mes y el mes del acumulador: a las 00:00 del primero, dos relojes
+  // podían caer en meses distintos.
+  const ahora = new Date();
+  const monthStart = inicioDelMes(ahora);
 
   /*
    * El tope mensual es del proyecto entero, y eso es lo que se quiere: protege
@@ -308,8 +311,7 @@ export async function checkBudget(
    */
   const demoTenantId = getDemoTenantId();
 
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
+  const dayStart = new Date(medianocheHaceDias(1, ahora));
 
   /*
    * Los tres cupos se preguntan a la vez.
@@ -331,7 +333,6 @@ export async function checkBudget(
    * miran. Es el caso terminal, y a cambio el camino normal —el de siempre—
    * pasa de tres latencias a una.
    */
-  const ahora = new Date();
   const mesDeIa = `${diaArgentino(ahora).slice(0, 7)}-01`;
   const [mensual, delDia] = await Promise.all([
     sumaMensualDelProyecto(monthStart, demoTenantId),

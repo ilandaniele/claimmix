@@ -37,8 +37,9 @@ vi.mock("@/server/ai/budget", () => ({ sumaMensualDelProyecto: h.medir, getDemoT
 
 import { avisarTopes } from "@/server/alta/aviso-de-topes";
 
-const AHORA = new Date(2026, 9, 24, 12, 0, 0);
-const VENCE = new Date(2026, 10, 1);
+// Fechas en UTC: el mes que cuenta es el argentino, así que el 1 de noviembre empieza a las 03:00Z.
+const AHORA = new Date("2026-10-24T15:00:00Z");
+const VENCE = new Date("2026-11-01T03:00:00.000Z");
 const OPERADORES = ["ops@example.com", "dueno@example.com"];
 const TOPES = { presupuesto: 200, pruebas: 30, bases: 30, mb: 350 };
 
@@ -252,7 +253,7 @@ describe("la consulta", () => {
 
     expect(h.medir).toHaveBeenCalledTimes(1);
     const [desde, demo, extras] = h.medir.mock.calls[0];
-    expect(desde).toEqual(new Date(2026, 9, 1));
+    expect(desde).toEqual(new Date("2026-10-01T03:00:00.000Z"));
     expect(demo).toBe(DEMO);
     expect(Object.keys(extras)).toEqual(["bases", "mb"]);
   });
@@ -338,8 +339,9 @@ describe("una sola vez por umbral, tope y mes", () => {
   it("dos barridos en el mismo mes miran la misma marca y el segundo no manda", async () => {
     h.medir.mockResolvedValue(medida({ total: 170 }));
 
-    expect(await avisarTopes(new Date(2026, 9, 3, 4, 7))).toBe(1);
-    expect(await avisarTopes(new Date(2026, 9, 30, 23, 59))).toBe(0);
+    expect(await avisarTopes(new Date("2026-10-03T07:07:00Z"))).toBe(1);
+    // 23:59 del 31 de octubre en Argentina, ya 1 de noviembre en UTC: sigue siendo octubre.
+    expect(await avisarTopes(new Date("2026-11-01T02:59:00Z"))).toBe(0);
 
     expect(h.leer.mock.calls).toEqual([[[clave("presupuesto", 80)], VENCE], [[clave("presupuesto", 80)], VENCE]]);
     expect(marcasPedidas()).toEqual([[clave("presupuesto", 80)]]);
@@ -350,17 +352,36 @@ describe("una sola vez por umbral, tope y mes", () => {
     h.medir.mockResolvedValue(medida({ total: 170 }));
     await avisarTopes(AHORA);
 
-    expect(await avisarTopes(new Date(2026, 10, 2, 4, 7))).toBe(1);
+    expect(await avisarTopes(new Date("2026-11-02T07:07:00Z"))).toBe(1);
 
-    expect(h.poner).toHaveBeenLastCalledWith([clave("presupuesto", 80, { periodo: "2026-11" })], new Date(2026, 11, 1));
+    expect(h.poner).toHaveBeenLastCalledWith(
+      [clave("presupuesto", 80, { periodo: "2026-11" })],
+      new Date("2026-12-01T03:00:00.000Z")
+    );
   });
 
   it("en diciembre la marca vence el 1 de enero del año que viene", async () => {
     h.medir.mockResolvedValue(medida({ total: 170 }));
 
-    await avisarTopes(new Date(2026, 11, 31, 22, 0));
+    // 22:00 del 31 de diciembre en Argentina, 01:00 del 1 de enero en UTC.
+    await avisarTopes(new Date("2027-01-01T01:00:00Z"));
 
-    expect(h.poner).toHaveBeenCalledWith([clave("presupuesto", 80, { periodo: "2026-12" })], new Date(2027, 0, 1));
+    expect(h.poner).toHaveBeenCalledWith(
+      [clave("presupuesto", 80, { periodo: "2026-12" })],
+      new Date("2027-01-01T03:00:00.000Z")
+    );
+  });
+
+  it("a las 23:30 del 30 de septiembre en Argentina el mes todavía es septiembre", async () => {
+    h.medir.mockResolvedValue(medida({ total: 170 }));
+
+    await avisarTopes(new Date("2026-10-01T02:30:00Z"));
+
+    expect(h.medir.mock.calls[0][0]).toEqual(new Date("2026-09-01T03:00:00.000Z"));
+    expect(h.poner).toHaveBeenCalledWith(
+      [clave("presupuesto", 80, { periodo: "2026-09" })],
+      new Date("2026-10-01T03:00:00.000Z")
+    );
   });
 
   it("si el operador sube el tope en el mismo mes, el tope nuevo tiene sus propios avisos", async () => {

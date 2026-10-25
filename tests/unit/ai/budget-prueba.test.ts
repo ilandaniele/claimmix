@@ -49,6 +49,7 @@ const { estado, pedido, borrados } = vi.hoisted(() => ({
     lotes: [] as number[],
     campos: [] as Array<Record<string, unknown>>,
     filtros: [] as unknown[],
+    filtrosDelProyecto: [] as unknown[],
     camposDelProyecto: [] as Array<Record<string, unknown>>,
   },
   borrados: { delete: vi.fn(), update: vi.fn(), insert: vi.fn() },
@@ -95,7 +96,8 @@ vi.mock("@/lib/db", async () => {
         return {
           from: () => ({
             leftJoin: () => ({
-              where: async () => {
+              where: async (filtro: unknown) => {
+                pedido.filtrosDelProyecto.push(filtro);
                 if (estado.proyectoFalla) throw new Error("connection reset");
                 return [estado.proyecto];
               },
@@ -173,6 +175,7 @@ beforeEach(() => {
   pedido.lotes.length = 0;
   pedido.campos.length = 0;
   pedido.filtros.length = 0;
+  pedido.filtrosDelProyecto.length = 0;
   pedido.camposDelProyecto.length = 0;
   borrados.delete.mockClear();
   borrados.update.mockClear();
@@ -516,6 +519,9 @@ describe("el techo mensual de cada prueba", () => {
 
     const delMes = pedido.filtros.map((f) => render(f).params).find((p) => p.includes("2026-09-01"));
     expect(delMes).toBeDefined();
+    // El día y el mes del guardia también son los de acá: la medianoche del 30 y la del 1 de septiembre.
+    expect(pedido.filtros.flatMap((f) => render(f).params)).toContain("2026-09-30T03:00:00.000Z");
+    expect(render(pedido.filtrosDelProyecto[0]).params).toContain("2026-09-01T03:00:00.000Z");
   });
 });
 

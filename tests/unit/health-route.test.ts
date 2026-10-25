@@ -39,7 +39,6 @@ vi.mock("@/lib/db", () => ({
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/health/route";
-import { inicioDelMes } from "@/core/fecha/inicio-del-mes";
 import { cifrar } from "@/lib/security/cifrado";
 
 /** Lo que el chequeo de presupuesto va a ver como gastado este mes. */
@@ -664,15 +663,15 @@ describe("cuánto queda del presupuesto de IA", () => {
     expect(p.detail).not.toContain("US$200");
   });
 
-  it("suma desde el mismo primer instante del mes que el guardia y el aviso de topes", async () => {
-    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 24, 15, 30) });
+  it("suma desde la medianoche argentina del primero, la misma que el guardia y el aviso de topes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-24T15:30:00Z") });
     try {
       await leer();
     } finally {
       vi.useRealTimers();
     }
     const consulta = mockExecute.mock.calls.map(([q]) => JSON.stringify(q)).find((q) => q.includes("ai_usage"));
-    expect(consulta).toContain(inicioDelMes(new Date(2026, 9, 24, 15, 30)).toISOString());
+    expect(consulta).toContain("2026-10-01T03:00:00.000Z");
   });
 
   it("si la consulta falla, avisa en vez de decir que está todo bien", async () => {

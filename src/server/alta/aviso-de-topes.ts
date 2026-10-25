@@ -33,6 +33,7 @@ import "server-only";
 
 import { sql } from "drizzle-orm";
 
+import { diaArgentino, mesArgentino } from "@/core/fecha/dia-argentino";
 import { inicioDelMes } from "@/core/fecha/inicio-del-mes";
 import { getT } from "@/lib/i18n";
 import { logger } from "@/lib/observability/logger";
@@ -78,9 +79,9 @@ interface Cruzado {
  */
 export async function avisarTopes(ahora: Date = new Date()): Promise<number> {
   const inicio = inicioDelMes(ahora);
-  // La marca dura hasta que empieza el mes siguiente: ahí la purga del limitador la lleva.
-  const vence = new Date(inicio.getFullYear(), inicio.getMonth() + 1, 1);
-  const periodo = `${inicio.getFullYear()}-${String(inicio.getMonth() + 1).padStart(2, "0")}`;
+  // La marca dura hasta que empieza el mes argentino siguiente: ahí la purga del limitador la lleva.
+  const vence = new Date(mesArgentino(ahora).fin);
+  const periodo = diaArgentino(ahora).slice(0, 7);
   const clave = (c: Cruzado, umbral: UmbralDeAviso) =>
     claveDeCupo("aviso-tope", c.nombre, String(c.tope), String(umbral), periodo);
   try {

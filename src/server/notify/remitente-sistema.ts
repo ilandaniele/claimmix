@@ -31,7 +31,13 @@
  *    además por IP: si no, tres pedidos de un tercero le gastan a la víctima el
  *    cupo del día y su propio enlace no sale.
  *
- * Los dos cierran si el contador no contesta (`fallaCerrada`): un mail que no
+ * El segundo no corre en los tipos que no se piden sobre la dirección de nadie
+ * (`TIPOS_SIN_CUPO_POR_DESTINATARIO`): el aviso de los topes sale a las
+ * direcciones de operación, una sola vez por umbral y por mes, y con tres por día
+ * por dirección el aviso del 100 % podía quedar esperando a las 00:00 UTC con la IA
+ * ya cortada. Su cupo global sigue.
+ *
+ * Los que corren cierran si el contador no contesta (`fallaCerrada`): un mail que no
  * sale se pide de nuevo, uno que sale de más no se recupera.
  *
  * Nunca lanza, por lo mismo que `sendPasswordResetEmail`: quien llama no puede
@@ -71,8 +77,11 @@ export interface CorreoDelSistema {
   texto: string;
 }
 
-/** Cada tipo tiene su propio cupo global: ver arriba. */
-export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador" | "recordatorio";
+/**
+ * Cada tipo tiene su propio cupo global: ver arriba. `topes` (el aviso de los topes al operador) está
+ * aparte de `operador` para que una ráfaga de avisos de números no le gaste el cupo, y no cuenta por dirección.
+ */
+export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador" | "recordatorio" | "topes";
 
 export interface OpcionesDeCorreo {
   tipo: TipoDeCorreo;
@@ -82,6 +91,9 @@ export interface OpcionesDeCorreo {
 
 /** Los tipos cuyo cupo por dirección se cuenta por IP. */
 const TIPOS_POR_IP: ReadonlySet<TipoDeCorreo> = new Set(["alta", "recuperacion"]);
+
+/** Los tipos que no tienen cupo por dirección: nadie los pide sobre una dirección ajena. */
+const TIPOS_SIN_CUPO_POR_DESTINATARIO: ReadonlySet<TipoDeCorreo> = new Set(["topes"]);
 
 /**
  * La casilla de la plataforma, o null si falta el correo, el refresh token o el
@@ -136,11 +148,15 @@ export async function enviarCorreoDelSistema(
       limit: topeEntero("ALTA_TOPE_CORREOS_DIA"),
       cual: "global",
     },
-    {
-      clave: claveDeCupo("alta:destinatario", tipo, ...porIp, huellaDelDestinatario(destinatario)),
-      limit: topeEntero("ALTA_TOPE_POR_DESTINATARIO_DIA"),
-      cual: "destinatario",
-    },
+    ...(TIPOS_SIN_CUPO_POR_DESTINATARIO.has(tipo)
+      ? []
+      : [
+          {
+            clave: claveDeCupo("alta:destinatario", tipo, ...porIp, huellaDelDestinatario(destinatario)),
+            limit: topeEntero("ALTA_TOPE_POR_DESTINATARIO_DIA"),
+            cual: "destinatario",
+          },
+        ]),
   ];
 
   const contados: IntentoContado[] = [];

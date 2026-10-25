@@ -28,7 +28,14 @@ vi.mock("@/lib/observability/logger", () => ({
 }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: h.rateLimit, liberarCupo: h.liberarCupo }));
 
-import { avisarAlOperador, FRACCION_DEL_AVISO, llegoAlAviso } from "@/server/alta/aviso-operador";
+import {
+  avisarAlOperador,
+  destinatariosDeOperacion,
+  FRACCION_DEL_AVISO,
+  llegoAlAviso,
+  mandarAlOperador,
+  umbralDelTope,
+} from "@/server/alta/aviso-operador";
 
 const DIA_MS = 24 * 60 * 60_000;
 const VENTANA = 1_700_000_000_000;
@@ -62,6 +69,68 @@ describe("llegoAlAviso", () => {
     [5, 0, false],
   ])("%i altas con tope %i da %s", (creadas, tope, esperado) => {
     expect(llegoAlAviso(creadas, tope)).toBe(esperado);
+  });
+});
+
+describe("umbralDelTope", () => {
+  it.each([
+    [0, 200, null],
+    [159.99, 200, null],
+    [160, 200, 80],
+    [199.99, 200, 80],
+    [200, 200, 100],
+    [350, 200, 100],
+    // Con 30 bases el 80 % son 24: la cuenta es la misma, sin redondeos.
+    [23, 30, null],
+    [24, 30, 80],
+    [30, 30, 100],
+  ])("%d con tope %d da %s", (usado, tope, esperado) => {
+    expect(umbralDelTope(usado, tope)).toBe(esperado);
+  });
+
+  it.each([0, -1, Number.NaN])("con el tope en %d no hay umbral: es «sin límite» o «parado a propósito»", (tope) => {
+    expect(umbralDelTope(0, tope)).toBeNull();
+    expect(umbralDelTope(5, tope)).toBeNull();
+  });
+
+  it("un uso que no es un número no cruza nada", () => {
+    expect(umbralDelTope(Number.NaN, 200)).toBeNull();
+  });
+});
+
+describe("destinatariosDeOperacion", () => {
+  it("son las direcciones de operación", () => {
+    expect(destinatariosDeOperacion()).toEqual(["ops@example.com", "dueno@example.com"]);
+  });
+
+  it("sin casilla remitente no hay por dónde escribirles: ninguna", () => {
+    h.remitente.mockReturnValue(null);
+
+    expect(destinatariosDeOperacion()).toEqual([]);
+  });
+});
+
+describe("mandarAlOperador", () => {
+  const DESTINOS = ["ops@example.com", "dueno@example.com"];
+
+  it("manda el mismo mail a cada dirección, con el tipo de correo que se le pide", async () => {
+    expect(await mandarAlOperador(DESTINOS, "Asunto", "Texto", "topes")).toBe(true);
+
+    expect(h.enviar.mock.calls).toEqual(
+      DESTINOS.map((to) => [{ to, asunto: "Asunto", texto: "Texto" }, { tipo: "topes" }])
+    );
+  });
+
+  it("con que salga a una alcanza: el aviso se dio", async () => {
+    h.enviar.mockResolvedValueOnce({ enviado: false, motivo: "no_salio" }).mockResolvedValueOnce({ enviado: true });
+
+    expect(await mandarAlOperador(DESTINOS, "Asunto", "Texto", "topes")).toBe(true);
+  });
+
+  it("si no salió a ninguna, el aviso no se dio", async () => {
+    h.enviar.mockResolvedValue({ enviado: false, motivo: "sin_cupo" });
+
+    expect(await mandarAlOperador(DESTINOS, "Asunto", "Texto", "topes")).toBe(false);
   });
 });
 

@@ -345,6 +345,8 @@ describe("las claves con marcas del lote de decisiones", () => {
   const DE_SERVIDOR = {
     "presupuesto.aviso.cuerpo": ["{hora}", "{motivo}", "{plazo}"],
     "formulario.ayuda": ["{porDia}", "{porHora}"],
+    "alta.avisoTope.linea80": ["{nombre}", "{tope}", "{usado}"],
+    "alta.avisoTope.linea100": ["{llena}", "{nombre}", "{tope}", "{usado}"],
   } as const;
 
   it("las de cliente llevan las mismas marcas en los dos idiomas", () => {

@@ -22,6 +22,7 @@ const m = vi.hoisted(() => ({
   avisar: vi.fn(),
   revisar: vi.fn(),
   avisarDesvios: vi.fn(),
+  avisarTopes: vi.fn(),
   purgar: vi.fn(),
   purgaAdjuntos: vi.fn(),
   retencion: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock("@/server/bases/cada-base", () => ({ paraCadaBase: m.paraCadaBase }));
 vi.mock("@/server/bases/reintentar", () => ({ reintentarBases: m.reintentar }));
 vi.mock("@/server/bases/espejo", () => ({ espejarTodas: m.espejar }));
 vi.mock("@/server/alta/waba-salud", () => ({ revisarWabas: m.revisarWabas }));
+vi.mock("@/server/alta/aviso-de-topes", () => ({ avisarTopes: m.avisarTopes }));
 vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: m.rateLimit,
   RATE_LIMIT_CONFIGS: {
@@ -99,6 +101,7 @@ beforeEach(() => {
   m.recordar.mockImplementation(anota("recordar", { enviados: 3, salteados: 1 }));
   m.cerrar.mockImplementation(anota("cerrar", { closed: 4, caseIds: [] }));
   m.avisar.mockImplementation(anota("avisar", 2));
+  m.avisarTopes.mockImplementation(anota("topes", 2));
   m.revisar.mockImplementation(anota("revisar", { nuevos: 6, porRegla: {}, porInquilino: {}, fallidas: [] }));
   m.avisarDesvios.mockResolvedValue(true);
   m.purgar.mockImplementation(anota("purgar", 5));
@@ -115,9 +118,9 @@ afterEach(() => {
 });
 
 describe("GET /api/cron/reap-stuck", () => {
-  it("corre reap, retomar, recordatorios, cierre, avisos de cierre, desvíos y purga, en ese orden", async () => {
+  it("corre reap, retomar, recordatorios, cierre, avisos de cierre, aviso de topes, desvíos y purga, en ese orden", async () => {
     await GET(pedido());
-    expect(m.orden).toEqual(["reap", "retomar", "recordar", "cerrar", "avisar", "revisar", "purgar"]);
+    expect(m.orden).toEqual(["reap", "retomar", "recordar", "cerrar", "avisar", "topes", "revisar", "purgar"]);
   });
 
   it("la revisión de desvíos corre una vez por día aunque la ruta la llamen cada quince minutos", async () => {
@@ -144,7 +147,7 @@ describe("GET /api/cron/reap-stuck", () => {
     const res = await GET(pedido());
 
     expect(res.status).toBe(200);
-    expect(m.orden).toEqual(["reap", "retomar", "recordar", "cerrar", "avisar", "purgar"]);
+    expect(m.orden).toEqual(["reap", "retomar", "recordar", "cerrar", "avisar", "topes", "purgar"]);
   });
 
   it("si el cupo no se puede consultar la revisión no corre y la purga sí", async () => {
@@ -306,6 +309,28 @@ describe("GET /api/cron/reap-stuck", () => {
     expect(await res.json()).toMatchObject({ abandoned_closed: 4, avisos_de_cierre: 0 });
   });
 
+  it("un error en el aviso de topes no corta lo demás y cuenta cero", async () => {
+    m.avisarTopes.mockRejectedValue(new Error("se cayó"));
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(m.revisar).toHaveBeenCalledOnce();
+    expect(m.purgar).toHaveBeenCalledOnce();
+    expect(await res.json()).toMatchObject({ avisos_de_topes: 0, rate_limit_rows_purged: 5 });
+  });
+
+  it("no avisa los topes si no queda un minuto de la función", async () => {
+    const reloj = vi.spyOn(Date, "now");
+    reloj.mockReturnValueOnce(0).mockReturnValue(300_000);
+
+    const res = await GET(pedido());
+    reloj.mockRestore();
+
+    expect(m.avisarTopes).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ avisos_de_topes: 0 });
+  });
+
   it("un error en los recordatorios no corta el cierre", async () => {
     m.recordar.mockRejectedValue(new Error("se cayó"));
 
@@ -331,6 +356,7 @@ describe("GET /api/cron/reap-stuck", () => {
       desvios_nuevos: 6,
       desvios_fallidas: [],
       avisos_de_desvios: 0,
+      avisos_de_topes: 2,
       purga: null,
       retencion: null,
       rate_limit_rows_purged: 5,
@@ -444,6 +470,7 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
       "recordar",
       "cerrar",
       "avisar",
+      "topes",
       "revisar",
       "purgaAdjuntos",
       "retencion",
@@ -556,6 +583,15 @@ describe("GET /api/cron/reap-stuck: una pasada por base (P10)", () => {
     expect(m.cerrar).toHaveBeenNthCalledWith(2, BASE_B);
     expect(m.avisar).toHaveBeenNthCalledWith(1, { hasta: expect.any(Number) }, BASE_A);
     expect(m.revisar).toHaveBeenNthCalledWith(2, BASE_B);
+  });
+
+  it("el aviso de topes es de todo el proyecto: corre una vez aunque haya varias bases", async () => {
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    conDosBases();
+
+    await GET(pedido());
+
+    expect(m.avisarTopes).toHaveBeenCalledOnce();
   });
 
   it("junta lo de todas las bases en la respuesta", async () => {

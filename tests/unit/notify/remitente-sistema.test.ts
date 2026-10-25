@@ -299,6 +299,32 @@ describe("los cupos son por tipo de mail", () => {
     });
   });
 
+  it("el aviso de los topes tiene su propio cupo: los avisos de números a la misma dirección no lo gastan", async () => {
+    // El operador recibe los dos tipos en la misma casilla: tres avisos de números no le tapan el de un tope.
+    for (let i = 0; i < 3; i++) await enviar("ops@example.com", { tipo: "operador" });
+    expect(await enviar("ops@example.com", { tipo: "operador" })).toEqual({ enviado: false, motivo: "sin_cupo" });
+
+    expect(await enviar("ops@example.com", { tipo: "topes" })).toEqual({ enviado: true });
+  });
+
+  it("el aviso de los topes no cuenta por dirección: el del 100 % sale aunque ese día ya hayan salido tres", async () => {
+    for (let i = 0; i < 4; i++) {
+      expect(await enviar("ops@example.com", { tipo: "topes" })).toEqual({ enviado: true });
+    }
+
+    const claves = vi.mocked(rateLimit).mock.calls.map(([clave]) => clave);
+    expect(claves).toEqual(Array(4).fill("alta:correos:topes"));
+    expect(mockSend).toHaveBeenCalledTimes(4);
+  });
+
+  it("el aviso de los topes conserva su cupo global del día", async () => {
+    vi.stubEnv("ALTA_TOPE_CORREOS_DIA", "2");
+
+    expect(await enviar("ops@example.com", { tipo: "topes" })).toEqual({ enviado: true });
+    expect(await enviar("dueno@example.com", { tipo: "topes" })).toEqual({ enviado: true });
+    expect(await enviar("ops@example.com", { tipo: "topes" })).toEqual({ enviado: false, motivo: "sin_cupo" });
+  });
+
   it("las claves llevan el tipo y, en alta y recuperación, la IP", async () => {
     await enviar("ana@example.com", { tipo: "recuperacion", ip: "203.0.113.7" });
 

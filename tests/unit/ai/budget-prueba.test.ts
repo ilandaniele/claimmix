@@ -18,7 +18,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
-import type { SQL } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 
 vi.mock("server-only", () => ({}));
 
@@ -40,7 +40,7 @@ const { estado, pedido, borrados } = vi.hoisted(() => ({
     tokensDelInquilino: 0,
     tokensDeLaOtra: 0,
     usdDelMes: 0,
-    proyecto: { total: 0, pruebas: 0 },
+    proyecto: { total: 0, pruebas: 0 } as Record<string, number>,
     loteFalla: false,
     proyectoFalla: false,
   },
@@ -113,7 +113,8 @@ vi.mock("@/lib/rate-limit", async (importOriginal) => {
   return { ...real, rateLimit: vi.fn(real.rateLimit), liberarCupo: vi.fn(real.liberarCupo) };
 });
 
-import { checkBudget, reservarSiEsPrueba, soltarReserva } from "@/server/ai/budget";
+import { checkBudget, reservarSiEsPrueba, soltarReserva, sumaMensualDelProyecto } from "@/server/ai/budget";
+import { logger } from "@/lib/observability/logger";
 import { clearAllRateLimits, liberarCupo, rateLimit } from "@/lib/rate-limit";
 
 const PRUEBA = "30000000-0000-0000-0000-000000000003";
@@ -691,5 +692,69 @@ describe("las consultas del lote", () => {
 
     const campos = pedido.campos.find((c) => "usd" in c)!;
     expect(render(campos.usd).sql).toContain(`"ai_usage_mensual"."cost_usd"`);
+  });
+});
+
+describe("sumaMensualDelProyecto", () => {
+  const desde = new Date(2026, 9, 1);
+
+  it("sin extras trae el total y las pruebas, y ningún extra", async () => {
+    estado.proyecto = { total: 40, pruebas: 30 };
+
+    expect(await sumaMensualDelProyecto(desde, DEMO)).toEqual({ ok: true, total: 40, pruebas: 30, extras: {} });
+    expect(Object.keys(pedido.camposDelProyecto[0])).toEqual(["total", "pruebas"]);
+  });
+
+  it("los extras viajan en la misma consulta y vuelven por nombre, como número", async () => {
+    // El driver devuelve bigint y numeric como texto: se convierten acá.
+    estado.proyecto = { total: 40, pruebas: 30, bases: "12" as unknown as number, mb: 211.5 };
+    const bases = sql<number>`1`;
+    const mb = sql<number>`2`;
+
+    const medido = await sumaMensualDelProyecto(desde, DEMO, { bases, mb });
+
+    expect(medido).toEqual({ ok: true, total: 40, pruebas: 30, extras: { bases: 12, mb: 211.5 } });
+    expect(pedido.camposDelProyecto).toHaveLength(1);
+    expect(Object.keys(pedido.camposDelProyecto[0])).toEqual(["total", "pruebas", "bases", "mb"]);
+    expect(pedido.camposDelProyecto[0].bases).toBe(bases);
+  });
+
+  it("un extra que la fila no trae vale 0", async () => {
+    estado.proyecto = { total: 1, pruebas: 0 };
+
+    const medido = await sumaMensualDelProyecto(desde, DEMO, { mb: sql<number>`2` });
+
+    expect(medido.extras).toEqual({ mb: 0 });
+  });
+
+  it("si la consulta falla no hay medida: ok false y ningún extra", async () => {
+    estado.proyectoFalla = true;
+
+    expect(await sumaMensualDelProyecto(desde, DEMO, { mb: sql<number>`2` })).toEqual({
+      ok: false,
+      total: 0,
+      pruebas: 0,
+      extras: {},
+    });
+  });
+
+  it("la falla se registra con el evento del guardia de IA salvo que quien llama pida el suyo", async () => {
+    vi.mocked(logger.error).mockClear();
+    estado.proyectoFalla = true;
+
+    await sumaMensualDelProyecto(desde, DEMO);
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.any(Object), "budget.monthly_check_error");
+  });
+
+  it("con evento propio la falla del catálogo no se lee como una del guardia de IA", async () => {
+    vi.mocked(logger.error).mockClear();
+    estado.proyectoFalla = true;
+
+    await sumaMensualDelProyecto(desde, DEMO, { mb: sql<number>`2` }, "alta.aviso_topes_medicion_fallo");
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.any(Object), "alta.aviso_topes_medicion_fallo");
   });
 });

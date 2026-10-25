@@ -144,6 +144,41 @@ export async function liberarIntentoPostgres(
 }
 
 /**
+ * Marcas de «ya está hecho» que duran hasta `vence`: para lo que pasa una vez por período más largo
+ * que el día (un aviso por mes). Un contador de ventana no sirve, porque `purgeExpiredRateLimits`
+ * borra todo lo que empezó hace más de 24 h; la marca es una fila cuyo `window_start` es el `vence`
+ * (futuro), así que la purga no la toca hasta que el período termina.
+ *
+ * Quien las usa lee primero, hace lo suyo y marca después (`ponerMarcas`), no al revés: una marca
+ * puesta antes y que quedó huérfana (la corrida murió, o la base confirmó el insert y perdió la
+ * respuesta) dejaría ese aviso mudo todo el período. Con la marca al final, lo peor que pasa es que
+ * se haga dos veces. Las dos lanzan si la base no contesta.
+ */
+export async function marcasPuestas(claves: string[], vence: Date): Promise<Set<string>> {
+  if (claves.length === 0) return new Set();
+  // sin-inquilino: el mismo contador por clave que `checkRateLimitPostgres`; la marca no es de nadie.
+  const result = await db.execute(sql`
+    select bucket_key from rate_limit_counters
+    where bucket_key in ${claves} and window_start = ${vence.toISOString()}
+  `);
+  // sin-inquilino: Idem: es el resultado de la misma consulta de arriba.
+  const rows = (result as unknown as { rows: { bucket_key: string }[] }).rows ?? [];
+  return new Set(rows.map((r) => r.bucket_key));
+}
+
+/** Pone las marcas de `marcasPuestas`, todas en una sola sentencia. Las que ya estaban se dejan como están. */
+export async function ponerMarcas(claves: string[], vence: Date): Promise<void> {
+  if (claves.length === 0) return;
+  const filas = sql.join(claves.map((k) => sql`(${k}, ${vence.toISOString()}, 1)`), sql`, `);
+  // sin-inquilino: las mismas marcas por clave que `marcasPuestas`.
+  await db.execute(sql`
+    insert into rate_limit_counters (bucket_key, window_start, hits)
+    values ${filas}
+    on conflict (bucket_key, window_start) do nothing
+  `);
+}
+
+/**
  * Borrar las ventanas que ya vencieron.
  *
  * Una fila por clave y por ventana crece rápido y no sirve de nada pasada la

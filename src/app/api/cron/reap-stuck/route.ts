@@ -32,6 +32,7 @@ import { reintentarBases } from "@/server/bases/reintentar";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
+import { avisarTopes } from "@/server/alta/aviso-de-topes";
 import { revisarWabas } from "@/server/alta/waba-salud";
 import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
 import { revisarDesvios, type ResultadoDeLaRevision } from "@/server/desvios/revision-nocturna";
@@ -142,6 +143,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     avisosDeCierre = suma(await porBase((db) => avisarCierres({ hasta: hasta - 60_000 }, db), hasta - 60_000));
   } catch (err) {
     logger.error({ code: errorCode(err) }, "cron_reap_stuck.avisos_de_cierre_fallaron");
+  }
+
+  // El aviso de los topes (80 % y 100 %) no depende de ninguna base de cliente: mide el proyecto entero (una
+  // consulta de medición, una sentencia para marcar y otra para sacar las marcas si el mail no sale) y avisa una
+  // vez por umbral, tope y mes. Si no queda margen o falla, el barrido siguiente lo alcanza.
+  let avisosDeTopes = 0;
+  if (Date.now() < hasta - 60_000) {
+    try {
+      avisosDeTopes = await avisarTopes();
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "cron_reap_stuck.avisos_de_topes_fallaron");
+    }
   }
 
   // La revisión de calidad (B22) mira lo que quedó después de los barridos de
@@ -269,6 +282,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     desvios_nuevos: desviosNuevos,
     desvios_fallidas: desviosFallidas,
     avisos_de_desvios: avisosDeDesvios,
+    avisos_de_topes: avisosDeTopes,
     purga,
     retencion,
     rate_limit_rows_purged: purged,

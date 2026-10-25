@@ -36,6 +36,7 @@ import { gmailAccounts } from "@/lib/db/schema";
 
 import { getWatchExpiration } from "@/server/email/gmail/poll-state";
 import { topeMensualDelProyecto } from "@/lib/topes";
+import { inicioDelMes } from "@/core/fecha/inicio-del-mes";
 import { basePorCliente } from "@/data/bases";
 import { enControl, enTenant } from "@/data/scope";
 
@@ -606,9 +607,7 @@ async function checkPresupuesto(): Promise<Check> {
   const demo = process.env.DEMO_TENANT_ID?.trim() || null;
 
   try {
-    const inicio = new Date();
-    inicio.setDate(1);
-    inicio.setHours(0, 0, 0, 0);
+    const inicio = inicioDelMes();
 
     // sin-inquilino: el tope es del proyecto entero, no de una aseguradora.
     const filas = await rowsOf<{ total: number }>(

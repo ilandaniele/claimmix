@@ -22,6 +22,8 @@ vi.mock("server-only", () => ({}));
 import {
   checkRateLimitPostgres,
   liberarIntentoPostgres,
+  marcasPuestas,
+  ponerMarcas,
   purgeExpiredRateLimits,
 } from "@/lib/rate-limit/postgres";
 import { resolveProvider } from "@/lib/rate-limit/index";
@@ -115,6 +117,96 @@ describe("liberarIntentoPostgres", () => {
   it("no rompe a quien la llama si la base no contesta", async () => {
     execute.mockRejectedValueOnce(new Error("connection reset"));
     await expect(liberarIntentoPostgres("k", 60_000, VENTANA)).resolves.toBeUndefined();
+  });
+});
+
+describe("marcasPuestas", () => {
+  const VENCE = new Date("2026-11-01T03:00:00.000Z");
+  const A = "aviso-tope:presupuesto:200:80:2026-10";
+  const B = "aviso-tope:presupuesto:200:100:2026-10";
+
+  it("lee en una sola sentencia las que ya estaban, fechadas al vencimiento", async () => {
+    execute.mockResolvedValueOnce({ rows: [{ bucket_key: A }] });
+
+    expect(await marcasPuestas([A, B], VENCE)).toEqual(new Set([A]));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const sentencia = JSON.stringify(execute.mock.calls[0][0]);
+    expect(sentencia).toContain("select bucket_key from rate_limit_counters");
+    expect(sentencia).toContain("bucket_key in");
+    expect(sentencia).toContain(A);
+    expect(sentencia).toContain(B);
+    expect(sentencia).toContain(VENCE.toISOString());
+  });
+
+  it("no escribe: leer no deja marca", async () => {
+    execute.mockResolvedValueOnce({ rows: [] });
+
+    await marcasPuestas([A], VENCE);
+
+    expect(JSON.stringify(execute.mock.calls[0][0])).not.toMatch(/insert|update|delete/);
+  });
+
+  it("si no había ninguna, el conjunto vuelve vacío", async () => {
+    execute.mockResolvedValueOnce({ rows: [] });
+    expect(await marcasPuestas([A], VENCE)).toEqual(new Set());
+  });
+
+  it("sin filas en la respuesta tampoco hay marca", async () => {
+    execute.mockResolvedValueOnce({});
+    expect(await marcasPuestas(["k"], VENCE)).toEqual(new Set());
+  });
+
+  it("sin claves no toca la base", async () => {
+    expect(await marcasPuestas([], VENCE)).toEqual(new Set());
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("si la base no contesta lanza: quien lee para decidir no decide a ciegas", async () => {
+    execute.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(marcasPuestas(["k"], VENCE)).rejects.toThrow("connection reset");
+  });
+});
+
+describe("ponerMarcas", () => {
+  const VENCE = new Date("2026-11-01T03:00:00.000Z");
+  const A = "aviso-tope:presupuesto:200:80:2026-10";
+  const B = "aviso-tope:presupuesto:200:100:2026-10";
+
+  it("pone todas en una sola sentencia, fechadas al vencimiento y sin pisar las que ya estaban", async () => {
+    execute.mockResolvedValueOnce({ rowCount: 2 });
+
+    await ponerMarcas([A, B], VENCE);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const sentencia = JSON.stringify(execute.mock.calls[0][0]);
+    expect(sentencia).toContain("insert into rate_limit_counters");
+    expect(sentencia).toContain("on conflict (bucket_key, window_start) do nothing");
+    expect(sentencia).toContain(A);
+    expect(sentencia).toContain(B);
+    // La marca va fechada al vencimiento, no a la ventana en curso: la purga de 24 h no la toca.
+    expect(sentencia).toContain(VENCE.toISOString());
+  });
+
+  it("sin claves no toca la base", async () => {
+    await ponerMarcas([], VENCE);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("si la base no contesta lanza: quien marca después de hacer lo suyo se entera", async () => {
+    execute.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(ponerMarcas(["k"], VENCE)).rejects.toThrow("connection reset");
+  });
+
+  it("la purga de 24 h deja la marca: borra lo anterior a su corte, y la marca está fechada después", async () => {
+    execute.mockResolvedValueOnce({ rowCount: 0 });
+    await purgeExpiredRateLimits();
+    const sentencia = JSON.stringify(execute.mock.calls[0][0]);
+    const corte = sentencia.match(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/)?.[0];
+    expect(sentencia).toContain("window_start <");
+    expect(corte).toBeDefined();
+    const mañana = Date.now() + 24 * 60 * 60_000;
+    expect(new Date(corte!).getTime()).toBeLessThan(mañana);
   });
 });
 

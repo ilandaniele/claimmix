@@ -91,7 +91,7 @@ export interface MetricasData {
     by_user: AiUsageByUser[];
     by_model: AiUsageByModel[];
   };
-  /** El rango del período elegido, `[start, end)`. El uso de IA sigue el mes calendario. */
+  /** El rango del período elegido, `[start, end)`. El uso de IA sigue el mes argentino, el mismo del guardia del gasto. */
   period: { start: string; end: string };
   periodo: Periodo;
   /** Sólo si se pidió: /api/metricas no la pide y devuelve null. */
@@ -209,7 +209,7 @@ export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
  *
  * Las tarjetas, las distribuciones por estado y tipo, el ciclo y los cuellos de
  * botella miran el `periodo` elegido (el mes por omisión); el uso de IA sigue
- * siendo el del mes calendario, que es el que se factura.
+ * siendo el del mes argentino, el mismo con el que cuenta el guardia del gasto.
  *
  * `serie` agrega la consulta de actividad al MISMO lote, así la pantalla sigue
  * en un viaje. Sin ella no se lee y vuelve null. `ayer` hace lo mismo con el

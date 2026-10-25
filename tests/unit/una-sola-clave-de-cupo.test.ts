@@ -54,6 +54,11 @@ describe("claveDeCupo", () => {
     expect(claveDeCupo("denuncia-slug-dia", " Mi-Slug ")).toBe("denuncia-slug-dia:mi-slug");
   });
 
+  it("la marca de un aviso de tope arma aviso-tope:<nombre>:<tope>:<umbral>:<período>", () => {
+    expect(claveDeCupo("aviso-tope", "presupuesto", "200", "80", "2026-10")).toBe("aviso-tope:presupuesto:200:80:2026-10");
+    expect(claveDeCupo("aviso-tope", "MB", "350", "100", "2026-10")).toBe("aviso-tope:mb:350:100:2026-10");
+  });
+
   it("re-analyze es re-analyze:<caseId>:<userId>", () => {
     expect(claveDeCupo("re-analyze", "c-1", "u-1")).toBe("re-analyze:c-1:u-1");
   });

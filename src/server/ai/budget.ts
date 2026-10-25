@@ -28,10 +28,11 @@
  */
 
 import "server-only";
-import { and, eq, gte, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { QueryBuilder } from "drizzle-orm/pg-core";
 import { after } from "next/server.js";
-import { diaArgentino } from "@/core/fecha/dia-argentino";
+import { diaArgentino, medianocheHaceDias } from "@/core/fecha/dia-argentino";
+import { inicioDelMes } from "@/core/fecha/inicio-del-mes";
 import { resolveDefaultTenantId } from "@/lib/auth/provision";
 import {
   enPrueba,
@@ -187,11 +188,9 @@ export async function checkDemoBudget(): Promise<BudgetCheckResult> {
   const dailyTokenCap = topeDecimal("AI_DEMO_DAILY_TOKEN_CAP");
   const monthlyCapUsd = topeDecimal("DEMO_MONTHLY_BUDGET_USD");
 
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
+  const ahora = new Date();
+  const dayStart = new Date(medianocheHaceDias(1, ahora));
+  const monthStart = inicioDelMes(ahora);
 
   try {
     const [day] = await enTenant(tenantCtx, (db) =>
@@ -295,9 +294,10 @@ export async function checkBudget(
   const anonimoDailyTokenCap = topeAnonimo();
 
   // ── Los cupos: mensual del proyecto, diario del inquilino, diario sin persona y diario de la persona ──
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
+  // Un solo `ahora` para el día, el mes y el mes del acumulador: a las 00:00 del primero, dos relojes
+  // podían caer en meses distintos.
+  const ahora = new Date();
+  const monthStart = inicioDelMes(ahora);
 
   /*
    * El tope mensual es del proyecto entero, y eso es lo que se quiere: protege
@@ -311,8 +311,7 @@ export async function checkBudget(
    */
   const demoTenantId = getDemoTenantId();
 
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
+  const dayStart = new Date(medianocheHaceDias(1, ahora));
 
   /*
    * Los tres cupos se preguntan a la vez.
@@ -334,7 +333,6 @@ export async function checkBudget(
    * miran. Es el caso terminal, y a cambio el camino normal —el de siempre—
    * pasa de tres latencias a una.
    */
-  const ahora = new Date();
   const mesDeIa = `${diaArgentino(ahora).slice(0, 7)}-01`;
   const [mensual, delDia] = await Promise.all([
     sumaMensualDelProyecto(monthStart, demoTenantId),
@@ -555,11 +553,18 @@ function esDeLaPlataforma(tenantId: string): boolean {
  * inquilino. Es `to_jsonb(tenants.*)` y no la columna porque antes de la 0048
  * `autoalta` no existe y nombrarla tira 42703. El `QueryBuilder` arma la
  * subconsulta sin pasar por `db`.
+ *
+ * `extras` son otras columnas escalares para la misma consulta (el aviso de topes mide el catálogo
+ * de bases al lado del gasto, en un solo viaje); vuelven por nombre en `extras`. Si la consulta
+ * falla queda registrada con `evento`: el guardia de IA y el aviso de topes no comparten el suyo, o
+ * una falla del catálogo se leería como una del guardia.
  */
-async function sumaMensualDelProyecto(
+export async function sumaMensualDelProyecto(
   desde: Date,
-  demoTenantId: string | null
-): Promise<{ ok: boolean; total: number; pruebas: number }> {
+  demoTenantId: string | null,
+  extras: Record<string, SQL<number>> = {},
+  evento = "budget.monthly_check_error"
+): Promise<{ ok: boolean; total: number; pruebas: number; extras: Record<string, number> }> {
   try {
     const autoaltas = new QueryBuilder()
       .select({ id: tables.tenants.id })
@@ -573,6 +578,7 @@ async function sumaMensualDelProyecto(
       .select({
         total: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}), 0)::float8`,
         pruebas: sql<number>`coalesce(sum(${tables.aiUsage.cost_usd}) filter (where ${autoaltas.id} is not null), 0)::float8`,
+        ...extras,
       })
       .from(tables.aiUsage)
       .leftJoin(autoaltas, eq(autoaltas.id, tables.aiUsage.tenant_id))
@@ -584,10 +590,17 @@ async function sumaMensualDelProyecto(
             )
           : gte(tables.aiUsage.created_at, desde.toISOString())
       );
-    return { ok: true, total: fila?.total ?? 0, pruebas: fila?.pruebas ?? 0 };
+    // El tipo de la fila no conoce las columnas de `extras`: se leen por nombre.
+    const columnas: Record<string, unknown> = fila ?? {};
+    return {
+      ok: true,
+      total: fila?.total ?? 0,
+      pruebas: fila?.pruebas ?? 0,
+      extras: Object.fromEntries(Object.keys(extras).map((k) => [k, Number(columnas[k] ?? 0)])),
+    };
   } catch (e) {
-    logger.error({ detalle: (e as { code?: string })?.code }, "budget.monthly_check_error");
-    return { ok: false, total: 0, pruebas: 0 };
+    logger.error({ detalle: (e as { code?: string })?.code }, evento);
+    return { ok: false, total: 0, pruebas: 0, extras: {} };
   }
 }
 

@@ -271,7 +271,7 @@ tarda algo, la guía lo dice así.
   - **Si falla:** una persona tiene un solo espacio por ambiente. Con una dirección repetida,
     el alta termina en `ya_tiene_espacio`; con una de `ADMIN_EMAILS`, `/alta` muestra el
     aviso de operador en vez de abrir un espacio.
-  - **Fuentes:** `src/server/alta/crear-inquilino.ts:5`, `:37`; `.env.example:404`
+  - **Fuentes:** `src/server/alta/crear-inquilino.ts:5`, `:38`; `.env.example:404`
     (`ADMIN_EMAILS`), `:295` (`CASILLAS_DE_DEV`); `src/app/alta/page.tsx`;
     `src/lib/auth/require-operator.ts:42-47` (comparación exacta);
     `src/app/api/admin/users/route.ts:134-153` (dominio y alias propio), `:155-179`
@@ -493,7 +493,7 @@ ningún doc lo dice.
 | `ALTA_REMITENTE_CORREO`, `ALTA_REMITENTE_REFRESH_TOKEN` (`.env.example:265-266`) | valor y secreto | excepción: un remitente por ambiente | cargadas en los tres, cada una con el cliente de su ambiente: QA el 18/10 y prd el 19/10 con `token-remitente.mts --vercel <proyecto>` (paso 1 de cada ambiente); la de prd vale desde su próximo deploy | el bloque de correo en `/registro` |
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:245-246`) | valor y secreto | excepción: un cliente OAuth por ambiente (decidido el 18/10). dev tiene el suyo, QA el suyo (`claimmix-qa`, en el mismo proyecto de Google Cloud) y prd uno propio (`claimmix-prd`), en su propio proyecto de Google Cloud, `claimmix-prd-veltra` | cargadas en los tres: QA el 18/10 y prd el 19/10 con `token-remitente.mts --vercel <proyecto>` (paso 1 de cada ambiente); las de prd valen desde su próximo deploy | el bloque de correo y «Conectar Gmail» |
 | `GMAIL_TOKEN_ENCRYPTION_KEY` (`.env.example:216`) | secreto | excepción: una por base; no se rota sin volver a cifrar | cargada en los tres (QA desde el 15/10) | error del servidor al volver de Google en «Conectar Gmail»; chequeo `gmail` de `/api/health` |
-| `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52-62`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
+| `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52`, `src/server/alta/catalogo.ts:15-22`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
 | `MONTHLY_BUDGET_USD` (`src/lib/topes.ts:117`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
@@ -605,7 +605,7 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
   - **Fuentes:** `src/app/alta/correo`; `src/app/registro/actions.ts`; `src/app/alta/actions.ts`;
     `src/app/alta/page.tsx`; `src/server/alta/crear-espacio.ts`;
     `src/server/alta/cuenta-del-enlace.ts`; `src/lib/auth/registro-permitido.ts:52-53`; `src/server/alta/crear-inquilino.ts:52`,
-    `:67`, `:79`; `.env.example:232-233`.
+    `:58`, `:70`; `.env.example:232-233`.
 - [ ] **4. El espacio nuevo en `/admin/altas`.**
   - **Quién:** [Dueño], con la cuenta de operador.
   - **Dónde:** `https://claimmix-dev.vercel.app/admin/altas`: «Altas» en el menú lateral de
@@ -1243,7 +1243,8 @@ Para quien no es el dueño ni Gonzalo y prueba ClaimMix en prd.
 - **Cómo reportan:** por el canal de D15, con el ambiente, la hora, una captura y, si lo hay,
   el número de caso.
 - **Quién mira:** [Dueño], `/admin/altas` una vez por día. Al operador le llega un mail
-  cuando las altas del día llegan al 80 % del tope.
+  cuando las altas del día llegan al 80 % del tope, y otro cuando el gasto de IA del mes, el pozo
+  de las pruebas, las bases o los MB llegan al 80 % o al 100 % del suyo (una vez por umbral y por mes).
 - **Los topes con que chocan, y qué hacer:**
   - `ALTA_TOPE_GLOBAL_DIA` (5 altas por día en prd): el alta termina en `alta_cerrada`.
     Esperar al otro día o subir la cifra (D7).
@@ -1256,7 +1257,7 @@ Para quien no es el dueño ni Gonzalo y prueba ClaimMix en prd.
   - Invitaciones: cinco por día y, en prueba, del mismo dominio o un alias `+` de la propia
     casilla de Gmail (D4 d).
 - **Fuentes:** `docs/whatsapp-setup.md:283-299`; `src/server/alta/aviso-operador.ts:30-35`;
-  `docs/PROMOCION.md:727-734`; `src/server/alta/crear-inquilino.ts:52-62`, `:79`.
+  `docs/PROMOCION.md:727-734`; `src/server/alta/crear-inquilino.ts:52`, `:70`; `src/server/alta/catalogo.ts:15-22`.
 
 ## Ensayo del prompt
 
@@ -1345,8 +1346,10 @@ diarios del plan piloto (unas 39 llamadas al p95 de 12.730 tokens, `src/lib/bill
 de una persona), el equipo del espacio recibe un mail por día, que sale de la casilla de Gmail
 que el espacio conectó; sin casilla conectada, el aviso no sale
 (`src/server/notify/specialist-alert.ts:344-352`, `src/server/worker/extract.ts:862-863`).
-Al operador sólo le llega el aviso de que las altas del día llegaron al 80 % del tope, desde
-la casilla remitente (`src/server/alta/aviso-operador.ts:30-35`).
+Al operador le llegan dos avisos, desde la casilla remitente: que las altas del día llegaron al 80 %
+del tope (`src/server/alta/aviso-operador.ts:30-35`) y que el gasto de IA del mes, el pozo de las
+pruebas, las bases de cliente o los MB del proyecto pasaron el 80 % o llegaron al 100 % de su tope
+(`src/server/alta/aviso-de-topes.ts`), una sola vez por umbral, tope y mes.
 
 **Costo por caso.** No existe: el uso de IA no se guarda por caso. Se aproxima con el paso C1.
 El costo que muestra ClaimMix es estimado a precio de lista (`src/server/ai/budget.ts:72`), con
@@ -1384,7 +1387,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta), y el 14 en el lote de las notas del 14/10, y el 10 en la rama `ci/paridad-banderas`. El resto no existe todavía: sus nombres de
+Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta), y el 14 en el lote de las notas del 14/10, y el 10 en la rama `ci/paridad-banderas`, y el 7 y el 17 en la rama `alta/avisos-topes` (#514). El resto no existe todavía: sus nombres de
 archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre
@@ -1398,7 +1401,7 @@ que tenía en la versión anterior de esta guía.
 | 4 | El número conectado a mano desde `/admin/altas` también fija su webhook, y el panel muestra los lugares libres de la WABA (P9) | Conectar un número a mano deja de depender de la Callback URL de la app de Meta | Su número recibe mensajes en el ambiente correcto | Un número conectado a mano recibe un mensaje en su espacio, y el panel muestra los lugares libres; revisión de seguridad aprobada. **Hecho en #484**, con la revisión de Fable sin hallazgos. Falta probarlo con una persona: un número con lugar libre en la WABA, conectado a mano, recibe un mensaje. Hasta A5, no conectar a mano en dev un número de prd: dev le pondría su webhook | mediano | nada |
 | 5 | Tiempos del alta en `/admin/altas`: mediana y p95 de 30 días, desde `tenant_bases` (P6) | Ve cuánto tarda la base sin pedir SQL | Nada | `/admin/altas` de prd muestra los dos números. **Hecho en #461** | chico | nada |
 | 6 | `/configuracion` y `/api/health` muestran el tope real de `MONTHLY_BUDGET_USD` (nuevo) | El semáforo y la pantalla dicen la cifra que corta | Ve su tope real | Con `MONTHLY_BUDGET_USD` en 50, las dos muestran 50; con 0, dicen «IA frenada», porque el guardia frena. **Hecho en #461.** Que 0 quiera decir «sin tope» lo decide el dueño | chico | nada |
-| 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
+| 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail. **Hecho en la rama `alta/avisos-topes` (#514)**, sin migración ni variables nuevas: el barrido de `reap-stuck` (`src/server/alta/aviso-de-topes.ts`) manda un solo mail por barrido, con una línea por cada tope que pasó el 80 % o llegó al 100 %, a las direcciones de `ADMIN_EMAILS`, por la casilla remitente y con cupo propio (`topes`), que no cuenta por dirección. Avisa una vez por umbral, tope y mes: la marca es una fila de `rate_limit_counters` que vence al empezar el mes siguiente, lleva el valor del tope, y la del 100 % marca también la del 80 % para que un gasto que baje del 100 al 80 no mande un «80» tarde. La marca se pone después de mandar el mail: si el mail no sale o la corrida muere, el barrido siguiente reintenta, a costa de que dos corridas simultáneas puedan repetirlo una vez. No lleva datos de nadie. El mes es el argentino, el mismo del guardia del gasto (ítem 17): empieza a la medianoche de acá, las 03:00 UTC. Un tope en 0 no avisa. **Falta la prueba en QA, que corre el dueño:** bajar `ALTA_TOPE_MB` a 1 en QA y redeployar QA (Vercel aplica una variable nueva sólo a los deploys nuevos), esperar al barrido (cada 2 h, o disparar `barrer-trabados.yml` a mano contra QA) y ver llegar el mail; después dejar el valor en 350 y redeployar de nuevo, porque mientras esté en 1 el alta de QA queda cerrada. Cada redeploy gasta uno de los builds diarios de Hobby. Como la marca lleva el tope, repetir la prueba con otro valor (2 en vez de 1) avisa de nuevo sin borrar nada; con el mismo valor hay que borrar las filas `aviso-tope:mb:1:80:<AAAA-MM>` y `aviso-tope:mb:1:100:<AAAA-MM>` de `rate_limit_counters` en la base de control de QA | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
 | 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador recibe un mail al llegar a 80 usuarios y cuando la WABA se llena | mediano | 4 y 7 |
 | 9 | Prueba automática del alta en dos pasos (el enlace del correo y el pedido del espacio), de punta a punta, en QA: `pnpm alta:probar` (`scripts/probar-alta.mts`), un guión nuevo. No parte de `pnpm onboard`, que prueba el alta de un inquilino por el operador y no la autoalta (nuevo) | Cada deploy de QA prueba `/registro`, el alta por el enlace del correo y la base (la función de la 0048 y los cupos por red) sin una persona. No prueba Turnstile, Gmail ni el alta con Google: siguen a mano | Menos altas rotas | El job «Alta automática en QA» corre en el Post-deploy de QA y queda rojo si el alta se rompe o QA queda sucia. Si no puede probar (red, tope de QA lleno, otro commit, candado ocupado) sale verde y el resumen del run dice «corrió SIN PODER PROBAR». **Hecho con el merge del lote 1** (`docs/TESTING.md`, capa 11). El lote 2 queda pendiente del dueño | grande | 3 |
 | 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones. **Hecho en la rama `ci/paridad-banderas`**: corre en cada deploy, al lado de los chequeos, sólo avisa (`::warning` y resumen del run) y nunca pone rojo; en el log público salen las claves, no los valores | mediano | 3. Decisión del dueño: si algún día bloquea en vez de avisar |
@@ -1408,7 +1411,7 @@ que tenía en la versión anterior de esta guía.
 | 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions. **Hecho en el lote de las notas del 14/10**, cada 2 h como prd. | chico | Nada (cadencia fijada en cada 2 h) |
 | 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso | grande | Decisión: si vale una migración en todas las bases (receta de pausa para migrar) |
 | 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte que `/alta` no revele qué empresas existen (`docs/SEGURIDAD.md`) |
-| 17 | Comprobar en qué zona horaria cortan el día y el mes del presupuesto, y fijarla (P14) | Los cortes coinciden con el mes que mira | El corte diario cae a una hora previsible | Un test fija la zona | chico | Decisión: mes argentino o mes de la factura de Google (supuesto: argentino) |
+| 17 | Comprobar en qué zona horaria cortan el día y el mes del presupuesto, y fijarla (P14) | Los cortes coinciden con el mes que mira | El corte diario cae a una hora previsible | Un test fija la zona. **Hecho en #514**, con el supuesto (mes argentino): el guardia del gasto (`checkBudget` y el del demo), `/api/health` y el aviso de topes cuentan el día y el mes desde la medianoche argentina (03:00 UTC), con un solo «ahora» por cálculo para que el día y el mes no caigan en lados distintos de la medianoche. Los tests usan instantes UTC fijos y pasan igual con `TZ=UTC` y `TZ=Asia/Tokyo`. Siguen en UTC, a propósito, el limitador, el cupo de la 0048, las ventanas del barrido, `/admin/facturacion` y `/admin/cartera`. Efecto visible: el tope diario de tokens se renueva a las 00:00 de acá y no a las 21:00 | chico | Decisión: mes argentino o mes de la factura de Google (supuesto: argentino) |
 | 18 | Correo que no sea Gmail (nuevo). Hoy no existe: sólo hay webhooks de Gmail y de WhatsApp (`src/app/api/webhooks`). Mientras tanto, el formulario web de `/denuncia/[slug]`, que se prende en `/agente`, solapa «Formulario web» | Puede vender a quien no usa Gmail | Conecta su correo, sea cual sea | Un cliente con otro proveedor recibe denuncias por correo | grande | Decisión: qué proveedores |
 | 19 | Cobro y activación sin operador (nuevo). Hoy no existe: activar es un paso del operador | No activa a mano cada cliente que paga | Paga y queda activo solo | Un pago de prueba activa el espacio sin tocar `/admin/altas` | grande | Decisión: medio de pago y lo que pida el abogado |
 | 20 | El entrenamiento base llega a cada espacio nuevo sin sembrarlo (P8) | Un cliente nuevo arranca con el mismo agente que dev | Mejores respuestas desde el primer caso | Un espacio nuevo de prd responde con las reglas base | grande | Bloqueado por «El agente aprende de la consola» (`docs/PROJECT_STATUS.md:5055-5063`) |
@@ -1773,7 +1776,7 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   leídos) y `gmail.send`.
 - **D13.** Las decisiones de los ítems 7, 10, 14, 15, 16, 17, 18 y 19 del plan. **24/10:** el
   dueño pidió aplicar las recomendaciones; 10 y 14 ya estaban hechos y el resto se hace de a
-  uno.
+  uno. El 7 y el 17 van juntos en #514.
 - **D14. MCP de WhatsApp.** Opcional, sobre la API oficial; no hace falta para el alta y le da
   el token permanente a código de terceros (`docs/whatsapp-setup.md:93-128`).
   **Recomendación: no instalarlo por ahora.** Si el dueño lo quiere, el paso M1. **Elegido el

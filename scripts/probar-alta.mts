@@ -391,7 +391,8 @@ async function probarTodo(): Promise<void> {
   const { claveDeCupo } = await import("@/lib/rate-limit/clave");
   const { topeEntero } = await import("@/lib/topes");
   const { llegoAlAviso } = await import("@/server/alta/aviso-operador");
-  const { topeDeBases, topeDeMb, topeGlobalDelDia } = await import("@/server/alta/crear-inquilino");
+  const { topeGlobalDelDia } = await import("@/server/alta/crear-inquilino");
+  const { topeDeBases, topeDeMb } = await import("@/server/alta/catalogo");
   const { conError, crearEspacio, SIN_ESPACIO } = await import("@/server/alta/crear-espacio");
   const { crearCuentaDelEnlace, YA_TENES_CUENTA } = await import("@/server/alta/cuenta-del-enlace");
   const { tomarCupoDeAlta } = await import("@/server/alta/cupo-por-ip");

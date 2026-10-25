@@ -23,7 +23,11 @@ import { getT } from "@/lib/i18n";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
-import { enviarCorreoDelSistema, remitenteDelSistema } from "@/server/notify/remitente-sistema";
+import {
+  enviarCorreoDelSistema,
+  remitenteDelSistema,
+  type TipoDeCorreo,
+} from "@/server/notify/remitente-sistema";
 
 const DIA_MS = 24 * 60 * 60_000;
 /** Desde qué parte del tope se avisa. */
@@ -34,11 +38,41 @@ export function llegoAlAviso(creadas24h: number, tope: number): boolean {
   return tope > 0 && creadas24h / tope >= FRACCION_DEL_AVISO;
 }
 
+/** Los umbrales de aviso de un tope, en % del tope: el de siempre y el tope lleno. */
+export type UmbralDeAviso = 80 | 100;
+
+/**
+ * El umbral más alto que `usado` ya cruzó del `tope`, o null. Sin tope (0 o menos) no hay contra qué
+ * medir: para unos es «sin límite» y para otros «parado a propósito», y en los dos casos avisar es ruido.
+ */
+export function umbralDelTope(usado: number, tope: number): UmbralDeAviso | null {
+  if (!(tope > 0)) return null;
+  if (usado >= tope) return 100;
+  return llegoAlAviso(usado, tope) ? 80 : null;
+}
+
+/** Las direcciones de operación, o ninguna si no hay casilla remitente por la que escribirles. */
+export function destinatariosDeOperacion(): string[] {
+  return remitenteDelSistema() ? operatorEmails() : [];
+}
+
+/** Manda el mismo mail a cada dirección y dice si salió a alguna: si a ninguna, el aviso no se dio. */
+export async function mandarAlOperador(
+  destinatarios: string[],
+  asunto: string,
+  texto: string,
+  tipo: TipoDeCorreo
+): Promise<boolean> {
+  const resultados = await Promise.all(
+    destinatarios.map((to) => enviarCorreoDelSistema({ to, asunto, texto }, { tipo }))
+  );
+  return resultados.some((r) => r.enviado);
+}
+
 export async function avisarAlOperador(creadas24h: number, tope: number): Promise<void> {
   try {
     logger.warn({ creadas24h, tope }, "alta.cerca_del_tope");
-    if (!remitenteDelSistema()) return;
-    const destinatarios = operatorEmails();
+    const destinatarios = destinatariosDeOperacion();
     if (destinatarios.length === 0) return;
 
     const clave = claveDeCupo("alta:aviso80");
@@ -52,16 +86,14 @@ export async function avisarAlOperador(creadas24h: number, tope: number): Promis
     const t = getT("es-AR");
     const numeros = (texto: string) =>
       texto.replace("{creadas}", String(creadas24h)).replace("{tope}", String(tope));
-    const resultados = await Promise.all(
-      destinatarios.map((to) =>
-        enviarCorreoDelSistema(
-          { to, asunto: numeros(t("alta.aviso.asunto")), texto: numeros(t("alta.aviso.texto")) },
-          { tipo: "operador" }
-        )
-      )
+    const salio = await mandarAlOperador(
+      destinatarios,
+      numeros(t("alta.aviso.asunto")),
+      numeros(t("alta.aviso.texto")),
+      "operador"
     );
     // Si no salió ninguno el aviso no se dio: mañana no, pero la próxima alta de hoy tiene que poder intentarlo.
-    if (!resultados.some((r) => r.enviado)) await liberarCupo(clave, DIA_MS, cupo.ventana);
+    if (!salio) await liberarCupo(clave, DIA_MS, cupo.ventana);
   } catch (e) {
     logger.error({ error: e instanceof Error ? e.name : "UnknownError" }, "alta.aviso_operador_fallo");
   }
@@ -177,8 +209,7 @@ export async function avisarNumeroEnRevision(
 ): Promise<void> {
   try {
     logger.warn({ motivo, tenantId }, "alta.numero_en_revision");
-    if (!remitenteDelSistema()) return;
-    const destinatarios = operatorEmails();
+    const destinatarios = destinatariosDeOperacion();
     if (destinatarios.length === 0) return;
 
     const porEspacio = POR_ESPACIO.has(motivo);
@@ -192,12 +223,8 @@ export async function avisarNumeroEnRevision(
     const t = getT("es-AR");
     const dosPasos = motivo === "revocada" && opciones.appPropia ? ` ${t("alta.avisoNumero.dosPasos")}` : "";
     const texto = t("alta.avisoNumero.texto").replace("{motivo}", `${t(`alta.avisoNumero.motivo.${motivo}`)}${dosPasos}`);
-    const resultados = await Promise.all(
-      destinatarios.map((to) =>
-        enviarCorreoDelSistema({ to, asunto: t("alta.avisoNumero.asunto"), texto }, { tipo: "operador" })
-      )
-    );
-    if (!resultados.some((r) => r.enviado)) await liberarCupo(clave, DIA_MS, cupo.ventana);
+    const salio = await mandarAlOperador(destinatarios, t("alta.avisoNumero.asunto"), texto, "operador");
+    if (!salio) await liberarCupo(clave, DIA_MS, cupo.ventana);
   } catch (e) {
     logger.error({ error: e instanceof Error ? e.name : "UnknownError" }, "alta.aviso_numero_fallo");
   }

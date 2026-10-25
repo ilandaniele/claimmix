@@ -1351,6 +1351,14 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   Postgres local que las ejecute. La primera vez que corren contra datos reales es
   el primer cron después de aplicar la migración 0043, y ahí conviene mirar
   `desvios_nuevos` en la respuesta del cron y la pantalla `/desvios`.
+- **El aviso de los topes contra una base y un Gmail reales.** Los tests de `aviso-de-topes`,
+  `marcasPuestas`, `ponerMarcas` y `sumaMensualDelProyecto` mockean la base y el remitente: comprueban los umbrales,
+  que se avise una sola vez por umbral, tope y mes, que la marca se ponga después del mail y no quede si no sale, que
+  la cifra no se redondee hasta el tope y que el texto no lleve datos de nadie, y el SQL se comprueba
+  por su forma. Que el mail llegue lo prueba el dueño en QA (`docs/PUESTA_EN_MARCHA.md`, ítem 7): baja
+  `ALTA_TOPE_MB` a 1, redeploya QA para que la variable rija, espera al barrido y, al terminar, vuelve
+  a 350 y redeploya de nuevo. El día y el mes son los argentinos y los tests usan instantes UTC fijos, así
+  que dicen lo mismo en cualquier zona: `TZ=UTC` y `TZ=Asia/Tokyo` dan el mismo resultado que la máquina de acá.
 - **El tablero de métricas contra el volumen real.** Los escenarios de `pnpm load`
   existen, pero no se corrieron contra una base con meses de auditoría, así que
   el p95 del tablero del año sigue sin medirse.

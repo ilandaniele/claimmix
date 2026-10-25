@@ -28,6 +28,7 @@ import { enControl } from "@/data/scope";
 import { diasDePrueba } from "@/lib/billing/plans";
 import { filasDe } from "@/lib/db/filas";
 import { topeEntero } from "@/lib/topes";
+import { BASES_DE_CLIENTE, MB_DEL_PROYECTO, topeDeBases, topeDeMb } from "@/server/alta/catalogo";
 import { codigoPg } from "@/server/core-sync/config";
 
 export type ResultadoDeAlta =
@@ -50,16 +51,6 @@ export interface AltaCreada {
 /** Cuántos espacios por día. 0 cierra el alta; la base lo acota a 500. */
 export function topeGlobalDelDia(): number {
   return topeEntero("ALTA_TOPE_GLOBAL_DIA");
-}
-
-/** Cuántas bases de cliente puede haber. 0 no pone tope. */
-export function topeDeBases(): number {
-  return topeEntero("ALTA_TOPE_BASES");
-}
-
-/** Cuántos MB puede pesar el proyecto entero. 0 no pone tope. */
-export function topeDeMb(): number {
-  return topeEntero("ALTA_TOPE_MB");
 }
 
 /**
@@ -116,11 +107,10 @@ export async function crearInquilino(datos: {
       db.execute(sql`
         select case
           when ${topeBases}::int > 0
-            and (select count(*) from pg_database where datname ~ '^t_[0-9a-f]{32}$') >= ${topeBases}::int
+            and ${BASES_DE_CLIENTE} >= ${topeBases}::int
             then jsonb_build_object('resultado', 'alta_cerrada')
           when ${topeMb}::int > 0
-            and (select sum(pg_database_size(oid)) from pg_database
-                 where not datistemplate and has_database_privilege(oid, 'CONNECT')) / 1048576 >= ${topeMb}::int
+            and ${MB_DEL_PROYECTO} >= ${topeMb}::int
             then jsonb_build_object('resultado', 'alta_cerrada')
           else public.claimmix_crear_inquilino(
             ${nuevoId}::uuid, ${datos.userId}::uuid, ${datos.empresa}::text, ${datos.numero}::text,

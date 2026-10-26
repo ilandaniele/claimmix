@@ -31,11 +31,13 @@
  *    además por IP: si no, tres pedidos de un tercero le gastan a la víctima el
  *    cupo del día y su propio enlace no sale.
  *
- * El segundo no corre en los tipos que no se piden sobre la dirección de nadie
- * (`TIPOS_SIN_CUPO_POR_DESTINATARIO`): el aviso de los topes sale a las
+ * El segundo no corre en los tipos que no se piden sobre la dirección de nadie, o que ya
+ * traen su propio tope (`TIPOS_SIN_CUPO_POR_DESTINATARIO`): el aviso de los topes sale a las
  * direcciones de operación, una sola vez por umbral y por mes, y con tres por día
  * por dirección el aviso del 100 % podía quedar esperando a las 00:00 UTC con la IA
- * ya cortada. Su cupo global sigue.
+ * ya cortada. Y el pedido de acceso (`acceso`, de /alta) se acota por espacio, cinco por día,
+ * y cada administrador es de un solo espacio: con tres por dirección el cuarto y el quinto
+ * pedido de un espacio con un solo administrador no salían y nadie lo sabía. Su cupo global sigue.
  *
  * Los que corren cierran si el contador no contesta (`fallaCerrada`): un mail que no
  * sale se pide de nuevo, uno que sale de más no se recupera.
@@ -80,8 +82,11 @@ export interface CorreoDelSistema {
 /**
  * Cada tipo tiene su propio cupo global: ver arriba. `topes` (el aviso de los topes al operador) está
  * aparte de `operador` para que una ráfaga de avisos de números no le gaste el cupo, y no cuenta por dirección.
+ * `acceso` es el pedido de acceso a un espacio (/alta): sale a los administradores del dominio de quien lo pide,
+ * con su cupo global propio para que una ráfaga de pedidos no le gaste el de las invitaciones, y sin cupo por
+ * dirección: el tope por espacio y día está en `pedir-acceso.ts`.
  */
-export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador" | "recordatorio" | "topes";
+export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador" | "recordatorio" | "topes" | "acceso";
 
 export interface OpcionesDeCorreo {
   tipo: TipoDeCorreo;
@@ -92,8 +97,8 @@ export interface OpcionesDeCorreo {
 /** Los tipos cuyo cupo por dirección se cuenta por IP. */
 const TIPOS_POR_IP: ReadonlySet<TipoDeCorreo> = new Set(["alta", "recuperacion"]);
 
-/** Los tipos que no tienen cupo por dirección: nadie los pide sobre una dirección ajena. */
-const TIPOS_SIN_CUPO_POR_DESTINATARIO: ReadonlySet<TipoDeCorreo> = new Set(["topes"]);
+/** Los tipos que no tienen cupo por dirección: nadie los pide sobre una dirección ajena, o ya los acota otro tope. */
+const TIPOS_SIN_CUPO_POR_DESTINATARIO: ReadonlySet<TipoDeCorreo> = new Set(["topes", "acceso"]);
 
 /**
  * La casilla de la plataforma, o null si falta el correo, el refresh token o el
@@ -115,8 +120,17 @@ function normalizarDestinatario(correo: string): string | null {
   return direccionCanonica(limpio);
 }
 
-function huellaDelDestinatario(normalizado: string): string {
+function huellaDelNormalizado(normalizado: string): string {
   return createHash("sha256").update(normalizado).digest("hex");
+}
+
+/**
+ * La huella con la que el limitador cuenta a esta dirección (sha256 de la canónica), o null si no es una
+ * dirección sola. La usa quien tiene que contar sobre la misma bandeja sin guardar mails.
+ */
+export function huellaDeLaDireccion(correo: string): string | null {
+  const normalizada = normalizarDestinatario(correo);
+  return normalizada ? huellaDelNormalizado(normalizada) : null;
 }
 
 /** Un intento contado en el limitador, para devolverlo si el mail no sale. */
@@ -152,7 +166,7 @@ export async function enviarCorreoDelSistema(
       ? []
       : [
           {
-            clave: claveDeCupo("alta:destinatario", tipo, ...porIp, huellaDelDestinatario(destinatario)),
+            clave: claveDeCupo("alta:destinatario", tipo, ...porIp, huellaDelNormalizado(destinatario)),
             limit: topeEntero("ALTA_TOPE_POR_DESTINATARIO_DIA"),
             cual: "destinatario",
           },

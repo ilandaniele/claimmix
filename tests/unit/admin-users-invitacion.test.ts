@@ -404,6 +404,19 @@ describe("una prueba gratuita", () => {
     expect(h.enviar).not.toHaveBeenCalled();
   });
 
+  it("tampoco entre dos casillas de un proveedor de internet argentino: son de todos sus clientes", async () => {
+    h.requireAdmin.mockResolvedValue({
+      ...prueba(),
+      user: { id: ADMIN_ID, email: "jefa@fibertel.com.ar" },
+    });
+
+    const res = await POST(pedido({ email: "lucia@fibertel.com.ar" }));
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("DOMINIO_NO_PERMITIDO");
+    expect(h.enviar).not.toHaveBeenCalled();
+  });
+
   it("el dominio propio entra", async () => {
     const res = await POST(pedido({ email: "lucia@seguros.com.ar" }));
 

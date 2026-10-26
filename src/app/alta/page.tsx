@@ -18,9 +18,16 @@
  *
  * «Mi empresa ya usa ClaimMix» no consulta la base ni busca a la empresa por el
  * dominio del correo, así que no dice qué empresas existen. Pide que un
- * administrador invite la dirección de la sesión. Si ESTE navegador trae una
- * invitación para esta dirección (`invitacionDeLaSesion` lee la cookie, no la base),
- * el enlace a /invitacion reemplaza ese pedido y el camino se muestra abierto.
+ * administrador invite la dirección de la sesión, y ofrece «pedir acceso»: un botón que
+ * sale igual haya o no un espacio para el dominio, contesta lo mismo a todos y manda el
+ * aviso a los administradores desde `after()`, ya respondida la persona. Con un proveedor
+ * abierto (gmail, fibertel, …) no se ofrece, porque no hay a quién avisarle: eso sale de
+ * la dirección de la sesión, no de la base, y no dice qué empresas son clientes.
+ * Tras apretarlo, la cookie de 2 minutos que deja la acción (`pedidoDeLaSesion`, sin base)
+ * reemplaza el botón por un estado fijo, igual para todos; un `?pedido=1` en el enlace no hace nada.
+ * Si ESTE navegador trae una invitación para esta dirección (`invitacionDeLaSesion`
+ * lee la cookie, no la base), el enlace a /invitacion reemplaza ese pedido y el camino
+ * se muestra abierto.
  * Una cuenta de este paso no entra por el SSO de la empresa: el SSO rechaza a
  * quien ya existe sin perfil, así que el texto no lo ofrece.
  */
@@ -29,18 +36,21 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { dominioDeEmpresa } from "@/core/sso";
 import { altaAbierta } from "@/lib/auth/registro-permitido";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { getSessionContext } from "@/lib/auth/session";
 import { getUserRowOrThrow } from "@/lib/auth/user-row";
 import { getT, type ClaveDelServidor } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { ultimoValor } from "@/lib/ultimo-valor";
 import { invitacionDeLaSesion } from "@/server/alta/invitacion";
 import { numeroAutomatico } from "@/server/alta/numero-automatico-activo";
+import { pedidoDeLaSesion } from "@/server/alta/pedir-acceso";
 import { ERRORES_DE_ALTA, type ErrorDeAlta } from "@/server/alta/validar";
 import { wabaPropia } from "@/server/alta/waba-propia-activa";
 
-import { crearMiEspacio } from "./actions";
+import { crearMiEspacio, pedirAcceso } from "./actions";
 import { Tarjeta } from "./Tarjeta";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -56,13 +66,17 @@ const CLASE_DEL_RESUMEN = "cursor-pointer text-sm font-semibold text-slate-800";
 
 /** La clave del texto de un motivo; uno que no está en la lista no muestra nada. */
 function claveDelError(e: string | string[] | undefined): ClaveDelServidor | null {
-  const motivo = Array.isArray(e) ? e.at(-1) : e;
+  const motivo = ultimoValor(e);
   return (ERRORES_DE_ALTA as readonly string[]).includes(motivo ?? "")
     ? (`alta.error.${motivo as ErrorDeAlta}` as const)
     : null;
 }
 
-export default async function AltaPage({ searchParams }: { searchParams: Promise<{ e?: string | string[] }> }) {
+export default async function AltaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ e?: string | string[] }>;
+}) {
   const usuario = (await getSessionContext())?.user;
   if (!usuario) redirect("/login");
   // Una falla de la base tira y muestra la pantalla de error: nunca se confunde con «sin espacio».
@@ -98,6 +112,26 @@ export default async function AltaPage({ searchParams }: { searchParams: Promise
     t("alta.unirme").replace("{correo}", () => usuario.email)
   );
 
+  const { e } = await searchParams;
+  // Con un proveedor abierto (gmail, fibertel, …) no hay a quién avisarle: no se ofrece. Sale de la dirección sola, sin la base.
+  const puedePedir = dominioDeEmpresa(usuario.email) !== null;
+  const pedido = puedePedir && (await pedidoDeLaSesion(usuario.id));
+  // Botón o estado, sin mirar la base: el mismo HTML para quien tiene empresa en ClaimMix y para quien no.
+  const pedirAccesoAca = pedido ? (
+    <p role="status" className="mt-3 text-sm font-medium text-slate-800">
+      {t("alta.pedido")}
+    </p>
+  ) : conInvitacion || !puedePedir ? null : (
+    <form action={pedirAcceso} className="mt-3">
+      <button
+        type="submit"
+        className="rounded-full border border-violet-600 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/30"
+      >
+        {t("alta.pedirAcceso")}
+      </button>
+    </form>
+  );
+
   if (!altaAbierta(usuario.email)) {
     return (
       <Tarjeta titulo={t("alta.cerrada.titulo")} locale={locale} etiquetaSalir={salir}>
@@ -105,11 +139,12 @@ export default async function AltaPage({ searchParams }: { searchParams: Promise
         {/* Con su rótulo: pegado al texto de arriba parecería un segundo pedido contradictorio, y es el de quien ya tiene empresa. */}
         <p className="mt-4 text-sm font-semibold text-slate-800">{t("alta.camino.unirme")}</p>
         <p className="mt-1 text-sm text-slate-600">{unirme}</p>
+        {pedirAccesoAca}
       </Tarjeta>
     );
   }
 
-  const claveError = claveDelError((await searchParams).e);
+  const claveError = claveDelError(e);
 
   return (
     <Tarjeta titulo={t("alta.titulo")} locale={locale} etiquetaSalir={salir}>
@@ -196,9 +231,10 @@ export default async function AltaPage({ searchParams }: { searchParams: Promise
         </details>
 
         {/* Nunca dos `open` en el grupo: con un error del formulario queda abierto el de la empresa. */}
-        <details name="camino" open={conInvitacion && claveError === null} className={CLASE_DEL_CAMINO}>
+        <details name="camino" open={(conInvitacion || pedido) && claveError === null} className={CLASE_DEL_CAMINO}>
           <summary className={CLASE_DEL_RESUMEN}>{t("alta.camino.unirme")}</summary>
           <p className="mt-3 text-sm text-slate-600">{unirme}</p>
+          {pedirAccesoAca}
         </details>
       </div>
     </Tarjeta>

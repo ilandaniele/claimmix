@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { dominioDelMail, dominioValido, esDominioPublico, normalizarDominio, revisarReclamos } from "@/core/sso";
+import { dominioDeEmpresa, dominioDelMail, dominioValido, esDominioPublico, normalizarDominio, revisarReclamos } from "@/core/sso";
 
 describe("normalizarDominio", () => {
   it.each([
@@ -56,8 +56,40 @@ describe("esDominioPublico", () => {
       expect(esDominioPublico(d)).toBe(true);
     }
   );
-  it.each(["empresa.com", "gmail.empresa.com", "mi-gmail.com", "seguros.com.ar"])("«%s» no", (d) => {
+  it.each([
+    "fibertel.com.ar", "Speedy.com.ar", "arnet.com.ar", "ciudad.com.ar", "uolsinectis.com.ar",
+    "sinectis.com.ar", "telecentro.com.ar", "telecentro.net.ar", "INFOVIA.com.ar",
+  ])(
+    "«%s», casilla de un proveedor de internet argentino, es de todos",
+    (d) => {
+      expect(esDominioPublico(d)).toBe(true);
+    }
+  );
+  it.each(["empresa.com", "gmail.empresa.com", "mi-gmail.com", "seguros.com.ar", "fibertel.empresa.com.ar"])("«%s» no", (d) => {
     expect(esDominioPublico(d)).toBe(false);
+  });
+  // Los de internet van como dominio completo: la etiqueta sola no alcanza para cerrar otro dominio.
+  it.each(["ciudad.gob.ar", "speedy.net", "arnet.org", "telecentro.com"])("«%s» no es el del proveedor de internet", (d) => {
+    expect(esDominioPublico(d)).toBe(false);
+  });
+});
+
+describe("dominioDeEmpresa", () => {
+  it("el dominio de una dirección que puede ser de una empresa, en minúscula", () => {
+    expect(dominioDeEmpresa("Ana@Seguros.com.ar")).toBe("seguros.com.ar");
+    expect(dominioDeEmpresa("ana@sub.empresa.com")).toBe("sub.empresa.com");
+    expect(dominioDeEmpresa("ana@ciudad.gob.ar")).toBe("ciudad.gob.ar");
+  });
+
+  it.each(["gmail.com", "hotmail.com.ar", "fibertel.com.ar", "Speedy.com.ar"])(
+    "con un proveedor abierto (%s) no hay dominio de empresa",
+    (d) => {
+      expect(dominioDeEmpresa(`ana@${d}`)).toBeNull();
+    }
+  );
+
+  it.each(["", "sin-arroba", "ana@", "@empresa.com", "a@b@empresa.com", "ana @empresa.com"])("«%s» no es una dirección", (e) => {
+    expect(dominioDeEmpresa(e)).toBeNull();
   });
 });
 

@@ -10,6 +10,11 @@
  * quien ya tiene cuenta sin perfil. Si este navegador trae una invitación para la
  * dirección, el enlace a /invitacion reemplaza ese texto (también con el alta
  * cerrada) y el camino arranca abierto.
+ *
+ * «Pedir acceso» es un botón igual haya o no un espacio para el dominio, sin mirar la base,
+ * y no se ofrece con un proveedor abierto (no habría a quién avisarle): con la cookie que deja
+ * la acción (`cm_pedido`, con el id de la sesión) pasa a un estado fijo y deja abierto el camino
+ * de unirme. Un `?pedido=1` en la URL no cuenta: la página no lo lee.
  */
 
 import { render, screen } from "@testing-library/react";
@@ -20,9 +25,17 @@ const h = vi.hoisted(() => ({
   fila: vi.fn(),
   invitacion: vi.fn(),
   locale: vi.fn(),
+  /** Las cookies del navegador de la prueba. */
+  galleta: new Map<string, string>(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (nombre: string) => (h.galleta.has(nombre) ? { name: nombre, value: h.galleta.get(nombre) } : undefined),
+  }),
+}));
+vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     throw new Error("REDIRECT:" + url);
@@ -36,7 +49,7 @@ vi.mock("@/lib/auth/require-operator", () => ({
 vi.mock("@/lib/i18n/locale", () => ({ getServerLocale: h.locale }));
 vi.mock("@/server/alta/invitacion", () => ({ invitacionDeLaSesion: h.invitacion }));
 vi.mock("@/app/login/actions", () => ({ signOut: vi.fn() }));
-vi.mock("@/app/alta/actions", () => ({ crearMiEspacio: vi.fn() }));
+vi.mock("@/app/alta/actions", () => ({ crearMiEspacio: vi.fn(), pedirAcceso: vi.fn() }));
 
 import { enUS, esAR } from "@/lib/i18n";
 import AltaPage, { generateMetadata } from "@/app/alta/page";
@@ -44,20 +57,26 @@ import AltaPage, { generateMetadata } from "@/app/alta/page";
 const UNIRME_ES = /Pedile a un administrador de tu empresa que invite a/;
 /** Lo que devuelve `invitacionDeLaSesion` cuando la cookie trae una invitación para esta dirección. */
 const INVITACION = { e: "ana@example.com" };
+/** Armado aparte: el chequeo de datos personales marca cualquier dirección entera de Gmail, y acá es de mentira. */
+const PUBLICO = "gmail.com";
 
 function sesion(extra: Record<string, unknown> = {}) {
   h.sesion.mockResolvedValue({ user: { id: "u-1", email: "ana@example.com", emailVerified: true, ...extra } });
 }
 
-async function pintar(e?: string | string[]) {
-  const searchParams = e === undefined ? {} : { e };
+async function pintar(e?: string | string[], otros: Record<string, string> = {}) {
+  const searchParams = { ...(e === undefined ? {} : { e }), ...otros };
   return render(await AltaPage({ searchParams: Promise.resolve(searchParams) }));
 }
+
+/** Lo que deja la acción al apretar «Pedir acceso»: la cookie con el id de la sesión. */
+const conPedido = (userId = "u-1") => h.galleta.set("cm_pedido", userId);
 
 const caminos = (container: HTMLElement) => [...container.querySelectorAll<HTMLDetailsElement>("details")];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  h.galleta.clear();
   process.env.ALTA_AUTOMATICA = "1";
   delete process.env.ALTA_NUMERO_AUTOMATICO;
   delete process.env.ALTA_WABA_PROPIA;
@@ -163,7 +182,9 @@ describe("/alta con los dos caminos", () => {
     expect(empresa.querySelector("#alta-form")).not.toBeNull();
     expect(unirme.querySelector("#alta-form")).toBeNull();
     expect(unirme).toHaveTextContent(UNIRME_ES);
-    expect(unirme.querySelector("form, input, button")).toBeNull();
+    // Lo único interactivo es «Pedir acceso»: un botón solo, sin campos que lea la acción.
+    expect(unirme.querySelectorAll("input, textarea, select")).toHaveLength(0);
+    expect([...unirme.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Pedir acceso"]);
   });
 
   it("el formulario llega vacío, con los términos sin tildar: nada viaja del paso anterior", async () => {
@@ -407,6 +428,169 @@ describe("«Mi empresa ya usa ClaimMix»", () => {
 
     expect(screen.queryByText(/ya usa ClaimMix/)).toBeNull();
     expect(screen.queryByText(UNIRME_ES)).toBeNull();
+  });
+});
+
+describe("«Pedir acceso»", () => {
+  it("con los dos caminos, el botón está en el segundo, después del texto de unirme, y no en el de la empresa", async () => {
+    const { container } = await pintar();
+
+    const [empresa, unirme] = caminos(container);
+    const boton = screen.getByRole("button", { name: "Pedir acceso" });
+    expect(unirme.contains(boton)).toBe(true);
+    expect(empresa.contains(boton)).toBe(false);
+    expect(boton).toHaveAttribute("type", "submit");
+    expect(boton.closest("form")).not.toBeNull();
+    expect(screen.getByText(UNIRME_ES).compareDocumentPosition(boton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("con el alta cerrada, el botón sigue al texto de «Mi empresa ya usa ClaimMix»", async () => {
+    delete process.env.ALTA_AUTOMATICA;
+    await pintar();
+
+    const boton = screen.getByRole("button", { name: "Pedir acceso" });
+    expect(screen.getByText(UNIRME_ES).compareDocumentPosition(boton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("el formulario no lleva campos ocultos: la acción no lee nada del navegador", async () => {
+    const { container } = await pintar();
+
+    const formulario = screen.getByRole("button", { name: "Pedir acceso" }).closest("form") as HTMLFormElement;
+    expect(formulario.querySelectorAll("input")).toHaveLength(0);
+    expect(caminos(container)[1].querySelectorAll("form")).toHaveLength(1);
+  });
+
+  it("el mismo HTML para cualquier dominio de empresa: no revela cuáles tienen espacio", async () => {
+    const dominios = ["ana@una-aseguradora.example.com", "luis@otra-corredora.example.org", "eva@sin-espacio.example.net"];
+    const htmls: string[] = [];
+    for (const email of dominios) {
+      sesion({ email });
+      const { container, unmount } = await pintar();
+      htmls.push(caminos(container)[1].innerHTML.replace(email, "{correo}"));
+      expect(screen.getByRole("button", { name: "Pedir acceso" })).toBeInTheDocument();
+      unmount();
+    }
+
+    expect(new Set(htmls).size).toBe(1);
+    // La única lectura de la base sigue siendo la del perfil, una por pantalla.
+    expect(h.fila).toHaveBeenCalledTimes(dominios.length);
+  });
+
+  it.each([`eva@${PUBLICO}`, "luis@fibertel.com.ar", "Ana@Speedy.com.ar"])(
+    "con una dirección de proveedor abierto (%s) no hay botón: no habría a quién avisarle",
+    async (email) => {
+      sesion({ email });
+      const { container } = await pintar();
+
+      expect(screen.queryByRole("button", { name: "Pedir acceso" })).toBeNull();
+      expect(caminos(container)[1].querySelector("form")).toBeNull();
+      expect(screen.getByText(/Pedile a un administrador de tu empresa que invite a/)).toBeInTheDocument();
+    }
+  );
+
+  it("con un proveedor abierto tampoco hay botón con el alta cerrada", async () => {
+    delete process.env.ALTA_AUTOMATICA;
+    sesion({ email: `eva@${PUBLICO}` });
+    await pintar();
+
+    expect(screen.queryByRole("button", { name: "Pedir acceso" })).toBeNull();
+  });
+
+  it("con una invitación en este navegador no hay botón: ya tiene el enlace", async () => {
+    h.invitacion.mockResolvedValue(INVITACION);
+    await pintar();
+
+    expect(screen.queryByRole("button", { name: "Pedir acceso" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Seguir con tu invitación" })).toBeInTheDocument();
+  });
+
+  it("en inglés, en inglés", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintar();
+
+    expect(screen.getByRole("button", { name: "Request access" })).toBeInTheDocument();
+  });
+
+  it("con la cookie del pedido de esta sesión el botón se reemplaza por un estado fijo y el camino de unirme queda abierto", async () => {
+    conPedido();
+    const { container } = await pintar();
+
+    expect(screen.queryByRole("button", { name: "Pedir acceso" })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(esAR["alta.pedido"]);
+    const [empresa, unirme] = caminos(container);
+    expect(unirme.contains(screen.getByRole("status"))).toBe(true);
+    expect([empresa.open, unirme.open]).toEqual([false, true]);
+  });
+
+  it("con un proveedor abierto, la cookie del pedido no promete un aviso que no sale", async () => {
+    sesion({ email: "luis@fibertel.com.ar" });
+    conPedido();
+    const { container } = await pintar();
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pedir acceso" })).toBeNull();
+    expect(caminos(container).map((d) => d.open)).toEqual([false, false]);
+  });
+
+  it("el estado es el mismo texto para todos: no nombra empresas ni a quien pidió", async () => {
+    sesion({ email: "ana@una-aseguradora.example.com" });
+    conPedido();
+    await pintar();
+
+    const estado = screen.getByRole("status");
+    expect(estado.textContent).toBe(esAR["alta.pedido"]);
+    expect(estado.textContent).not.toMatch(/una-aseguradora|ana@/);
+  });
+
+  it("con el alta cerrada, la cookie del pedido muestra el estado y ningún botón", async () => {
+    delete process.env.ALTA_AUTOMATICA;
+    conPedido();
+    await pintar();
+
+    expect(screen.getByRole("status")).toHaveTextContent(esAR["alta.pedido"]);
+    expect(screen.queryByRole("button", { name: "Pedir acceso" })).toBeNull();
+  });
+
+  it("la cookie es de otra sesión: sigue el botón", async () => {
+    conPedido("u-2");
+    const { container } = await pintar();
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Pedir acceso" })).toBeInTheDocument();
+    expect(caminos(container).map((d) => d.open)).toEqual([false, false]);
+  });
+
+  it.each(["1", "true", " u-1", "U-1", ""])("la cookie con %j en vez del id de la sesión no es un pedido", async (valor) => {
+    h.galleta.set("cm_pedido", valor);
+    await pintar();
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Pedir acceso" })).toBeInTheDocument();
+  });
+
+  it.each(["1", "0", "true", "<img src=x>", ""])("`?pedido=%s` en la URL, sin la cookie, no es un pedido: sigue el botón", async (valor) => {
+    const { container } = await pintar(undefined, { pedido: valor });
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Pedir acceso" })).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
+    expect(caminos(container).map((d) => d.open)).toEqual([false, false]);
+  });
+
+  it("tras un error del formulario, la cookie del pedido no abre el segundo camino: nunca dos abiertos en el grupo", async () => {
+    conPedido();
+    const { container } = await pintar("datos");
+
+    expect(caminos(container).map((d) => d.open)).toEqual([true, false]);
+  });
+
+  it("el estado y el botón no aparecen en las pantallas sin caminos", async () => {
+    sesion({ emailVerified: false });
+    conPedido();
+    await pintar();
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pedir acceso" })).toBeNull();
   });
 });
 

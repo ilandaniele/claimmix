@@ -770,11 +770,11 @@ cuando todo lo que apuntaba a él ya apuntaba a otro lado:
 7. prd pasa `NEXT_PUBLIC_SITE_URL` a `https://claimmix.vercel.app` y redeploya;
    `vars.PRD_URL` pasa a la misma URL (`gh variable set PRD_URL --body https://claimmix.vercel.app`),
    y se comprueba con `curl -I` y un login.
-8. Se miran 24 h los logs de `claimmix-prd` (`vercel logs`):
-   `whatsapp.webhook.numero_desconocido`, `webhooks_gmail.mailbox_not_connected`,
-   `INVALID_ORIGIN` y los 404 de `/denuncia`. Cada aparición se corrige con el override o el
-   slug que faltaba. Un número de dev sin override, o una WABA sin override, llega a prd
-   después del move y se descarta con 200; Meta no reintenta y el mensaje se pierde.
+8. Tras cada prueba, dentro de la hora (Hobby no guarda más), se miran los logs de
+   `claimmix-prd` (`vercel logs`): `whatsapp.webhook.numero_desconocido`,
+   `webhooks_gmail.mailbox_not_connected`, `INVALID_ORIGIN` y los 404 de `/denuncia`. Cada
+   aparición se corrige con el override o el slug que faltaba. Un número de dev o una WABA sin
+   override llega a prd después del move y se descarta con 200; Meta no reintenta y se pierde.
 
 ### BASE_POR_CLIENTE es de ida
 

@@ -41,11 +41,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAllRateLimits, rateLimit } from "@/lib/rate-limit";
 import {
   enviarCorreoDelSistema,
+  huellaDeLaDireccion,
   remitenteDelSistema,
   type OpcionesDeCorreo,
 } from "@/server/notify/remitente-sistema";
 
 const DIA_MS = 24 * 60 * 60_000;
+/** Armada aparte: el chequeo de datos personales marca cualquier dirección entera de Gmail, y acá son de mentira. */
+const GMAIL = "gmail.com";
 const TOKEN_DEL_ENLACE = "fake-tok-9f8e7d-no-deberia-aparecer-en-ningun-registro";
 
 function correo(to: string) {
@@ -332,6 +335,60 @@ describe("los cupos son por tipo de mail", () => {
     expect(claves[0]).toBe("alta:correos:recuperacion");
     expect(claves[1]).toMatch(/^alta:destinatario:recuperacion:203\.0\.113\.7:[0-9a-f]{64}$/);
   });
+
+  it("el pedido de acceso no tiene cupo por dirección: los cinco del tope del espacio salen al mismo administrador", async () => {
+    for (let i = 0; i < 5; i++) {
+      expect(await enviar("admin@example.com", { tipo: "acceso", ip: `203.0.113.${i + 1}` })).toEqual({ enviado: true });
+    }
+
+    const claves = vi.mocked(rateLimit).mock.calls.map(([clave]) => clave);
+    expect(claves).toEqual(Array(5).fill("alta:correos:acceso"));
+    expect(mockSend).toHaveBeenCalledTimes(5);
+  });
+
+  it("el pedido de acceso tiene su propio cupo global: llenarlo no frena las invitaciones", async () => {
+    vi.stubEnv("ALTA_TOPE_CORREOS_DIA", "2");
+    for (const d of ["a@example.com", "b@example.com"]) await enviar(d, { tipo: "acceso" });
+    expect(await enviar("c@example.com", { tipo: "acceso" })).toEqual({ enviado: false, motivo: "sin_cupo" });
+
+    expect(await enviar("c@example.com", { tipo: "invitacion" })).toEqual({ enviado: true });
+  });
+
+  it("los pedidos de acceso no gastan el cupo por dirección de las invitaciones al mismo administrador", async () => {
+    for (let i = 0; i < 5; i++) await enviar("admin@example.com", { tipo: "acceso" });
+
+    expect(await enviar("admin@example.com", { tipo: "invitacion" })).toEqual({ enviado: true });
+  });
+});
+
+describe("huellaDeLaDireccion", () => {
+  it("es la huella con la que el limitador cuenta a la dirección en el cupo por destinatario", async () => {
+    await enviar("Ana.Perez+x@Gmail.com");
+
+    const clave = vi.mocked(rateLimit).mock.calls[1][0];
+    expect(clave).toBe(`alta:destinatario:invitacion:${huellaDeLaDireccion(`ana.perez+x@${GMAIL}`)}`);
+    expect(huellaDeLaDireccion(`anaperez@${GMAIL}`)).toBe(huellaDeLaDireccion("Ana.Perez+x@Gmail.com"));
+  });
+
+  it("los alias de Gmail son la misma huella y las direcciones distintas no", () => {
+    const base = huellaDeLaDireccion(`ana@${GMAIL}`);
+
+    expect(base).toMatch(/^[0-9a-f]{64}$/);
+    expect(huellaDeLaDireccion("a.na+pedido@googlemail.com")).toBe(base);
+    expect(huellaDeLaDireccion(`beto@${GMAIL}`)).not.toBe(base);
+    expect(huellaDeLaDireccion("ana.perez@example.com")).not.toBe(huellaDeLaDireccion("anaperez@example.com"));
+  });
+
+  it("no guarda la dirección: es un hash", () => {
+    expect(huellaDeLaDireccion("ana@example.com")).not.toContain("ana");
+  });
+
+  it.each(["", "no es una dirección", "a@example.com, b@example.com", "Ana <a@example.com>", "a@b", `${"a".repeat(250)}@example.com`])(
+    "%j no es una dirección sola: null",
+    (valor) => {
+      expect(huellaDeLaDireccion(valor)).toBeNull();
+    }
+  );
 });
 
 describe("una misma bandeja de Gmail", () => {

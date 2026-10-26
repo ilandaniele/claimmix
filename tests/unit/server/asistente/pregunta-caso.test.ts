@@ -178,7 +178,7 @@ describe("preguntarSobreCaso — lo que se contesta", () => {
 
     await preguntarSobreCaso(ctx(), CASO, "¿Cómo está?", "es-AR");
 
-    expect(m.registrar).toHaveBeenCalledWith(TENANT, "gemini-2.5-flash", expect.anything(), USUARIO);
+    expect(m.registrar).toHaveBeenCalledWith(TENANT, "gemini-2.5-flash", expect.anything(), USUARIO, CASO);
     expect(m.rateLimit).toHaveBeenCalledWith(`asistente-caso:${TENANT}:${USUARIO}:${CASO}`, {
       limit: 30,
       windowMs: 86_400_000,

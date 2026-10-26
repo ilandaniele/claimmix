@@ -76,6 +76,7 @@ function leerCarta(tenantId: string, caseId: string, media: InlineMedia): Promis
   return leerDocumento({
     tenantId,
     userId: null,
+    caseId,
     ambito: "lectura-reclamo",
     partesDeClave: [tenantId, caseId],
     ...PROMPT_DEL_RECLAMO,

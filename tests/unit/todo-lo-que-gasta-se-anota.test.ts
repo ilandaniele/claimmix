@@ -40,7 +40,7 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/data/scope", () => import("../mocks/puente-de-alcance").then((m) => m.puenteSobreLibDb()));
 
-import { registrarConsumoDelModelo, computeCostUsd } from "@/server/ai/budget";
+import { recordUsage, registrarConsumoDelModelo, computeCostUsd } from "@/server/ai/budget";
 
 const INQUILINO = "10000000-0000-0000-0000-000000000001";
 
@@ -89,6 +89,36 @@ describe("registrarConsumoDelModelo", () => {
     );
 
     expect(filas[0].user_id).toBe(USUARIO);
+  });
+
+  it("anota a qué caso pertenece la llamada, para el costo por caso", async () => {
+    const CASO = "30000000-0000-0000-0000-000000000001";
+    await registrarConsumoDelModelo(
+      INQUILINO,
+      "gemini-2.5-flash",
+      { promptTokens: 10, completionTokens: 10 },
+      null,
+      CASO
+    );
+
+    expect(filas[0].case_id).toBe(CASO);
+  });
+
+  it("sin caso la fila lleva case_id nulo, no ausente: Drizzle nombra la columna igual", async () => {
+    await registrarConsumoDelModelo(INQUILINO, "gemini-2.5-flash", { promptTokens: 10, completionTokens: 10 });
+
+    expect(filas[0]).toHaveProperty("case_id", null);
+  });
+
+  it("un id de caso que no es uuid (la demo manda «demo») se anota igual, sin caso", async () => {
+    // Un no-uuid da 22P02 en la columna uuid y el reintento sólo saca user_id:
+    // la fila entera se perdería y los topes quedarían ciegos.
+    await expect(
+      recordUsage(INQUILINO, null, "gemini-2.5-flash", 10, 10, 0.0001, "demo")
+    ).resolves.toBeUndefined();
+
+    expect(filas).toHaveLength(1);
+    expect(filas[0].case_id).toBeNull();
   });
 
   it("cobra con el precio del modelo que se usó, no con otro", async () => {

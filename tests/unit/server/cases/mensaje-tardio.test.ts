@@ -189,7 +189,7 @@ describe("la clasificación", () => {
       tipo: "consulta_estado",
       resumen: "Pregunta cómo va su denuncia",
     });
-    expect(m.consumo).toHaveBeenCalledWith(TENANT_ID, "gemini-2.5-flash", expect.anything());
+    expect(m.consumo).toHaveBeenCalledWith(TENANT_ID, "gemini-2.5-flash", expect.anything(), null, CASE_ID);
   });
 
   it("el texto va al modelo sin la cita del correo anterior", async () => {

@@ -65,6 +65,7 @@ import { recordUsage, registrarConsumoDelModelo } from "@/server/ai/budget";
 const INQUILINO = "10000000-0000-0000-0000-000000000001";
 const CENTINELA = "00000000-0000-0000-0000-000000000000";
 const USUARIO = "30000000-0000-0000-0000-000000000003";
+const CASO = "40000000-0000-0000-0000-000000000004";
 const SAVED = { ...process.env };
 
 /** Corre lo que `after()` dejó para después, como lo hace Next al contestar. */
@@ -127,9 +128,20 @@ describe("recordUsage con BASE_POR_CLIENTE=1", () => {
       prompt_tokens: 100,
       completion_tokens: 50,
       cost_usd: "0.0123",
+      case_id: null,
     });
     expect(copia!.valores).toEqual(propia!.valores);
     expect(copia!.ctx).toEqual({ tenantId: INQUILINO });
+  });
+
+  it("el caso viaja en las dos filas: la copia en control lo conserva", async () => {
+    await recordUsage(INQUILINO, USUARIO, "gemini-2.5-flash", 100, 50, 0.0123, CASO);
+    await correrLoPendiente();
+
+    expect(h.inserts.map((i) => [i.libro, i.valores.case_id])).toEqual([
+      ["inquilino", CASO],
+      ["control", CASO],
+    ]);
   });
 
   it("registrarConsumoDelModelo también deja la copia", async () => {
@@ -175,6 +187,19 @@ describe("recordUsage con BASE_POR_CLIENTE=1", () => {
       ["control", null],
     ]);
     expect(h.error).not.toHaveBeenCalled();
+  });
+
+  it("el reintento sin usuario conserva el caso", async () => {
+    h.fallos.inquilino.push({ code: "23503" });
+    h.fallos.control.push({ code: "23503" });
+
+    await recordUsage(INQUILINO, USUARIO, "gemini-2.5-flash", 100, 50, 0.0123, CASO);
+    await correrLoPendiente();
+
+    expect(h.inserts.map((i) => [i.libro, i.valores.user_id, i.valores.case_id])).toEqual([
+      ["inquilino", null, CASO],
+      ["control", null, CASO],
+    ]);
   });
 
   it("una falla que no es del usuario no se reintenta en control", async () => {

@@ -573,6 +573,8 @@ export const aiUsage = pgTable("ai_usage", {
   // Intentionally NOT an FK in SQL.
   tenant_id: uuid("tenant_id").notNull(),
   user_id: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  // Sin FK: control recibe la misma fila y no tiene cases. Nula si no es de un caso (0054).
+  case_id: uuid("case_id"),
   model: text("model").notNull(),
   prompt_tokens: integer("prompt_tokens").notNull().default(0),
   completion_tokens: integer("completion_tokens").notNull().default(0),

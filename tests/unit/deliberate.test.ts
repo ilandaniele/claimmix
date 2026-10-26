@@ -36,7 +36,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { deliberate, validate, type AgentPlan, type DeliberationInput } from "@/server/ai/deliberate";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
-import { reservarSiEsPrueba } from "@/server/ai/budget";
+import { registrarConsumoDelModelo, reservarSiEsPrueba } from "@/server/ai/budget";
 import { separarPorRespaldo } from "@/core/case/respaldado-por-busqueda";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
@@ -894,5 +894,37 @@ describe("deliberate — la sombra (alPlanear)", () => {
 
     expect(mockCallGemini).toHaveBeenCalledTimes(sin.gemini);
     expect(mockReservar).toHaveBeenCalledTimes(sin.reserva);
+  });
+});
+
+describe("deliberate — el consumo se anota contra el caso", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReservar.mockResolvedValue({ exceeded: false });
+  });
+
+  it("cada pasada del bucle, la última y las de herramienta, lleva el caso de la situación", async () => {
+    mockRunTool.mockResolvedValue({ encontradas: 0 });
+    mockCallGemini
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ tool: "polizas_por_dni", args: { dni: "27654321" } }),
+        usage: {},
+        model: "gemini-test",
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ intent: "ask", ask_for: ["fotos_danos"], reasoning: "x" }),
+        usage: {},
+        model: "gemini-test",
+      });
+
+    await deliberate(situation());
+
+    const llamadas = vi.mocked(registrarConsumoDelModelo).mock.calls;
+    expect(llamadas).toHaveLength(2);
+    for (const c of llamadas) {
+      expect(c[0]).toBe(situation().tenantId);
+      expect(c[3]).toBeNull();
+      expect(c[4]).toBe(situation().caseId);
+    }
   });
 });

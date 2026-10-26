@@ -134,7 +134,7 @@ async function clasificar(
   let respuesta: string | null;
   try {
     const r = await callGemini(sistema, usuario);
-    await registrarConsumoDelModelo(tenantId, r.model, r.usage);
+    await registrarConsumoDelModelo(tenantId, r.model, r.usage, null, caseId);
     respuesta = r.text;
   } catch (err) {
     logger.warn({ case_id: caseId, error_code: errorCode(err) }, "mensaje_tardio.clasificacion_fallida");

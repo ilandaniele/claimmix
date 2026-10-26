@@ -359,6 +359,15 @@ describe("responderPregunta — buscar_caso, un solo resultado", () => {
     expect(mockRegistrarConsumo).toHaveBeenCalledTimes(2);
     for (const c of mockRegistrarConsumo.mock.calls) expect(c[3]).toBe(USER_ID);
   });
+
+  it("el resumen se anota contra el caso resumido; la clasificación, que no es de ninguno, sin caso", async () => {
+    respuestaDelModelo({ resumen: "resumen normal" });
+
+    await responderPregunta(ctx(), "qué pasó con el caso de Roberto Paz");
+    const [clasificacion, resumen] = mockRegistrarConsumo.mock.calls;
+    expect(clasificacion![4]).toBeUndefined();
+    expect(resumen![4]).toBe(detalle.id);
+  });
 });
 
 describe("responderPregunta — buscar_caso, varios o ningún resultado", () => {

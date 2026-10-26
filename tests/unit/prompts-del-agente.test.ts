@@ -165,6 +165,7 @@ describe("prompts del agente — compose", () => {
       intent: "ask",
       channel: "whatsapp",
       tenantId: "10000000-0000-0000-0000-000000000001",
+      caseId: "11111111-1111-1111-1111-111111111111",
       fallback: "Texto de plantilla, siempre correcto.",
       ...over,
     };

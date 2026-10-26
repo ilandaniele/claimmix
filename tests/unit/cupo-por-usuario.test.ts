@@ -102,6 +102,11 @@ describe("recordUsage sobrevive a un usuario desconocido", () => {
     expect(FUENTE).toContain('code === "22P02"');
   });
 
+  it("el reintento sin usuario conserva el resto de la fila, el caso incluido", () => {
+    // Si el reintento armara la fila de cero, el caso se perdería justo cuando el usuario es el desconocido.
+    expect(FUENTE).toContain("{ ...fila, user_id: null }");
+  });
+
   it("el reintento es sólo para ESOS errores, no para cualquiera", () => {
     /*
      * El control. Un `catch` que reintentara sin usuario ante cualquier fallo

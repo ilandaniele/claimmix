@@ -56,9 +56,15 @@ vi.mock("@/lib/db", () => ({
       activated_at: { name: "activated_at" },
       created_at: { name: "created_at" },
     },
-    cases: { tenant_id: { name: "tenant_id" }, created_at: { name: "created_at" } },
+    cases: {
+      id: { name: "id" },
+      tenant_id: { name: "tenant_id" },
+      created_at: { name: "created_at" },
+      channel: { name: "channel" },
+    },
     aiUsage: {
       tenant_id: { name: "tenant_id" },
+      case_id: { name: "case_id" },
       created_at: { name: "created_at" },
       prompt_tokens: { name: "prompt_tokens" },
       completion_tokens: { name: "completion_tokens" },
@@ -94,12 +100,23 @@ const tenantRow = {
   created_at: "2026-01-01T00:00:00.000Z",
 };
 
-/** Lo que devuelven las tres consultas de un cálculo en vivo, en orden. */
-function liveQueries(billable: number, costUsd = 2) {
+/**
+ * Lo que devuelven las tres consultas de un cálculo en vivo, en orden. La del
+ * gasto trae además un número por caso real del mes (`costos_por_caso`).
+ */
+function liveQueries(billable: number, costUsd = 2, costosPorCaso: unknown = []) {
   return [
     [tenantRow],
     [{ total: billable + 5, billable, rejected: 5, unresolved: 0 }],
-    [{ calls: billable, prompt_tokens: 1000, completion_tokens: 100, cost_usd: costUsd }],
+    [
+      {
+        calls: billable,
+        prompt_tokens: 1000,
+        completion_tokens: 100,
+        cost_usd: costUsd,
+        costos_por_caso: costosPorCaso,
+      },
+    ],
   ];
 }
 
@@ -119,6 +136,56 @@ describe("periodHasEnded", () => {
     // durante un segundo, y ese segundo es el que va a agarrar el primer
     // pedido automático del día 1.
     expect(periodHasEnded(MARZO, new Date("2026-04-01T00:00:00Z"))).toBe(true);
+  });
+});
+
+describe("getStatement — el costo por caso", () => {
+  it("lo resume en ai_cost.per_case: mediana y p95 de lo que gastó cada caso", async () => {
+    queued.push([], ...liveQueries(800, 2, [0.1, 0.3]));
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-03-15T12:00:00Z"));
+
+    expect(s?.ai_cost.per_case).toEqual({ cases: 2, median_usd: 0.2, p95_usd: 0.29 });
+    expect(s?.ai_cost).not.toHaveProperty("costos_por_caso");
+  });
+
+  it("sin ningún caso con gasto no hay per_case, y lo demás del gasto queda igual", async () => {
+    queued.push([], ...liveQueries(800, 2, []));
+    const vacio = await getStatement(TENANT, MARZO, new Date("2026-03-15T12:00:00Z"));
+    queued.push([], ...liveQueries(800, 2, null));
+    const nulo = await getStatement(TENANT, MARZO, new Date("2026-03-15T12:00:00Z"));
+
+    expect(vacio?.ai_cost.per_case).toBeUndefined();
+    expect(nulo?.ai_cost.per_case).toBeUndefined();
+    expect(vacio?.ai_cost.cost_usd).toBe(2);
+    expect(vacio?.ai_cost.cost_per_billable_claim_usd).toBe(0.0025);
+  });
+
+  it("al congelar guarda el resumen y no la lista cruda de costos", async () => {
+    queued.push([], ...liveQueries(800, 2, [0.1, 0.3]));
+    queued.push([{ payload: { month: "2026-03" }, frozen_at: "2026-04-01T03:00:00.000Z" }]);
+
+    await getStatement(TENANT, MARZO, new Date("2026-04-01T03:00:00Z"));
+
+    const payload = inserted[0]!.payload as { ai_cost: Record<string, unknown> };
+    expect(payload.ai_cost.per_case).toEqual({ cases: 2, median_usd: 0.2, p95_usd: 0.29 });
+    expect(JSON.stringify(payload)).not.toContain("costos_por_caso");
+  });
+
+  it("una factura congelada antes de este cambio (sin per_case) se lee sin tirar y sin recalcular", async () => {
+    queued.push([
+      {
+        payload: { month: "2026-03", ai_cost: { calls: 800, cost_usd: 2 }, invoice: { total_usd: 412.5 } },
+        frozen_at: "2026-04-01T03:00:00.000Z",
+      },
+    ]);
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-06-10T00:00:00Z"));
+
+    expect(s?.frozen).toBe(true);
+    expect(s?.ai_cost.per_case).toBeUndefined();
+    expect(inserted).toHaveLength(0);
+    expect(queued).toHaveLength(0);
   });
 });
 

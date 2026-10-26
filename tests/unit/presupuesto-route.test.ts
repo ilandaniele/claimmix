@@ -210,6 +210,8 @@ describe("POST …/presupuesto — la lectura", () => {
 
     const pedido = m.leer.mock.calls[0]![0];
     expect(pedido).toMatchObject({ ambito: "lectura-presupuesto", partesDeClave: [TENANT_ID, CASE_ID], userId: USER_ID });
+    // El gasto de la lectura se anota contra el caso de la URL (ítem 15).
+    expect(pedido.caseId).toBe(CASE_ID);
     expect(pedido.media.map((x: { mimeType: string }) => x.mimeType)).toEqual(["application/pdf", "image/jpeg"]);
     expect(pedido.usuario.match(/<\/claim_text>/g)).toHaveLength(1);
     expect(pedido.usuario).toContain("<presupuesto_taller>");

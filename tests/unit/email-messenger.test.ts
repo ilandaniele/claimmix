@@ -152,6 +152,14 @@ describe("emailMessenger — pasa por el redactor", () => {
     expect(compose.mock.calls[0][0]).toMatchObject({ channel: "email", intent: "ask" });
   });
 
+  it("le pasa el caso al redactor para que el gasto se anote contra él", async () => {
+    escribe("Ilan, para seguir con tu reclamo necesitamos el número de póliza. Contanos y avanzamos.");
+
+    await mandar("missing_information_request", PEDIDO);
+
+    expect(compose.mock.calls[0][0]).toMatchObject({ tenantId: TENANT, caseId: CASE });
+  });
+
   it.each([
     ["specialist_escalation", "escalation"],
     ["missing_information_request", "ask"],

@@ -23,6 +23,7 @@ import { buildEmailClaimPrompt } from "@/server/ai/prompt";
 const mockCall = callGemini as unknown as ReturnType<typeof vi.fn>;
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
+const CASO = "11111111-1111-1111-1111-111111111111";
 const FALLBACK = "Texto de plantilla, siempre correcto.";
 
 /** Lo que sólo sabe el equipo: la opinión, el artículo y los montos de la carta. */
@@ -48,6 +49,7 @@ describe("lo que se le pide al redactor de respuestas", () => {
       intent,
       channel: "whatsapp",
       tenantId: TENANT,
+      caseId: CASO,
       fields: ["policy_number"],
       claimTypeLabel: "choque",
       fallback: FALLBACK,
@@ -73,6 +75,7 @@ describe("lo que el redactor puede devolver", () => {
       intent: "ask",
       channel: "whatsapp",
       tenantId: TENANT,
+      caseId: CASO,
       fields: ["policy_number"],
       fallback: FALLBACK,
     });
@@ -90,6 +93,7 @@ describe("lo que el redactor puede devolver", () => {
       intent: "ask",
       channel: "whatsapp",
       tenantId: TENANT,
+      caseId: CASO,
       fields: ["policy_number"],
       claimTypeLabel: "responsabilidad civil",
       fallback: FALLBACK,

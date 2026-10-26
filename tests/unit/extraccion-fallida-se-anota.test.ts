@@ -92,7 +92,7 @@ describe("un intento cortado por MAX_TOKENS anota lo que Google cobró", () => {
 
     expect((err as { cause?: { code?: string } }).cause?.code).toBe("MAX_TOKENS");
     expect(mockRecordUsage).toHaveBeenCalledTimes(1);
-    expect(mockRecordUsage).toHaveBeenCalledWith(TENANT, USER, "gemini-2.5-flash", 20000, 16384, 0.5);
+    expect(mockRecordUsage).toHaveBeenCalledWith(TENANT, USER, "gemini-2.5-flash", 20000, 16384, 0.5, "caso-1");
   });
 
   it("b) MAX_TOKENS y después éxito: resuelve con los tokens de los dos intentos", async () => {
@@ -114,7 +114,7 @@ describe("un intento cortado por MAX_TOKENS anota lo que Google cobró", () => {
     expect(result.prompt_tokens).toBe(20000);
     expect(result.completion_tokens).toBe(16384);
     expect(mockRecordUsage).toHaveBeenCalledTimes(1);
-    expect(mockRecordUsage).toHaveBeenCalledWith(TENANT, USER, "gemini-2.5-flash", 20000, 16384, 0.5);
+    expect(mockRecordUsage).toHaveBeenCalledWith(TENANT, USER, "gemini-2.5-flash", 20000, 16384, 0.5, "caso-1");
   });
 
   it("c) JSON inválido en los dos intentos: rechaza pero igual graba 20000/16384", async () => {
@@ -132,7 +132,7 @@ describe("un intento cortado por MAX_TOKENS anota lo que Google cobró", () => {
     ).rejects.toThrow();
 
     expect(mockRecordUsage).toHaveBeenCalledTimes(1);
-    expect(mockRecordUsage).toHaveBeenCalledWith(TENANT, USER, "gemini-2.5-flash", 20000, 16384, 0.5);
+    expect(mockRecordUsage).toHaveBeenCalledWith(TENANT, USER, "gemini-2.5-flash", 20000, 16384, 0.5, "caso-1");
   });
 
   it("d) (control) un 500 de Google no cobró nada: no graba", async () => {

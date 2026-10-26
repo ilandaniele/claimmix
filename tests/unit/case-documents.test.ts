@@ -41,6 +41,14 @@ const { mockLogError, mockReadAttachment } = vi.hoisted(() => ({
   mockReadAttachment: vi.fn(),
 }));
 
+// El consumo del reconocedor se anota contra el caso: es lo que alimenta el costo por caso.
+const { mockConsumo } = vi.hoisted(() => ({ mockConsumo: vi.fn(async (..._args: unknown[]) => undefined) }));
+
+vi.mock("@/server/ai/budget", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai/budget")>()),
+  registrarConsumoDelModelo: mockConsumo,
+}));
+
 vi.mock("@/server/storage/claim-attachments-bucket", () => ({
   readAttachment: mockReadAttachment,
 }));
@@ -980,5 +988,35 @@ describe("reconcileAttachments — PDFs, copias y archivos que no sirven", () =>
     const prompt = vi.mocked(callGemini).mock.calls[0][0];
     expect(prompt).not.toContain("</adjunto>");
     expect(prompt).not.toContain("x".repeat(200));
+  });
+});
+
+describe("el gasto del reconocedor se anota contra el caso", () => {
+  it("identifyDocument (por un adjunto nuevo) pasa el caso", async () => {
+    queueSelects(
+      [{ doc_key: "fotos_danos" }],
+      [{ id: "att-1", filename: "image-abc.jpg", contentType: "image/jpeg", storagePath: null }]
+    );
+    vi.mocked(callGemini).mockResolvedValue({ text: JSON.stringify({ doc_key: "fotos_danos" }), usage: {} } as never);
+
+    await reconcileAttachments(CASE, TENANT, "choque de vehículo");
+
+    expect(mockConsumo).toHaveBeenCalledTimes(1);
+    const [inquilino, , , persona, caso] = mockConsumo.mock.calls[0]!;
+    expect([inquilino, persona, caso]).toEqual([TENANT, null, CASE]);
+  });
+
+  it("identifyDeclined (por un mensaje que niega documentos) pasa el caso", async () => {
+    queueSelects([{ doc_key: "parte_amistoso" }]);
+    vi.mocked(callGemini).mockResolvedValue({
+      text: JSON.stringify({ declined: [{ clave: "parte_amistoso", cita: "No completamos ningún parte amistoso" }] }),
+      usage: {},
+    } as never);
+
+    await resolveDeclinedDocs(CASE, TENANT, "No completamos ningún parte amistoso", ["parte_amistoso"]);
+
+    expect(mockConsumo).toHaveBeenCalledTimes(1);
+    const [inquilino, , , persona, caso] = mockConsumo.mock.calls[0]!;
+    expect([inquilino, persona, caso]).toEqual([TENANT, null, CASE]);
   });
 });

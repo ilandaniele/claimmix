@@ -192,6 +192,7 @@ export async function POST(
       resultado = await leerDocumento({
         tenantId,
         userId: userRow.id,
+        caseId,
         ambito: "lectura-presupuesto",
         partesDeClave: [tenantId, caseId],
         sistema,

@@ -915,7 +915,7 @@ export async function extractEmailClaimGemini(
        * Un intento fallido que Google cobró (MAX_TOKENS, JSON inválido)
        * también cuenta: es plata gastada aunque no haya dado una extracción.
        */
-      await recordUsage(tenantId, userId ?? null, model, totalPromptTokens, totalCompletionTokens, costUsd);
+      await recordUsage(tenantId, userId ?? null, model, totalPromptTokens, totalCompletionTokens, costUsd, caseId ?? null);
     } catch {
       // recordUsage never throws, but a failure here must never hide the extraction error.
     }

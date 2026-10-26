@@ -62,6 +62,21 @@ describe("recordUsage cuando el usuario no es un uuid", () => {
     expect(insertados[0]).toMatchObject({ tenant_id: DEMO, user_id: null, prompt_tokens: 100 });
   });
 
+  it("la demo manda «demo» como caso: la fila se anota igual y sin caso, no con 22P02", async () => {
+    // case_id es uuid: el texto «demo» rompería el INSERT y el reintento sólo saca user_id.
+    await recordUsage(DEMO, null, "gemini-2.5-flash", 100, 40, 0.0012, "demo");
+
+    expect(insertados).toHaveLength(1);
+    expect(insertados[0]).toMatchObject({ tenant_id: DEMO, prompt_tokens: 100, case_id: null });
+  });
+
+  it("un caso uuid sí se anota", async () => {
+    const CASO = "30000000-0000-0000-0000-000000000001";
+    await recordUsage(DEMO, null, "gemini-2.5-flash", 100, 40, 0.0012, CASO);
+
+    expect(insertados[0]).toMatchObject({ case_id: CASO });
+  });
+
   it("sigue reintentando ante una clave foránea rota", async () => {
     fallos.push("23503");
     await recordUsage(DEMO, "10000000-0000-0000-0000-000000000009", "m", 1, 2, 0.1);

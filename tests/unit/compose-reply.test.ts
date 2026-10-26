@@ -19,9 +19,15 @@ vi.mock("@/server/ai/gemini-extractor", () => ({
   }),
 }));
 
+vi.mock("@/server/ai/budget", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai/budget")>()),
+  registrarConsumoDelModelo: vi.fn(async () => undefined),
+}));
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { composeReply, type ComposeReplyInput } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
+import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
@@ -40,6 +46,7 @@ function base(over: Partial<Parameters<typeof composeReply>[0]> = {}) {
     // De quien es el gasto. Requerido desde que composeReply registra su
     // consumo: las llamadas del redactor no aparecian en `ai_usage`.
     tenantId: "10000000-0000-0000-0000-000000000001",
+    caseId: "11111111-1111-1111-1111-111111111111",
     fallback: FALLBACK,
     ...over,
   };
@@ -1450,5 +1457,27 @@ describe("composeReply — las indicaciones del equipo", () => {
     const prompt = mockCall.mock.calls[0][0] as string;
     expect(prompt).not.toContain("4455");
     expect(prompt).toContain("no nombres la póliza ***.");
+  });
+});
+
+describe("composeReply — el consumo se anota contra el caso", () => {
+  it("cada intento, también el reintento tras una guarda rechazada, lleva el caso", async () => {
+    const CASO = "22222222-2222-2222-2222-222222222222";
+    // El primero pierde un campo y se rechaza; el segundo lo corrige.
+    responde(
+      "Necesito tu número de póliza y el DNI del titular para seguir.",
+      "Necesito tu número de póliza, el DNI del titular y la fecha del accidente para seguir."
+    );
+
+    await composeReply(base({ fields: ["policy_number", "dni", "accident_date"], caseId: CASO }));
+
+    const anotados = vi.mocked(registrarConsumoDelModelo).mock.calls;
+    expect(mockCall).toHaveBeenCalledTimes(2);
+    expect(anotados).toHaveLength(2);
+    for (const c of anotados) {
+      expect(c[0]).toBe("10000000-0000-0000-0000-000000000001");
+      expect(c[3]).toBeNull();
+      expect(c[4]).toBe(CASO);
+    }
   });
 });

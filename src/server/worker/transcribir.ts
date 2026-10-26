@@ -145,7 +145,7 @@ export async function transcribirNotasDeVoz(args: {
       const { text, usage, model } = await callGemini(SISTEMA, PEDIDO, undefined, undefined, [
         { mimeType: MIME_DEL_MODELO[mime] ?? mime, data: bytes.toString("base64") },
       ]);
-      await registrarConsumoDelModelo(tenantId, model, usage);
+      await registrarConsumoDelModelo(tenantId, model, usage, null, caseId);
       hechas.push({ nota, ...(leer(text, nota.metadatos?.segundos) ?? SIN_TEXTO) });
     } catch (err) {
       const meta = errMeta(err);

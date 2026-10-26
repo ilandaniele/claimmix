@@ -97,6 +97,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const lectura = await leerDocumento({
       tenantId,
       userId: userRow.id,
+      caseId: null,
       ambito: "condiciones-poliza",
       partesDeClave: [tenantId, policyId],
       sistema,

@@ -42,6 +42,7 @@ import { leerDocumento } from "@/server/ai/leer-documento";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
 const USUARIO = "20000000-0000-0000-0000-000000000001";
+const CASO = "11111111-1111-1111-1111-111111111111";
 const PDF = { mimeType: "application/pdf", data: "JVBERi0=" };
 const Schema = z.object({ total: z.number() });
 
@@ -49,6 +50,7 @@ const leer = (extra: Partial<Parameters<typeof leerDocumento<{ total: number }>>
   leerDocumento({
     tenantId: TENANT,
     userId: USUARIO,
+    caseId: CASO,
     ambito: "lectura-presupuesto",
     partesDeClave: [TENANT, "caso-1"],
     sistema: "sistema",
@@ -71,7 +73,7 @@ beforeEach(() => {
 describe("leerDocumento", () => {
   it("lee, valida y anota el consumo a nombre de quien lo pidió", async () => {
     await expect(leer()).resolves.toEqual({ ok: { total: 5 } });
-    expect(m.registrar).toHaveBeenCalledWith(TENANT, "gemini-2.5-flash", { promptTokens: 9 }, USUARIO);
+    expect(m.registrar).toHaveBeenCalledWith(TENANT, "gemini-2.5-flash", { promptTokens: 9 }, USUARIO, CASO);
     expect(m.callGemini).toHaveBeenCalledWith("sistema", expect.any(String), undefined, undefined, [PDF]);
   });
 

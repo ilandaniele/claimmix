@@ -137,7 +137,7 @@ async function resumenDelCaso(tenantId: string, userId: string, detalle: Detalle
   try {
     const datos = `<datos_del_caso>${sinCentinelas(JSON.stringify(detalle))}</datos_del_caso>`;
     const { text, usage, model } = await callGemini(PROMPT_RESUMEN, datos);
-    await registrarConsumoDelModelo(tenantId, model, usage, userId);
+    await registrarConsumoDelModelo(tenantId, model, usage, userId, detalle.id);
 
     if (text) {
       const parsed = JSON.parse(text) as { resumen?: unknown };

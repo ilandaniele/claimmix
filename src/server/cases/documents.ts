@@ -448,7 +448,7 @@ Devolvé JSON: {"doc_key": "<clave exacta de la lista>" | null}`;
     // La llamada más cara que hace el producto: el adjunto viaja entero en
     // `inlineData`, así que una foto son miles de tokens de ENTRADA. Era la
     // que más pesaba y la que menos rastro dejaba.
-    await registrarConsumoDelModelo(tenantId, model, usage);
+    await registrarConsumoDelModelo(tenantId, model, usage, null, caseId);
 
     if (!text) return null;
 
@@ -690,7 +690,7 @@ Lista vacía si no niega ninguno.`;
       "Respondé sólo con las claves de los documentos que la persona dice no tener."
     );
 
-    await registrarConsumoDelModelo(tenantId, model, usage);
+    await registrarConsumoDelModelo(tenantId, model, usage, null, caseId);
 
     if (!text) return [];
 

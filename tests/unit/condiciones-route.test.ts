@@ -165,6 +165,8 @@ describe("POST /api/policies/:id/condiciones — la lectura", () => {
     const pedido = m.leer.mock.calls[0]![0];
     expect(pedido).toMatchObject({ tenantId: TENANT_ID, userId: USER_ID, ambito: "condiciones-poliza" });
     expect(pedido.partesDeClave).toEqual([TENANT_ID, POLICY_ID]);
+    // Las condiciones son de la póliza, no de un caso: el gasto va sin caso (ítem 15).
+    expect(pedido.caseId).toBeNull();
     expect(pedido.usuario).toMatch(/^<condiciones_poliza>.*<\/condiciones_poliza>$/);
     expect(pedido.media).toEqual([{ mimeType: "application/pdf", data: Buffer.from(pdf(2)).toString("base64") }]);
     expect(m.audit).toHaveBeenCalledWith(

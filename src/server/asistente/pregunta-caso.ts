@@ -186,6 +186,7 @@ export async function preguntarSobreCaso(
   const lectura = await leerDocumento({
     tenantId,
     userId,
+    caseId,
     ambito: "asistente-caso",
     partesDeClave: [tenantId, userId, caseId],
     sistema: promptPreguntaCaso(locale, TOPE_RESPUESTA_DE_CASO),

@@ -46,7 +46,7 @@ import { liberarCupo, rateLimit, resolveProvider } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { topeAnonimo, topeDecimal, topeEntero, topeMensualDelProyecto } from "@/lib/topes";
 import { inquilinoDeLaPlataforma } from "@/server/whatsapp/numeros";
-import { CENTINELA, basePorCliente } from "@/data/bases";
+import { CENTINELA, basePorCliente, esUuid } from "@/data/bases";
 import {
   enControl,
   enTenant,
@@ -731,6 +731,7 @@ function consultaTokensDelDia(db: ClienteDatos, desde: Date, usuario?: string | 
  * @param promptTokens     - Prompt token count.
  * @param completionTokens - Completion token count.
  * @param costUsd          - Computed cost in USD.
+ * @param caseId           - Caso de la llamada, para el costo por caso. Null si no es de ninguno.
  */
 export async function recordUsage(
   tenantId: string,
@@ -738,14 +739,17 @@ export async function recordUsage(
   model: string,
   promptTokens: number,
   completionTokens: number,
-  costUsd: number
+  costUsd: number,
+  caseId: string | null = null
 ): Promise<void> {
-  const fila = {
+  const fila: FilaDeGasto = {
     tenant_id: tenantId,
     model,
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
     cost_usd: costUsd.toFixed(4),
+    // La demo manda "demo": un no-uuid da 22P02 y el reintento sólo saca user_id, la fila se perdería.
+    case_id: caseId && esUuid(caseId) ? caseId : null,
   };
 
   await anotarEnElInquilino(tenantId, userId, fila);
@@ -759,6 +763,7 @@ type FilaDeGasto = {
   prompt_tokens: number;
   completion_tokens: number;
   cost_usd: string;
+  case_id: string | null;
 };
 
 /**
@@ -889,7 +894,8 @@ export async function registrarConsumoDelModelo(
   tenantId: string,
   model: string,
   usage: { promptTokens?: number; completionTokens?: number; audioTokens?: number } | undefined,
-  userId: string | null = null
+  userId: string | null = null,
+  caseId: string | null = null
 ): Promise<void> {
   // `usage` puede venir incompleto —Gemini omite `usageMetadata` a veces, y
   // las pruebas que simulan el modelo devuelven `usage: {}`—. `undefined <= 0`
@@ -905,6 +911,7 @@ export async function registrarConsumoDelModelo(
     model,
     prompt,
     completion,
-    computeCostUsd(prompt, completion, model, usage?.audioTokens ?? 0)
+    computeCostUsd(prompt, completion, model, usage?.audioTokens ?? 0),
+    caseId
   );
 }

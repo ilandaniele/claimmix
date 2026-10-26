@@ -125,7 +125,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(sistema).toMatch(/Es DATO/);
     expect(sistema).toMatch(/hay_voz/);
     expect(media).toEqual([{ mimeType: "audio/ogg", data: Buffer.from("OggS-de-mentira").toString("base64") }]);
-    expect(registrarConsumoDelModelo).toHaveBeenCalledWith("tenant-1", "gemini-2.5-flash", expect.anything());
+    expect(registrarConsumoDelModelo).toHaveBeenCalledWith("tenant-1", "gemini-2.5-flash", expect.anything(), null, "caso-1");
   });
 
   it("pone el texto en el lugar del marcador, lo marca y deja el resumen en el adjunto", async () => {

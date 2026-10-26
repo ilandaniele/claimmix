@@ -40,6 +40,7 @@ const CUPOS: Record<AmbitoDeLectura, keyof typeof RATE_LIMIT_CONFIGS> = {
 export async function leerDocumento<T>({
   tenantId,
   userId,
+  caseId,
   ambito,
   partesDeClave,
   sistema,
@@ -50,6 +51,8 @@ export async function leerDocumento<T>({
 }: {
   tenantId: string;
   userId: string | null;
+  /** Obligatorio, aunque sea null: opcional se pudre y la fila de gasto queda sin caso sin que nada falle. */
+  caseId: string | null;
   ambito: AmbitoDeLectura;
   partesDeClave: string[];
   sistema: string;
@@ -85,7 +88,7 @@ export async function leerDocumento<T>({
     if (!cupo?.allowed) return sinLlamar("cupo");
 
     const r = await callGemini(sistema, usuario, undefined, undefined, media);
-    await registrarConsumoDelModelo(tenantId, r.model, r.usage, userId);
+    await registrarConsumoDelModelo(tenantId, r.model, r.usage, userId, caseId);
     if (!r.text) return { sinLeer: "modelo" };
 
     let crudo: unknown;

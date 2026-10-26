@@ -1,0 +1,44 @@
+-- =============================================================================
+-- 0054 — A qué caso pertenece cada llamada a la IA (el costo por caso)
+-- =============================================================================
+--
+-- Hasta acá ai_usage sabía de qué inquilino y de qué usuario era cada llamada,
+-- pero no de qué caso: el costo por caso de /admin/facturacion (ítem 15, D13) no
+-- se podía calcular. ai_usage.case_id lo guarda. Es nula cuando la llamada no es de
+-- ningún caso (el asistente general, la demo, las condiciones de una póliza) o
+-- cuando es anterior a esta migración: el pasado no se rellena.
+--
+-- Sin FK, a propósito: control recibe la misma fila y no tiene cases, y borrar un
+-- caso no debe tocar el gasto ni disparar trg_ai_usage_mensual por cada fila.
+-- Sin índice: la lectura entra por idx_ai_usage_tenant_created, y un índice sin
+-- CONCURRENTLY (el runner corre todo en una transacción) frena las escrituras
+-- mientras se arma y encarece cada INSERT. El acumulador de la 0046 no cambia: su
+-- trigger nombra sus columnas y no ve la nueva.
+--
+-- ai_usage tiene permisos por tabla y política por tenant_id para claimmix_app: la
+-- columna nueva no pide GRANT ni POLICY. Es aditiva, no toca datos, y se puede
+-- repetir.
+--
+-- Drizzle la nombra en cada INSERT: el código desplegado sin ella da 42703,
+-- recordUsage se lo traga y ningún gasto de IA se anota (los topes quedan ciegos),
+-- /admin/facturacion da 500 y /api/health da caído con «faltan: ai_usage.case_id».
+-- Aplicarla A MANO ANTES de mergear, con `node scripts/migrate.mjs --apply` por
+-- TCP, en este orden:
+--   1. ep-wispy-flower (QA, QA_DATABASE_URL).
+--   2. ep-proud-resonance (la viva, y también la de los secretos DATABASE_URL del CI).
+--   3. La rama production de Veltra (STAGING_DATABASE_URL, sólo para ci.yml).
+--   4. `node scripts/migrar-bases.mjs --env prd`: control de prd, la rama ensayo y
+--      las bases t_<hex>.
+-- Identificar cada base por su canal de casos, no por su nombre.
+--
+-- Verificar después de aplicarla, en cada base:
+--   SELECT data_type, is_nullable FROM information_schema.columns
+--    WHERE table_schema = 'public' AND table_name = 'ai_usage' AND column_name = 'case_id';
+--   y la consulta EXCEPT de la cabecera de la 0046, que tiene que dar 0.
+--
+-- Vuelta atrás (primero el código; al revés vuelve el 42703 que se traga):
+--   ALTER TABLE public.ai_usage DROP COLUMN IF EXISTS case_id;
+--   node scripts/migrate.mjs --env <VAR> --forget 0054 --apply
+
+ALTER TABLE public.ai_usage
+  ADD COLUMN IF NOT EXISTS case_id uuid;

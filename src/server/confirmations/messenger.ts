@@ -561,6 +561,7 @@ async function writeReply(
   return composeReply({
     // Cubre los tres mensajeros y el ensayo: los tres pasan por acá.
     tenantId: message.tenantId,
+    caseId: message.caseId,
     intent: intentFor(message.template),
     channel,
     fields: Array.isArray(message.data.missingFields)

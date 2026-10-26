@@ -522,12 +522,18 @@ WABA y el cliente OAuth de Google (`docs/PROMOCION.md:572-574`). No lleva base p
 que el alta termina directo en la bandeja.
 
 **El cliente de dev está partido en dos espacios.** El alta del paso 3 crea un espacio nuevo,
-«el espacio de autoalta», con la dirección del dueño que no es de operador. Ahí van el Gmail
-del paso 7, el segundo usuario del paso 8 y la denuncia por correo del paso 10. dev no tiene
-número por código (la bandera va en 1, pero el dueño no elige esa opción en dev: ver el paso
-1), así que la denuncia por WhatsApp del paso 9 entra por el número de la plataforma y cae en
-otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
-`.env.example:372`). El paso 12 lee los dos.
+«el espacio de autoalta», con la dirección del dueño que no es de operador. Ahí van el alta,
+su revisión del paso 4 y el segundo usuario del paso 8. Las dos denuncias caen en el otro
+espacio, el de la plataforma (el de `WHATSAPP_TENANT_ID`, `.env.example:372`), en el que entra
+la cuenta de operador:
+- La Gmail de Veltra ya está conectada y activa en el espacio de la plataforma, y una casilla
+  atiende a un solo espacio. Por eso el paso 7 sólo lo confirma, y la denuncia por correo del
+  paso 10 entra por ahí.
+- dev no tiene número por código (la bandera va en 1, pero el dueño no elige esa opción en
+  dev: ver el paso 1). Por eso la denuncia por WhatsApp del paso 9 entra por el número de la
+  plataforma.
+
+El paso 12 lee los dos espacios.
 
 - [ ] **1. Configuración (parte del lote de A12).**
   - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos que falten.
@@ -649,15 +655,18 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
       regenerarlo.
   - **Fuentes:** `.env.example:372`; `src/app/api/health/route.ts:407-415`, `:424`;
     `docs/whatsapp-setup.md:46-48`.
-- [ ] **7. Gmail.**
-  - **Quién:** [Dueño].
-  - **Dónde:** `/configuracion` del espacio de autoalta, «Conectar Gmail».
-  - **Qué hacer:** conectar la Gmail del mail agente de dev (A3). La casilla conectada
-    también manda las respuestas del agente. **Aviso:** Google muestra una
-    pantalla de app no verificada. Es esperable (A6). Para seguir, entrar al enlace de
-    opciones avanzadas de esa pantalla y continuar hacia la app.
-  - **Salió bien si:** vuelve con `?gmail=connected` y la casilla aparece en el panel.
-  - **Si falla:** el resultado dice por qué.
+- [ ] **7. Gmail: la de Veltra, ya conectada.**
+  - **Quién:** [Claude] lo confirma en la base; [Dueño] mira el panel.
+  - **Dónde:** `/configuracion` del espacio de la plataforma, con la cuenta de operador.
+  - **Qué hacer:** nada que conectar. La Gmail del mail agente de dev (A3, D3) es la de Veltra,
+    y ya está conectada y activa en el espacio de la plataforma. Esa casilla también manda las
+    respuestas del agente. No conectarla en el espacio de autoalta: una casilla atiende a un
+    solo espacio y la vuelta da `mailbox_taken`. El espacio de autoalta queda sin casilla.
+  - **Salió bien si:** la casilla figura activa en el panel, sin error.
+  - **Si falla:** reconectarla desde el mismo panel, «Conectar Gmail». **Aviso:** Google
+    muestra una pantalla de app no verificada. Es esperable (A6). Para seguir, entrar al
+    enlace de opciones avanzadas de esa pantalla y continuar hacia la app. Si sale bien,
+    vuelve con `?gmail=connected`. Si no, el resultado dice por qué.
     - `missing_google_config`: faltan `GMAIL_CLIENT_*`.
     - `missing_refresh_token`, `otro_ambiente`, `mailbox_taken`.
     - `save_failed`: no se pudo guardar la casilla.
@@ -666,7 +675,7 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
     - Error del servidor a la vuelta: falta `GMAIL_TOKEN_ENCRYPTION_KEY`, porque el token se
       cifra antes de guardar.
   - **Fuentes:** `src/lib/i18n/es-AR.ts:678`; `/api/admin/gmail-accounts/connect`;
-    `src/app/api/admin/gmail-accounts/callback/route.ts:93`;
+    `src/app/api/admin/gmail-accounts/callback/route.ts:84`, `:93`, `:125`;
     `src/lib/security/cifrado.ts:38-39`.
 - [ ] **8. Segundo usuario.**
   - **Quién:** [Dueño].
@@ -704,11 +713,10 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
   - **Fuentes:** `scripts/rehearse-conversations.mts:340`.
 - [ ] **10. Denuncia por mail.**
   - **Quién:** [Dueño].
-  - **Dónde:** otra casilla; la bandeja del espacio de autoalta.
-  - **Qué hacer:** un mail a la casilla conectada en el paso 7, con un siniestro de ejemplo.
-    Por ejemplo, el incendio con una persona internada, que tiene que derivar a un
-    especialista.
-  - **Salió bien si:** el caso aparece en el espacio de autoalta con canal de correo, en
+  - **Dónde:** otra casilla; la bandeja del espacio de la plataforma.
+  - **Qué hacer:** un mail a la Gmail de Veltra del paso 7, con un siniestro de ejemplo. Por
+    ejemplo, el incendio con una persona internada, que tiene que derivar a un especialista.
+  - **Salió bien si:** el caso aparece en el espacio de la plataforma con canal de correo, en
     `requiere_especialista`, y la respuesta llega a la casilla que mandó. Con el push de dev
     el caso entra en minutos.
   - **Si falla:** sin push, entra con el sondeo diario de `/api/cron/gmail-poll` a las 03:00
@@ -727,13 +735,14 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
   - **Fuentes:** `src/lib/i18n/es-AR.ts:774`.
 - [ ] **12. Consumo de los dos espacios.**
   - **Quién:** [Dueño].
-  - **Dónde:** en el espacio de autoalta, `/metricas` y `/admin/facturacion`. En el espacio de
-    la plataforma, lo mismo, con la cuenta de operador. Para todos los espacios,
+  - **Dónde:** en el espacio de la plataforma, `/metricas` y `/admin/facturacion`, con la
+    cuenta de operador. En el espacio de autoalta, lo mismo. Para todos los espacios,
     `/admin/cartera`.
   - **Qué hacer:** anotar el gasto de cada espacio y los casos de los pasos 9 y 10.
-  - **Salió bien si:** el caso de WhatsApp suma en el espacio de la plataforma y el de correo
-    en el de autoalta.
-  - **Si falla:** si un caso no suma en ninguno, avisar a Claude. `/configuracion` muestra el tope
+  - **Salió bien si:** los dos casos suman en el espacio de la plataforma, y el de autoalta
+    queda en 0.
+  - **Si falla:** si un caso no suma, o el espacio de autoalta muestra gasto, avisar a Claude.
+    `/configuracion` muestra el tope
     del proyecto entero (`MONTHLY_BUDGET_USD`), no lo que gastó cada espacio.
   - **Fuentes:** `src/app/(app)/metricas`; `src/app/(app)/admin/facturacion`;
     `src/app/(app)/admin/cartera`; `src/app/(app)/configuracion/page.tsx:168-169`.
@@ -1484,25 +1493,30 @@ parte G y la parte H.
   - **Fuentes:** `docs/whatsapp-setup.md:462-463`.
 - [ ] **T2. La app ClaimMix como Tech Provider.**
   - **Quién:** [Dueño].
-  - **Dónde:** panel de la app ClaimMix en Meta for Developers > Casos de uso > WhatsApp; la
-    conexión con el negocio, en Configuración > Básica > Verificación. Guías de Meta:
+  - **Dónde:** `https://developers.facebook.com/apps` > ClaimMix > Casos de uso > «Personalizar»
+    (el lápiz) en WhatsApp > «Tech Provider onboarding» en el menú de la izquierda; la conexión
+    con el negocio, en Configuración > Básica > Verificación. Guías de Meta:
     https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers/
     (Tech Provider),
     https://developers.facebook.com/documentation/development/release/business-verification
     (conectar la app al negocio verificado) y
     https://developers.facebook.com/documentation/development/release/access-verification
-    (verificación de acceso).
-  - **Qué hacer:** empezar el onboarding de Tech Provider desde el caso de uso WhatsApp y
-    completar lo que pida la pantalla. Conectar la app al negocio Veltra ya verificado. La
-    verificación de acceso se pide en el mismo panel cuando Meta la habilita, aunque eso llegue
-    después de T3: sin ella, un cliente que no tiene un rol en la app recibe el error 100 al
-    conectar. T9 no arranca sin ella.
-  - **Salió bien si:** el caso de uso WhatsApp no muestra pasos pendientes del onboarding, la
-    app figura conectada al negocio Veltra verificado y, al final, la verificación de acceso
-    figura aprobada.
+    (Meta dice ahí que la verificación de acceso ya no hace falta).
+  - **Qué hacer:**
+    - Elegir «Onboard without a partner».
+    - El paso 1, «Verify your business», tendría que figurar completo por A5. Si no, en
+      Configuración > Básica > Verificación, «Iniciar verificación» (o «+ Verificación del
+      negocio») y elegir Veltra. Quien la conecta tiene que ser administrador del portfolio y
+      de la app.
+    - El paso 2, «App Review», es T3, con T5 hecho antes.
+    - La verificación de acceso ya no se pide: Meta la sacó. T9 no la espera.
+  - **Salió bien si:** el paso 1 figura completo y la app figura conectada al negocio Veltra
+    verificado. El paso 2 se cierra con T3.
   - **Si falla:** si el negocio no aparece para conectar, la app tiene que estar dentro del
     portfolio Veltra (ahí está hoy) y quien la conecta tiene que ser administrador de ese
-    portfolio. Si Meta pide la verificación del negocio, volver a T1.
+    portfolio. Si Meta pide la verificación del negocio, volver a T1. Meta saca la condición
+    de Tech Provider si la verificación del negocio vence, si la app se desconecta del
+    negocio o si restringe la cuenta.
   - **Fuentes:** `docs/whatsapp-setup.md:467`, `:501`.
 - [ ] **T3. La revisión de la app (App Review).**
   - **Quién:** [Dueño].
@@ -1640,9 +1654,9 @@ parte G y la parte H.
     `meta_borrado.atendido` con una baja y no `meta_borrado.sin_coincidencia`.
   - **Si falla:** si los ids no calzan, no pasar a T9 y avisarle a Claude; mientras tanto los
     pedidos de borrado se atienden a mano, como dice «Si un cliente pide que se borren sus
-    datos» (`docs/whatsapp-setup.md:586`). Un error 100 al conectar quiere decir que falta la
-    verificación de acceso (T2) o que quien conecta no tiene un rol en la app. Los demás
-    errores de la ventana de Meta, en el link de errores de T4.
+    datos» (`docs/whatsapp-setup.md:586`). Si conectar falla sólo para quien no tiene un rol
+    en la app, falta el acceso avanzado de T3: Meta devuelve el error 200 con las cuentas de
+    otros. Los demás errores de la ventana de Meta, en el link de errores de T4.
   - **Fuentes:** `docs/whatsapp-setup.md:485-500`, `:597-613`;
     `src/app/conectar-whatsapp/meta-sdk.ts:184-197`; `src/app/api/meta/borrado/route.ts`;
     `src/server/alta/panel-operador.ts:921-961`.
@@ -1859,7 +1873,7 @@ arriba.
     https://developers.facebook.com/documentation/development/release/business-verification
     (conectar la app al negocio),
     https://developers.facebook.com/documentation/development/release/access-verification
-    (verificación de acceso),
+    (verificación de acceso: Meta dice que ya no hace falta),
     https://developers.facebook.com/documentation/development/create-an-app/app-dashboard/basic-settings
     (configuración básica),
     https://developers.facebook.com/documentation/pages-api/create-an-app (el ícono),

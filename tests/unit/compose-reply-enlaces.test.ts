@@ -29,6 +29,7 @@ function base(over: Partial<Parameters<typeof composeReply>[0]> = {}) {
     intent: "ask" as const,
     channel: "whatsapp" as const,
     tenantId: "10000000-0000-0000-0000-000000000001",
+    caseId: "11111111-1111-1111-1111-111111111111",
     fallback: FALLBACK,
     ...over,
   };

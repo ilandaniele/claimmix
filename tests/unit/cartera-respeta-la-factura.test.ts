@@ -76,6 +76,7 @@ vi.mock("@/lib/db", async () => {
       cases,
       aiUsage: {
         tenant_id: col("tenant_id"),
+        case_id: col("case_id"),
         created_at: col("created_at"),
         prompt_tokens: col("prompt_tokens"),
         completion_tokens: col("completion_tokens"),

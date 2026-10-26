@@ -270,6 +270,8 @@ async function checkSchema(): Promise<Check> {
     ["tenants", "plazos"],
     ["tenants", "plan_por_tipo"],
     ["tenants", "pesos_puntaje"],
+    // 0054: sin esto ningún gasto de IA se anota y los topes no cortan.
+    ["ai_usage", "case_id"],
   ];
 
   try {

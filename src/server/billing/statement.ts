@@ -28,11 +28,12 @@
  */
 
 import "server-only";
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import { periodoAntesDelAlta, type BillingPeriod } from "@/lib/billing/period";
+import { costoPorCaso, type CostoPorCaso } from "@/lib/billing/costo-por-caso";
 import { esCasoReal } from "@/server/core-sync/lectura";
 
 export interface Statement {
@@ -63,6 +64,8 @@ export interface Statement {
     completion_tokens: number;
     cost_usd: number;
     cost_per_billable_claim_usd: number;
+    /** Opcional: las facturas congeladas antes de este cambio no lo tienen. */
+    per_case?: CostoPorCaso;
   };
   margin: ReturnType<typeof computeMargin>;
   /** True when this is the stored copy of a closed period, not a fresh count. */
@@ -137,6 +140,14 @@ export async function computeStatement(
       .where(inPeriod)
   );
 
+  const delMes = and(gte(aiUsage.created_at, range.start), lt(aiUsage.created_at, range.next));
+
+  // El costo por caso va en la misma consulta del gasto, para no sumar un viaje:
+  // un número por caso real del mes (el gasto de ese caso dentro del mes), que
+  // `costoPorCaso` resume. Se agrupa antes de unir para que cada caso cuente una
+  // vez; el join con `cases` deja afuera los simulados, los del ensayo y los
+  // casos ya borrados (`ai_usage.case_id` no tiene FK). `cases` va sin alias
+  // porque `esCasoReal` lo nombra.
   const [spend] = await enTenant(tenantCtx, (db) =>
     db
       .select({
@@ -144,14 +155,20 @@ export async function computeStatement(
         prompt_tokens: sql<number>`coalesce(sum(${aiUsage.prompt_tokens}), 0)::int`,
         completion_tokens: sql<number>`coalesce(sum(${aiUsage.completion_tokens}), 0)::int`,
         cost_usd: sql<number>`coalesce(sum(${aiUsage.cost_usd}), 0)::float8`,
+        costos_por_caso: sql<unknown>`coalesce((
+          select json_agg(u.costo)
+          from (
+            select ${aiUsage.case_id} as case_id, sum(${aiUsage.cost_usd})::float8 as costo
+            from ${aiUsage}
+            where ${and(isNotNull(aiUsage.case_id), delMes)}
+            group by ${aiUsage.case_id}
+          ) u
+          join ${cases} on ${eq(cases.id, sql`u.case_id`)}
+          where ${inPeriod}
+        ), '[]'::json)`,
       })
       .from(aiUsage)
-      .where(
-        and(
-          gte(aiUsage.created_at, range.start),
-          lt(aiUsage.created_at, range.next)
-        )
-      )
+      .where(delMes)
   );
 
   // The tenant's stored terms are authoritative — they are what was signed.
@@ -198,6 +215,7 @@ export async function computeStatement(
       cost_usd: Math.round(cost * 10000) / 10000,
       cost_per_billable_claim_usd:
         billable > 0 ? Math.round((cost / billable) * 10000) / 10000 : 0,
+      per_case: costoPorCaso(spend?.costos_por_caso),
     },
     margin: computeMargin(invoice.total_usd, cost),
   };

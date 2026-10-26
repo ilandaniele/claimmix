@@ -117,6 +117,8 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "adjuntos_por_purgar", column_name: "id" },
     // 0046.
     { table_name: "ai_usage_mensual", column_name: "tenant_id" },
+    // 0054.
+    { table_name: "ai_usage", column_name: "case_id" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -299,6 +301,21 @@ describe("GET /api/health — what it reports", () => {
 
     expect(migraciones.status).toBe("down");
     expect(migraciones.detail).toContain("ai_usage_mensual");
+  });
+
+  it("sin la columna de caso del uso de IA (0054) cae: cada gasto se pierde en silencio y los topes no cortan", async () => {
+    mockExecute.mockImplementation((q: unknown) =>
+      Promise.resolve(
+        JSON.stringify(q).includes("ai_usage")
+          ? { rows: [{ total: 0 }] }
+          : { rows: esquemaSin("ai_usage.case_id") }
+      )
+    );
+    const body = await (await GET(request(`Bearer ${SECRET}`))).json();
+    const migraciones = body.checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(migraciones.status).toBe("down");
+    expect(migraciones.detail).toContain("ai_usage.case_id");
   });
 
   it("nota que falta lo comercial, no sólo lo del camino caliente", async () => {

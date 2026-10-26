@@ -850,6 +850,36 @@ PATCH del SSO, la cola de purga con dos borrados del mismo objeto (R2 simulado),
 retención en `simular` y la revisión nocturna dos veces. Por eso sólo corren en CI
 o con `--escribe`, y nunca contra `ep-proud-resonance`: ahí el chequeo falla.
 
+#### Costo por caso (ítem 15, migración 0054)
+
+Todo corre en `pnpm verify`, sin red, sin base real y sin gastar tokens. **Con la
+migración 0054 sin aplicar**, el código desplegado da 42703 en cada INSERT a `ai_usage`
+(Drizzle nombra `case_id`), `recordUsage` se lo traga y ningún gasto de IA se anota: los
+topes quedan ciegos. Por eso `/api/health` la exige (`ai_usage.case_id` en `required`: sin
+ella da `down`, y `pnpm check` completo queda rojo) y `VERSION_ESPERADA` es 54
+(`bases.desfase`). La aplica el dueño a mano antes del check, igual que la 0045, en este
+orden: QA (`ep-wispy-flower`), dev (`ep-proud-resonance`, que también es la base de los
+secretos `DATABASE_URL` del CI), `STAGING_DATABASE_URL` y `node scripts/migrar-bases.mjs --env prd`
+(control, rama de ensayo y bases `t_<hex>`). Después, `--exigir-al-dia` en verde y
+`pnpm bases:empaquetar --comprobar` en 54. El acumulador `ai_usage_mensual` (0046) no se
+toca: su trigger nombra sus columnas y no ve la nueva.
+
+| test | qué cubre |
+| --- | --- |
+| `tests/unit/migracion-0054.test.ts` | una sola sentencia (`ADD COLUMN IF NOT EXISTS case_id uuid`), sin FK, índice, default, NOT NULL, backfill ni permisos; la cabecera dice cómo aplicarla (a mano, en orden, qué pasa si no); el esquema la declara nula |
+| `tests/unit/plantilla-bases.test.ts` | la 0054 viaja en la cadena empaquetada: `VERSION_ESPERADA` 54, el SQL igual al archivo, y no toca la RLS ni los permisos de `ai_usage` |
+| `tests/unit/billing/costo-por-caso.test.ts` | la mediana y el p95 (interpolados como `percentile_cont`, a cuatro decimales), sin casos no hay cifra, acepta el JSON como arreglo o como texto, descarta lo que no es número |
+| `tests/unit/billing/costo-por-caso-sql.test.ts` | `computeStatement` sigue en tres `enTenant`; el gasto se agrupa por caso antes de unir a `cases`, que va sin alias, con el filtro de inquilino, de período y de casos reales; lo que no es de un caso queda afuera |
+| `tests/unit/billing-freeze.test.ts` | el resumen entra a `ai_cost.per_case`, al congelar se guarda el resumen y no la lista cruda, y una factura congelada antes de la 0054 (sin `per_case`) se lee sin tirar y sin recalcular |
+| `tests/unit/billing/facturacion-costo-por-caso.test.tsx` | la pantalla muestra mediana, p95 y casos a cuatro decimales con la nota de precio de lista, «sin datos» cuando no hay `per_case`, y los dos idiomas |
+| `tests/unit/budget-control.test.ts`, `tests/unit/todo-lo-que-gasta-se-anota.test.ts`, `tests/unit/gasto-de-la-demo-anonima.test.ts`, `tests/unit/cupo-por-usuario.test.ts` | `recordUsage` anota el caso, vuelve `null` si no es un uuid (la demo manda `"demo"`, que daría 22P02 y perdería la fila) y la fila del reintento conserva el caso |
+| `tests/unit/health-route.test.ts` | sin `ai_usage.case_id` el chequeo de migraciones da `down` y nombra la columna |
+| `tests/unit/deliberate.test.ts`, `case-documents.test.ts`, `compose-reply.test.ts`, `email-messenger.test.ts`, `lectura-reclamo.test.ts`, `leer-documento.test.ts`, `presupuesto-route.test.ts`, `condiciones-route.test.ts`, `server/asistente/pregunta-caso.test.ts`, `server/asistente/responder.test.ts`, `server/cases/mensaje-tardio.test.ts`, `server/worker/transcribir.test.ts`, `extraccion-fallida-se-anota.test.ts` | cada llamador a la IA que tiene el caso a mano se lo pasa al registro del consumo (las condiciones de póliza, que no son de un caso, pasan `null`) |
+
+Un `caseId` obligatorio en `ComposeReplyInput` y en `leerDocumento` es a propósito: opcional,
+el llamador que lo olvida deja la fila sin caso y no falla nada. Los tests de arriba
+fijan que cada llamador lo pasa.
+
 ### 9. `pnpm bases:probar` — una base por cliente, de punta a punta
 
 Sólo importa con `BASE_POR_CLIENTE=1`, que está prendida en prd desde el 09/10 y en 0 en
@@ -1359,6 +1389,14 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   `ALTA_TOPE_MB` a 1, redeploya QA para que la variable rija, espera al barrido y, al terminar, vuelve
   a 350 y redeploya de nuevo. El día y el mes son los argentinos y los tests usan instantes UTC fijos, así
   que dicen lo mismo en cualquier zona: `TZ=UTC` y `TZ=Asia/Tokyo` dan el mismo resultado que la máquina de acá.
+- **El costo por caso contra una base con casos.** La subconsulta de `computeStatement` (`json_agg` del gasto
+  agrupado por caso, unido a `cases`) se comprueba por su forma, renderizada con el dialecto de verdad, y no
+  ejecutada: no hay Postgres local que la corra. La primera vez contra datos reales es la primera visita a
+  `/admin/facturacion` después de aplicar la 0054; ahí conviene ver que la cantidad de casos coincida con los
+  casos del mes de `/metricas`. El primer mes es parcial (el uso anterior a la 0054 no tiene caso y queda
+  afuera), y por eso la pantalla muestra la cantidad de casos junto a la mediana y el p95. Tampoco se mide
+  cuánto tarda con un inquilino de decenas de miles de casos: el arreglo de costos viaja entero al servidor
+  (unos 80 KB con 10.000 casos), y si molesta se pasa a `percentile_cont` en SQL.
 - **El tablero de métricas contra el volumen real.** Los escenarios de `pnpm load`
   existen, pero no se corrieron contra una base con meses de auditoría, así que
   el p95 del tablero del año sigue sin medirse.

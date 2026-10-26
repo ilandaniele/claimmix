@@ -125,7 +125,7 @@ describe("atenderCartas", () => {
     await atender();
     expect(m.callGemini).toHaveBeenCalledTimes(1);
     expect(m.registrar).toHaveBeenCalledTimes(1);
-    expect(m.registrar).toHaveBeenCalledWith(TENANT, "gemini-2.5-flash", { promptTokens: 9 }, null);
+    expect(m.registrar).toHaveBeenCalledWith(TENANT, "gemini-2.5-flash", { promptTokens: 9 }, null, CASO);
     expect(m.rateLimit).toHaveBeenCalledWith(`lectura-reclamo:${TENANT}:${CASO}`, { limit: 3, windowMs: 86_400_000 });
     expect(consultas).toHaveLength(1);
     expect(escrito().reclamo).toMatchObject({

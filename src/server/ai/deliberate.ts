@@ -318,7 +318,7 @@ async function think(
     // se pagó igual, y una consulta a una herramienta gasta una pasada entera
     // que no es la que trae el plan. Registrar sólo la última contaría una de
     // tres.
-    await registrarConsumoDelModelo(input.tenantId, model, usage);
+    await registrarConsumoDelModelo(input.tenantId, model, usage, null, input.caseId);
 
     if (!text) return { plan: null, toolCalls, lookupResults: resultados };
 

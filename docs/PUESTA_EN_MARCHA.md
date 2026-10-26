@@ -38,8 +38,9 @@ variables. Los valores de secretos los pega sólo el dueño, en la pantalla de V
 3. prd. El número por código va primero a prd, porque en la WABA queda un solo lugar libre
    (D1). Dev y QA también reciben la bandera (D1, b), pero ese lugar es primero del cliente
    ficticio de prd.
-4. El «Ensayo del prompt» después de cada deploy, y «Cuánto consume» (C1) después del paso 12
-   de dev.
+4. El «Ensayo del prompt» después de cada deploy, y «Cuánto consume» después del paso 12 de dev:
+   el costo por caso sale de `/admin/facturacion` desde que la 0054 está aplicada (ítem 15), y
+   C1 queda como contraste.
 
 **Contradicción en los docs, resuelta.** Los otros docs decían que el número por código no se
 prende en prd hasta que la prueba en QA salga bien. El 17/10 el dueño eligió D1 (b): prd lo
@@ -68,7 +69,7 @@ y `docs/PROJECT_STATUS.md` se corrigieron en este mismo cambio.
 | Pedido | Dónde se resuelve | Estado al 16/10 |
 |---|---|---|
 | 1. Alta automática con número, mail y base propia | prd pasos 2 a 9; altas de dev (pasos 3 a 7) y de QA (pasos 2 a 6) | En curso: falta la primera alta de punta a punta en prd |
-| 2. Cuánto consume | «Cuánto consume» y C1; dev paso 12, QA paso 13, prd paso 14 | El costo por caso no se guarda; C1 lo aproxima |
+| 2. Cuánto consume | «Cuánto consume» y C1; dev paso 12, QA paso 13, prd paso 14 | El costo por caso se guarda desde la 0054 y `/admin/facturacion` lo muestra (ítem 15, 25/10); falta que el dueño aplique la 0054 a mano |
 | 3. prd con base por cliente y dos usuarios | prd pasos 4, 5 y 10 | La base propia anda; el analista entra como alias de la Gmail del administrador, sin activar el espacio (D4 d) |
 | 4. Correr el prompt de nuevo | «Ensayo del prompt» (E1 a E3) | El ensayo corre en dev y QA; prd no ensaya, a propósito |
 | 5. MCP de Meta para WhatsApp | «MCP de WhatsApp (opcional)» y D14 | No hace falta para el alta; queda opcional |
@@ -511,7 +512,7 @@ ningún doc lo dice.
 | `NEXT_PUBLIC_SITE_URL` (`.env.example:187`), `DEFAULT_TENANT_ID`, `GOOGLE_DEFAULT_TENANT_ID` (`:47-49`) | valor | excepción: uno por ambiente | cargadas | login; respuestas 403 `INVALID_ORIGIN` de `/api/auth` |
 | `SLUGS_DE_DEV`, `NUMEROS_DE_DEV`, `CASILLAS_DE_DEV`, `URL_DEL_OTRO_AMBIENTE` (`.env.example:291-297`) | valor | sólo en prd | cargadas en prd; 24/10: la casilla del agente (veltra) salió de `CASILLAS_DE_DEV` en prd | Vercel |
 | `CRON_SECRET`, `BETTER_AUTH_SECRET`, `DATABASE_URL`, `DATABASE_URL_APP`, `R2_*`, `WHATSAPP_APP_SECRETS_KEY` | secreto | excepción: uno por ambiente. El `CRON_SECRET` de prd tiene que ser igual al secreto `PRD_CRON_SECRET` de GitHub (`.github/workflows/post-deploy.yml:660`) | cargadas (salvo `WHATSAPP_APP_SECRETS_KEY`, que espera a la app propia) | smoke y `/api/health` |
-| Migraciones (hasta la 0051) | esquema | igual | 0050 y 0051 en las bases (`docs/PROJECT_STATUS.md:4761-4762`, `:5076`) | A11; `pnpm esquemas` (`package.json:43`) compara dos bases |
+| Migraciones (hasta la 0054) | esquema | igual | 0050 a 0053 en las bases (`docs/PROJECT_STATUS.md`, secciones «Lote de la segunda auditoría» y «Lote 2 de la auditoría»); la 0054 (`ai_usage.case_id`, ítem 15) la aplica el dueño a mano en las cuatro bases antes del merge | A11; `pnpm esquemas` (`package.json:43`) compara dos bases |
 
 ## dev: la cuenta del dueño
 
@@ -1321,8 +1322,9 @@ alta. Recomendación: no instalarlo (D14).
 **Dónde mirar.**
 
 - `/metricas`: cualquier rol del espacio.
-- `/admin/facturacion`: administración del espacio. Trae `cost_per_billable_claim_usd`, lo más
-  parecido a un costo por denuncia que existe hoy.
+- `/admin/facturacion`: administración del espacio. Trae el costo por caso (mediana, p95 y
+  cantidad de casos del mes, desde la 0054) y `cost_per_billable_claim_usd`, el gasto del mes
+  dividido por las denuncias que se cobran.
 - `/admin/cartera` y `/admin/altas`: operador, todos los espacios.
 - `/api/admin/provider-usage` (`src/app/api/admin/provider-usage`): llamadas y latencia, sin
   dólares.
@@ -1351,13 +1353,23 @@ del tope (`src/server/alta/aviso-operador.ts:30-35`) y que el gasto de IA del me
 pruebas, las bases de cliente o los MB del proyecto pasaron el 80 % o llegaron al 100 % de su tope
 (`src/server/alta/aviso-de-topes.ts`), una sola vez por umbral, tope y mes.
 
-**Costo por caso.** No existe: el uso de IA no se guarda por caso. Se aproxima con el paso C1.
-El costo que muestra ClaimMix es estimado a precio de lista (`src/server/ai/budget.ts:72`), con
+**Costo por caso.** Desde la 0054 cada llamada a la IA que tiene el caso a mano lo guarda
+(`ai_usage.case_id`), y `/admin/facturacion` muestra la fila «Costo por caso (mediana · p95 ·
+casos)», a cuatro decimales, con los casos reales creados en el mes de la liquidación (el
+mes UTC, el mismo de esa pantalla). Quedan sin caso, a propósito: el asistente general, la
+demo, las condiciones de póliza y todo uso anterior a la 0054, que no se rellena; por eso el
+primer mes es parcial y la pantalla dice cuántos casos entran. Una liquidación congelada antes
+de la 0054 dice «sin datos» y no se recalcula. No hace falta la cuenta a mano de C1. El costo
+que muestra ClaimMix es estimado a precio de lista (`src/server/ai/budget.ts:72`), con
 los tokens en caché cobrados enteros, así que la factura de Google puede salir algo menor. El
 costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el de 2.5
 (`docs/PROJECT_STATUS.md:4871`).
 
-- [ ] **C1. Medir el costo por caso.**
+- [x] **C1. Medir el costo por caso.** Reemplazado por el ítem 15 (25/10): desde la 0054 el
+  costo por caso sale de `/admin/facturacion` y la cuenta a mano ya no hace falta. Se marca
+  porque el paso dejó de ser necesario, no porque se haya hecho; lo que sigue queda como
+  contraste para quien quiera comparar con un lote medido. El número real aparece cuando la
+  0054 esté aplicada y haya casos del mes.
   - **Quién:** [Dueño] dispara el lote y le pasa los números a [Claude]; [Claude] hace la
     cuenta y la anota en esta guía.
   - **Dónde:** dev, el espacio de la plataforma, que no está en prueba y no lo cortan los
@@ -1387,7 +1399,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 ## Plan para que el alta sea automática
 
-Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta), y el 14 en el lote de las notas del 14/10, y el 10 en la rama `ci/paridad-banderas`, y el 7 y el 17 en la rama `alta/avisos-topes` (#514). El resto no existe todavía: sus nombres de
+Los ítems 1, 5, 6 y 12 entraron por #461, el 2 y el 3 por #475, y el 4, el 11 y el 13 por #484, y el 9 por #487 (lote 1 de la prueba del alta), y el 14 en el lote de las notas del 14/10, y el 10 en la rama `ci/paridad-banderas`, y el 7 y el 17 en la rama `alta/avisos-topes` (#514), y el 15 en la rama `facturacion/costo-por-caso`. El resto no existe todavía: sus nombres de
 archivos, funciones y textos son propuestas. Van numerados por prioridad (1 es lo primero), y cada uno entra por el camino de
 siempre: PR a `qa`, `pnpm check`, main y prd el mismo día. Tamaño: chico (un PR de un día),
 mediano (unos días) o grande (una semana o más, o una migración). Entre paréntesis, el nombre
@@ -1409,7 +1421,7 @@ que tenía en la versión anterior de esta guía.
 | 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |
 | 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo. **Hecho en #484**; `tests/unit/lib/topes-unico.test.ts` lo fija | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
 | 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions. **Hecho en el lote de las notas del 14/10**, cada 2 h como prd. | chico | Nada (cadencia fijada en cada 2 h) |
-| 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso | grande | Decisión: si vale una migración en todas las bases (receta de pausa para migrar) |
+| 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso. **Hecho en la rama `facturacion/costo-por-caso`**, con la migración 0054 (`ai_usage.case_id`, nula, sin FK, índice ni backfill; el acumulador de la 0046 no se toca). Cada llamada a la IA que tiene el caso a mano lo anota (extracción, deliberación, lectura de documentos y presupuestos, mensajes tardíos, transcripción, pregunta del caso, redactor, asistente por caso); sin caso quedan el asistente general, la demo y las condiciones de póliza, y `recordUsage` vuelve `null` todo id que no sea un uuid (la demo manda `demo`). La cifra sale dentro de la consulta del gasto de `computeStatement` (el gasto se agrupa por caso y se une a `cases`; siguen siendo tres `enTenant`): mediana y p95 de lo que gastó cada caso real creado en el mes, a precio de lista y a cuatro decimales, con la cantidad de casos. Sigue en el mes UTC, como el resto de `/admin/facturacion` (ítem 17). La liquidación congelada guarda el resumen y no la lista; las anteriores a la 0054 dicen «sin datos» y no se recalculan. `/api/health` pasa a exigir la columna (`down` si falta) y `VERSION_ESPERADA` es 54. **Falta aplicar la 0054, a mano, antes del merge:** código sin la columna da 42703 en cada INSERT a `ai_usage`, `recordUsage` lo traga y ningún gasto se anota (los topes quedan ciegos). Orden, con `node scripts/migrate.mjs --apply` por TCP: QA (`ep-wispy-flower`), dev (`ep-proud-resonance`, también la de los secretos `DATABASE_URL` del CI), `STAGING_DATABASE_URL` y `node scripts/migrar-bases.mjs --env prd` (control, rama de ensayo y bases `t_<hex>`); la cabecera de la migración tiene la comprobación y la vuelta atrás | grande | Decisión D13 (elegida el 24/10) |
 | 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte que `/alta` no revele qué empresas existen (`docs/SEGURIDAD.md`) |
 | 17 | Comprobar en qué zona horaria cortan el día y el mes del presupuesto, y fijarla (P14) | Los cortes coinciden con el mes que mira | El corte diario cae a una hora previsible | Un test fija la zona. **Hecho en #514**, con el supuesto (mes argentino): el guardia del gasto (`checkBudget` y el del demo), `/api/health` y el aviso de topes cuentan el día y el mes desde la medianoche argentina (03:00 UTC), con un solo «ahora» por cálculo para que el día y el mes no caigan en lados distintos de la medianoche. Los tests usan instantes UTC fijos y pasan igual con `TZ=UTC` y `TZ=Asia/Tokyo`. Siguen en UTC, a propósito, el limitador, el cupo de la 0048, las ventanas del barrido, `/admin/facturacion` y `/admin/cartera`. Efecto visible: el tope diario de tokens se renueva a las 00:00 de acá y no a las 21:00 | chico | Decisión: mes argentino o mes de la factura de Google (supuesto: argentino) |
 | 18 | Correo que no sea Gmail (nuevo). Hoy no existe: sólo hay webhooks de Gmail y de WhatsApp (`src/app/api/webhooks`). Mientras tanto, el formulario web de `/denuncia/[slug]`, que se prende en `/agente`, solapa «Formulario web» | Puede vender a quien no usa Gmail | Conecta su correo, sea cual sea | Un cliente con otro proveedor recibe denuncias por correo | grande | Decisión: qué proveedores |
@@ -1776,7 +1788,7 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   leídos) y `gmail.send`.
 - **D13.** Las decisiones de los ítems 7, 10, 14, 15, 16, 17, 18 y 19 del plan. **24/10:** el
   dueño pidió aplicar las recomendaciones; 10 y 14 ya estaban hechos y el resto se hace de a
-  uno. El 7 y el 17 van juntos en #514.
+  uno. El 7 y el 17 van juntos en #514. El 15 va solo, en la rama `facturacion/costo-por-caso`, porque trae una migración (la 0054) que aplica el dueño a mano.
 - **D14. MCP de WhatsApp.** Opcional, sobre la API oficial; no hace falta para el alta y le da
   el token permanente a código de terceros (`docs/whatsapp-setup.md:93-128`).
   **Recomendación: no instalarlo por ahora.** Si el dueño lo quiere, el paso M1. **Elegido el
@@ -1806,7 +1818,7 @@ Apenas el dueño avise, Claude puede:
   permisos de IAM: habilitar las APIs y crear el tema, la cuenta de servicio y la suscripción
   de Pub/Sub (prd, paso 1).
 - Disparar el barrido de QA desde Actions si hace falta antes de su corrida de cada 2 h.
-- Hacer la cuenta del costo por caso de C1.
+- Leer el costo por caso de `/admin/facturacion` (la cuenta a mano de C1 ya no hace falta).
 - Implementar los ítems del plan en orden, cada uno en su PR a `qa` y el mismo día a main y prd,
   con la revisión de seguridad en Fable (u Opus) para los ítems 3 y 4.
 

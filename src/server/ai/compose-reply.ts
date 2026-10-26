@@ -55,6 +55,8 @@ export interface ComposeReplyInput {
    * no falla nada—. Requerido, lo pide el compilador.
    */
   tenantId: string;
+  /** El caso del gasto, para el costo por caso. Obligatorio por lo mismo que `tenantId`: opcional se pudre. */
+  caseId: string;
   /** Field keys we are asking about, in the order the orchestrator chose. */
   fields?: string[];
   /** Values we already hold for some of those fields. */
@@ -526,7 +528,7 @@ Corregilo y devolvé el mensaje entero de nuevo.`
 
   // Acá y no en `composeReply`: el reintento tras una guarda rechazada es
   // una segunda llamada, facturada igual que la primera.
-  await registrarConsumoDelModelo(input.tenantId, model, usage);
+  await registrarConsumoDelModelo(input.tenantId, model, usage, null, input.caseId);
   if (!text) return { ok: false, problem: "no_output" };
 
   const parsed = JSON.parse(text) as { message?: unknown };

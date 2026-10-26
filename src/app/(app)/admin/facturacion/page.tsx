@@ -213,6 +213,15 @@ export default async function FacturacionPage({
               label={t("facturacion.porDenunciaFacturable")}
               value={money(cost.cost_per_billable_claim_usd)}
             />
+            {/* Cuatro decimales: un caso cuesta milésimas y con dos se vería US$ 0,00. */}
+            <Row
+              label={t("facturacion.costoPorCaso")}
+              value={
+                cost.per_case
+                  ? `${formatUsd(cost.per_case.median_usd, 4)} · ${formatUsd(cost.per_case.p95_usd, 4)} · ${cost.per_case.cases.toLocaleString("es-AR")}`
+                  : t("facturacion.costoPorCasoSinDatos")
+              }
+            />
             <div className="!mt-4 flex items-center justify-between border-t border-slate-200 pt-3 dark:border-slate-700">
               <dt className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 {t("facturacion.margen")}
@@ -233,6 +242,9 @@ export default async function FacturacionPage({
               </dd>
             </div>
           </dl>
+          <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+            {t("facturacion.costoPorCasoDetalle")}
+          </p>
         </section>
       </div>
 

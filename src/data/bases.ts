@@ -17,6 +17,8 @@ export const CENTINELA = "00000000-0000-0000-0000-000000000000";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export const esUuid = (s: string): boolean => UUID.test(s);
+
 /**
  * ¿Está prendida la base por cliente?
  *

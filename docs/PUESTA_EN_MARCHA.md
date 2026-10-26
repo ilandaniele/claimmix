@@ -1503,7 +1503,9 @@ parte G y la parte H.
     https://developers.facebook.com/documentation/development/release/access-verification
     (Meta dice ahí que la verificación de acceso ya no hace falta).
   - **Qué hacer:**
-    - Elegir «Onboard without a partner».
+    - En «Regístrate como proveedor de tecnología», elegir «Independent Tech Provider» (sin
+      socio; el identificador de un socio no hace falta) e «Iniciar registro». Ese botón acepta
+      las Condiciones para proveedores de tecnología.
     - El paso 1, «Verify your business», tendría que figurar completo por A5. Si no, en
       Configuración > Básica > Verificación, «Iniciar verificación» (o «+ Verificación del
       negocio») y elegir Veltra. Quien la conecta tiene que ser administrador del portfolio y

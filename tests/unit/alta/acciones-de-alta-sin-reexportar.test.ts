@@ -23,12 +23,12 @@ const RAIZ = join(__dirname, "..", "..", "..");
 const SRC = join(RAIZ, "src");
 
 const TODO_DE_LA_LOGICA = /export\s*\*[^;]*from\s*["'][^"']*alta\/(?:crear-espacio|cuenta-del-enlace)["']/;
-const MODULOS_DE_LA_LOGICA = ["alta/crear-espacio", "alta/cuenta-del-enlace"];
+const MODULOS_DE_LA_LOGICA = ["alta/crear-espacio", "alta/cuenta-del-enlace", "alta/pedir-acceso"];
 const LOGICA = /\b(crearEspacio|crearCuentaDelEnlace|prepararEspacio)\b/g;
 
 /** Lo único que cada acción del alta publica. Todo export de un archivo "use server" es un endpoint: sumar uno es una decisión. */
 const EXPORTS_PERMITIDOS: Record<string, string[]> = {
-  "src/app/alta/actions.ts": ["crearMiEspacio"],
+  "src/app/alta/actions.ts": ["crearMiEspacio", "pedirAcceso"],
   "src/app/alta/correo/actions.ts": ["crearCuentaDesdeCorreo"],
   "src/app/registro/actions.ts": ["empezarAltaConGoogle", "signUp"],
 };
@@ -144,6 +144,31 @@ describe.each(MODULOS_DE_LA_LOGICA.map((m) => `src/server/${m}.ts`))("%s", (ruta
 
   it("no lleva la directiva \"use server\"", () => {
     expect(TIENE_USE_SERVER.test(texto)).toBe(false);
+  });
+});
+
+describe("pedirAcceso", () => {
+  const texto = leer("src/app/alta/actions.ts");
+  /** Sólo el cuerpo de la acción: el resto del archivo sí lee el formulario (`crearMiEspacio`). */
+  const accion = texto.slice(texto.indexOf("export async function pedirAcceso"));
+
+  it("no recibe argumentos ni lee el formulario: el usuario sale de la sesión", () => {
+    expect(accion.startsWith("export async function pedirAcceso(): Promise<void>")).toBe(true);
+    expect(accion).not.toMatch(/formData|FormData/);
+  });
+
+  it("agenda el trabajo con `after()`, deja la cookie del pedido con el id de la sesión y redirige a /alta fuera de todo try/catch", () => {
+    expect(accion).toContain("after(() => pedirAccesoAlEspacio({ userId, email }))");
+    expect(accion).toContain("await ponerCookieDePedido(userId)");
+    expect(accion).toContain('redirect("/alta")');
+    expect(accion).not.toContain("pedido=1");
+    expect(accion).not.toMatch(/\b(try|catch)\b/);
+  });
+
+  it("no toca la base ni los contadores antes de contestar: eso vive en `pedirAccesoAlEspacio`", () => {
+    expect(texto).not.toContain('from "@/lib/rate-limit"');
+    expect(texto).not.toContain('from "@/lib/db"');
+    expect(accion).not.toMatch(/\b(rateLimit|enviarCorreoDelSistema|getUserRowOrThrow)\b/);
   });
 });
 

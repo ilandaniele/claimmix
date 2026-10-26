@@ -92,3 +92,28 @@ export function correoDeInvitacion(t: Traductor, url: string, duraHoras: number)
     ].join("\n"),
   };
 }
+
+/**
+ * El pedido de acceso de /alta, para cada administrador del dominio. Texto fijo: ni el
+ * espacio ni el nombre de nadie aparecen, sólo la dirección verificada de quien pide, sola
+ * en su línea. Esa parte local la eligió un tercero, y por eso el texto dice que nadie
+ * recibió acceso y el único enlace es el nuestro.
+ */
+export function correoDePedidoDeAcceso(t: Traductor, pedidor: string, url: string): Omit<CorreoDelSistema, "to"> {
+  return {
+    asunto: t("correo.acceso.asunto"),
+    texto: [
+      t("correo.saludo"),
+      "",
+      t("correo.acceso.intro"),
+      "",
+      pedidor,
+      "",
+      t("correo.acceso.invitar"),
+      "",
+      url,
+      "",
+      t("correo.acceso.noFuiste"),
+    ].join("\n"),
+  };
+}

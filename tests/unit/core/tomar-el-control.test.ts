@@ -1,5 +1,6 @@
 /**
- * `puedeTomarElControl` — D-F2: sólo con el agente terminado del todo.
+ * `puedeTomarElControl` — se puede en cualquier momento, aunque el agente esté
+ * trabajando; `puedeDevolverAlAgente` — D-F2: sólo con el agente terminado.
  *
  * Tabla de verdad: parte de un caso que SÍ puede, y cada test apaga una sola
  * condición para verla dar false.
@@ -7,7 +8,6 @@
 
 import { describe, it, expect } from "vitest";
 import { puedeTomarElControl, puedeDevolverAlAgente } from "@/core/case/tomar-el-control";
-import { RESERVA_DE_EXTRACCION_MS } from "@/core/case/reserva-de-extraccion";
 
 const AHORA = new Date("2026-09-27T12:00:00.000Z");
 
@@ -16,9 +16,6 @@ const CASO_OK = {
   plan: "profesional",
   channel: "whatsapp",
   status: "info_faltante",
-  extractionPending: false,
-  extractionLeaseAt: null,
-  ahora: AHORA,
 };
 
 describe("puedeTomarElControl", () => {
@@ -54,18 +51,8 @@ describe("puedeTomarElControl", () => {
     expect(puedeTomarElControl({ ...CASO_OK, status: "confirmacion_pendiente" })).toBe(true);
   });
 
-  it("da false con una corrida pendiente", () => {
-    expect(puedeTomarElControl({ ...CASO_OK, extractionPending: true })).toBe(false);
-  });
-
-  it("da false con la reserva todavía viva", () => {
-    const haceUnMinuto = new Date(AHORA.getTime() - 60_000).toISOString();
-    expect(puedeTomarElControl({ ...CASO_OK, extractionLeaseAt: haceUnMinuto })).toBe(false);
-  });
-
-  it("da true con una reserva ya vencida", () => {
-    const vencida = new Date(AHORA.getTime() - RESERVA_DE_EXTRACCION_MS - 1_000).toISOString();
-    expect(puedeTomarElControl({ ...CASO_OK, extractionLeaseAt: vencida })).toBe(true);
+  it("da false en requiere_especialista (ya lo tomó alguien)", () => {
+    expect(puedeTomarElControl({ ...CASO_OK, status: "requiere_especialista" })).toBe(false);
   });
 });
 

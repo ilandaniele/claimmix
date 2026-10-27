@@ -12,7 +12,8 @@
  * PII protection: from_addr, subject, body_text are PII.
  * They are rendered in the UI but NEVER logged to console.
  *
- * Fetches GET /api/cases/[caseId]/messages on mount.
+ * Fetches GET /api/cases/[caseId]/messages on mount and then polls it while
+ * the tab is visible, so inbound messages and the reply box show up alone.
  * Uses collapsible cards (click to expand full body_text up to 2000 chars from API).
  */
 
@@ -37,6 +38,11 @@ interface RespuestaDeMensajes {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type LoadState = "loading" | "ready" | "error";
+
+// Mismo ritmo que la bandeja (useCasesRealtime): cada pedido pasa por el
+// limitador de CASES_API, que comparte con ella.
+const POLL_MIN_MS = 5_000;
+const POLL_MAX_MS = 30_000;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -311,6 +317,8 @@ function MessageCard({ message, locale }: MessageCardProps) {
 
 interface MessagesThreadProps {
   caseId: string;
+  /** Estado del caso: si cambia (Tomar el control, devolver al agente) se vuelve a pedir la conversación. */
+  estado: string;
 }
 
 /**
@@ -340,9 +348,15 @@ function Marco({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function MessagesThread({ caseId }: MessagesThreadProps) {
+export function MessagesThread({ caseId, estado }: MessagesThreadProps) {
   const { t, locale } = useLocale();
   const router = useRouter();
+  const routerRef = useRef(router);
+  useEffect(() => {
+    routerRef.current = router;
+  });
+  // La última respuesta, para saber si el sondeo trajo algo nuevo.
+  const ultimoRef = useRef<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [messages, setMessages] = useState<Message[]>([]);
   const [recortada, setRecortada] = useState(false);
@@ -371,25 +385,32 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
   // `silencioso` es el refetch que sigue a un POST que ya salió (o quedó
   // anotado): si ese GET falla no hay que tapar el hilo ni el "Enviado." con
   // la pantalla de error genérica, sólo se pierde la actualización.
+  //
+  // Devuelve si la respuesta cambió respecto de la anterior.
   const fetchMessages = useCallback(async (opciones: { silencioso?: boolean } = {}) => {
     try {
       const res = await fetch(`/api/cases/${caseId}/messages`);
 
       if (!res.ok) {
         if (!cancelledRef.current && !opciones.silencioso) setLoadState("error");
-        return;
+        return false;
       }
 
       const data: RespuestaDeMensajes = await res.json();
+      const firma = JSON.stringify(data);
+      const cambio = ultimoRef.current !== null && firma !== ultimoRef.current;
+      ultimoRef.current = firma;
       if (!cancelledRef.current) {
         setMessages(data.messages);
         setRecortada(data.recortada);
         setRespuesta(data.respuesta);
         setLoadState("ready");
       }
+      return cambio;
     } catch {
       // Network failure — show error state, salvo que sea un refetch silencioso.
       if (!cancelledRef.current && !opciones.silencioso) setLoadState("error");
+      return false;
     }
   }, [caseId]);
 
@@ -397,6 +418,56 @@ export function MessagesThread({ caseId }: MessagesThreadProps) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMessages();
   }, [fetchMessages]);
+
+  // Lo que escribe la persona entra por el worker, no por esta pantalla: se
+  // sondea mientras la pestaña está a la vista, de 5 s hasta 30 s si no hay
+  // novedades. Con novedades se refresca la página, porque el agente pudo
+  // haber cambiado el estado del caso. Un cambio de `estado` reinicia el sondeo
+  // con un pedido en el acto: así la caja aparece sola después de «Tomar el
+  // control», sin recargar.
+  useEffect(() => {
+    let cancelado = false;
+    let enVuelo = false;
+    let demora = POLL_MIN_MS;
+    let timerId = 0;
+
+    async function sondear(): Promise<boolean> {
+      if (enVuelo || document.visibilityState === "hidden") return false;
+      enVuelo = true;
+      try {
+        return await fetchMessages({ silencioso: true });
+      } finally {
+        enVuelo = false;
+      }
+    }
+
+    function programar(ms: number) {
+      window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => {
+        void sondear().then((hubo) => {
+          if (cancelado) return;
+          if (hubo) routerRef.current.refresh();
+          demora = hubo ? POLL_MIN_MS : Math.min(demora * 2, POLL_MAX_MS);
+          programar(demora);
+        });
+      }, ms);
+    }
+
+    function alVolver() {
+      if (cancelado || document.visibilityState !== "visible") return;
+      demora = POLL_MIN_MS;
+      programar(0);
+    }
+
+    // Sin datos todavía, la carga inicial ya está en camino.
+    programar(ultimoRef.current === null ? POLL_MIN_MS : 0);
+    document.addEventListener("visibilitychange", alVolver);
+    return () => {
+      cancelado = true;
+      window.clearTimeout(timerId);
+      document.removeEventListener("visibilitychange", alVolver);
+    };
+  }, [fetchMessages, estado]);
 
   async function enviarRespuesta() {
     if (!texto.trim() || enviando) return;

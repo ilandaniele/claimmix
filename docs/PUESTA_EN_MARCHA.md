@@ -1533,9 +1533,11 @@ parte G y la parte H.
     avanzado).
   - **Qué hacer:** pedir acceso avanzado a `whatsapp_business_management` y
     `whatsapp_business_messaging`. Meta pide un video por permiso que muestre cómo lo usa la
-    app: se graban sobre el número de producción que ya atiende, con lo que pide la guía de
-    WhatsApp para cada uno. Grabar no le cambia nada al número: no se registra de nuevo ni se
-    mueve de WABA.
+    app. El de mensajería se graba en dev: una persona escribe al número del negocio, contesta
+    el agente, y en el caso se toca «Tomar el control» y se responde desde la caja de la
+    conversación hasta que el mensaje llega a WhatsApp. El de gestión se graba en WhatsApp
+    Manager sobre la WABA de prueba, nunca la de producción: Plantillas de mensajes > Crear
+    plantilla. Grabar no le cambia nada al número: no se registra de nuevo ni se mueve de WABA.
   - **Salió bien si:** los dos permisos figuran con acceso avanzado en el panel.
   - **Si falla:** Meta devuelve el pedido con el motivo. Corregir el video o la explicación y
     mandarlo de nuevo. Mientras la revisión está abierta, no tocar la configuración básica
@@ -1672,8 +1674,8 @@ parte G y la parte H.
     https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/data-use-checkup
     (Data Use Checkup) y https://www.facebook.com/business/help/488291839463771 (cómo paga el
     cliente).
-  - **Qué hacer:** arrancar sólo con T3 aprobada, la verificación de acceso hecha y el borrado
-    de T8 calzando. Como la app de Meta tiene un solo webhook, la bandera va prendida en un
+  - **Qué hacer:** arrancar sólo con T3 aprobada y el borrado de T8 calzando. Como la app de
+    Meta tiene un solo webhook, la bandera va prendida en un
     solo ambiente por app: en el mismo lote, `ALTA_WABA_PROPIA=1` en prd y `0` en dev. QA queda
     en 0, con `META_APP_ID` y `META_ES_CONFIG_ID` cargados como en prd. Es una excepción
     declarada a la regla de ambientes iguales: Claude suma `ALTA_WABA_PROPIA` a las excepciones

@@ -469,7 +469,7 @@ registro, a un resultado ni al navegador.
    `https://claimmix.vercel.app/api/meta/borrado` (responde después del deploy).
 3. En Casos de uso, WhatsApp: empezar el onboarding de **Tech Provider**.
 4. Revisión de la app: acceso avanzado a `whatsapp_business_management` y
-   `whatsapp_business_messaging`, con los videos grabados sobre el número actual.
+   `whatsapp_business_messaging`: el video de mensajería en dev y el de gestión en la WABA de prueba.
 
 **Hace falta el código desplegado:**
 
@@ -501,7 +501,7 @@ registro, a un resultado ni al navegador.
      devuelve `userID` o los ids no calzan, el borrado contesta igual 200 con su código pero
      deja `meta_borrado.sin_coincidencia` en el registro: ahí hay que usar «Desvincular la
      WABA» a mano. Esto solo se ve contra Meta de verdad.
-9. Con la app aprobada y la verificación de acceso hecha: pasar la app a modo Live, cargar
+9. Con la app aprobada: pasar la app a modo Live, cargar
    las variables en prd, hacer **una** promoción y conectar al primer cliente. **No prender
    prd sin haber visto en dev que el `user_id` del borrado calza con el `userID` del popup**
    (punto del paso 8): hasta entonces el borrado automático es una suposición y vale el

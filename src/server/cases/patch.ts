@@ -23,6 +23,7 @@ import type { CasePatch } from "@/lib/schemas/cases";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import { validateTransition, DEVOLUCION_AL_AGENTE, ESTADOS_CERRADOS, esSalidaAMano } from "@/core/case/fsm";
 import { reservaViva } from "@/core/case/reserva-de-extraccion";
+import { ESTADOS_PARA_TOMAR, esCanalWhatsApp } from "@/core/case/tomar-el-control";
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { writeAuditLog, AuditEvent, type AuditEventType } from "@/lib/audit/log";
 import { puedeAsignar, puedeCambiarEstado } from "@/lib/auth/roles";
@@ -127,9 +128,29 @@ export async function patchCase(
     throw new AppError("FSM_INVALID_TRANSITION", "Ese estado lo pone sólo el envío a Core.");
   }
 
-  // D-F2: «tomar el control» sólo con el agente terminado del todo. La UI ya
-  // esconde el botón, pero la guarda de verdad es ésta.
+  // «Tomar el control» se puede aunque el agente esté trabajando: el worker,
+  // `setStatus` y los mensajeros miran si una persona tomó el caso antes de
+  // escribir o mandar algo. Por eso la arista se valida entera acá y la
+  // guarda D-F2 de abajo queda para los demás pases a especialista.
+  if (patch.reason === MOTIVO_TOMAR) {
+    if (patch.status !== "requiere_especialista" || !ESTADOS_PARA_TOMAR.includes(current.status)) {
+      throw new AppError(
+        "FSM_INVALID_TRANSITION",
+        "Tomar el control sólo va de info_faltante o confirmacion_pendiente a requiere_especialista."
+      );
+    }
+    if (!esCanalWhatsApp(current.channel)) {
+      throw new AppError("FSM_INVALID_TRANSITION", "Tomar el control es sólo para WhatsApp.");
+    }
+    if (!esPlanPro(actor.plan)) {
+      throw new AppError("PLAN_REQUERIDO");
+    }
+  }
+
+  // D-F2: un pase a especialista que no es «tomar el control» espera a que el
+  // agente termine del todo.
   if (
+    patch.reason !== MOTIVO_TOMAR &&
     patch.status === "requiere_especialista" &&
     (current.extraction_pending || reservaViva(current.extraction_lease_at, new Date()))
   ) {
@@ -147,7 +168,7 @@ export async function patchCase(
         "Devolver al agente sólo va de requiere_especialista a info_faltante."
       );
     }
-    if (current.channel !== "whatsapp" && current.channel !== "whatsapp_sim") {
+    if (!esCanalWhatsApp(current.channel)) {
       throw new AppError("FSM_INVALID_TRANSITION", "Devolver al agente es sólo para WhatsApp.");
     }
     if (!esPlanPro(actor.plan)) {

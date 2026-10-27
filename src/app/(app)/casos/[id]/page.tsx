@@ -284,9 +284,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     plan: me.plan,
     channel: caseRow.channel,
     status: caseRow.status,
-    extractionPending: caseRow.extraction_pending,
-    extractionLeaseAt: caseRow.extraction_lease_at,
-    ahora: new Date(),
   });
   const puedeDevolverAlAgenteCaso = puedeDevolverAlAgente({
     puedeCambiarEstado: puedeCambiarEstadoCaso,

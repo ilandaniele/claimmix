@@ -30,11 +30,15 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   return { ...real, eq: vi.fn((col: unknown, val: unknown) => ({ col, val })) };
 });
 
-const { mockLogError, mockLogInfo, mockAfter } = vi.hoisted(() => ({
+const { mockLogError, mockLogInfo, mockAfter, mockLoTomo } = vi.hoisted(() => ({
   mockLogError: vi.fn(),
   mockLogInfo: vi.fn(),
   mockAfter: vi.fn(),
+  mockLoTomo: vi.fn(),
 }));
+
+// Nadie tomó el caso, salvo en los tests de «Tomar el control».
+vi.mock("@/server/cases/devolver-al-agente", () => ({ loTomoUnaPersona: mockLoTomo }));
 
 // `after` sólo corre dentro de un pedido: acá se junta lo que se agenda, o tira como fuera de uno.
 vi.mock("next/server", async (importOriginal) => ({
@@ -128,6 +132,7 @@ let nextId: number;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockLoTomo.mockResolvedValue(false);
   inserted = [];
   updated = [];
   nextId = 0;
@@ -1472,6 +1477,41 @@ describe("messengerFor", () => {
     expect(messengerFor("whatsapp")).toBe(whatsappMessenger);
     expect(messengerFor("email")).toBe(emailMessenger);
     expect(messengerFor("email_sim")).toBe(emailMessenger);
+  });
+});
+
+/*
+ * «Tomar el control» se puede con el agente a mitad de una corrida: lo que esa
+ * corrida iba a mandar ya no sale, la conversación es de la persona.
+ */
+describe("whatsappMessenger — un caso que tomó una persona", () => {
+  const MENSAJE = { caseId: CASE, tenantId: TENANT, to: TO, template: "confirmation_received" as const, data: { caseId: CASE } };
+
+  it("no manda nada y lo anota", async () => {
+    mockLoTomo.mockResolvedValue(true);
+
+    expect(await whatsappMessenger.send(MENSAJE)).toBe(false);
+
+    expect(mockLoTomo).toHaveBeenCalledWith(CASE, TENANT);
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
+    expect(sendWhatsAppTemplate).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+    expect(mockLogInfo).toHaveBeenCalledWith(expect.objectContaining({ case_id: CASE }), "whatsapp.messenger.omitido_tomado");
+  });
+
+  it("el simulado tampoco deja fila", async () => {
+    mockLoTomo.mockResolvedValue(true);
+
+    expect(await simulatedWhatsappMessenger.send({ ...MENSAJE, to: "5491100000000" })).toBe(false);
+
+    expect(inserted).toHaveLength(0);
+    expect(mockLogInfo).toHaveBeenCalledWith(expect.objectContaining({ case_id: CASE }), "whatsapp.messenger.omitido_tomado");
+  });
+
+  it("sin toma, manda como siempre", async () => {
+    await whatsappMessenger.send(MENSAJE);
+
+    expect(sendWhatsAppText).toHaveBeenCalledTimes(1);
   });
 });
 

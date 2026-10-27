@@ -55,6 +55,7 @@ import { ARCHIVO_QUE_NO_ENTRO, conArchivoQueNoEntro } from "@/core/mensajes/arch
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
+import { loTomoUnaPersona } from "@/server/cases/devolver-al-agente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
@@ -727,6 +728,16 @@ async function anotarEnvio(
   }
 }
 
+/**
+ * Una persona tomó el caso con «Tomar el control» mientras el agente corría:
+ * lo que el agente iba a mandar ya no sale, la conversación es de ella.
+ */
+async function omitirPorToma(message: AgentMessage): Promise<boolean> {
+  if (!(await loTomoUnaPersona(message.caseId, message.tenantId))) return false;
+  logger.info({ case_id: message.caseId, template: message.template }, "whatsapp.messenger.omitido_tomado");
+  return true;
+}
+
 export const whatsappMessenger: AgentMessenger = {
   async send(message) {
     try {
@@ -741,6 +752,8 @@ export const whatsappMessenger: AgentMessenger = {
       if (isReservedTestNumber(message.to)) {
         return await simulatedWhatsappMessenger.send(message);
       }
+
+      if (await omitirPorToma(message)) return false;
 
       // El número de este inquilino, antes de gastar el redactor: sin número no
       // se manda, y el intento queda anotado como fallido con el texto de piso.
@@ -911,6 +924,8 @@ async function recordOutbound(
  */
 export const simulatedWhatsappMessenger: AgentMessenger = {
   async send(message) {
+    if (await omitirPorToma(message)) return false;
+
     // Fuera de la ventana con la plantilla aprobada: el cuerpo es el de
     // Meta, no el del redactor — nada que componer.
     if (message.data.porPlantilla === true) {

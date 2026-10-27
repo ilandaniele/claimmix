@@ -63,6 +63,16 @@ vi.mock("@/server/confirmations/ya-contestado", () => ({
   yaContestamosElUltimoMensaje: vi.fn().mockResolvedValue(false),
 }));
 
+// Nadie tomó el caso con «Tomar el control»: la guarda no agrega consultas.
+vi.mock("@/server/cases/devolver-al-agente", async (importOriginal) => {
+  const { sql } = await import("drizzle-orm");
+  return {
+    ...(await importOriginal<typeof import("@/server/cases/devolver-al-agente")>()),
+    loTomoUnaPersona: vi.fn().mockResolvedValue(false),
+    noLoTomoUnaPersona: () => sql`true`,
+  };
+});
+
 vi.mock("@/server/cases/gap-analyzer", () => ({
   MEDIUM_CONFIDENCE_HIGH: 0.85,
   MEDIUM_CONFIDENCE_LOW: 0.6,

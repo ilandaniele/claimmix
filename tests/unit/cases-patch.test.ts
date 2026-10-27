@@ -301,72 +301,54 @@ describe("patchCase — FSM validation", () => {
   });
 });
 
-// ── patchCase — tomar el control (D-F2, G38) ─────────────────────────────────
+// ── patchCase — tomar el control (G38) ───────────────────────────────────────
 
-describe("patchCase — tomar el control (D-F2)", () => {
+describe("patchCase — tomar el control", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("con la reserva de extracción viva, pasar a requiere_especialista da FSM_INVALID_TRANSITION", async () => {
-    const infoFaltanteCase = {
-      ...listoCase,
-      status: "info_faltante",
-      extraction_lease_at: new Date().toISOString(),
-    };
-    setupPatchMocks([infoFaltanteCase], []);
+  const TOMAR = { status: "requiere_especialista", reason: "tomar_el_control" } as const;
+  const infoFaltanteWhatsapp = { ...listoCase, status: "info_faltante", channel: "whatsapp", extraction_lease_at: null };
 
-    await expect(
-      patchCase("case-1", { status: "requiere_especialista", reason: "tomar_el_control" }, adminActor, null, null)
-    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
-    expect(db.update).not.toHaveBeenCalled();
-  });
+  // La toma se puede con el agente a mitad de una corrida: el worker y los
+  // mensajeros miran si una persona tomó el caso antes de escribir o mandar.
+  it("con la reserva de extracción viva, tomar el control da ok", async () => {
+    const enCurso = { ...infoFaltanteWhatsapp, extraction_lease_at: new Date().toISOString() };
+    setupConfirmMocks([enCurso], [{ ...enCurso, status: "requiere_especialista" }]);
 
-  it("con la reserva vencida, pasar a requiere_especialista da ok", async () => {
-    const infoFaltanteCase = {
-      ...listoCase,
-      status: "info_faltante",
-      extraction_lease_at: new Date(Date.now() - 10 * 60_000).toISOString(),
-    };
-    const updatedCase = { ...infoFaltanteCase, status: "requiere_especialista" };
-    setupConfirmMocks([infoFaltanteCase], [updatedCase]);
-
-    const result = await patchCase(
-      "case-1",
-      { status: "requiere_especialista", reason: "tomar_el_control" },
-      adminActor,
-      null,
-      null
-    );
+    const result = await patchCase("case-1", TOMAR, adminActor, null, null);
     expect(result.case.status).toBe("requiere_especialista");
   });
 
-  it("sin reserva (extraction_lease_at null), pasar a requiere_especialista da ok", async () => {
-    const infoFaltanteCase = { ...listoCase, status: "info_faltante", extraction_lease_at: null };
-    const updatedCase = { ...infoFaltanteCase, status: "requiere_especialista" };
-    setupConfirmMocks([infoFaltanteCase], [updatedCase]);
+  it("con extraction_pending true, tomar el control da ok", async () => {
+    const pendiente = { ...infoFaltanteWhatsapp, extraction_pending: true };
+    setupConfirmMocks([pendiente], [{ ...pendiente, status: "requiere_especialista" }]);
 
-    const result = await patchCase(
-      "case-1",
-      { status: "requiere_especialista", reason: "tomar_el_control" },
-      adminActor,
-      null,
-      null
-    );
+    const result = await patchCase("case-1", TOMAR, adminActor, null, null);
+    expect(result.case.status).toBe("requiere_especialista");
+  });
+
+  it("con la reserva vencida, tomar el control da ok", async () => {
+    const vencida = { ...infoFaltanteWhatsapp, extraction_lease_at: new Date(Date.now() - 10 * 60_000).toISOString() };
+    setupConfirmMocks([vencida], [{ ...vencida, status: "requiere_especialista" }]);
+
+    const result = await patchCase("case-1", TOMAR, adminActor, null, null);
+    expect(result.case.status).toBe("requiere_especialista");
+  });
+
+  it("desde confirmacion_pendiente, tomar el control da ok", async () => {
+    const confirmacion = { ...infoFaltanteWhatsapp, status: "confirmacion_pendiente", channel: "whatsapp_sim" };
+    setupConfirmMocks([confirmacion], [{ ...confirmacion, status: "requiere_especialista" }]);
+
+    const result = await patchCase("case-1", TOMAR, adminActor, null, null);
     expect(result.case.status).toBe("requiere_especialista");
   });
 
   it("la toma y su auditoría van en un solo lote: nada se escribe aparte", async () => {
-    const infoFaltanteCase = { ...listoCase, status: "info_faltante", extraction_lease_at: null };
-    setupConfirmMocks([infoFaltanteCase], [{ ...infoFaltanteCase, status: "requiere_especialista" }]);
+    setupConfirmMocks([infoFaltanteWhatsapp], [{ ...infoFaltanteWhatsapp, status: "requiere_especialista" }]);
 
-    await patchCase(
-      "case-1",
-      { status: "requiere_especialista", reason: "tomar_el_control" },
-      adminActor,
-      null,
-      null
-    );
+    await patchCase("case-1", TOMAR, adminActor, null, null);
 
     expect(auditoriaSiQuedo).toHaveBeenCalledWith(
       expect.anything(),
@@ -384,16 +366,12 @@ describe("patchCase — tomar el control (D-F2)", () => {
   });
 
   it("una toma que también reasigna sigue auditada como cambio de estado", async () => {
-    const infoFaltanteCase = { ...listoCase, status: "info_faltante", extraction_lease_at: null };
-    setupConfirmMocks([infoFaltanteCase], [{ ...infoFaltanteCase, status: "requiere_especialista", assigned_to: "analyst-id" }]);
-
-    await patchCase(
-      "case-1",
-      { status: "requiere_especialista", reason: "tomar_el_control", assigned_to: "analyst-id" },
-      adminActor,
-      null,
-      null
+    setupConfirmMocks(
+      [infoFaltanteWhatsapp],
+      [{ ...infoFaltanteWhatsapp, status: "requiere_especialista", assigned_to: "analyst-id" }]
     );
+
+    await patchCase("case-1", { ...TOMAR, assigned_to: "analyst-id" }, adminActor, null, null);
 
     expect(vi.mocked(auditoriaSiQuedo).mock.calls[0]![1]).toMatchObject({
       eventType: "case.status_changed",
@@ -401,17 +379,58 @@ describe("patchCase — tomar el control (D-F2)", () => {
     });
   });
 
-  it("rechaza tomar el control con extraction_pending true aunque no haya reserva", async () => {
-    const infoFaltanteCase = {
-      ...listoCase,
-      status: "info_faltante",
-      extraction_lease_at: null,
-      extraction_pending: true,
-    };
-    setupPatchMocks([infoFaltanteCase], []);
+  it("por mail, FSM_INVALID_TRANSITION (es sólo para WhatsApp)", async () => {
+    setupPatchMocks([{ ...infoFaltanteWhatsapp, channel: "email_sim" }], []);
+
+    await expect(patchCase("case-1", TOMAR, adminActor, null, null)).rejects.toThrow(
+      expect.objectContaining({ code: "FSM_INVALID_TRANSITION" })
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("sin plan Pro, PLAN_REQUERIDO", async () => {
+    setupPatchMocks([infoFaltanteWhatsapp], []);
+
+    await expect(patchCase("case-1", TOMAR, basicActor, null, null)).rejects.toThrow(
+      expect.objectContaining({ code: "PLAN_REQUERIDO" })
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["recibido", "listo"])("desde %s, FSM_INVALID_TRANSITION", async (status) => {
+    setupPatchMocks([{ ...infoFaltanteWhatsapp, status }], []);
+
+    await expect(patchCase("case-1", TOMAR, adminActor, null, null)).rejects.toThrow(
+      expect.objectContaining({ code: "FSM_INVALID_TRANSITION" })
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("con el motivo de tomar pero otro destino, FSM_INVALID_TRANSITION", async () => {
+    setupPatchMocks([infoFaltanteWhatsapp], []);
 
     await expect(
-      patchCase("case-1", { status: "requiere_especialista", reason: "tomar_el_control" }, adminActor, null, null)
+      patchCase("case-1", { status: "confirmacion_pendiente", reason: "tomar_el_control" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  // D-F2: los demás pases a especialista siguen esperando al agente.
+  it("un pase a especialista sin el motivo, con la reserva viva, FSM_INVALID_TRANSITION", async () => {
+    const enCurso = { ...infoFaltanteWhatsapp, extraction_lease_at: new Date().toISOString() };
+    setupPatchMocks([enCurso], []);
+
+    await expect(
+      patchCase("case-1", { status: "requiere_especialista" }, adminActor, null, null)
+    ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("un pase a especialista sin el motivo, con extraction_pending true, FSM_INVALID_TRANSITION", async () => {
+    setupPatchMocks([{ ...infoFaltanteWhatsapp, extraction_pending: true }], []);
+
+    await expect(
+      patchCase("case-1", { status: "requiere_especialista" }, adminActor, null, null)
     ).rejects.toThrow(expect.objectContaining({ code: "FSM_INVALID_TRANSITION" }));
     expect(db.update).not.toHaveBeenCalled();
   });

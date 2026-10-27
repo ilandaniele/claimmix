@@ -284,9 +284,6 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
     plan: me.plan,
     channel: caseRow.channel,
     status: caseRow.status,
-    extractionPending: caseRow.extraction_pending,
-    extractionLeaseAt: caseRow.extraction_lease_at,
-    ahora: new Date(),
   });
   const puedeDevolverAlAgenteCaso = puedeDevolverAlAgente({
     puedeCambiarEstado: puedeCambiarEstadoCaso,
@@ -574,7 +571,7 @@ export default async function CaseDetailPage({ params, searchParams }: CaseDetai
           {/* La conversación, para todos los canales (AC11, AC12).
               El marco y el titulo los pone el componente: solo el sabe si hay
               mensajes, y sin ellos la tarjeta no tiene que existir. */}
-          <MessagesThread caseId={caseRow.id} />
+          <MessagesThread caseId={caseRow.id} estado={caseRow.status} />
 
           {/*
             * Análisis de fraude, para todos los canales: los indicios que salen

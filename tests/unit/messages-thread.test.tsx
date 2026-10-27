@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { StrictMode } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { vi, beforeEach, describe, it, expect } from "vitest";
+import { vi, beforeEach, afterEach, describe, it, expect } from "vitest";
 import { MessagesThread } from "../../src/app/(app)/casos/[id]/_components/MessagesThread";
 import type { EstadoDeRespuesta } from "@/core/whatsapp/puede-responder";
 import { ENCABEZADO_TRANSCRIPCION } from "@/core/adjuntos/transcripcion";
@@ -84,7 +84,7 @@ describe("MessagesThread", () => {
   it("AC12: renders null (no messages-thread element) when messages array is empty", async () => {
     mockFetch.mockReturnValue(makeJsonResponse({ messages: [] }));
 
-    const { container } = render(<MessagesThread caseId={CASE_ID} />);
+    const { container } = render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       expect(container.querySelector("[data-testid='messages-thread']")).toBeNull();
@@ -102,7 +102,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       const cards = screen.getAllByTestId("message-card");
@@ -117,7 +117,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       expect(screen.getByText("sender@example.com")).toBeInTheDocument();
@@ -131,7 +131,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       expect(screen.getByText("Reclamación por choque")).toBeInTheDocument();
@@ -146,7 +146,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       expect(screen.getByText(bodyText)).toBeInTheDocument();
@@ -162,7 +162,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       // The relative time element should contain "hace" (es-AR relative format)
@@ -181,7 +181,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       const card = screen.getByTestId("message-card");
@@ -202,7 +202,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       const card = screen.getByTestId("message-card");
@@ -219,7 +219,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       expect(screen.getByText(shortBody)).toBeInTheDocument();
@@ -236,7 +236,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       // Badge with text "2" should be visible
@@ -251,7 +251,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       // No badge text "0" should be present
@@ -264,7 +264,7 @@ describe("MessagesThread", () => {
 
     render(
       <StrictMode>
-        <MessagesThread caseId={CASE_ID} />
+        <MessagesThread caseId={CASE_ID} estado="info_faltante" />
       </StrictMode>
     );
 
@@ -277,7 +277,7 @@ describe("MessagesThread", () => {
     // Fetch never resolves during this assertion
     mockFetch.mockReturnValue(new Promise(() => {}));
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     // During loading, aria-busy skeleton elements should be present
     const busyEls = document.querySelectorAll("[aria-busy='true']");
@@ -287,7 +287,7 @@ describe("MessagesThread", () => {
   it("shows no messages-thread element on fetch error", async () => {
     mockFetch.mockReturnValue(makeJsonResponse({ error: { code: "INTERNAL_ERROR" } }, 500));
 
-    const { container } = render(<MessagesThread caseId={CASE_ID} />);
+    const { container } = render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       expect(container.querySelector("[data-testid='messages-thread']")).toBeNull();
@@ -301,7 +301,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       // "(sin asunto)" is the i18n fallback for null subject
@@ -316,7 +316,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       // Avatar shows "J" (first letter of "juan")
@@ -327,7 +327,7 @@ describe("MessagesThread", () => {
   it("el viewer ve '?' y no '[': su remitente llega como «[oculto]»", async () => {
     mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage({ from_addr: "[oculto]" })] }));
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => expect(screen.getByText("?")).toBeInTheDocument());
     expect(screen.queryByText("[")).not.toBeInTheDocument();
@@ -340,7 +340,7 @@ describe("MessagesThread", () => {
       })
     );
 
-    render(<MessagesThread caseId={CASE_ID} />);
+    render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
     await waitFor(() => {
       expect(screen.getByText("?")).toBeInTheDocument();
@@ -363,7 +363,7 @@ describe("MessagesThread", () => {
     it("muestra lo entrante y lo saliente en el orden en que llegan, cada uno con su autor", async () => {
       mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage(), respuesta()] }));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => {
         const cards = screen.getAllByTestId("message-card");
@@ -380,7 +380,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => {
         const cards = screen.getAllByTestId("message-card");
@@ -398,7 +398,7 @@ describe("MessagesThread", () => {
 
       render(
         <LocaleProvider locale="en-US">
-          <MessagesThread caseId={CASE_ID} />
+          <MessagesThread caseId={CASE_ID} estado="info_faltante" />
         </LocaleProvider>
       );
 
@@ -409,7 +409,7 @@ describe("MessagesThread", () => {
     it("lo que se mandó bien no lleva etiqueta de estado", async () => {
       mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta()] }));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByText("Agente")).toBeInTheDocument());
       expect(screen.queryByText("No se envió")).not.toBeInTheDocument();
@@ -419,7 +419,7 @@ describe("MessagesThread", () => {
     it("avisa cuando una respuesta no se envió", async () => {
       mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta({ estado_envio: "failed" })] }));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByText("No se envió")).toBeInTheDocument());
     });
@@ -427,7 +427,7 @@ describe("MessagesThread", () => {
     it("el mail que quedó a medio mandar no se muestra como entregado", async () => {
       mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta({ estado_envio: "queued" })] }));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByText("Sin confirmar")).toBeInTheDocument());
     });
@@ -442,7 +442,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByText("Simulado")).toBeInTheDocument());
       expect(screen.queryByText("(sin asunto)")).not.toBeInTheDocument();
@@ -452,7 +452,7 @@ describe("MessagesThread", () => {
     it("lo saliente lleva la inicial del agente aunque el viewer vea el remitente oculto", async () => {
       mockFetch.mockReturnValue(makeJsonResponse({ messages: [respuesta({ from_addr: "[oculto]" })] }));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByText("A")).toBeInTheDocument());
       expect(screen.queryByText("[")).not.toBeInTheDocument();
@@ -461,7 +461,7 @@ describe("MessagesThread", () => {
     it("avisa cuando se muestran sólo los últimos mensajes", async () => {
       mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage()], recortada: true }));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() =>
         expect(screen.getByText("Se muestran sólo los mensajes más recientes.")).toBeInTheDocument()
@@ -471,7 +471,7 @@ describe("MessagesThread", () => {
     it("y no avisa nada cuando está entera", async () => {
       mockFetch.mockReturnValue(makeJsonResponse({ messages: [makeMessage()], recortada: false }));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
       expect(screen.queryByText("Se muestran sólo los mensajes más recientes.")).not.toBeInTheDocument();
@@ -487,7 +487,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getAllByTestId("message-card")).toHaveLength(2));
       // "WhatsApp" sólo por la píldora de canal (I), una por tarjeta: si el
@@ -508,7 +508,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getAllByTestId("message-card")).toHaveLength(2));
       const [wa, mail] = screen.getAllByTestId("message-card");
@@ -521,7 +521,7 @@ describe("MessagesThread", () => {
         makeJsonResponse({ messages: [respuesta({ autor: "equipo" })] })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByText("Equipo")).toBeInTheDocument());
       expect(screen.queryByText("Agente")).not.toBeInTheDocument();
@@ -541,7 +541,7 @@ describe("MessagesThread", () => {
         makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       await user.type(textarea, "Ya está resuelto.");
@@ -572,7 +572,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       await user.type(textarea, "Ya está resuelto.");
@@ -588,7 +588,7 @@ describe("MessagesThread", () => {
         makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       expect(screen.getByText(/Podés responder hasta el/)).toBeInTheDocument();
@@ -603,7 +603,7 @@ describe("MessagesThread", () => {
         makeJsonResponse({ error: { code: "PLAN_REQUERIDO", message: "Disponible con el Plan Pro." } }, 403)
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       await user.type(textarea, "Ya está resuelto.");
@@ -631,7 +631,7 @@ describe("MessagesThread", () => {
         )
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       await user.type(textarea, "Ya está resuelto.");
@@ -653,7 +653,7 @@ describe("MessagesThread", () => {
         makeJsonResponse({ messages: [makeMessage()], recortada: false, respuesta: HABILITADA })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       await user.type(textarea, "Ya está resuelto.");
@@ -679,7 +679,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       await user.type(textarea, "Ya está resuelto.");
@@ -698,7 +698,7 @@ describe("MessagesThread", () => {
       mockFetch.mockReturnValueOnce(makeJsonResponse({ id: "outbound-1", estado: "sent" }));
       mockFetch.mockReturnValueOnce(makeJsonResponse({ error: { code: "INTERNAL_ERROR" } }, 500));
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       const textarea = await screen.findByPlaceholderText("Escribí la respuesta para el denunciante…");
       await user.type(textarea, "Ya está resuelto.");
@@ -719,7 +719,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByText("Disponible con el Plan Pro")).toBeInTheDocument());
       expect(screen.getByText("Responder por WhatsApp desde la app")).toBeInTheDocument();
@@ -735,7 +735,7 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() =>
         expect(
@@ -754,11 +754,88 @@ describe("MessagesThread", () => {
         })
       );
 
-      render(<MessagesThread caseId={CASE_ID} />);
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
 
       await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
       expect(screen.queryByPlaceholderText("Escribí la respuesta para el denunciante…")).not.toBeInTheDocument();
       expect(screen.queryByText("Disponible con el Plan Pro")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("sondeo", () => {
+    const AGENTE: EstadoDeRespuesta = { habilitada: false, motivo: "agente_activo", vence_en: null };
+    const HABILITADA: EstadoDeRespuesta = { habilitada: true, motivo: null, vence_en: "2026-09-26T12:00:00.000Z" };
+    const CAJA = "Escribí la respuesta para el denunciante…";
+
+    function hilo(messages: ReturnType<typeof makeMessage>[], respuesta: EstadoDeRespuesta) {
+      return makeJsonResponse({ messages, recortada: false, respuesta });
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      Reflect.deleteProperty(document, "visibilityState");
+    });
+
+    it("a los 5 s trae el mensaje nuevo sin recargar y refresca la página", async () => {
+      mockFetch.mockReturnValueOnce(hilo([makeMessage()], AGENTE));
+      mockFetch.mockReturnValue(hilo([makeMessage(), makeMessage({ id: "msg-002", body_text: "hello" })], AGENTE));
+
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
+      await waitFor(() => expect(screen.getAllByTestId("message-card")).toHaveLength(1));
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await waitFor(() => expect(screen.getAllByTestId("message-card")).toHaveLength(2));
+      expect(nav.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("sin novedades no refresca y espera el doble antes del pedido siguiente", async () => {
+      mockFetch.mockReturnValue(hilo([makeMessage()], AGENTE));
+
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
+      await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      expect(nav.refresh).not.toHaveBeenCalled();
+    });
+
+    it("con la pestaña oculta no pide nada, y al volver pide en el acto", async () => {
+      mockFetch.mockReturnValue(hilo([makeMessage()], AGENTE));
+
+      render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
+      await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
+
+      Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    });
+
+    it("al cambiar el estado (Tomar el control) pide en el acto y aparece la caja", async () => {
+      mockFetch.mockReturnValueOnce(hilo([makeMessage()], AGENTE));
+      mockFetch.mockReturnValue(hilo([makeMessage()], HABILITADA));
+
+      const { rerender } = render(<MessagesThread caseId={CASE_ID} estado="info_faltante" />);
+      await waitFor(() => expect(screen.getByTestId("message-card")).toBeInTheDocument());
+      expect(screen.queryByPlaceholderText(CAJA)).not.toBeInTheDocument();
+
+      rerender(<MessagesThread caseId={CASE_ID} estado="requiere_especialista" />);
+
+      expect(await screen.findByPlaceholderText(CAJA)).toBeInTheDocument();
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
 });
@@ -767,7 +844,7 @@ describe("la página del caso", () => {
   it("muestra la conversación para todos los canales, no sólo mail", () => {
     // Estaba detrás de `isEmailCase &&`: un caso de WhatsApp no la veía.
     const pagina = readFileSync("src/app/(app)/casos/[id]/page.tsx", "utf8");
-    const hilo = "<MessagesThread caseId={caseRow.id} />";
+    const hilo = "<MessagesThread caseId={caseRow.id} estado={caseRow.status} />";
     expect(pagina).toContain(hilo);
 
     const antes = pagina.slice(0, pagina.indexOf(hilo)).trimEnd();

@@ -1533,9 +1533,11 @@ parte G y la parte H.
     avanzado).
   - **Qué hacer:** pedir acceso avanzado a `whatsapp_business_management` y
     `whatsapp_business_messaging`. Meta pide un video por permiso que muestre cómo lo usa la
-    app. El de mensajería se graba en dev: una persona escribe al número del negocio, contesta
-    el agente, y en el caso se toca «Tomar el control» y se responde desde la caja de la
-    conversación hasta que el mensaje llega a WhatsApp. El de gestión se graba en WhatsApp
+    app. El de mensajería se graba en dev: una persona escribe una denuncia nueva al número del
+    negocio, el agente contesta pidiendo un dato, y en ese caso se toca «Tomar el control» y se
+    responde desde la caja de la conversación hasta que el mensaje llega a WhatsApp. El botón
+    sólo aparece mientras el caso está en «Falta información» o «Confirmación pendiente»; en un
+    caso que ya pasó a «Requiere especialista» o se cerró no está. El de gestión se graba en WhatsApp
     Manager sobre la WABA de prueba, nunca la de producción: Plantillas de mensajes > Crear
     plantilla. Grabar no le cambia nada al número: no se registra de nuevo ni se mueve de WABA.
   - **Salió bien si:** los dos permisos figuran con acceso avanzado en el panel.

@@ -29,6 +29,7 @@ import { getUserRowOrThrow } from "@/lib/auth/user-row";
 import { casillaDeGmail } from "@/lib/email/reserved";
 import { getT, type ClaveDelServidor, type Locale } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { ultimoValor } from "@/lib/ultimo-valor";
 import { abrirInvitacion, leerCookieDeInvitacion, resumenDeInvitacion } from "@/server/alta/invitacion";
 import { urlDelOtroAmbiente } from "@/server/ambiente/de-otro-ambiente";
 
@@ -56,8 +57,6 @@ const ERRORES: Record<string, ClaveDelServidor> = {
   intentos: "login.errores.demasiados_intentos",
   falla: "alta.correo.error.falla",
 };
-
-const ultimo = (v: string | string[] | undefined) => (Array.isArray(v) ? v.at(-1) : v);
 
 function Tarjeta({ titulo, locale, children }: { titulo: string; locale: Locale; children: React.ReactNode }) {
   return (
@@ -90,7 +89,7 @@ export default async function InvitacionPage({
   const locale = await getServerLocale();
   const t = getT(locale);
 
-  if (ultimo(e) === "rechazada") {
+  if (ultimoValor(e) === "rechazada") {
     return (
       <Tarjeta titulo={t("invitacion.rechazada.titulo")} locale={locale}>
         <p className="text-sm text-slate-600">{t("invitacion.rechazada.texto")}</p>
@@ -98,7 +97,7 @@ export default async function InvitacionPage({
     );
   }
 
-  const enlace = ultimo(crudo) ?? (await leerCookieDeInvitacion());
+  const enlace = ultimoValor(crudo) ?? (await leerCookieDeInvitacion());
   const datos = abrirInvitacion(enlace);
   // Una falla de la base tira y muestra la pantalla de error: nunca se confunde con «vencida».
   const resumen = datos && enlace ? await resumenDeInvitacion(datos) : null;
@@ -156,7 +155,7 @@ export default async function InvitacionPage({
     );
   }
 
-  const motivo = ultimo(e);
+  const motivo = ultimoValor(e);
   const claveError = motivo !== undefined && Object.hasOwn(ERRORES, motivo) ? ERRORES[motivo] : null;
   const conSesion = usuario !== undefined && usuario.emailVerified === true;
   const casilla = casillaDeGmail(datos.e);

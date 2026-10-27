@@ -411,6 +411,7 @@ describe("PUT", () => {
     it.each([
       ["un proveedor de correo abierto", { dominio: "gmail.com" }, "dominio_publico"],
       ["un dominio con mayúsculas de un proveedor abierto", { dominio: "Outlook.COM" }, "dominio_publico"],
+      ["un proveedor de internet argentino", { dominio: "fibertel.com.ar" }, "dominio_publico"],
       ["algo sin forma de dominio", { dominio: "no es un dominio" }, "dominio_invalido"],
       ["un dominio sin punto", { dominio: "empresa" }, "dominio_invalido"],
       ["un mail en lugar del dominio", { dominio: "ana@empresa.com" }, "dominio_invalido"],

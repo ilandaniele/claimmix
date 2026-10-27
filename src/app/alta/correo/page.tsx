@@ -16,6 +16,7 @@ import Link from "next/link";
 
 import { getT, type ClaveDelServidor, type Locale } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { ultimoValor } from "@/lib/ultimo-valor";
 import { abrirToken } from "@/server/alta/token-de-registro";
 
 import { crearCuentaDesdeCorreo } from "./actions";
@@ -37,8 +38,6 @@ const ERRORES: Record<string, ClaveDelServidor> = {
   falla: "alta.correo.error.falla",
 };
 
-const ultimo = (v: string | string[] | undefined) => (Array.isArray(v) ? v.at(-1) : v);
-
 function Tarjeta({ titulo, locale, children }: { titulo: string; locale: Locale; children: React.ReactNode }) {
   return (
     <main lang={locale} className="flex min-h-dvh items-center justify-center bg-slate-50 px-4 py-10">
@@ -56,7 +55,7 @@ export default async function AltaCorreoPage({
   searchParams: Promise<{ t?: string | string[]; e?: string | string[] }>;
 }) {
   const { t: crudo, e } = await searchParams;
-  const enlace = ultimo(crudo);
+  const enlace = ultimoValor(crudo);
   const datos = abrirToken(enlace);
   // El idioma en que pidió el alta; sin enlace válido, el de este navegador.
   const locale = datos?.locale ?? (await getServerLocale());
@@ -73,7 +72,7 @@ export default async function AltaCorreoPage({
     );
   }
 
-  const motivo = ultimo(e);
+  const motivo = ultimoValor(e);
   const claveError = motivo !== undefined && Object.hasOwn(ERRORES, motivo) ? ERRORES[motivo] : null;
 
   return (

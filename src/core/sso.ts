@@ -34,6 +34,13 @@ const PROVEEDORES_PUBLICOS = new Set([
   "me", "mac", "proton", "protonmail", "pm", "aol", "gmx", "zoho", "mail", "fastmail",
   "yandex", "hey", "tutanota", "tuta",
 ]);
+// Casillas de los proveedores de internet argentinos: las usan las PyMEs y son de todos sus clientes.
+// Van como dominios completos y por igualdad exacta: una etiqueta sola atraparía, por ejemplo, ciudad.gob.ar.
+// La lista es una sola: también cierra el SSO (`/api/admin/sso`) y la invitación de un espacio en prueba (`/api/admin/users`).
+const DOMINIOS_PUBLICOS = new Set([
+  "fibertel.com.ar", "speedy.com.ar", "arnet.com.ar", "ciudad.com.ar", "uolsinectis.com.ar",
+  "sinectis.com.ar", "telecentro.com.ar", "telecentro.net.ar", "infovia.com.ar",
+]);
 const SEGUNDO_NIVEL = new Set(["com", "co", "net", "org", "gob", "gov", "edu"]);
 
 /**
@@ -42,10 +49,17 @@ const SEGUNDO_NIVEL = new Set(["com", "co", "net", "org", "gob", "gov", "edu"]);
  * persona con una cuenta de Gmail entraría a su aseguradora.
  */
 export function esDominioPublico(dominio: string): boolean {
-  const etiquetas = normalizarDominio(dominio).split(".");
+  const normalizado = normalizarDominio(dominio);
+  const etiquetas = normalizado.split(".");
   const tieneForma =
     etiquetas.length === 2 || (etiquetas.length === 3 && SEGUNDO_NIVEL.has(etiquetas[1]));
-  return tieneForma && PROVEEDORES_PUBLICOS.has(etiquetas[0]);
+  return DOMINIOS_PUBLICOS.has(normalizado) || (tieneForma && PROVEEDORES_PUBLICOS.has(etiquetas[0]));
+}
+
+/** El dominio de una dirección que puede ser de la empresa de un espacio, o null si no es una dirección o es de un proveedor abierto. */
+export function dominioDeEmpresa(email: string): string | null {
+  const dominio = dominioDelMail(email);
+  return dominio && !esDominioPublico(dominio) ? dominio : null;
 }
 
 export type MotivoSso =

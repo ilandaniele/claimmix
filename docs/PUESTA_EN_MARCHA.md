@@ -522,12 +522,18 @@ WABA y el cliente OAuth de Google (`docs/PROMOCION.md:572-574`). No lleva base p
 que el alta termina directo en la bandeja.
 
 **El cliente de dev está partido en dos espacios.** El alta del paso 3 crea un espacio nuevo,
-«el espacio de autoalta», con la dirección del dueño que no es de operador. Ahí van el Gmail
-del paso 7, el segundo usuario del paso 8 y la denuncia por correo del paso 10. dev no tiene
-número por código (la bandera va en 1, pero el dueño no elige esa opción en dev: ver el paso
-1), así que la denuncia por WhatsApp del paso 9 entra por el número de la plataforma y cae en
-otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
-`.env.example:372`). El paso 12 lee los dos.
+«el espacio de autoalta», con la dirección del dueño que no es de operador. Ahí van el alta,
+su revisión del paso 4 y el segundo usuario del paso 8. Las dos denuncias caen en el otro
+espacio, el de la plataforma (el de `WHATSAPP_TENANT_ID`, `.env.example:372`), en el que entra
+la cuenta de operador:
+- La Gmail de Veltra ya está conectada y activa en el espacio de la plataforma, y una casilla
+  atiende a un solo espacio. Por eso el paso 7 sólo lo confirma, y la denuncia por correo del
+  paso 10 entra por ahí.
+- dev no tiene número por código (la bandera va en 1, pero el dueño no elige esa opción en
+  dev: ver el paso 1). Por eso la denuncia por WhatsApp del paso 9 entra por el número de la
+  plataforma.
+
+El paso 12 lee los dos espacios.
 
 - [ ] **1. Configuración (parte del lote de A12).**
   - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos que falten.
@@ -649,15 +655,18 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
       regenerarlo.
   - **Fuentes:** `.env.example:372`; `src/app/api/health/route.ts:407-415`, `:424`;
     `docs/whatsapp-setup.md:46-48`.
-- [ ] **7. Gmail.**
-  - **Quién:** [Dueño].
-  - **Dónde:** `/configuracion` del espacio de autoalta, «Conectar Gmail».
-  - **Qué hacer:** conectar la Gmail del mail agente de dev (A3). La casilla conectada
-    también manda las respuestas del agente. **Aviso:** Google muestra una
-    pantalla de app no verificada. Es esperable (A6). Para seguir, entrar al enlace de
-    opciones avanzadas de esa pantalla y continuar hacia la app.
-  - **Salió bien si:** vuelve con `?gmail=connected` y la casilla aparece en el panel.
-  - **Si falla:** el resultado dice por qué.
+- [ ] **7. Gmail: la de Veltra, ya conectada.**
+  - **Quién:** [Claude] lo confirma en la base; [Dueño] mira el panel.
+  - **Dónde:** `/configuracion` del espacio de la plataforma, con la cuenta de operador.
+  - **Qué hacer:** nada que conectar. La Gmail del mail agente de dev (A3, D3) es la de Veltra,
+    y ya está conectada y activa en el espacio de la plataforma. Esa casilla también manda las
+    respuestas del agente. No conectarla en el espacio de autoalta: una casilla atiende a un
+    solo espacio y la vuelta da `mailbox_taken`. El espacio de autoalta queda sin casilla.
+  - **Salió bien si:** la casilla figura activa en el panel, sin error.
+  - **Si falla:** reconectarla desde el mismo panel, «Conectar Gmail». **Aviso:** Google
+    muestra una pantalla de app no verificada. Es esperable (A6). Para seguir, entrar al
+    enlace de opciones avanzadas de esa pantalla y continuar hacia la app. Si sale bien,
+    vuelve con `?gmail=connected`. Si no, el resultado dice por qué.
     - `missing_google_config`: faltan `GMAIL_CLIENT_*`.
     - `missing_refresh_token`, `otro_ambiente`, `mailbox_taken`.
     - `save_failed`: no se pudo guardar la casilla.
@@ -666,7 +675,7 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
     - Error del servidor a la vuelta: falta `GMAIL_TOKEN_ENCRYPTION_KEY`, porque el token se
       cifra antes de guardar.
   - **Fuentes:** `src/lib/i18n/es-AR.ts:678`; `/api/admin/gmail-accounts/connect`;
-    `src/app/api/admin/gmail-accounts/callback/route.ts:93`;
+    `src/app/api/admin/gmail-accounts/callback/route.ts:84`, `:93`, `:125`;
     `src/lib/security/cifrado.ts:38-39`.
 - [ ] **8. Segundo usuario.**
   - **Quién:** [Dueño].
@@ -704,11 +713,10 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
   - **Fuentes:** `scripts/rehearse-conversations.mts:340`.
 - [ ] **10. Denuncia por mail.**
   - **Quién:** [Dueño].
-  - **Dónde:** otra casilla; la bandeja del espacio de autoalta.
-  - **Qué hacer:** un mail a la casilla conectada en el paso 7, con un siniestro de ejemplo.
-    Por ejemplo, el incendio con una persona internada, que tiene que derivar a un
-    especialista.
-  - **Salió bien si:** el caso aparece en el espacio de autoalta con canal de correo, en
+  - **Dónde:** otra casilla; la bandeja del espacio de la plataforma.
+  - **Qué hacer:** un mail a la Gmail de Veltra del paso 7, con un siniestro de ejemplo. Por
+    ejemplo, el incendio con una persona internada, que tiene que derivar a un especialista.
+  - **Salió bien si:** el caso aparece en el espacio de la plataforma con canal de correo, en
     `requiere_especialista`, y la respuesta llega a la casilla que mandó. Con el push de dev
     el caso entra en minutos.
   - **Si falla:** sin push, entra con el sondeo diario de `/api/cron/gmail-poll` a las 03:00
@@ -727,13 +735,14 @@ otro espacio: el de la plataforma (el de `WHATSAPP_TENANT_ID`,
   - **Fuentes:** `src/lib/i18n/es-AR.ts:774`.
 - [ ] **12. Consumo de los dos espacios.**
   - **Quién:** [Dueño].
-  - **Dónde:** en el espacio de autoalta, `/metricas` y `/admin/facturacion`. En el espacio de
-    la plataforma, lo mismo, con la cuenta de operador. Para todos los espacios,
+  - **Dónde:** en el espacio de la plataforma, `/metricas` y `/admin/facturacion`, con la
+    cuenta de operador. En el espacio de autoalta, lo mismo. Para todos los espacios,
     `/admin/cartera`.
   - **Qué hacer:** anotar el gasto de cada espacio y los casos de los pasos 9 y 10.
-  - **Salió bien si:** el caso de WhatsApp suma en el espacio de la plataforma y el de correo
-    en el de autoalta.
-  - **Si falla:** si un caso no suma en ninguno, avisar a Claude. `/configuracion` muestra el tope
+  - **Salió bien si:** los dos casos suman en el espacio de la plataforma, y el de autoalta
+    queda en 0.
+  - **Si falla:** si un caso no suma, o el espacio de autoalta muestra gasto, avisar a Claude.
+    `/configuracion` muestra el tope
     del proyecto entero (`MONTHLY_BUDGET_USD`), no lo que gastó cada espacio.
   - **Fuentes:** `src/app/(app)/metricas`; `src/app/(app)/admin/facturacion`;
     `src/app/(app)/admin/cartera`; `src/app/(app)/configuracion/page.tsx:168-169`.
@@ -1206,9 +1215,12 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     un mail por día. Esperar al mes siguiente o que el dueño active el espacio con cuota 0
     desde `/admin/altas`.
   - **Fuentes:** `docs/PROMOCION.md:733-734`; `src/server/notify/specialist-alert.ts:344-352`.
-- [ ] **15. Las 24 h siguientes: los logs.**
-  - **Quién:** [Claude].
-  - **Dónde:** los logs de prd.
+- [ ] **15. Los logs, justo después de cada prueba del dueño en prd.**
+  - **Quién:** [Dueño] avisa que terminó una prueba; [Claude] mira los logs.
+  - **Dónde:** los logs de prd (`vercel logs` sobre claimmix.vercel.app).
+  - **Por qué no 24 h:** el plan Hobby guarda los logs de runtime menos de una hora (unos 30
+    minutos vistos el 26/10), así que una revisión al día siguiente no encuentra nada. Se mira
+    dentro de esa ventana, después de cada prueba de los pasos 4 a 14.
   - **Qué hacer:** buscar los eventos `whatsapp.webhook.numero_desconocido` y
     `webhooks_gmail.mailbox_not_connected`; las respuestas 403 de `/api/auth` con el código
     `INVALID_ORIGIN` de better-auth (se buscan por estado 403 en `/api/auth`: no es un evento
@@ -1421,8 +1433,8 @@ que tenía en la versión anterior de esta guía.
 | 12 | `.env.example` completo y fijado por un test (P11) | Las variables que faltan dejan de faltar en silencio | Nada | Un test falla si el código lee una variable que no está en `.env.example`. **Hecho en #461** | chico | nada |
 | 13 | Registro único de topes, `src/lib/topes.ts` (P0) | Los topes se leen en un solo lugar | Nada | Todos los topes salen de ese archivo. **Hecho en #484**; `tests/unit/lib/topes-unico.test.ts` lo fija | mediano | nada. Los ítems 3, 7 y 10 se pueden hacer sin él |
 | 14 | Barrido programado de QA en `barrer-trabados.yml` (P13) | Nada que disparar a mano | Nada | La corrida programada aparece en Actions. **Hecho en el lote de las notas del 14/10**, cada 2 h como prd. | chico | Nada (cadencia fijada en cada 2 h) |
-| 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso. **Hecho en la rama `facturacion/costo-por-caso`**, con la migración 0054 (`ai_usage.case_id`, nula, sin FK, índice ni backfill; el acumulador de la 0046 no se toca). Cada llamada a la IA que tiene el caso a mano lo anota (extracción, deliberación, lectura de documentos y presupuestos, mensajes tardíos, transcripción, pregunta del caso, redactor, asistente por caso); sin caso quedan el asistente general, la demo y las condiciones de póliza, y `recordUsage` vuelve `null` todo id que no sea un uuid (la demo manda `demo`). La cifra sale dentro de la consulta del gasto de `computeStatement` (el gasto se agrupa por caso y se une a `cases`; siguen siendo tres `enTenant`): mediana y p95 de lo que gastó cada caso real creado en el mes, a precio de lista y a cuatro decimales, con la cantidad de casos. Sigue en el mes UTC, como el resto de `/admin/facturacion` (ítem 17). La liquidación congelada guarda el resumen y no la lista; las anteriores a la 0054 dicen «sin datos» y no se recalculan. `/api/health` pasa a exigir la columna (`down` si falta) y `VERSION_ESPERADA` es 54. **Falta aplicar la 0054, a mano, antes del merge:** código sin la columna da 42703 en cada INSERT a `ai_usage`, `recordUsage` lo traga y ningún gasto se anota (los topes quedan ciegos). Orden, con `node scripts/migrate.mjs --apply` por TCP: QA (`ep-wispy-flower`), dev (`ep-proud-resonance`, también la de los secretos `DATABASE_URL` del CI), `STAGING_DATABASE_URL` y `node scripts/migrar-bases.mjs --env prd` (control, rama de ensayo y bases `t_<hex>`); la cabecera de la migración tiene la comprobación y la vuelta atrás | grande | Decisión D13 (elegida el 24/10) |
-| 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores | mediano | Decisión: revierte que `/alta` no revele qué empresas existen (`docs/SEGURIDAD.md`) |
+| 15 | Costo por caso: una migración que agrega el caso al uso de IA, con mediana y p95 (P5) | Sabe cuánto cuesta cada denuncia, sin C1 | Nada | `/admin/facturacion` muestra el costo por caso. **Hecho en #517, en los tres ambientes desde el 26/10 (#518 y #519)**, con la migración 0054 (`ai_usage.case_id`, nula, sin FK, índice ni backfill; el acumulador de la 0046 no se toca). Cada llamada a la IA que tiene el caso a mano lo anota (extracción, deliberación, lectura de documentos y presupuestos, mensajes tardíos, transcripción, pregunta del caso, redactor, asistente por caso); sin caso quedan el asistente general, la demo y las condiciones de póliza, y `recordUsage` vuelve `null` todo id que no sea un uuid (la demo manda `demo`). La cifra sale dentro de la consulta del gasto de `computeStatement` (el gasto se agrupa por caso y se une a `cases`; siguen siendo tres `enTenant`): mediana y p95 de lo que gastó cada caso real creado en el mes, a precio de lista y a cuatro decimales, con la cantidad de casos. Sigue en el mes UTC, como el resto de `/admin/facturacion` (ítem 17). La liquidación congelada guarda el resumen y no la lista; las anteriores a la 0054 dicen «sin datos» y no se recalculan. `/api/health` pasa a exigir la columna (`down` si falta) y `VERSION_ESPERADA` es 54. **La 0054 se aplicó a mano en las seis bases el 25/10, antes del merge**, porque código sin la columna da 42703 en cada INSERT a `ai_usage`, `recordUsage` lo traga y ningún gasto se anota (los topes quedan ciegos). Orden, con `node scripts/migrate.mjs --apply` por TCP: QA (`ep-wispy-flower`), dev (`ep-proud-resonance`, también la de los secretos `DATABASE_URL` del CI), `STAGING_DATABASE_URL` y `node scripts/migrar-bases.mjs --env prd` (control, rama de ensayo y bases `t_<hex>`); la cabecera de la migración tiene la comprobación y la vuelta atrás | grande | Decisión D13 (elegida el 24/10) |
+| 16 | `/alta` con un dominio que ya tiene espacio: botón «pedir acceso» y mail a sus administradores, con respuesta neutra (P7) | Menos pedidos a mano | Llega al espacio de su empresa sin escribirle a nadie | Un alta con un dominio existente manda el mail a los administradores. **Hecho en la rama `alta/pedir-acceso`** (#517, que trae las filas vecinas de esta guía, ya entró; falta abrir el PR a qa), sin migración ni variables nuevas: la persona con el correo verificado y sin perfil ve «Pedir acceso» junto a «Mi empresa ya usa ClaimMix», haya o no un espacio para su dominio, y no lo ve con una dirección de proveedor abierto (gmail, fibertel, …: no habría a quién avisarle, y eso sale de la dirección sola, no de la base, así que no dice qué empresas son clientes); `pedirAcceso()` (`src/app/alta/actions.ts`) pasa la misma guarda que `crearMiEspacio`, agenda `pedirAccesoAlEspacio` (`src/server/alta/pedir-acceso.ts`) con `after()`, deja la cookie `cm_pedido` de 2 minutos con el id de la sesión (sólo la escribe la acción: un enlace no la falsifica) y vuelve siempre a `/alta`, que muestra un texto fijo e igual para todos, sin tocar la base ni ningún contador antes de contestar. Ya respondida la persona: sale sin hacer nada con un dominio público o sin remitente del sistema; un pedido por persona y día (`alta:acceso-persona`); una consulta de hasta 20 administradores activos, verificados y no bloqueados del mismo dominio, de espacios con servicio (ni suspendidos ni dados de baja), sin las direcciones de operación ni la de quien pide; cinco pedidos por espacio y día (`alta:acceso-espacio`, que vuelve si no salió ningún mail); y un mail de texto fijo por administrador, en su idioma (`correo.acceso.*`, es-AR y en-US), del tipo `acceso`, que tiene su tope global y no cuenta por dirección ni por IP (por administrador rige el tope del espacio). `esDominioPublico` suma los proveedores de internet argentinos, como dominios completos por igualdad exacta (`fibertel.com.ar`, `speedy.com.ar`, `arnet.com.ar`, `ciudad.com.ar`, `uolsinectis.com.ar`, `sinectis.com.ar`, `telecentro.com.ar`, `telecentro.net.ar`, `infovia.com.ar`), y como es la lista de todos, el cambio llega también a dos endpoints: un espacio en prueba con administrador en `@fibertel.com.ar` ya no invita a otra casilla del mismo proveedor (`DOMINIO_NO_PERMITIDO`, igual que con Gmail) y ningún espacio puede reclamar esos dominios para el SSO (`dominio_publico`); es lo buscado, son casillas de cualquiera, y los tests de `/api/admin/users` y `/api/admin/sso` lo fijan. El mail lleva la dirección de quien pide y el enlace a `/admin/users`, sin el nombre de la empresa ni el de nadie. No se guarda nada. **Falta la prueba en QA, que corre el dueño:** `alta:probar` no ejecuta `after()` y usa un remitente falso, así que sólo sirve el flujo real: con la cuenta de prueba de un dominio que tiene un administrador en QA y una persona nueva de ese dominio, verificar el correo, apretar «Pedir acceso» y ver que llega el mail al administrador (y que apretar de nuevo no manda otro) | mediano | Decisión D13 (elegida el 24/10): no revierte que `/alta` no revele qué empresas existen, porque la respuesta es igual con o sin espacio (`docs/SEGURIDAD.md` §4 y §11.12) |
 | 17 | Comprobar en qué zona horaria cortan el día y el mes del presupuesto, y fijarla (P14) | Los cortes coinciden con el mes que mira | El corte diario cae a una hora previsible | Un test fija la zona. **Hecho en #514**, con el supuesto (mes argentino): el guardia del gasto (`checkBudget` y el del demo), `/api/health` y el aviso de topes cuentan el día y el mes desde la medianoche argentina (03:00 UTC), con un solo «ahora» por cálculo para que el día y el mes no caigan en lados distintos de la medianoche. Los tests usan instantes UTC fijos y pasan igual con `TZ=UTC` y `TZ=Asia/Tokyo`. Siguen en UTC, a propósito, el limitador, el cupo de la 0048, las ventanas del barrido, `/admin/facturacion` y `/admin/cartera`. Efecto visible: el tope diario de tokens se renueva a las 00:00 de acá y no a las 21:00 | chico | Decisión: mes argentino o mes de la factura de Google (supuesto: argentino) |
 | 18 | Correo que no sea Gmail (nuevo). Hoy no existe: sólo hay webhooks de Gmail y de WhatsApp (`src/app/api/webhooks`). Mientras tanto, el formulario web de `/denuncia/[slug]`, que se prende en `/agente`, solapa «Formulario web» | Puede vender a quien no usa Gmail | Conecta su correo, sea cual sea | Un cliente con otro proveedor recibe denuncias por correo | grande | Decisión: qué proveedores |
 | 19 | Cobro y activación sin operador (nuevo). Hoy no existe: activar es un paso del operador | No activa a mano cada cliente que paga | Paga y queda activo solo | Un pago de prueba activa el espacio sin tocar `/admin/altas` | grande | Decisión: medio de pago y lo que pida el abogado |
@@ -1481,25 +1493,32 @@ parte G y la parte H.
   - **Fuentes:** `docs/whatsapp-setup.md:462-463`.
 - [ ] **T2. La app ClaimMix como Tech Provider.**
   - **Quién:** [Dueño].
-  - **Dónde:** panel de la app ClaimMix en Meta for Developers > Casos de uso > WhatsApp; la
-    conexión con el negocio, en Configuración > Básica > Verificación. Guías de Meta:
+  - **Dónde:** `https://developers.facebook.com/apps` > ClaimMix > Casos de uso > «Personalizar»
+    (el lápiz) en WhatsApp > «Tech Provider onboarding» en el menú de la izquierda; la conexión
+    con el negocio, en Configuración > Básica > Verificación. Guías de Meta:
     https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers/
     (Tech Provider),
     https://developers.facebook.com/documentation/development/release/business-verification
     (conectar la app al negocio verificado) y
     https://developers.facebook.com/documentation/development/release/access-verification
-    (verificación de acceso).
-  - **Qué hacer:** empezar el onboarding de Tech Provider desde el caso de uso WhatsApp y
-    completar lo que pida la pantalla. Conectar la app al negocio Veltra ya verificado. La
-    verificación de acceso se pide en el mismo panel cuando Meta la habilita, aunque eso llegue
-    después de T3: sin ella, un cliente que no tiene un rol en la app recibe el error 100 al
-    conectar. T9 no arranca sin ella.
-  - **Salió bien si:** el caso de uso WhatsApp no muestra pasos pendientes del onboarding, la
-    app figura conectada al negocio Veltra verificado y, al final, la verificación de acceso
-    figura aprobada.
+    (Meta dice ahí que la verificación de acceso ya no hace falta).
+  - **Qué hacer:**
+    - En «Regístrate como proveedor de tecnología», elegir «Independent Tech Provider» (sin
+      socio; el identificador de un socio no hace falta) e «Iniciar registro». Ese botón acepta
+      las Condiciones para proveedores de tecnología.
+    - El paso 1, «Verify your business», tendría que figurar completo por A5. Si no, en
+      Configuración > Básica > Verificación, «Iniciar verificación» (o «+ Verificación del
+      negocio») y elegir Veltra. Quien la conecta tiene que ser administrador del portfolio y
+      de la app.
+    - El paso 2, «App Review», es T3, con T5 hecho antes.
+    - La verificación de acceso ya no se pide: Meta la sacó. T9 no la espera.
+  - **Salió bien si:** el paso 1 figura completo y la app figura conectada al negocio Veltra
+    verificado. El paso 2 se cierra con T3.
   - **Si falla:** si el negocio no aparece para conectar, la app tiene que estar dentro del
     portfolio Veltra (ahí está hoy) y quien la conecta tiene que ser administrador de ese
-    portfolio. Si Meta pide la verificación del negocio, volver a T1.
+    portfolio. Si Meta pide la verificación del negocio, volver a T1. Meta saca la condición
+    de Tech Provider si la verificación del negocio vence, si la app se desconecta del
+    negocio o si restringe la cuenta.
   - **Fuentes:** `docs/whatsapp-setup.md:467`, `:501`.
 - [ ] **T3. La revisión de la app (App Review).**
   - **Quién:** [Dueño].
@@ -1637,9 +1656,9 @@ parte G y la parte H.
     `meta_borrado.atendido` con una baja y no `meta_borrado.sin_coincidencia`.
   - **Si falla:** si los ids no calzan, no pasar a T9 y avisarle a Claude; mientras tanto los
     pedidos de borrado se atienden a mano, como dice «Si un cliente pide que se borren sus
-    datos» (`docs/whatsapp-setup.md:586`). Un error 100 al conectar quiere decir que falta la
-    verificación de acceso (T2) o que quien conecta no tiene un rol en la app. Los demás
-    errores de la ventana de Meta, en el link de errores de T4.
+    datos» (`docs/whatsapp-setup.md:586`). Si conectar falla sólo para quien no tiene un rol
+    en la app, falta el acceso avanzado de T3: Meta devuelve el error 200 con las cuentas de
+    otros. Los demás errores de la ventana de Meta, en el link de errores de T4.
   - **Fuentes:** `docs/whatsapp-setup.md:485-500`, `:597-613`;
     `src/app/conectar-whatsapp/meta-sdk.ts:184-197`; `src/app/api/meta/borrado/route.ts`;
     `src/server/alta/panel-operador.ts:921-961`.
@@ -1788,7 +1807,7 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   leídos) y `gmail.send`.
 - **D13.** Las decisiones de los ítems 7, 10, 14, 15, 16, 17, 18 y 19 del plan. **24/10:** el
   dueño pidió aplicar las recomendaciones; 10 y 14 ya estaban hechos y el resto se hace de a
-  uno. El 7 y el 17 van juntos en #514. El 15 va solo, en la rama `facturacion/costo-por-caso`, porque trae una migración (la 0054) que aplica el dueño a mano.
+  uno. El 7 y el 17 van juntos en #514. El 15 va solo, en la rama `facturacion/costo-por-caso`, porque trae una migración (la 0054) que aplica el dueño a mano. El 16 va solo, en la rama `alta/pedir-acceso`, sin migración: responde igual con o sin espacio y manda el aviso desde `after()`.
 - **D14. MCP de WhatsApp.** Opcional, sobre la API oficial; no hace falta para el alta y le da
   el token permanente a código de terceros (`docs/whatsapp-setup.md:93-128`).
   **Recomendación: no instalarlo por ahora.** Si el dueño lo quiere, el paso M1. **Elegido el
@@ -1856,7 +1875,7 @@ arriba.
     https://developers.facebook.com/documentation/development/release/business-verification
     (conectar la app al negocio),
     https://developers.facebook.com/documentation/development/release/access-verification
-    (verificación de acceso),
+    (verificación de acceso: Meta dice que ya no hace falta),
     https://developers.facebook.com/documentation/development/create-an-app/app-dashboard/basic-settings
     (configuración básica),
     https://developers.facebook.com/documentation/pages-api/create-an-app (el ícono),

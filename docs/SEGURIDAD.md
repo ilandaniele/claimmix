@@ -58,7 +58,8 @@ la sección 13.
 | ¿Qué roles hay? | Cinco: `owner`, `admin`, `specialist`, `analyst`, `viewer`. Cada acción tiene una constante de roles propia (ver datos del padrón, editar el padrón, entregar al Core, revisar desvíos), y la guarda vive en el servidor. Esconder un enlace no es una defensa. | `src/lib/auth/roles.ts`, `require-role.ts` |
 | ¿Quién puede registrarse? | Nadie por su cuenta: el alta la cierra una lista de permitidos, en un solo lugar (el hook de creación de usuario), que cubre también la primera entrada con Google. | `src/lib/auth/registro-permitido.ts`, `provision.ts` |
 | ¿Cómo es el alta en dos pasos y qué controles conserva? | Paso 1, `/registro`: sólo la cuenta (nombre, correo y términos, o Google). El enlace del correo viaja sellado (AES-256-GCM, una hora) y lleva únicamente el correo, el nombre y el idioma: no crea espacio, cupo ni fila hasta que se abre. Paso 2, `/alta`: la persona elige entre dar de alta su empresa (empresa y WhatsApp) o entrar a una que ya usa ClaimMix. Siguen todos los controles: desafío Turnstile, topes por IP y por correo (`auth:up`, `auth:ip`, `alta:correo-ip`, `alta:ip`), el correo de operador, el dominio con SSO, el alta cerrada, el tope global de 24 horas dentro de la función de la base y `provisionUserProfile`. | `src/server/alta/cuenta-del-enlace.ts`, `src/server/alta/crear-espacio.ts`, `src/app/alta/page.tsx`, `tests/unit/alta/` |
-| ¿`/alta` revela qué empresas existen? | **No.** El camino «Mi empresa ya usa ClaimMix» es un texto fijo, sin consulta a la base: pide al administrador que invite la dirección de la sesión; no manda al SSO, que rechaza a una cuenta sin perfil. No busca ni lista empresas. El enlace «Seguir con tu invitación», que reemplaza ese pedido, aparece sólo si el propio navegador trae la cookie `cm_invitacion` de esa dirección (se lee la cookie, no la base) y lleva a `/invitacion` sin el token en la URL. | `src/app/alta/page.tsx`, `src/server/alta/invitacion.ts`, `tests/unit/alta/alta-page.test.tsx` |
+| ¿`/alta` revela qué empresas existen? | **No.** El camino «Mi empresa ya usa ClaimMix» es un texto fijo, sin consulta a la base: pide al administrador que invite la dirección de la sesión; no manda al SSO, que rechaza a una cuenta sin perfil. No busca ni lista empresas. El botón «Pedir acceso» sale igual haya o no un espacio para el dominio y siempre contesta lo mismo: vuelve a `/alta` y, por una cookie de 2 minutos, muestra un texto fijo; lo único que cambia es si, después, sale un mail (ver la fila siguiente). Con una dirección de proveedor abierto (`esDominioPublico`) el botón no se ofrece, porque no habría a quién avisar: eso sale de la dirección de la sesión y no de la base, así que tampoco dice qué empresas son clientes. El enlace «Seguir con tu invitación», que reemplaza ese pedido, aparece sólo si el propio navegador trae la cookie `cm_invitacion` de esa dirección (se lee la cookie, no la base) y lleva a `/invitacion` sin el token en la URL. | `src/app/alta/page.tsx`, `src/app/alta/actions.ts`, `src/server/alta/invitacion.ts`, `tests/unit/alta/alta-page.test.tsx`, `tests/unit/alta/pedir-acceso-accion.test.ts` |
+| ¿Cómo se pide acceso a un espacio que ya existe, y qué topes tiene? | La persona con el correo verificado y sin perfil aprieta «Pedir acceso». La acción (`pedirAcceso`) no recibe argumentos (el usuario sale de la sesión), pasa la misma guarda que `crearMiEspacio`, agenda el trabajo con `after()`, deja la cookie `cm_pedido` (id de la sesión, `httpOnly`, sólo `/alta`, 2 minutos: la página no puede borrarla y sólo la escribe la acción, así que un enlace no la falsifica) y vuelve siempre a `/alta`; antes de contestar no consulta la base, no cuenta ni manda nada. Ya respondida la persona: sale sin hacer nada si el dominio es público o no hay remitente del sistema; un pedido por persona y día (`alta:acceso-persona`, sobre la dirección canónica, que se cuenta aunque no haya espacio); una sola consulta de los administradores activos, verificados y no bloqueados del mismo dominio, de espacios con servicio (ni suspendidos ni dados de baja, que no pueden invitar), hasta 20, excluidas las direcciones de operación y la de quien pide; cinco pedidos por espacio y día (`alta:acceso-espacio`, que vuelve si ningún mail salió); y un mail de texto fijo, sin HTML, por administrador, en el idioma del administrador, del tipo `acceso` (con su tope global; por administrador rige el del espacio, porque es de uno solo). El mail lleva la dirección verificada de quien pide y el enlace a `/admin/users`; no lleva el nombre de la empresa ni el de nadie. No se guarda nada ni hay migración, y lo que se registra son dos números o el nombre de un error, nunca una dirección, un dominio ni un espacio. | `src/app/alta/actions.ts`, `src/server/alta/pedir-acceso.ts`, `src/server/notify/correos-de-alta.ts`, `src/server/notify/remitente-sistema.ts`, `tests/unit/alta/pedir-acceso.test.ts`, `tests/unit/alta/pedir-acceso-accion.test.ts` |
 | ¿Autenticación? | Email y contraseña, Google y, por inquilino, el IdP OIDC de la aseguradora (sección 5). | `src/lib/auth/index.ts` |
 | ¿Sesiones? | Cookie de sesión de Better Auth con un caché de 60 segundos. Revocar una sesión tarda hasta un minuto en llegar a todas las pantallas. Cambiar la contraseña cierra las otras sesiones. | `src/lib/auth/index.ts` |
 | ¿Límite de intentos? | Por IP y por cuenta, en Postgres, con un alcance propio para el SSO (`auth:sso`) y tope por IP. | `src/lib/rate-limit/` |
@@ -73,7 +74,7 @@ El admin lo configura en `/configuracion`.
 - **Dominio.** El correo de quien entra tiene que pertenecer a un dominio que
   la aseguradora demostró controlar con un registro TXT. La coincidencia es
   exacta: `ana@sub.empresa.com` no es de `empresa.com`. Los proveedores de
-  correo abierto (gmail, hotmail, etc.) no se aceptan. El token del TXT sale de
+  correo abierto (gmail, hotmail, y las casillas de los proveedores de internet argentinos, como dominios completos: fibertel.com.ar, speedy.com.ar, etc.) no se aceptan. El token del TXT sale de
   una clave derivada (HKDF) de `BETTER_AUTH_SECRET`.
 - **Qué se valida en el callback.** Firma del `id_token` contra el JWKS del
   IdP (`jose`), `iss`, `aud`, vencimiento, `nonce` y que el dominio del correo
@@ -280,7 +281,7 @@ Okta o Google Workspace de una aseguradora. Lo prueba el piloto.
     nocturna. La migración 0045 ya está aplicada en las tres bases (30/09). Lo que
     esa prueba no cubre, porque simula R2 y no enciende ningún modo, es del
     dueño (sección 12).
-12. **Cuatro puntos del alta en dos pasos.** (a) Una persona con cuenta
+12. **Cinco puntos del alta en dos pasos.** (a) Una persona con cuenta
     sin espacio cuyo dominio exige SSO (`sin_perfil` con SSO) ve el mismo texto
     fijo que las demás: no se cambió, y la decisión de qué mostrarle es del
     dueño. (b) Hay una variante que listaría las invitaciones vigentes para la
@@ -298,7 +299,39 @@ Okta o Google Workspace de una aseguradora. Lo prueba el piloto.
     (antes, el de `alta`). No cambia ningún tope: `ALTA_TOPE_CORREOS_DIA` y
     `ALTA_TOPE_POR_DESTINATARIO_DIA` valen igual, y lo que cambia es en qué
     contador se gasta: las recuperaciones de cuentas sin perfil comparten el
-    cupo del día con las demás recuperaciones y ya no con las altas.
+    cupo del día con las demás recuperaciones y ya no con las altas. (e)
+    **«Pedir acceso» de `/alta`** (`src/server/alta/pedir-acceso.ts`). La
+    respuesta, la pantalla y el mensaje son idénticos con o sin espacio del
+    dominio, porque todo lo que mira (cupos, base, envío) corre en `after()`
+    cuando la persona ya tiene su respuesta. Queda un canal de tiempos teórico:
+    quien mida cuándo termina el trabajo agendado, o cuándo llega el mail a un
+    administrador que controla, puede distinguir un dominio con espacio de uno
+    sin él; se acepta porque exige una cuenta verificada con correo de
+    empresa, un pedido por persona y día, y una medición de tiempos que la
+    respuesta no facilita. Lo único variable del mail es la dirección
+    verificada de quien pide, que el administrador ve y nadie más. Los dos cupos (`alta:acceso-persona` y `alta:acceso-espacio`, 24
+    horas) no guardan nada propio: son filas del limitador que vencen solas y
+    las barre `purgeExpiredRateLimits`. El tipo de mail `acceso` tiene su tope
+    global y no cuenta por dirección ni por IP, por decisión: lo que protege la
+    bandeja de cada administrador es el tope del espacio, cinco por día, porque
+    el administrador es de un solo espacio; con los tres por dirección que
+    tienen los demás tipos, el cuarto y el quinto pedido de un espacio con un
+    solo administrador no salían y nadie lo sabía. El costo es que quien
+    controla muchas cuentas verificadas de un mismo dominio puede mandar hasta
+    cinco pedidos por día a un mismo espacio y uno por cuenta; el tope global
+    del tipo y el del espacio lo acotan, y los administradores del dominio son
+    a lo sumo 20 por pedido. Otra deuda: un dominio compartido por varias empresas
+    que no figure como público avisa a los administradores de todas; la lista
+    es `esDominioPublico`, que ya trae los proveedores de internet argentinos,
+    como dominios completos y por igualdad exacta (`fibertel.com.ar`, `speedy.com.ar`,
+    `arnet.com.ar`, `ciudad.com.ar`, `uolsinectis.com.ar`, `sinectis.com.ar`,
+    `telecentro.com.ar`, `telecentro.net.ar`, `infovia.com.ar`), y hay que mantenerla. Es la misma que cierran
+    `/api/admin/sso` (ningún espacio reclama esos dominios para el SSO) y la invitación
+    de un espacio en prueba en `/api/admin/users` (un administrador con
+    `@fibertel.com.ar` ya no invita a otra casilla del mismo proveedor, igual que
+    con Gmail): es lo buscado, son casillas de cualquiera, y los tests de los dos
+    endpoints lo fijan. Los espacios suspendidos o
+    dados de baja no reciben el aviso: no pueden invitar a nadie.
 
 ## 12. Pendientes del dueño (no son código)
 

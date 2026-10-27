@@ -968,6 +968,7 @@ pnpm sombra:evaluar --reporte ruta.json      # ids, claves, enums, conteo, versi
 - **El número por código** (`ALTA_NUMERO_AUTOMATICO`): el pedido del espacio se hace con `numeroAutomatico: false`, así que no se comprueba el rechazo del «celular» de `/alta`.
 - **Las dos pantallas de `/alta`.** Qué muestra cada camino («dar de alta mi empresa» y «mi empresa ya usa ClaimMix») lo prueban los tests unitarios (`tests/unit/alta/alta-page.test.tsx`); acá no hay sesión de un navegador.
 - **El aviso al operador al 80 %.** `avisarSiLlegoAlTope` vive en la acción `src/app/alta/actions.ts` y usa `after()` de Next, que no anda fuera de un pedido: el guión llama a `crearEspacio`, que no lo toca. En su lugar la prueba exige margen para no dispararlo.
+- **«Pedir acceso».** La acción `pedirAcceso` (`src/app/alta/actions.ts`) agenda `pedirAccesoAlEspacio` con `after()` y no se ejecuta en el guión, y el remitente es falso: no se comprueba que el mail llegue al administrador. Lo prueban los tests unitarios (`tests/unit/alta/pedir-acceso.test.ts` y `pedir-acceso-accion.test.ts`) y, de punta a punta, el dueño en QA (`docs/PUESTA_EN_MARCHA.md`, ítem 16).
 - **La base por cliente.** El guión fuerza `BASE_POR_CLIENTE=0`. Si QA la prende, el resultado es inconcluso.
 - **El runtime de Vercel.** El recorrido corre en el runner. Una variable de QA mal cargada en Vercel sólo se ve en lo que alcanzan los tres GETs.
 - **El cierre del alta por tope.** El tope global de 24 horas sólo se lee y se usa como precondición. Las puertas de la función de la 0048 —un id que no es el del contexto, un usuario que no existe y el tope en 0— las prueba `pnpm tenancy`, en un rollback. Los topes de bases y de MB sólo se miran para explicar un cierre que ocurrió solo.
@@ -1389,6 +1390,16 @@ Dicho de frente, para que nadie lea "todo verde" como "todo probado":
   `ALTA_TOPE_MB` a 1, redeploya QA para que la variable rija, espera al barrido y, al terminar, vuelve
   a 350 y redeploya de nuevo. El día y el mes son los argentinos y los tests usan instantes UTC fijos, así
   que dicen lo mismo en cualquier zona: `TZ=UTC` y `TZ=Asia/Tokyo` dan el mismo resultado que la máquina de acá.
+- **«Pedir acceso» contra una base y un Gmail reales.** Los tests mockean el driver de la base (`pg-proxy`), el limitador de memoria y el
+  remitente: comprueban que se mande un mail por administrador y no más, que el texto sea fijo y salga en el idioma
+  del administrador, que el cupo de la persona (uno por día) y el del espacio (cinco) corten y vuelvan cuando
+  corresponde, que con el remitente de verdad (sólo Gmail simulado) un espacio con un solo administrador reciba los cinco
+  pedidos del día, que la consulta sea una sola con todos sus filtros, el de los espacios sin servicio incluido (se mira el
+  SQL renderizado) y que lo registrado no lleve datos de nadie. No se ejecuta la consulta contra Postgres ni sale un correo. Tampoco se mide el canal de tiempos
+  de `docs/SEGURIDAD.md` §11.12: la respuesta es la misma con o sin espacio y el trabajo corre en `after()`.
+  Que el mail llegue lo prueba el dueño en QA (`docs/PUESTA_EN_MARCHA.md`, ítem 16): con un administrador en un
+  dominio de QA y una persona nueva de ese dominio con el correo verificado, aprieta «Pedir acceso» y ve llegar el mail
+  una sola vez.
 - **El costo por caso contra una base con casos.** La subconsulta de `computeStatement` (`json_agg` del gasto
   agrupado por caso, unido a `cases`) se comprueba por su forma, renderizada con el dialecto de verdad, y no
   ejecutada: no hay Postgres local que la corra. La primera vez contra datos reales es la primera visita a

@@ -107,6 +107,16 @@ vi.mock("@/server/confirmations/derivacion-nueva", () => ({
   anotarDerivacionSiEsNueva: vi.fn().mockResolvedValue(true),
 }));
 
+// Nadie tomó el caso con «Tomar el control»: la guarda no agrega consultas.
+vi.mock("@/server/cases/devolver-al-agente", async (importOriginal) => {
+  const { sql } = await import("drizzle-orm");
+  return {
+    ...(await importOriginal<typeof import("@/server/cases/devolver-al-agente")>()),
+    loTomoUnaPersona: vi.fn().mockResolvedValue(false),
+    noLoTomoUnaPersona: () => sql`true`,
+  };
+});
+
 // Mock gap analyzer.
 vi.mock("@/server/cases/gap-analyzer", () => ({
   // Real value: the orchestrator resolves pending confirmations against the

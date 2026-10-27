@@ -108,7 +108,7 @@ import {
 import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contestado";
 import { lastAskedKeys } from "@/server/confirmations/ultimo-pedido";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
-import { MOTIVO_DEVOLVER } from "@/server/cases/devolver-al-agente";
+import { MOTIVO_DEVOLVER, loTomoUnaPersona, noLoTomoUnaPersona } from "@/server/cases/devolver-al-agente";
 import { redactObject, redactString } from "@/lib/audit/redact";
 import { errorCode } from "@/lib/observability/error-code";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
@@ -1207,21 +1207,24 @@ export async function orchestratePostExtraction(
     missingInfoEmailDispatched = true;
 
     // A genuine gap outranks a doubt: the case is blocked, not merely unsure.
-    await setStatus(
+    const movido = await setStatus(
       caseId,
       tenantId,
       missingInfoEmailComing ? "info_faltante" : "confirmacion_pendiente"
     );
 
-    // Audit: MISSING_INFO_REQUESTED.
-    await writeAuditLog({
-      tenant_id: tenantId,
-      actor_id: null,
-      event_type: AuditEvent.MISSING_INFO_REQUESTED,
-      target_type: "case",
-      target_id: caseId,
-      payload: { missing_fields: gapResult.missingRequiredFields },
-    });
+    // Si una persona tomó el caso a mitad de la vuelta, el mensajero no mandó
+    // el pedido: no se anota.
+    if (movido || !(await loTomoUnaPersona(caseId, tenantId))) {
+      await writeAuditLog({
+        tenant_id: tenantId,
+        actor_id: null,
+        event_type: AuditEvent.MISSING_INFO_REQUESTED,
+        target_type: "case",
+        target_id: caseId,
+        payload: { missing_fields: gapResult.missingRequiredFields },
+      });
+    }
   } else if (askOnHold && !derivaSola && !confirmationEmailDispatched) {
     // We asked for exactly this and they have not answered it yet. Nothing to
     // say, but the case is still blocked on it — leaving the status alone here
@@ -2152,9 +2155,10 @@ const ESTADOS_QUE_PISA_EL_AGENTE = [...ESTADOS_DE_ARRANQUE, "listo"] as const;
  * Cambia el estado del caso, pero sólo si todavía es del agente.
  *
  * Guarda atómica: si para cuando esta escritura llega el caso ya lo movió
- * otra mano —un analista, otra vuelta del worker—, `where` no matchea
- * ninguna fila y no se pisa nada. Devuelve si se aplicó, para que quien llama
- * decida si lo que sigue (el mensaje, la auditoría) todavía corresponde.
+ * otra mano —un analista, otra vuelta del worker, una persona que lo tomó con
+ * «Tomar el control»—, `where` no matchea ninguna fila y no se pisa nada.
+ * Devuelve si se aplicó, para que quien llama decida si lo que sigue (el
+ * mensaje, la auditoría) todavía corresponde.
  */
 export async function setStatus(
   caseId: string,
@@ -2171,7 +2175,10 @@ export async function setStatus(
       .where(
         and(
           eq(cases.id, caseId),
-          or(inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE), eq(cases.status, status))
+          or(
+            inArray(cases.status, ESTADOS_QUE_PISA_EL_AGENTE),
+            and(eq(cases.status, status), noLoTomoUnaPersona(db))
+          )
         )
       )
       .returning({ id: cases.id });

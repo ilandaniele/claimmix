@@ -392,7 +392,7 @@ Hace falta una SIM libre que no esté en la app de WhatsApp. Prender
 `ALTA_NUMERO_AUTOMATICO=1` en QA (y la 0049 ya aplicada en esa base), con el token de
 la WABA propia de QA (después de A5).
 
-1. Crear un espacio por `/alta` con el número de esa SIM.
+1. Crear la cuenta en `/registro` y, en `/alta`, el espacio con el número de esa SIM.
 2. En Configuración, «Por SMS»; si no llega, «Por llamada».
 3. Escribir el código y ver «Listo».
 4. Mandar un WhatsApp a ese número y ver el caso en la bandeja de ese espacio.
@@ -473,8 +473,11 @@ registro, a un resultado ni al navegador.
 
 **Hace falta el código desplegado:**
 
-5. Facebook Login for Business: prender Client OAuth, Web OAuth, Enforce HTTPS, Strict Mode
-   y Login with JS SDK; dominios permitidos de prd y de dev; crear una configuración de
+5. Facebook Login for Business > Configuración: prender Client OAuth login, Web OAuth login,
+   Enforce HTTPS, Embedded Browser OAuth Login, Strict Mode y Login with the JavaScript SDK.
+   En los dominios permitidos del SDK y en las URI de redirección válidas, cargar
+   `https://claimmix.vercel.app` (prd) y `https://claimmix-dev.vercel.app` (dev). Después,
+   en Configuraciones, crear una con «Create configuration» (no la plantilla de 60 días):
    Embedded Signup v4 con Cloud API y token **que no vence**. Sin `featureType`: la
    coexistencia no entra. El `config_id` que sale es `META_ES_CONFIG_ID`.
 6. Suscribir en el webhook de la app los campos `account_update` y

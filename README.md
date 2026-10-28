@@ -64,7 +64,7 @@ Optional seed data lives in `neon/seed.sql`.
 | `BETTER_AUTH_URL` | yes | Public app URL for Better Auth |
 | `AI_PROVIDER` | no | Defaults to `gemini` (only supported provider — OpenAI was removed) |
 | `GEMINI_API_KEY` | no | Global Gemini provider key used by the default provider |
-| `GEMINI_MODEL` | no | Default Gemini model, defaults to `gemini-2.5-flash` |
+| `GEMINI_MODEL` | no | Default Gemini model, defaults to `gemini-flash-latest` (AI Studio only; extraction on Vertex uses `gemini-3.8-flash` in the `us` multi-region) |
 | `MOCK_AI` | no | Set `true` to use a deterministic mock agent: the case is left in Requiere especialista, with no data invented |
 | `GMAIL_CLIENT_ID` | email | Google OAuth client ID |
 | `GMAIL_CLIENT_SECRET` | email | Google OAuth client secret |

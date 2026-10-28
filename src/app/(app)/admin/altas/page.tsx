@@ -14,7 +14,7 @@
 
 import { duracionLegible } from "@/core/fecha/duracion";
 import { dominioDelMail } from "@/core/sso";
-import { PLANS } from "@/lib/billing/plans";
+import { PLANES_COMERCIALES } from "@/lib/billing/plans";
 import { nombreDePlan } from "@/lib/billing/plan-label";
 import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireOperator } from "@/lib/auth/require-operator";
@@ -531,7 +531,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
             <input type="hidden" name="tenant_id" value={fila.tenantId} />
             <div className="flex flex-wrap gap-2">
               <select name="plan" defaultValue="operativo" aria-label={t("altas.activar.plan")} className={CAMPO}>
-                {PLANS.map((plan) => (
+                {PLANES_COMERCIALES.map((plan) => (
                   <option key={plan} value={plan}>
                     {nombreDePlan(plan, plan, t)}
                   </option>

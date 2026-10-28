@@ -9,9 +9,13 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CANALES_REALES } from "@/lib/schemas/cases";
 import {
+  PESO_EN_DECIMAS,
+  PLANES_COMERCIALES,
   PLANS,
   TOPE_DIARIO_TOKENS,
+  consumoDelMes,
   diasDePrueba,
   enPrueba,
   llamadasDiariasDePrueba,
@@ -48,6 +52,7 @@ describe("topeDiarioDelPlan", () => {
   it("cada plan paga su escalón", () => {
     vi.stubEnv("AI_PILOTO_DAILY_TOKEN_CAP", "");
     expect(topeDiarioDelPlan("piloto")).toBe(500_000);
+    expect(topeDiarioDelPlan("inicial")).toBe(1_000_000);
     expect(topeDiarioDelPlan("operativo")).toBe(5_000_000);
     expect(topeDiarioDelPlan("profesional")).toBe(20_000_000);
     expect(topeDiarioDelPlan("corporativo")).toBe(50_000_000);
@@ -84,6 +89,10 @@ describe("topeDiarioDelPlan", () => {
 });
 
 describe("llamadasDiariasDePrueba", () => {
+  it("el tope de inicial rinde 78 llamadas (inerte: sólo el piloto lo usa)", () => {
+    expect(llamadasDiariasDePrueba(1_000_000)).toBe(78);
+  });
+
   it("con el p95 de 12.730 tokens por llamada, 500.000 son 39 llamadas", () => {
     expect(llamadasDiariasDePrueba(500_000)).toBe(39);
   });
@@ -169,5 +178,55 @@ describe("pruebaVencida", () => {
 
   it("una fecha ilegible cuenta como vencida: falla cerrado", () => {
     expect(pruebaVencida({ billing_status: "trial", trial_ends_at: "mañana" }, ahora)).toBe(true);
+  });
+});
+
+describe("planes comerciales", () => {
+  it("son todos menos el piloto, en el orden del catálogo", () => {
+    expect(PLANES_COMERCIALES).toEqual(PLANS.filter((p) => p !== "piloto"));
+    expect(PLANES_COMERCIALES).not.toContain("piloto");
+  });
+});
+
+describe("PESO_EN_DECIMAS", () => {
+  it("una cubeta por canal real más la WABA propia, con sus pesos", () => {
+    expect(Object.keys(PESO_EN_DECIMAS).sort()).toEqual(
+      [...CANALES_REALES, "whatsapp_propia"].sort()
+    );
+    expect(PESO_EN_DECIMAS).toEqual({ whatsapp: 10, whatsapp_propia: 8, email: 5, web: 10 });
+  });
+});
+
+describe("consumoDelMes", () => {
+  it("300 de WhatsApp y 100 mails son 400 denuncias y 350 unidades", () => {
+    expect(consumoDelMes({ whatsapp: 300, email: 100 })).toEqual({ claims: 400, units: 350 });
+  });
+
+  it("la WABA propia pesa 0,8", () => {
+    expect(consumoDelMes({ whatsapp_propia: 3 })).toEqual({ claims: 3, units: 2.4 });
+  });
+
+  it("la web pesa 1", () => {
+    expect(consumoDelMes({ web: 7 })).toEqual({ claims: 7, units: 7 });
+  });
+
+  it("las cubetas ausentes valen cero", () => {
+    expect(consumoDelMes({})).toEqual({ claims: 0, units: 0 });
+  });
+
+  it("negativos y NaN cuentan cero", () => {
+    expect(consumoDelMes({ whatsapp: -5, email: Number.NaN, web: 2 })).toEqual({
+      claims: 2,
+      units: 2,
+    });
+  });
+
+  it("una cuenta fraccionaria se trunca: una denuncia no se parte", () => {
+    expect(consumoDelMes({ email: 3.9 })).toEqual({ claims: 3, units: 1.5 });
+  });
+
+  it("un mail solo gasta media unidad: sin coma flotante", () => {
+    expect(consumoDelMes({ email: 1 }).units).toBe(0.5);
+    expect(consumoDelMes({ email: 7, whatsapp_propia: 7 }).units).toBe(9.1);
   });
 });

@@ -116,7 +116,7 @@ const ACCIONES = [
   { nombre: "suspenderInquilino", correr: () => suspenderInquilino(CLIENTE, OP) },
   { nombre: "reactivarInquilino", correr: () => reactivarInquilino(CLIENTE, OP) },
   { nombre: "extenderPrueba", correr: () => extenderPrueba(CLIENTE, 14, OP) },
-  { nombre: "activarInquilino", correr: () => activarInquilino(CLIENTE, terminosDeActivacion("piloto")!, OP) },
+  { nombre: "activarInquilino", correr: () => activarInquilino(CLIENTE, terminosDeActivacion("operativo")!, OP) },
 ];
 
 describe.each(ACCIONES)("$nombre", (a) => {

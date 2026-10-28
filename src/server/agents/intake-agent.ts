@@ -79,6 +79,11 @@ export interface WhatsAppIntakeInput {
    * Messaging a made-up number is how a WhatsApp Business account gets flagged.
    */
   simulated?: boolean;
+  /**
+   * Entró por la WABA propia del cliente: el caso queda marcado al crearse (`cases.waba_propia`)
+   * porque la facturación lo pesa distinto y después no se puede deducir. Ausente vale false.
+   */
+  wabaPropia?: boolean;
 }
 
 export interface WhatsAppIntakeResult {
@@ -242,7 +247,7 @@ export async function createWhatsAppIntake(
    */
   const abierto = existente
     ? { id: existente.id, creado: false }
-    : await createWhatsAppCase(input.tenantId, threadId, channel);
+    : await createWhatsAppCase(input.tenantId, threadId, channel, input.wabaPropia === true);
   let caseId = abierto.id;
 
   const guardado = await insertWhatsAppMessage({
@@ -253,6 +258,7 @@ export async function createWhatsAppIntake(
     providerMessageId,
     threadId,
     senderName: input.senderName ?? null,
+    wabaPropia: input.wabaPropia === true,
   });
 
   // Cuenta sólo lo que entró de verdad: una reentrega de Meta no suma.
@@ -553,7 +559,8 @@ async function casoRecienAbierto(
 async function createWhatsAppCase(
   tenantId: string,
   threadId: string,
-  channel: "whatsapp" | "whatsapp_sim" = "whatsapp"
+  channel: "whatsapp" | "whatsapp_sim" = "whatsapp",
+  wabaPropia = false
 ): Promise<{ id: string; creado: boolean }> {
   let data: { id: string } | null;
   try {
@@ -564,6 +571,7 @@ async function createWhatsAppCase(
           .values({
             tenant_id: tenantId,
             channel,
+            waba_propia: wabaPropia,
             status: "recibido",
             email_thread_id: threadId,
             // Unknown until the extractor decides — see the same fix in gmail-poller.
@@ -612,6 +620,7 @@ async function insertWhatsAppMessage(
     providerMessageId: string | null;
     threadId: string;
     senderName: string | null;
+    wabaPropia: boolean;
   }
 ): Promise<{ claimMessageId: string | null; duplicado: boolean }> {
   const now = new Date().toISOString();
@@ -634,7 +643,12 @@ async function insertWhatsAppMessage(
         headers: {},
         // El nombre de perfil, en el INSERT que ya ocurre. Lo lee el worker
         // como columna escalar (`raw_payload->>'profile_name'`).
-        raw_payload: input.senderName ? { profile_name: input.senderName } : {},
+        // `waba_propia`: por qué número entró ESTE mensaje. Si se suma a un caso anterior
+        // y después un siniestro nuevo lo parte, el caso nuevo lo toma de acá y no del viejo.
+        raw_payload: {
+          ...(input.senderName ? { profile_name: input.senderName } : {}),
+          ...(input.wabaPropia ? { waba_propia: true } : {}),
+        },
         status: "received",
         received_at: now,
       }).returning({ id: tables.claimMessages.id })

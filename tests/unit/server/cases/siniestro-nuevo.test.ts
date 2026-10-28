@@ -91,6 +91,17 @@ describe("el lote", () => {
     expect(nuevoDe(1)).toMatch(UUID);
   });
 
+  it("el caso nuevo toma waba_propia del mensaje que se parte y no del caso de antes: el cliente pudo cambiar de número", async () => {
+    await abrir();
+
+    const { sql, params } = sqlDe(1);
+    expect(sql).toMatch(/insert into cases \([^)]*\bwaba_propia\b[^)]*\)/);
+    expect(sql).not.toContain("cases.waba_propia");
+    const del = /coalesce\(\(select m\.raw_payload->>'waba_propia' = 'true' from claim_messages m where m\.id = \$(\d+)::uuid\), false\)/.exec(sql);
+    expect(del).not.toBeNull();
+    expect(params[Number(del![1]) - 1]).toBe(MSG);
+  });
+
   it("no lo abre si ya se partió", async () => {
     await abrir();
 

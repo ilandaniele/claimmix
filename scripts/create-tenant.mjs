@@ -16,12 +16,12 @@
  *
  * Flags:
  *   --name <s>       required, the client's display name
- *   --plan <s>       piloto (default) | operativo | profesional | corporativo | enterprise
+ *   --plan <s>       piloto (default) | inicial | operativo | profesional | corporativo | enterprise
  *   --contact <s>    billing contact email
- *   --fee <n>        override the plan's monthly fee (USD)
- *   --included <n>   override the plan's included claims
- *   --overage <n>    override the plan's per-claim overage price (USD)
- *   --trial-days <n> for piloto: when the trial ends (default 60)
+ *   --fee <n>        override the plan's monthly fee (US$)
+ *   --included <n>   override the plan's included units
+ *   --overage <n>    override the plan's per-unit overage price (US$)
+ *   --trial-days <n> for piloto: when the trial ends (default 30)
  *   --apply          actually write
  *
  * After creating a tenant you still have to let its people IN: add their
@@ -32,14 +32,16 @@
 import { readFileSync } from "node:fs";
 import { connect } from "./lib/db-driver.mjs";
 
-// Mirrors src/lib/billing/plans.ts. Duplicated deliberately: this script is
-// plain .mjs run outside the Next build and cannot import the TS module.
+// Copia de src/lib/billing/plans.ts; la cuida tests/unit/create-tenant-catalogo.test.ts.
+// Duplicated deliberately: this script is plain .mjs run outside the Next build
+// and cannot import the TS module.
 const CATALOG = {
-  piloto: { fee: 0, included: 300, overage: 0, status: "trial" },
-  operativo: { fee: 390, included: 750, overage: 0.45, status: "active" },
-  profesional: { fee: 1100, included: 3000, overage: 0.35, status: "active" },
-  corporativo: { fee: 2900, included: 10000, overage: 0.28, status: "active" },
-  enterprise: { fee: 2900, included: 10000, overage: 0.2, status: "active" },
+  piloto: { fee: 0, included: 50, overage: 0, status: "trial" },
+  inicial: { fee: 19, included: 12, overage: 1.5, status: "active" },
+  operativo: { fee: 390, included: 320, overage: 1.3, status: "active" },
+  profesional: { fee: 1100, included: 950, overage: 1.2, status: "active" },
+  corporativo: { fee: 2900, included: 2700, overage: 1.1, status: "active" },
+  enterprise: { fee: 8000, included: 8000, overage: 1, status: "active" },
 };
 
 function arg(flag, fallback = null) {
@@ -80,7 +82,7 @@ const base = CATALOG[plan];
 const fee = numArg("--fee", base.fee);
 const included = Math.floor(numArg("--included", base.included));
 const overage = numArg("--overage", base.overage);
-const trialDays = Math.floor(numArg("--trial-days", 60));
+const trialDays = Math.floor(numArg("--trial-days", 30));
 
 const trialEnds =
   plan === "piloto" ? new Date(Date.now() + trialDays * 86_400_000).toISOString() : null;
@@ -89,9 +91,9 @@ const activatedAt = plan === "piloto" ? null : new Date().toISOString();
 console.log("TENANT A CREAR:");
 console.log(`  nombre         ${name}`);
 console.log(`  plan           ${plan}  (${base.status})`);
-console.log(`  abono          USD ${fee.toFixed(2)}/mes`);
-console.log(`  incluidos      ${included} siniestros/mes`);
-console.log(`  excedente      USD ${overage.toFixed(4)} c/u`);
+console.log(`  abono          US$ ${fee.toFixed(2)}/mes`);
+console.log(`  incluidos      ${included} unidades/mes`);
+console.log(`  excedente      US$ ${overage.toFixed(4)} c/u`);
 console.log(`  contacto       ${contact ?? "(sin definir)"}`);
 if (trialEnds) console.log(`  piloto hasta   ${trialEnds.slice(0, 10)}  (${trialDays} días)`);
 console.log();

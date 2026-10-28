@@ -33,6 +33,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import * as dotenv from "dotenv";
+import { PLAN_CATALOG } from "@/lib/billing/plans";
 
 const envPath = path.resolve(process.cwd(), ".env.local");
 dotenv.config({ path: fs.existsSync(envPath) ? envPath : undefined });
@@ -43,7 +44,12 @@ const NAME = `Ensayo de alta ${RUN}`;
 const PLAN = "operativo";
 
 /** Los términos del catálogo para `operativo`. Si el alta no los escribe, falla. */
-const EXPECTED = { fee: 390, included: 750, overage: 0.45, status: "active" };
+const EXPECTED = {
+  fee: PLAN_CATALOG.operativo.monthly_fee_usd,
+  included: PLAN_CATALOG.operativo.included_claims,
+  overage: PLAN_CATALOG.operativo.overage_price_usd,
+  status: "active",
+};
 
 const PROD_TENANT = process.env.GMAIL_TENANT_ID;
 if (!process.env.DATABASE_URL || !PROD_TENANT) {
@@ -129,7 +135,7 @@ const TENANT = created.id;
 check("el tenant existe", true, TENANT);
 check("plan", created.plan === PLAN, `${created.plan}`);
 check("abono mensual", Number(created.monthly_fee_usd) === EXPECTED.fee, `US$ ${created.monthly_fee_usd}`);
-check("denuncias incluidas", Number(created.included_claims) === EXPECTED.included, `${created.included_claims}`);
+check("unidades incluidas", Number(created.included_claims) === EXPECTED.included, `${created.included_claims}`);
 check(
   "precio del excedente",
   Number(created.overage_price_usd) === EXPECTED.overage,

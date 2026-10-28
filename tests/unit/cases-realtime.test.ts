@@ -24,6 +24,7 @@ function makeCase(overrides: Partial<CaseRow> = {}): CaseRow {
     confidence_min: "0.85",
     assigned_to: null,
     channel: "email_sim",
+    waba_propia: false,
     created_at: new Date().toISOString(),
     updated_at: null,
     closed_at: null,

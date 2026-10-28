@@ -84,7 +84,12 @@ y `docs/PROJECT_STATUS.md` se corrigieron en este mismo cambio.
   `/admin/cartera`.
 - **Autoalta**: el alta que hace el cliente solo, en dos pasos: la cuenta en `/registro` y, ya con la sesión abierta, el espacio de su empresa en `/alta`.
 - **En prueba**: un espacio que todavía no paga. Tiene topes de gasto e invitaciones más
-  chicos.
+  chicos. Su plan es `piloto` (la Prueba: US$ 0, 50 unidades, sin excedente).
+- **Piloto guiado**: se arma a mano, no tiene mecanismo. El operador activa el plan en
+  `/admin/altas` con la mitad de la cuota por 60 días y después lo activa de nuevo con la
+  cuota entera.
+- **Unidad**: lo que gasta una denuncia del cupo del plan: WhatsApp en el número de ClaimMix
+  1, WhatsApp con la WABA propia del cliente 0,8, mail 0,5.
 - **Base propia** (`t_<hex>`): en prd, cada cliente tiene su propia base de datos en Neon. Su
   nombre empieza con `t_` y sigue con letras y números. **Control** es la base de prd que
   guarda la lista de espacios.
@@ -495,7 +500,7 @@ ningún doc lo dice.
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` (`.env.example:245-246`) | valor y secreto | excepción: un cliente OAuth por ambiente (decidido el 18/10). dev tiene el suyo, QA el suyo (`claimmix-qa`, en el mismo proyecto de Google Cloud) y prd uno propio (`claimmix-prd`), en su propio proyecto de Google Cloud, `claimmix-prd-veltra` | cargadas en los tres: QA el 18/10 y prd el 19/10 con `token-remitente.mts --vercel <proyecto>` (paso 1 de cada ambiente); las de prd valen desde su próximo deploy | el bloque de correo y «Conectar Gmail» |
 | `GMAIL_TOKEN_ENCRYPTION_KEY` (`.env.example:216`) | secreto | excepción: una por base; no se rota sin volver a cifrar | cargada en los tres (QA desde el 15/10) | error del servidor al volver de Google en «Conectar Gmail»; chequeo `gmail` de `/api/health` |
 | `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52`, `src/server/alta/catalogo.ts:15-22`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
-| `ALTA_PRUEBA_DIAS` (`src/lib/billing/plans.ts:190`), `AI_PILOTO_DAILY_TOKEN_CAP` (`:180`) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
+| `ALTA_PRUEBA_DIAS` (`diasDePrueba` en `src/lib/billing/plans.ts`), `AI_PILOTO_DAILY_TOKEN_CAP` (`topeDiarioDelPlan`, mismo archivo) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
 | `MONTHLY_BUDGET_USD` (`src/lib/topes.ts:117`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
 | `AI_TENANT_DAILY_TOKEN_CAP` (`.env.example:159`) | valor | excepción en dev y QA (D7); en esos dos, igual a la variable del repo (`.github/workflows/deploy-checks.yml:383`) | QA 20 M; dev y prd desconocido | Vercel y Settings > Variables del repo |
@@ -913,7 +918,7 @@ ambiente, la hora, una captura y el número de caso.
   - **Si falla:** si el lote se corta a mitad, es el tope de la prueba: anotar en qué caso
     cortó y seguir al otro día. Si un caso queda trabado, avisar por D15 (paso 5).
   - **Fuentes:** `src/lib/i18n/es-AR.ts:846`;
-    `src/app/api/admin/batch-simulate/route.ts:255`; `src/lib/billing/plans.ts:163-180`.
+    `src/app/api/admin/batch-simulate/route.ts:255`; `TOPE_DIARIO_TOKENS` y `topeDiarioDelPlan` en `src/lib/billing/plans.ts`.
 - [ ] **12. Lectura del agente.**
   - **Quién:** [Gonzalo].
   - **Dónde:** cada caso de los pasos 9 a 11.
@@ -929,7 +934,7 @@ ambiente, la hora, una captura y el número de caso.
   - **Salió bien si:** los casos aparecen contados.
   - **Si falla:** si la simulación en lote se cortó, es el tope de la prueba: 500.000 tokens
     por día o el dólar del mes. Avisar por D15.
-  - **Fuentes:** `src/lib/billing/plans.ts:180` (`AI_PILOTO_DAILY_TOKEN_CAP`);
+  - **Fuentes:** `topeDiarioDelPlan` en `src/lib/billing/plans.ts` (`AI_PILOTO_DAILY_TOKEN_CAP`);
     `src/server/ai/budget.ts:464` (`AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`).
 
 ## prd: el cliente ficticio
@@ -1354,7 +1359,7 @@ alta. Recomendación: no instalarlo (D14).
 omisión); tope de lo anónimo (`AI_ANONIMO_DAILY_TOKEN_CAP`, 60 % del anterior); tope por usuario
 (`AI_USER_DAILY_TOKEN_CAP`, 2 M en el código; `.env.example:184` trae 100000 de ejemplo); y,
 en prueba, el dólar por espacio, el pozo de US$ 30 entre todas las pruebas y los 500.000 tokens
-diarios del plan piloto (unas 39 llamadas al p95 de 12.730 tokens, `src/lib/billing/plans.ts:163-180`).
+diarios del plan piloto (unas 39 llamadas al p95 de 12.730 tokens, `TOPE_DIARIO_TOKENS` y `llamadasDiariasDePrueba` en `src/lib/billing/plans.ts`).
 
 **Avisos.** Cuando un tope deja sin analizar las denuncias de un espacio (cualquiera menos el
 de una persona), el equipo del espacio recibe un mail por día, que sale de la casilla de Gmail
@@ -1396,7 +1401,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
     espacio activado. No medir en un espacio en prueba: el dólar del mes y los 500.000 tokens
     cortan antes y el número sale mal.
   - **Fuentes:** `src/lib/i18n/es-AR.ts:846`; `src/server/ai/budget.ts:464`, `:585-587`;
-    `src/lib/billing/plans.ts:180`.
+    `topeDiarioDelPlan` en `src/lib/billing/plans.ts`.
 
 **Límites de los planes gratis.**
 

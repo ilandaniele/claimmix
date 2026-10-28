@@ -672,6 +672,93 @@ describe("createWhatsAppIntake — simulated numbers never reach WhatsApp", () =
 });
 
 /**
+ * Qué cupo gasta un caso depende de si entró por la WABA propia del cliente (0,8
+ * unidades) o por el número de Veltra (1). Después de creado no hay cómo
+ * deducirlo, así que el INSERT lo estampa.
+ */
+describe("createWhatsAppIntake — waba propia", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRunEmailExtractionWorker.mockResolvedValue(undefined);
+    mockWriteAuditLog.mockResolvedValue(undefined);
+  });
+
+  function insertedCase(): Record<string, unknown> | undefined {
+    const chain = mockDbInsert.mock.results[0]?.value as { values: ReturnType<typeof vi.fn> } | undefined;
+    return chain?.values.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+  }
+
+  function caso(channel = "whatsapp") {
+    setupSelectResults([[], [{ id: "case-w-1", tenant_id: "tenant-001", channel, status: "recibido" }]]);
+    setupInsertResults([{ rows: [{ id: "case-w-1" }] }, { rows: [] }, { rows: [] }]);
+  }
+
+  it("el caso nuevo de una WABA propia se crea con waba_propia = true", async () => {
+    caso();
+
+    await createWhatsAppIntake({ tenantId: "tenant-001", from: "5491100000000", body: "Choqué", wabaPropia: true });
+
+    expect(insertedCase()).toMatchObject({ channel: "whatsapp", waba_propia: true });
+  });
+
+  it("sin decir nada vale false: lo de la plataforma no cambia", async () => {
+    caso();
+
+    await createWhatsAppIntake({ tenantId: "tenant-001", from: "5491100000000", body: "Choqué" });
+
+    expect(insertedCase()).toMatchObject({ waba_propia: false });
+  });
+
+  it("un caso simulado no es de WABA propia", async () => {
+    caso("whatsapp_sim");
+
+    await createWhatsAppIntake({ tenantId: "tenant-001", from: "5491100000000", body: "Choqué", simulated: true });
+
+    expect(insertedCase()).toMatchObject({ channel: "whatsapp_sim", waba_propia: false });
+  });
+
+  it("un mensaje de un caso que ya existe no abre otro ni lo vuelve a estampar", async () => {
+    setupSelectResults([[{ id: "case-existing-001", status: "info_faltante" }]]);
+    setupInsertResults([{ rows: [] }, { rows: [] }]);
+
+    const r = await createWhatsAppIntake({
+      tenantId: "tenant-001",
+      from: "5491100000000",
+      body: "Sigo",
+      wabaPropia: true,
+    });
+
+    expect(r.created).toBe(false);
+    const tablas = mockDbInsert.mock.results.map(
+      (x) => (x.value as { values: ReturnType<typeof vi.fn> }).values.mock.calls[0][0] as Record<string, unknown>
+    );
+    expect(tablas.every((v) => !("waba_propia" in v))).toBe(true);
+  });
+
+  it("si pierde la carrera (23505) se suma al caso que ganó, sin tocar su waba_propia", async () => {
+    setupSelectResults([[], [{ id: "case-ganador" }]]);
+    setupInsertResults([
+      { rejectWith: Object.assign(new Error("dup"), { code: "23505" }) },
+      { rows: [] },
+      { rows: [] },
+    ]);
+
+    const r = await createWhatsAppIntake({
+      tenantId: "tenant-001",
+      from: "5491100000000",
+      body: "Choqué",
+      wabaPropia: true,
+    });
+
+    expect(r.caseId).toBe("case-ganador");
+    expect(r.created).toBe(false);
+    // El único INSERT de `cases` fue el que chocó; el resto son mensajes.
+    expect(insertedCase()).toMatchObject({ waba_propia: true });
+    expect(mockDbInsert).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
  * El nombre de perfil, guardado en el INSERT que ya ocurre.
  *
  * Meta lo manda en cada webhook, `parseCloudApiMessages` ya lo leia y moria en
@@ -717,6 +804,30 @@ describe("createWhatsAppIntake — el nombre de perfil", () => {
     });
 
     expect(mensaje().raw_payload).toEqual({});
+  });
+
+  it("por qué número entró el mensaje queda en su raw_payload: el caso nuevo de un siniestro nuevo lo toma de ahí", async () => {
+    await createWhatsAppIntakeAndRunAgent({
+      tenantId: "tenant-001",
+      from: "5491100000000",
+      body: "Choque en Alem",
+      senderName: "Martin Sosa",
+      wabaPropia: true,
+    });
+
+    expect(mensaje().raw_payload).toEqual({ profile_name: "Martin Sosa", waba_propia: true });
+  });
+
+  it("el mensaje de un caso viejo que entra por la WABA propia se marca igual, sin tocar el caso", async () => {
+    setupSelectResults([[{ id: "case-existing-001", status: "info_faltante" }]]);
+    setupInsertResults([{ rows: [] }, { rows: [] }]);
+
+    await createWhatsAppIntake({ tenantId: "tenant-001", from: "5491100000000", body: "Otro choque", wabaPropia: true });
+
+    const chain = mockDbInsert.mock.results[0].value as { values: ReturnType<typeof vi.fn> };
+    const fila = chain.values.mock.calls[0][0] as Record<string, unknown>;
+    expect(fila.raw_payload).toEqual({ waba_propia: true });
+    expect("waba_propia" in fila).toBe(false);
   });
 });
 

@@ -216,7 +216,7 @@ export async function POST(request: NextRequest, context: Ctx): Promise<NextResp
   }
 
   const respuesta = guarda
-    ? await atenderLoteDeMeta(propios, (numero) => (numero === vigente.phoneNumberId ? tenantId : undefined), hasta)
+    ? await atenderLoteDeMeta(propios, (numero) => (numero === vigente.phoneNumberId ? { tenantId, wabaPropia: true } : undefined), hasta)
     : { status: 200 as const, cuerpo: { ok: true, received: 0, case_ids: [] as string[] } };
 
   // El primer mensaje se anota sólo si alguien lo atendió: acusado y descartado, el panel mentiría y la falta de respuesta daría un diagnóstico falso.

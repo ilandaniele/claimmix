@@ -539,7 +539,7 @@ const ACCIONES = [
   },
   {
     nombre: "activarInquilino",
-    correr: () => activarInquilino(CLIENTE, terminosDeActivacion("piloto")!, OP),
+    correr: () => activarInquilino(CLIENTE, terminosDeActivacion("operativo")!, OP),
     id: CLIENTE,
     evento: AuditEvent.TENANT_PLAN_CHANGED,
     escribe: "update public.tenants",
@@ -636,13 +636,13 @@ describe("reglas de cada acción", () => {
 
   it("activar sólo toca un espacio en prueba o activo, marca activated_at una vez y deja el plan anterior en el asiento", async () => {
     h.execute.mockResolvedValue(filas({ n: 1 }));
-    await activarInquilino(CLIENTE, terminosDeActivacion("piloto", { cuota: "199.5", incluidas: "300" })!, OP);
+    await activarInquilino(CLIENTE, terminosDeActivacion("operativo", { cuota: "199.5", incluidas: "300" })!, OP);
     const q = consulta();
     expect(q.sql).toContain("billing_status = 'active'");
     expect(q.sql).toContain("activated_at = coalesce(t.activated_at, now())");
     expect(q.sql).toContain("t.billing_status in ('trial', 'active')");
     expect(q.sql).toContain("plan_anterior");
-    expect(q.params).toEqual(expect.arrayContaining(["piloto", "199.5", 300]));
+    expect(q.params).toEqual(expect.arrayContaining(["operativo", "199.5", 300]));
   });
 
   it("H4: extender la prueba entre 1 y 90 días enteros, y nada fuera de eso toca la base", async () => {
@@ -1674,36 +1674,57 @@ describe("listarAltas con la WABA propia", () => {
 
 describe("terminosDeActivacion", () => {
   it("sin nada a mano usa los términos del catálogo", () => {
-    const base = PLAN_CATALOG.piloto;
-    expect(terminosDeActivacion("piloto")).toEqual({
-      plan: "piloto",
+    const base = PLAN_CATALOG.operativo;
+    expect(terminosDeActivacion("operativo")).toEqual({
+      plan: "operativo",
       monthly_fee_usd: String(base.monthly_fee_usd),
       included_claims: base.included_claims,
       overage_price_usd: String(base.overage_price_usd),
     });
   });
 
+  it("inicial toma del catálogo US$ 19, 12 unidades y US$ 1,50 el excedente", () => {
+    expect(terminosDeActivacion("inicial")).toEqual({
+      plan: "inicial",
+      monthly_fee_usd: "19",
+      included_claims: 12,
+      overage_price_usd: "1.5",
+    });
+  });
+
+  it("'piloto' no se activa: daría una Prueba gratis y sin vencimiento", () => {
+    expect(terminosDeActivacion("piloto")).toBeNull();
+    expect(terminosDeActivacion("piloto", { cuota: "100" })).toBeNull();
+  });
+
   it("lo que el operador pisa a mano gana, y lo vacío no pisa", () => {
-    expect(terminosDeActivacion("piloto", { cuota: " 150.25 ", incluidas: "40", excedente: "0.5" })).toMatchObject({
+    expect(terminosDeActivacion("operativo", { cuota: " 150.25 ", incluidas: "40", excedente: "0.5" })).toMatchObject({
       monthly_fee_usd: "150.25",
       included_claims: 40,
       overage_price_usd: "0.5",
     });
-    expect(terminosDeActivacion("piloto", { cuota: "", incluidas: " ", excedente: "" })).toMatchObject({
-      included_claims: PLAN_CATALOG.piloto.included_claims,
+    expect(terminosDeActivacion("operativo", { cuota: "", incluidas: " ", excedente: "" })).toMatchObject({
+      included_claims: PLAN_CATALOG.operativo.included_claims,
+    });
+  });
+
+  it("una cuota de 0 a mano se acepta: un acuerdo sin abono sigue siendo un plan comercial", () => {
+    expect(terminosDeActivacion("operativo", { cuota: "0" })).toMatchObject({
+      plan: "operativo",
+      monthly_fee_usd: "0",
     });
   });
 
   it("un plan que no existe, o un número que no es un número razonable, es null", () => {
     expect(terminosDeActivacion("platino")).toBeNull();
     expect(terminosDeActivacion(undefined)).toBeNull();
-    expect(terminosDeActivacion("piloto", { cuota: "1e5" })).toBeNull();
-    expect(terminosDeActivacion("piloto", { cuota: "-10" })).toBeNull();
-    expect(terminosDeActivacion("piloto", { cuota: "10; drop table tenants" })).toBeNull();
-    expect(terminosDeActivacion("piloto", { excedente: "1.23456" })).toBeNull();
-    expect(terminosDeActivacion("piloto", { incluidas: "1.5" })).toBeNull();
-    expect(terminosDeActivacion("piloto", { incluidas: "-1" })).toBeNull();
-    expect(terminosDeActivacion("piloto", { incluidas: "10000001" })).toBeNull();
+    expect(terminosDeActivacion("operativo", { cuota: "1e5" })).toBeNull();
+    expect(terminosDeActivacion("operativo", { cuota: "-10" })).toBeNull();
+    expect(terminosDeActivacion("operativo", { cuota: "10; drop table tenants" })).toBeNull();
+    expect(terminosDeActivacion("operativo", { excedente: "1.23456" })).toBeNull();
+    expect(terminosDeActivacion("operativo", { incluidas: "1.5" })).toBeNull();
+    expect(terminosDeActivacion("operativo", { incluidas: "-1" })).toBeNull();
+    expect(terminosDeActivacion("operativo", { incluidas: "10000001" })).toBeNull();
   });
 });
 

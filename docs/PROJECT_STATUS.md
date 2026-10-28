@@ -283,6 +283,52 @@ endpoint returns all four buckets so an invoice can be defended line by line.
 A tenant's own stored terms are authoritative, not the catalog: a signed contract
 must not change retroactively because someone edited the price list.
 
+**Catálogo 2027 (rama `billing/catalogo-precios-2027`, aprobado por el dueño el 28/10).**
+Cuota única en unidades: cada denuncia gasta del cupo según por dónde entró (WhatsApp en el
+número de ClaimMix 1, WhatsApp con la WABA propia del cliente 0,8, mail 0,5, web 1 a la
+espera del dueño) y el excedente se cobra por unidad. `included_claims` pasa a significar
+unidades; `volume.billable_claims` sigue siendo la cantidad de denuncias y `invoice.units`
+trae el consumo pesado (las facturas congeladas antes no lo traen: se leen con `units =
+claims`). Los pesos viven en `PESO_EN_DECIMAS` y `consumoDelMes`
+(`src/lib/billing/plans.ts`); el SQL sólo cuenta cuatro cubetas disjuntas
+(`src/server/billing/cuentas-sql.ts`) y `computeInvoice` cobra.
+
+| Plan | Cuota mensual | Unidades incluidas | Excedente por unidad |
+| --- | --- | --- | --- |
+| `piloto` (la Prueba, por omisión en altas solas, `billing_status` trial) | US$ 0 | 50 | US$ 0 |
+| `inicial` (nuevo) | US$ 19 | 12 | US$ 1,50 |
+| `operativo` | US$ 390 | 320 | US$ 1,30 |
+| `profesional` | US$ 1.100 | 950 | US$ 1,20 |
+| `corporativo` | US$ 2.900 | 2.700 | US$ 1,10 |
+| `enterprise` (contrato anual, piso negociable; la cuota es mensual) | US$ 8.000 | 8.000 | US$ 1,00 |
+
+- El **Piloto guiado** no tiene mecanismo: el operador activa el plan a mitad de cuota por 60
+  días y vuelve a activarlo a mano con la cuota entera. `/admin/altas` ya no deja activar
+  `piloto` (daría una Prueba gratis sin vencimiento).
+- La regla comercial vieja (excedente <= precio por unidad del plan propio) cae a propósito.
+  La reemplazan dos invariantes que fija `billing-plans.test.ts`: la cuota por unidad incluida
+  baja de plan en plan (US$ 1,583 > US$ 1,219 > US$ 1,158 > US$ 1,074 > US$ 1,000) y el excedente de un plan no
+  pasa de la cuota por unidad del anterior.
+- **Migración 0055** (`neon/migrations/0055_planes_por_unidades.sql`, A MANO, los deploys no
+  la corren): permite `inicial` en `tenants_plan_check`, baja el `DEFAULT` de
+  `tenants.included_claims` a 50 y agrega `cases.waba_propia boolean not null default
+  false` (la marca la pone el webhook al crear el caso; sin la columna `/api/health` da 503
+  y ningún caso se crea; el caso que abre un `siniestro_nuevo` la toma de `raw_payload` del
+  mensaje que se parte, no del caso de antes: el cliente pudo cambiar de número). Se aplica antes del deploy, con `node scripts/migrate.mjs --apply`,
+  en este orden: QA (`ep-wispy-flower`), la base viva (`ep-proud-resonance`, la de
+  `DATABASE_URL` del CI), la rama `production` de Veltra (`STAGING_DATABASE_URL`) y por último
+  `node scripts/migrar-bases.mjs --env prd` (control, ensayo y cada `t_<hex>` lista; confirmar
+  el ensayo con `--env ensayo --dry`). Cada base se identifica por su canal de casos, no por
+  el nombre.
+- Los inquilinos existentes y las facturas congeladas no cambian de términos: cada uno guarda
+  los suyos. El cambio de pesos sí mueve el mes en curso de todos (no está congelado) y sólo
+  cambia plata donde ya había excedente. La cubeta de WABA propia (0,8) queda inerte mientras
+  `ALTA_WABA_PROPIA` y `ALTA_APP_PROPIA` sigan apagadas.
+- **Pendientes, sin implementar ni gancho en el código:** una prueba por CUIT; tope global de
+  15 pruebas activas; corte de la Prueba a los 50 casos; regla de uso razonable (20 mensajes
+  cuentan doble); aviso automático para el Piloto guiado; peso de web; si la etiqueta de
+  `piloto` pasa de «Piloto» a «Prueba».
+
 ### 🔐 Hardening pass (2026-08-21 → 23)
 
 Everything else here asks whether the system does what it promises. This asked the

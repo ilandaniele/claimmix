@@ -5,8 +5,8 @@
  * en cómo prueban la firma y en cómo deciden de quién es cada número, no en
  * esto.
  *
- * No importa `numeros.ts`: quién es el dueño de cada número lo resuelve el que
- * llama y llega acá como `tenantDe`.
+ * No importa el código de `numeros.ts` (sólo el tipo `Destino`): quién es el dueño
+ * de cada número lo resuelve el que llama y llega acá como `destinoDe`.
  */
 
 import { after } from "next/server";
@@ -19,6 +19,7 @@ import {
 } from "@/server/intake/retomar-pendientes";
 import { logger } from "@/lib/observability/logger";
 import type { NormalizedWhatsAppMessage } from "@/server/whatsapp/cloud-api";
+import type { Destino } from "@/server/whatsapp/numeros";
 
 /**
  * Schedules the bounded intake agent after the response is flushed, then
@@ -145,10 +146,14 @@ export function scheduleAgent(
   });
 }
 
-/** Maps a normalized Cloud API message into the shared intake pipeline. */
-export function ingest(tenantId: string, msg: NormalizedWhatsAppMessage) {
+/**
+ * Maps a normalized Cloud API message into the shared intake pipeline.
+ * `wabaPropia`: entró por la WABA del cliente, que pesa menos en el cupo.
+ */
+export function ingest(tenantId: string, msg: NormalizedWhatsAppMessage, wabaPropia = false) {
   return createWhatsAppIntake({
     tenantId,
+    wabaPropia,
     from: msg.from,
     body: msg.body,
     providerMessageId: msg.providerMessageId,
@@ -168,13 +173,13 @@ export interface ResultadoDelLote {
 /**
  * Guarda los mensajes de un lote de Meta ya firmado y programa el agente.
  *
- * `tenantDe` decide de quién es el número al que le hablaron; `undefined` es un
- * evento bien firmado cuyo destinatario no es de nadie: se descarta y no se
- * reintenta.
+ * `destinoDe` decide de quién es el número al que le hablaron (y si es una WABA
+ * propia); `undefined` es un evento bien firmado cuyo destinatario no es de nadie:
+ * se descarta y no se reintenta.
  */
 export async function atenderLoteDeMeta(
   mensajes: NormalizedWhatsAppMessage[],
-  tenantDe: (phoneNumberId: string) => string | undefined,
+  destinoDe: (phoneNumberId: string) => Destino | undefined,
   hasta: number
 ): Promise<ResultadoDelLote> {
   const caseIds: string[] = [];
@@ -187,8 +192,8 @@ export async function atenderLoteDeMeta(
 
   for (const msg of mensajes) {
     const numero = msg.toPhoneNumberId?.trim();
-    const tenantId = numero ? tenantDe(numero) : undefined;
-    if (!tenantId) {
+    const destino = numero ? destinoDe(numero) : undefined;
+    if (!destino) {
       // Sin metadata, de un número sin fila conectada o de uno suspendido: no
       // se reintenta, el evento está bien y el destinatario no es de nadie.
       descartados++;
@@ -198,7 +203,8 @@ export async function atenderLoteDeMeta(
       continue;
     }
     try {
-      const stored = await ingest(tenantId, msg);
+      const { tenantId, wabaPropia } = destino;
+      const stored = await ingest(tenantId, msg, wabaPropia);
       caseIds.push(stored.caseId);
 
       // Una reentrega no vuelve a correr el agente.

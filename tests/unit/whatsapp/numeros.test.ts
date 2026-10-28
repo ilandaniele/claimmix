@@ -201,9 +201,25 @@ describe("webhookDelEntorno", () => {
 });
 
 describe("resolverNumeros", () => {
-  function fila(numero: string, tenantId: string, estado: string, billing = "active", wabaId: string | null = null) {
-    return { phone_number_id: numero, tenant_id: tenantId, estado, billing_status: billing, waba_id: wabaId };
+  function fila(
+    numero: string,
+    tenantId: string,
+    estado: string,
+    billing = "active",
+    wabaId: string | null = null,
+    wabaPropia = false
+  ) {
+    return {
+      phone_number_id: numero,
+      tenant_id: tenantId,
+      estado,
+      billing_status: billing,
+      waba_id: wabaId,
+      waba_propia: wabaPropia,
+    };
   }
+  const deLaPlataforma = (tenantId: string) => ({ tenantId, wabaPropia: false });
+  const deWabaPropia = (tenantId: string) => ({ tenantId, wabaPropia: true });
 
   it("sin ids no consulta nada", async () => {
     const ruta = await resolverNumeros([]);
@@ -217,7 +233,74 @@ describe("resolverNumeros", () => {
 
     const ruta = await resolverNumeros([NUMERO_OTRO]);
 
-    expect(ruta.get(NUMERO_OTRO)).toBe(OTRO);
+    expect(ruta.get(NUMERO_OTRO)).toEqual(deLaPlataforma(OTRO));
+  });
+
+  describe("si el mensaje pesa distinto en el cupo: la WABA propia del cliente", () => {
+    it("una fila con token propio va marcada como waba propia, en la misma consulta", async () => {
+      mockSelectDb.mockReturnValue(consulta([fila(NUMERO_OTRO, OTRO, "conectado", "active", null, true)]));
+
+      const ruta = await resolverNumeros([NUMERO_OTRO]);
+
+      expect(ruta.get(NUMERO_OTRO)).toEqual(deWabaPropia(OTRO));
+      expect(mockSelectDb).toHaveBeenCalledTimes(1);
+    });
+
+    it("un lote con un número propio y uno de la plataforma marca cada uno por su fila", async () => {
+      mockSelectDb.mockReturnValue(
+        consulta([
+          fila(NUMERO_OTRO, OTRO, "conectado", "active", null, true),
+          fila(NUMERO_TERCERO, TERCERO, "conectado", "active", null, false),
+        ])
+      );
+
+      const ruta = await resolverNumeros([NUMERO_OTRO, NUMERO_TERCERO]);
+
+      expect(mockSelectDb).toHaveBeenCalledTimes(1);
+      expect(Object.fromEntries(ruta)).toEqual({
+        [NUMERO_OTRO]: deWabaPropia(OTRO),
+        [NUMERO_TERCERO]: deLaPlataforma(TERCERO),
+      });
+    });
+
+    it("pregunta `token_cifrado is not null` y no trae el token: sólo sale un booleano", async () => {
+      mockSelectDb.mockReturnValue(consulta([]));
+
+      await resolverNumeros([NUMERO_OTRO]);
+
+      const columnas = mockSelectDb.mock.calls[0][0] as Record<string, unknown>;
+      expect(Object.keys(columnas)).not.toContain("token_cifrado");
+      const { sql } = new PgDialect().sqlToQuery(columnas.waba_propia as SQL);
+      expect(sql).toContain('"whatsapp_numeros"."token_cifrado" is not null');
+    });
+
+    it("sin la 0051 (la consulta de respaldo, sin la unión a whatsapp_wabas) también lo trae", async () => {
+      mockSelectDb
+        .mockReturnValueOnce(consulta(sinTabla()))
+        .mockReturnValueOnce(consulta([fila(NUMERO_OTRO, OTRO, "conectado", "active", null, true)]));
+
+      const ruta = await resolverNumeros([NUMERO_OTRO]);
+
+      const columnas = mockSelectDb.mock.calls[1][0] as Record<string, unknown>;
+      expect(Object.keys(columnas)).toContain("waba_propia");
+      expect(ruta.get(NUMERO_OTRO)).toEqual(deWabaPropia(OTRO));
+    });
+
+    it("el número de la plataforma con fila sin token propio no es waba propia", async () => {
+      mockSelectDb.mockReturnValue(consulta([fila(NUMERO_PLATAFORMA, PLATAFORMA, "conectado")]));
+
+      const ruta = await resolverNumeros([NUMERO_PLATAFORMA]);
+
+      expect(ruta.get(NUMERO_PLATAFORMA)).toEqual(deLaPlataforma(PLATAFORMA));
+    });
+
+    it("el id del .env sin fila es de la plataforma: no es waba propia", async () => {
+      mockSelectDb.mockReturnValue(consulta([]));
+
+      const ruta = await resolverNumeros([NUMERO_PLATAFORMA]);
+
+      expect(ruta.get(NUMERO_PLATAFORMA)).toEqual(deLaPlataforma(PLATAFORMA));
+    });
   });
 
   describe("la WABA que firma el evento", () => {
@@ -232,7 +315,7 @@ describe("resolverNumeros", () => {
 
       const ruta = await resolverNumeros([NUMERO_OTRO], new Map([[NUMERO_OTRO, "999999999999999"]]));
 
-      expect(ruta.get(NUMERO_OTRO)).toBe(OTRO);
+      expect(ruta.get(NUMERO_OTRO)).toEqual(deLaPlataforma(OTRO));
       const linea = logs.lineas().find((l) => l.msg === "whatsapp.waba_no_coincide");
       expect(linea).toMatchObject({ tenantId: OTRO, wabaFirmada: "999999999999999", wabaDeLaFila: WABA_PROPIA });
     });
@@ -260,7 +343,7 @@ describe("resolverNumeros", () => {
 
       const ruta = await resolverNumeros([NUMERO_OTRO]);
 
-      expect(ruta.get(NUMERO_OTRO)).toBe(OTRO);
+      expect(ruta.get(NUMERO_OTRO)).toEqual(deLaPlataforma(OTRO));
       expect(logs.texto()).not.toContain("waba_no_coincide");
     });
   });
@@ -295,7 +378,7 @@ describe("resolverNumeros", () => {
 
       const ruta = await resolverNumeros([NUMERO_OTRO]);
 
-      expect(ruta.get(NUMERO_OTRO)).toBe(OTRO);
+      expect(ruta.get(NUMERO_OTRO)).toEqual(deLaPlataforma(OTRO));
       expect(logs.texto()).not.toContain("app_por_plataforma");
     });
 
@@ -306,7 +389,7 @@ describe("resolverNumeros", () => {
 
         const ruta = await resolverNumeros([NUMERO_OTRO]);
 
-        expect(ruta.get(NUMERO_OTRO)).toBe(OTRO);
+        expect(ruta.get(NUMERO_OTRO)).toEqual(deLaPlataforma(OTRO));
         expect(logs.texto()).not.toContain("app_por_plataforma");
       }
     );
@@ -321,7 +404,7 @@ describe("resolverNumeros", () => {
 
       const ruta = await resolverNumeros([NUMERO_OTRO, NUMERO_TERCERO]);
 
-      expect(Object.fromEntries(ruta)).toEqual({ [NUMERO_TERCERO]: TERCERO });
+      expect(Object.fromEntries(ruta)).toEqual({ [NUMERO_TERCERO]: deLaPlataforma(TERCERO) });
     });
   });
 
@@ -333,7 +416,10 @@ describe("resolverNumeros", () => {
     const ruta = await resolverNumeros([NUMERO_OTRO, NUMERO_TERCERO, NUMERO_OTRO]);
 
     expect(mockSelectDb).toHaveBeenCalledTimes(1);
-    expect(Object.fromEntries(ruta)).toEqual({ [NUMERO_OTRO]: OTRO, [NUMERO_TERCERO]: TERCERO });
+    expect(Object.fromEntries(ruta)).toEqual({
+      [NUMERO_OTRO]: deLaPlataforma(OTRO),
+      [NUMERO_TERCERO]: deLaPlataforma(TERCERO),
+    });
   });
 
   it.each(["pedido", "suspendido", "baja"])("una fila «%s» se descarta", async (estado) => {
@@ -357,7 +443,7 @@ describe("resolverNumeros", () => {
 
     const ruta = await resolverNumeros([NUMERO_PLATAFORMA]);
 
-    expect(ruta.get(NUMERO_PLATAFORMA)).toBe(PLATAFORMA);
+    expect(ruta.get(NUMERO_PLATAFORMA)).toEqual(deLaPlataforma(PLATAFORMA));
   });
 
   it("sin fila, cualquier otro id se descarta: nada cae en un inquilino por omisión", async () => {
@@ -381,7 +467,7 @@ describe("resolverNumeros", () => {
 
     const ruta = await resolverNumeros([NUMERO_PLATAFORMA]);
 
-    expect(ruta.get(NUMERO_PLATAFORMA)).toBe(OTRO);
+    expect(ruta.get(NUMERO_PLATAFORMA)).toEqual(deLaPlataforma(OTRO));
   });
 
   it("sin inquilino de la plataforma configurado, su número no entra a ninguno", async () => {
@@ -398,7 +484,7 @@ describe("resolverNumeros", () => {
 
     const ruta = await resolverNumeros([NUMERO_PLATAFORMA, NUMERO_OTRO]);
 
-    expect(Object.fromEntries(ruta)).toEqual({ [NUMERO_PLATAFORMA]: PLATAFORMA });
+    expect(Object.fromEntries(ruta)).toEqual({ [NUMERO_PLATAFORMA]: deLaPlataforma(PLATAFORMA) });
   });
 
   it("con la 0048 y sin la 0051 (falta whatsapp_wabas) sigue ruteando por la fila del número", async () => {
@@ -409,7 +495,7 @@ describe("resolverNumeros", () => {
     const ruta = await resolverNumeros([NUMERO_OTRO, NUMERO_PLATAFORMA]);
 
     expect(mockSelectDb).toHaveBeenCalledTimes(2);
-    expect(Object.fromEntries(ruta)).toEqual({ [NUMERO_OTRO]: OTRO });
+    expect(Object.fromEntries(ruta)).toEqual({ [NUMERO_OTRO]: deLaPlataforma(OTRO) });
   });
 
   it("el 42P01 que Drizzle mete en `cause` también cuenta", async () => {
@@ -417,7 +503,7 @@ describe("resolverNumeros", () => {
 
     const ruta = await resolverNumeros([NUMERO_PLATAFORMA]);
 
-    expect(ruta.get(NUMERO_PLATAFORMA)).toBe(PLATAFORMA);
+    expect(ruta.get(NUMERO_PLATAFORMA)).toEqual(deLaPlataforma(PLATAFORMA));
   });
 
   it("cualquier otro error de la base se tira: no se resuelve «por las dudas»", async () => {

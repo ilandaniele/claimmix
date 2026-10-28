@@ -10,6 +10,11 @@
  * not-a-claim is NOT billed — charging for filtered spam would make the
  * filter look like a revenue source instead of a feature. Cases that never
  * produced a verdict (failed or still processing) are not billed either.
+ * Each billable claim spends part of the plan's quota by channel
+ * (`PESO_EN_DECIMAS` in lib/billing/plans.ts): `invoice.units` is that
+ * consumption and `overage_claims` the units beyond the quota;
+ * `volume.billable_claims` stays a head count. A period frozen before the
+ * weights has no `invoice.units`.
  *
  * The full breakdown is returned, not just the billable number, so an invoice
  * can be defended line by line when a client questions it.

@@ -12,11 +12,15 @@
  * change retroactively because we edited a price here.
  */
 
+import type { CANALES_REALES } from "@/lib/schemas/cases";
 import { topeEntero } from "@/lib/topes";
 
-export const PLANS = ["piloto", "operativo", "profesional", "corporativo", "enterprise"] as const;
+export const PLANS = ["piloto", "inicial", "operativo", "profesional", "corporativo", "enterprise"] as const;
 
 export type Plan = (typeof PLANS)[number];
+
+/** Los planes que se venden. 'piloto' es la Prueba gratuita: no se activa a mano. */
+export const PLANES_COMERCIALES = PLANS.filter((p): p is Exclude<Plan, "piloto"> => p !== "piloto");
 
 export const BILLING_STATUSES = ["trial", "active", "suspended", "churned"] as const;
 
@@ -28,49 +32,89 @@ export const SIN_SERVICIO: ReadonlySet<string> = new Set<BillingStatus>(["suspen
 export interface PlanTerms {
   /** Fixed monthly fee in USD. */
   monthly_fee_usd: number;
-  /** Claims covered by the fee each calendar month. */
+  /** Units covered by the fee each calendar month (a claim spends units by channel, see `PESO_EN_DECIMAS`). */
   included_claims: number;
-  /** Price per claim beyond `included_claims`. */
+  /** Price per unit beyond `included_claims`. */
   overage_price_usd: number;
   label: string;
 }
 
 /**
- * Default terms per plan. `enterprise` is negotiated per client, so its entry
- * is a floor to start from, not a quote.
+ * Default terms per plan; `included_claims` are units of the quota.
+ *
+ * - `piloto` is the free trial: the days come from ALTA_PRUEBA_DIAS.
+ * - `enterprise` is the MONTHLY fee and the floor of a negotiable annual
+ *   contract: a starting point, not a quote.
+ * - Piloto guiado (manual, no mechanism): the operator activates the plan at half
+ *   the fee for 60 days and activates it again by hand at the full fee.
  */
 export const PLAN_CATALOG: Record<Plan, PlanTerms> = {
   piloto: {
     monthly_fee_usd: 0,
-    included_claims: 300,
+    included_claims: 50,
     overage_price_usd: 0,
     label: "Piloto",
   },
+  inicial: {
+    monthly_fee_usd: 19,
+    included_claims: 12,
+    overage_price_usd: 1.5,
+    label: "Inicial",
+  },
   operativo: {
     monthly_fee_usd: 390,
-    included_claims: 750,
-    overage_price_usd: 0.45,
+    included_claims: 320,
+    overage_price_usd: 1.3,
     label: "Operativo",
   },
   profesional: {
     monthly_fee_usd: 1100,
-    included_claims: 3000,
-    overage_price_usd: 0.35,
+    included_claims: 950,
+    overage_price_usd: 1.2,
     label: "Profesional",
   },
   corporativo: {
     monthly_fee_usd: 2900,
-    included_claims: 10000,
-    overage_price_usd: 0.28,
+    included_claims: 2700,
+    overage_price_usd: 1.1,
     label: "Corporativo",
   },
   enterprise: {
-    monthly_fee_usd: 2900,
-    included_claims: 10000,
-    overage_price_usd: 0.2,
+    monthly_fee_usd: 8000,
+    included_claims: 8000,
+    overage_price_usd: 1,
     label: "Enterprise",
   },
 };
+
+/** Cada canal real, y el WhatsApp de la WABA propia del cliente, que pesa distinto. */
+export type Cubeta = (typeof CANALES_REALES)[number] | "whatsapp_propia";
+
+/**
+ * Cuántas unidades del cupo gasta una denuncia, según por dónde entró. En décimas
+ * para que la suma quede entera y no arrastre error de coma flotante. `web` pesa 1,
+ * como antes de los pesos, hasta que lo decida el dueño. El `Record` obliga a darle
+ * peso a cualquier canal real nuevo.
+ */
+export const PESO_EN_DECIMAS: Record<Cubeta, number> = {
+  whatsapp: 10,
+  whatsapp_propia: 8,
+  email: 5,
+  web: 10,
+};
+
+/** Denuncias y unidades de un mes a partir de las denuncias de cada cubeta. */
+export function consumoDelMes(cuentas: Partial<Record<Cubeta, number>>): { claims: number; units: number } {
+  let claims = 0;
+  let decimas = 0;
+  for (const cubeta of Object.keys(PESO_EN_DECIMAS) as Cubeta[]) {
+    const n = cuentas[cubeta];
+    const cuenta = Math.floor(n !== undefined && Number.isFinite(n) && n > 0 ? n : 0);
+    claims += cuenta;
+    decimas += cuenta * PESO_EN_DECIMAS[cubeta];
+  }
+  return { claims, units: decimas / 10 };
+}
 
 export function isPlan(value: unknown): value is Plan {
   return typeof value === "string" && (PLANS as readonly string[]).includes(value);
@@ -83,12 +127,16 @@ export function isBillingStatus(value: unknown): value is BillingStatus {
 export interface InvoiceInput extends PlanTerms {
   /** Billable claims the tenant produced this period. */
   claims: number;
+  /** Weighted consumption of the quota (see `consumoDelMes`). Without it, one unit per claim. */
+  units?: number;
 }
 
 export interface Invoice {
   claims: number;
+  /** Quota units consumed. Optional: a frozen invoice written before the weights does not carry it. */
+  units?: number;
   included_claims: number;
-  /** Claims beyond the included allowance. Never negative. */
+  /** Units beyond the included allowance. Never negative; the name stays for the frozen payloads. */
   overage_claims: number;
   monthly_fee_usd: number;
   overage_price_usd: number;
@@ -119,14 +167,17 @@ export function computeInvoice(input: InvoiceInput): Invoice {
   const monthlyFee = safe(input.monthly_fee_usd);
   const overagePrice = safe(input.overage_price_usd);
 
-  const overageClaims = Math.max(0, claims - included);
-  const overageTotal = toCents(overageClaims * overagePrice);
+  // En décimas: los pesos son de a 0,1 y así el excedente fraccionario no arrastra coma flotante.
+  const unitsD = Math.round(safe(input.units ?? claims) * 10);
+  const overageD = Math.max(0, unitsD - included * 10);
+  const overageTotal = toCents((overageD * overagePrice) / 10);
   const total = toCents(monthlyFee + overageTotal);
 
   return {
     claims,
+    units: unitsD / 10,
     included_claims: included,
-    overage_claims: overageClaims,
+    overage_claims: overageD / 10,
     monthly_fee_usd: toCents(monthlyFee),
     overage_price_usd: overagePrice,
     overage_total_usd: overageTotal,
@@ -164,6 +215,8 @@ export function computeMargin(
  */
 export const TOPE_DIARIO_TOKENS: Record<Plan, number> = {
   piloto: 500_000,
+  // Inerte: el tope sólo corta pruebas y las pruebas son 'piloto'; se fija por el orden creciente.
+  inicial: 1_000_000,
   operativo: 5_000_000,
   profesional: 20_000_000,
   corporativo: 50_000_000,

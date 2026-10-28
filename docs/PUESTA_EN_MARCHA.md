@@ -1522,7 +1522,12 @@ parte G y la parte H.
   - **Fuentes:** `docs/whatsapp-setup.md:467`, `:501`.
 - [ ] **T3. La revisión de la app (App Review).**
   - **Quién:** [Dueño].
-  - **Dónde:** panel de la app > Revisión de la app. Guías de Meta:
+  - **Dónde:** panel de la app > Casos de uso > WhatsApp «Personalizar» > Permisos y funciones
+    > «+Add to App Review» en cada permiso, después «Become Tech Provider» y «Edit App Review».
+    El formulario tiene seis pasos: Verification, App settings, Allowed usage (los videos), Data
+    handling, Reviewer instructions y Submit. En Data handling van cuatro procesadores: Vercel
+    (hosting) y Neon (base de datos) en Brasil y Estados Unidos; Google Vertex AI (procesamiento
+    con IA) y Cloudflare R2 (almacenamiento) en Estados Unidos. Guías de Meta:
     https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/app-review
     (qué pide WhatsApp),
     https://developers.facebook.com/docs/resp-plat-initiatives/individual-processes/app-review/submission-guide

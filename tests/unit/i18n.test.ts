@@ -233,7 +233,6 @@ describe("las cinco pantallas nuevas están traducidas de verdad", () => {
     "metricas.col.tokens",     // «Tokens»
     "facturacion.total",       // «Total»
     "cartera.col.plan",        // «Plan»
-    "cartera.incluidas",       // «incl.», abreviatura igual en los dos
   ]);
 
   const clavesNuevas = Object.keys(esAR).filter((k) =>

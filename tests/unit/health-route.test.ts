@@ -119,6 +119,8 @@ function esquemaSin(...faltan: string[]) {
     { table_name: "ai_usage_mensual", column_name: "tenant_id" },
     // 0054.
     { table_name: "ai_usage", column_name: "case_id" },
+    // 0055.
+    { table_name: "cases", column_name: "waba_propia" },
   ].filter((f) => !faltan.includes(`${f.table_name}.${f.column_name}`) && !faltan.includes(f.table_name));
 }
 
@@ -316,6 +318,23 @@ describe("GET /api/health — what it reports", () => {
 
     expect(migraciones.status).toBe("down");
     expect(migraciones.detail).toContain("ai_usage.case_id");
+  });
+
+  it("sin la marca de WABA propia del caso (0055) cae: cada INSERT de casos falla con 42703", async () => {
+    mockExecute.mockImplementation((q: unknown) =>
+      Promise.resolve(
+        JSON.stringify(q).includes("ai_usage")
+          ? { rows: [{ total: 0 }] }
+          : { rows: esquemaSin("cases.waba_propia") }
+      )
+    );
+    const res = await GET(request(`Bearer ${SECRET}`));
+    const body = await res.json();
+    const migraciones = body.checks.find((c: { name: string }) => c.name === "migraciones");
+
+    expect(res.status).toBe(503);
+    expect(migraciones.status).toBe("down");
+    expect(migraciones.detail).toContain("cases.waba_propia");
   });
 
   it("nota que falta lo comercial, no sólo lo del camino caliente", async () => {

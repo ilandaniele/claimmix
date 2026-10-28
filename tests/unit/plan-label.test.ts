@@ -26,6 +26,11 @@ describe("nombreDePlan", () => {
     expect(nombreDePlan("piloto", "Piloto", tEn)).toBe("Pilot");
   });
 
+  it("el plan inicial es «Inicial» y «Starter»", () => {
+    expect(nombreDePlan("inicial", "inicial", tEs)).toBe("Inicial");
+    expect(nombreDePlan("inicial", "inicial", tEn)).toBe("Starter");
+  });
+
   it("todos los planes del catálogo tienen nombre en los dos idiomas", () => {
     for (const plan of PLANS) {
       expect(nombreDePlan(plan, "SIN TRADUCIR", tEs)).not.toBe("SIN TRADUCIR");

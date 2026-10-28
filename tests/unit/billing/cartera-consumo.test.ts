@@ -56,12 +56,24 @@ const viejo = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-async function cartera(fila: Record<string, unknown>, opts: { billable?: number; gasto?: number } = {}) {
+async function cartera(
+  fila: Record<string, unknown>,
+  opts: { billable?: number; mails?: number; gasto?: number } = {}
+) {
   h.cola.length = 0;
   h.campos.length = 0;
   h.cola.push(
     [fila],
-    opts.billable === undefined ? [] : [{ tenant_id: UNO, total: opts.billable, billable: opts.billable }],
+    opts.billable === undefined && opts.mails === undefined
+      ? []
+      : [
+          {
+            tenant_id: UNO,
+            total: (opts.billable ?? 0) + (opts.mails ?? 0),
+            whatsapp: opts.billable ?? 0,
+            email: opts.mails ?? 0,
+          },
+        ],
     opts.gasto === undefined ? [] : [{ tenant_id: UNO, cost_usd: opts.gasto }],
     [],
   );
@@ -96,6 +108,12 @@ describe("la cartera con el consumo de cada cliente", () => {
     const t = await cartera(viejo(), { billable: 4, gasto: 3 });
 
     expect(t).toMatchObject({ billable_claims: 4, ai_cost_usd: 3, costo_medio_usd: 0.75 });
+  });
+
+  it("el costo medio divide por denuncias y no por unidades: un mail es una denuncia aunque pese media", async () => {
+    const t = await cartera(viejo(), { mails: 4, gasto: 3 });
+
+    expect(t).toMatchObject({ billable_claims: 4, costo_medio_usd: 0.75 });
   });
 
   it("sin denuncias facturables no hay costo medio", async () => {

@@ -3,6 +3,7 @@ import { PLANS, type Plan } from "@/lib/billing/plans";
 
 const CLAVES: Record<Plan, TranslationKey> = {
   piloto: "plan.piloto",
+  inicial: "plan.inicial",
   operativo: "plan.operativo",
   profesional: "plan.profesional",
   corporativo: "plan.corporativo",

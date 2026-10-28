@@ -40,7 +40,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { after } from "next/server.js";
 
 import { AuditEvent } from "@/lib/audit/log";
-import { PLAN_CATALOG, isPlan, type Plan } from "@/lib/billing/plans";
+import { PLAN_CATALOG, PLANES_COMERCIALES, type Plan } from "@/lib/billing/plans";
 import { db } from "@/lib/db";
 import { ID_DE_META } from "@/lib/meta-ids";
 import { conteoDe, filasDe } from "@/lib/db/filas";
@@ -1268,14 +1268,16 @@ export function terminosDeActivacion(
   plan: unknown,
   pisados: { cuota?: string; incluidas?: string; excedente?: string } = {}
 ): TerminosDeActivacion | null {
-  if (!isPlan(plan)) return null;
-  const base = PLAN_CATALOG[plan];
+  // 'piloto' queda afuera: activarlo daría una Prueba gratis y sin vencimiento.
+  const comercial = PLANES_COMERCIALES.find((p) => p === plan);
+  if (!comercial) return null;
+  const base = PLAN_CATALOG[comercial];
   const cuota = pisados.cuota?.trim() || String(base.monthly_fee_usd);
   const excedente = pisados.excedente?.trim() || String(base.overage_price_usd);
   const incluidas = pisados.incluidas?.trim() ? Number(pisados.incluidas.trim()) : base.included_claims;
   if (!DECIMAL.test(cuota) || !DECIMAL.test(excedente)) return null;
   if (!Number.isInteger(incluidas) || incluidas < 0 || incluidas > 10_000_000) return null;
-  return { plan, monthly_fee_usd: cuota, included_claims: incluidas, overage_price_usd: excedente };
+  return { plan: comercial, monthly_fee_usd: cuota, included_claims: incluidas, overage_price_usd: excedente };
 }
 
 /**

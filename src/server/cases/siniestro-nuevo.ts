@@ -66,9 +66,13 @@ export async function abrirCasoPorSiniestroNuevo(o: {
       db.execute(sql`select pg_advisory_xact_lock(hashtext('siniestro_nuevo'), hashtext(${caseId}::text))`),
       // En crudo: `insert().select()` de drizzle pide todas las columnas. Sin alias
       // en el `cases` de afuera, o `admiteParaResponder()` no lo encuentra.
+      // `waba_propia` sale del mensaje que se parte y no del caso de antes: el caso viejo pudo
+      // abrirse por otro número (el cliente cambió de número) y el nuevo pesa según por dónde entró éste.
       db.execute(sql`
-        insert into cases (id, tenant_id, channel, status, email_thread_id, is_claim, claim_type, extraction_pending)
-        select ${nuevo}::uuid, cases.tenant_id, cases.channel, 'recibido', cases.email_thread_id, null, null, true
+        insert into cases (id, tenant_id, channel, waba_propia, status, email_thread_id, is_claim, claim_type, extraction_pending)
+        select ${nuevo}::uuid, cases.tenant_id, cases.channel,
+               coalesce((select m.raw_payload->>'waba_propia' = 'true' from claim_messages m where m.id = ${messageId}::uuid), false),
+               'recibido', cases.email_thread_id, null, null, true
         from cases
         where cases.id = ${caseId}::uuid
           and cases.channel in ('whatsapp', 'whatsapp_sim')

@@ -137,10 +137,10 @@ describe("la cartera con la bandera prendida", () => {
       ],
       bases: {
         [UNO]: {
-          casos: [{ tenant_id: UNO, total: 40, billable: 30 }],
+          casos: [{ tenant_id: UNO, total: 40, whatsapp: 30 }],
           facturas: [{ tenant_id: UNO, total_usd: "120", billable_claims: 12 }],
         },
-        [OTRO]: { casos: [{ tenant_id: OTRO, total: 5, billable: 4 }] },
+        [OTRO]: { casos: [{ tenant_id: OTRO, total: 5, whatsapp: 4 }] },
       },
     });
 
@@ -154,11 +154,29 @@ describe("la cartera con la bandera prendida", () => {
     expect(porId.get(OTRO)).toMatchObject({ total_cases: 5, billable_claims: 4, invoice_total_usd: 100, ai_cost_usd: 1 });
   });
 
+  it("pesa los canales de cada base: 5 mails son 2,5 unidades y no pasan el abono de 10", async () => {
+    armar({
+      tenants: [tenant(UNO, "Seguros del Sur"), tenant(OTRO, "La Segunda")],
+      bases: {
+        [UNO]: { casos: [{ tenant_id: UNO, total: 24, email: 24 }] },
+        [OTRO]: { casos: [{ tenant_id: OTRO, total: 14, whatsapp: 14 }] },
+      },
+    });
+
+    const { tenants } = await listTenantSummaries(MES);
+
+    const porId = new Map(tenants.map((t) => [t.id, t]));
+    // 24 mails = 12 unidades: 2 de excedente a 2 sobre el abono de 100.
+    expect(porId.get(UNO)).toMatchObject({ billable_claims: 24, invoice_total_usd: 104 });
+    // 14 de WhatsApp = 14 unidades: 4 de excedente.
+    expect(porId.get(OTRO)).toMatchObject({ billable_claims: 14, invoice_total_usd: 108 });
+  });
+
   it("si una base no se puede leer, la cartera no se muestra a medias", async () => {
     armar({
       tenants: [tenant(UNO, "Seguros del Sur"), tenant(OTRO, "La Segunda")],
       bases: {
-        [UNO]: { casos: [{ tenant_id: UNO, total: 40, billable: 30 }] },
+        [UNO]: { casos: [{ tenant_id: UNO, total: 40, whatsapp: 30 }] },
         // El 3D000 de una base borrada: se encola como rechazo de su primera lectura.
         [OTRO]: { casos: Object.assign(new Error("no existe"), { code: "3D000" }) },
       },
@@ -183,7 +201,7 @@ describe("la cartera sin la bandera", () => {
     h.colaDeControl.length = 0;
     h.colaDeControl.push(
       [tenant(UNO, "Seguros del Sur")],
-      [{ tenant_id: UNO, total: 40, billable: 30 }],
+      [{ tenant_id: UNO, total: 40, whatsapp: 30 }],
       [],
       [{ tenant_id: UNO, total_usd: "120", billable_claims: 12 }],
     );

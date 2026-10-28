@@ -19,7 +19,7 @@
  */
 
 import "server-only";
-import { and, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enControl } from "@/data/scope";
 import { tenants, whatsappNumeros, whatsappWabas } from "@/lib/db/schema";
@@ -83,9 +83,17 @@ const wabaVivaDelNumero = () =>
     notInArray(whatsappWabas.estado, ["cancelada", "revocada"])
   );
 
+/** Adónde va un mensaje: el inquilino y si entró por la WABA propia del cliente (pesa distinto en el cupo). */
+export interface Destino {
+  tenantId: string;
+  wabaPropia: boolean;
+}
+
 /**
- * A qué inquilino va cada `phone_number_id` del lote: id -> tenant_id. Un id
- * que no está en el mapa se descarta.
+ * A qué inquilino va cada `phone_number_id` del lote: id -> destino. Un id
+ * que no está en el mapa se descarta. `wabaPropia` sale de que la fila tenga
+ * token propio (la misma regla que `credencialesWhatsApp.propia`); el id del .env
+ * sin fila es de la plataforma.
  *
  * Una sola consulta por POST. Va con `db` y sin inquilino porque todavía no lo
  * hay: es justo lo que se está buscando.
@@ -113,8 +121,8 @@ const wabaVivaDelNumero = () =>
 export async function resolverNumeros(
   ids: string[],
   wabaDe?: ReadonlyMap<string, string>
-): Promise<Map<string, string>> {
-  const ruta = new Map<string, string>();
+): Promise<Map<string, Destino>> {
+  const ruta = new Map<string, Destino>();
   const unicos = [...new Set(ids)];
   if (unicos.length === 0) return ruta;
 
@@ -125,6 +133,8 @@ export async function resolverNumeros(
       tenant_id: whatsappNumeros.tenant_id,
       waba_id: whatsappNumeros.waba_id,
       estado: whatsappNumeros.estado,
+      // Un booleano y no el token: acá sólo importa si tiene uno propio.
+      waba_propia: sql<boolean>`${whatsappNumeros.token_cifrado} is not null`,
       billing_status: tenants.billing_status,
     };
     // sin-inquilino: Todavía no hay inquilino, es lo que se busca: el dueño del
@@ -164,7 +174,7 @@ export async function resolverNumeros(
         logger.warn({ tenantId: f.tenant_id, wabaFirmada: firmada, wabaDeLaFila: f.waba_id }, "whatsapp.waba_no_coincide");
       }
       if (f.estado === "conectado" && !SIN_SERVICIO.has(f.billing_status)) {
-        ruta.set(f.phone_number_id, f.tenant_id);
+        ruta.set(f.phone_number_id, { tenantId: f.tenant_id, wabaPropia: f.waba_propia === true });
       }
     }
   } catch (e) {
@@ -174,7 +184,7 @@ export async function resolverNumeros(
   const propio = idDeLaPlataforma();
   const plataforma = inquilinoDeLaPlataforma();
   if (propio && plataforma && unicos.includes(propio) && !conFila.has(propio)) {
-    ruta.set(propio, plataforma);
+    ruta.set(propio, { tenantId: plataforma, wabaPropia: false });
   }
   return ruta;
 }

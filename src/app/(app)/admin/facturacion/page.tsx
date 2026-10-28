@@ -24,6 +24,7 @@ import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period"
 import { getStatement } from "@/server/billing/statement";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { nombreDePlan } from "@/lib/billing/plan-label";
+import { PESO_EN_DECIMAS, type Cubeta } from "@/lib/billing/plans";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
@@ -32,6 +33,15 @@ export const dynamic = "force-dynamic";
 
 // Uno solo para todo el producto: ver formatUsd en lib/utils.
 const money = (n: number) => formatUsd(n);
+
+// El texto lleva un marcador por cubeta ({whatsapp}, {email}…): el peso que se lee es el que se aplica.
+// Los números van en es-AR en las dos lenguas, como `money`: una etiqueta no mezcla «34.9» con «US$ 1,30».
+function notaDePesos(texto: string): string {
+  return (Object.keys(PESO_EN_DECIMAS) as Cubeta[]).reduce(
+    (nota, cubeta) => nota.replace(`{${cubeta}}`, (PESO_EN_DECIMAS[cubeta] / 10).toLocaleString("es-AR")),
+    texto
+  );
+}
 
 function shiftMonth(month: string, delta: number): string {
   const [year, m] = month.split("-");
@@ -180,10 +190,10 @@ export default async function FacturacionPage({
             />
             <Row
               label={t("facturacion.denunciasIncluidas")}
-              value={`${invoice.claims.toLocaleString("es-AR")} ${t("pagination.of")} ${invoice.included_claims.toLocaleString("es-AR")}`}
+              value={`${(invoice.units ?? invoice.claims).toLocaleString("es-AR")} ${t("pagination.of")} ${invoice.included_claims.toLocaleString("es-AR")}`}
             />
             <Row
-              label={`${t("facturacion.excedente")} (${invoice.overage_claims} × ${money(invoice.overage_price_usd)})`}
+              label={`${t("facturacion.excedente")} (${invoice.overage_claims.toLocaleString("es-AR")} × ${money(invoice.overage_price_usd)})`}
               value={money(invoice.overage_total_usd)}
             />
             <div className="!mt-4 flex items-center justify-between border-t border-slate-200 pt-3 dark:border-slate-700">
@@ -195,6 +205,10 @@ export default async function FacturacionPage({
               </dd>
             </div>
           </dl>
+          {/* Una factura congelada antes de los pesos no trae `units`: contó un caso por unidad y la nota no le toca. */}
+          {invoice.units !== undefined && (
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{notaDePesos(t("facturacion.pesos"))}</p>
+          )}
         </section>
 
         {/* ── Lo que costó ────────────────────────────────────────────────── */}

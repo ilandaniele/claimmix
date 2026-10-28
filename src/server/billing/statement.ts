@@ -31,9 +31,10 @@ import "server-only";
 import { and, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
 import { tables } from "@/lib/db";
 import { enTenant, type TenantContext } from "@/data/scope";
-import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
+import { computeInvoice, computeMargin, consumoDelMes, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import { periodoAntesDelAlta, type BillingPeriod } from "@/lib/billing/period";
 import { costoPorCaso, type CostoPorCaso } from "@/lib/billing/costo-por-caso";
+import { cuentasPorCubeta } from "@/server/billing/cuentas-sql";
 import { esCasoReal } from "@/server/core-sync/lectura";
 
 export interface Statement {
@@ -132,7 +133,7 @@ export async function computeStatement(
     db
       .select({
         total: sql<number>`count(*)::int`,
-        billable: sql<number>`count(*) filter (where is_claim is true)::int`,
+        ...cuentasPorCubeta,
         rejected: sql<number>`count(*) filter (where is_claim is false)::int`,
         unresolved: sql<number>`count(*) filter (where is_claim is null)::int`,
       })
@@ -176,8 +177,11 @@ export async function computeStatement(
   const fallback = isPlan(tenantRow.plan) ? PLAN_CATALOG[tenantRow.plan] : PLAN_CATALOG.piloto;
   const antesDelAlta = periodoAntesDelAlta(range, tenantRow.created_at);
 
+  const { claims, units } = consumoDelMes(counts ?? {});
+
   const invoice = computeInvoice({
-    claims: antesDelAlta ? 0 : counts?.billable ?? 0,
+    claims: antesDelAlta ? 0 : claims,
+    units: antesDelAlta ? 0 : units,
     monthly_fee_usd: antesDelAlta ? 0 : Number(tenantRow.monthly_fee_usd ?? fallback.monthly_fee_usd),
     included_claims: Number(tenantRow.included_claims ?? fallback.included_claims),
     overage_price_usd: Number(tenantRow.overage_price_usd ?? fallback.overage_price_usd),
@@ -185,7 +189,6 @@ export async function computeStatement(
   });
 
   const cost = Number(spend?.cost_usd ?? 0);
-  const billable = counts?.billable ?? 0;
 
   return {
     month: range.month,
@@ -203,7 +206,7 @@ export async function computeStatement(
     },
     volume: {
       total_cases: counts?.total ?? 0,
-      billable_claims: billable,
+      billable_claims: claims,
       rejected_not_a_claim: counts?.rejected ?? 0,
       unresolved: counts?.unresolved ?? 0,
     },
@@ -214,7 +217,7 @@ export async function computeStatement(
       completion_tokens: spend?.completion_tokens ?? 0,
       cost_usd: Math.round(cost * 10000) / 10000,
       cost_per_billable_claim_usd:
-        billable > 0 ? Math.round((cost / billable) * 10000) / 10000 : 0,
+        claims > 0 ? Math.round((cost / claims) * 10000) / 10000 : 0,
       per_case: costoPorCaso(spend?.costos_por_caso),
     },
     margin: computeMargin(invoice.total_usd, cost),
@@ -246,6 +249,8 @@ export async function readFrozenStatement(
   // The payload is what the API answered the day the period closed. `frozen`
   // is stamped from the row rather than trusted from inside the JSON, so an
   // edited payload cannot claim a closing date it never had.
+  // Una factura congelada antes de los pesos no trae `invoice.units` y así se lee:
+  // completarla sería decir que esa factura aplicó pesos que no aplicó.
   return { ...(row.payload as Statement), frozen: true, frozen_at: row.frozen_at };
 }
 

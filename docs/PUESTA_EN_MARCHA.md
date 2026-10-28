@@ -1527,7 +1527,13 @@ parte G y la parte H.
     El formulario tiene seis pasos: Verification, App settings, Allowed usage (los videos), Data
     handling, Reviewer instructions y Submit. En Data handling van cuatro procesadores: Vercel
     (hosting) y Neon (base de datos) en Brasil y Estados Unidos; Google Vertex AI (procesamiento
-    con IA) y Cloudflare R2 (almacenamiento) en Estados Unidos. Guías de Meta:
+    con IA) y Cloudflare R2 (almacenamiento) en Estados Unidos. Reviewer instructions queda
+    bloqueado hasta que la app tiene una plataforma Website en Configuración > Básica (T5).
+    Ahí van: Facebook Login, No (Embedded Signup existe pero está apagado hasta tener el acceso
+    avanzado); las instrucciones en inglés, con el login por mail y contraseña en `/login`, el
+    selector «Language», el recorrido caso de WhatsApp > «Conversation» > «Take over» y para qué
+    usa la app cada permiso; y el acceso para el revisor vacío, porque los videos muestran el
+    recorrido y el cliente de prd no tiene casos ni plan Pro. Guías de Meta:
     https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/app-review
     (qué pide WhatsApp),
     https://developers.facebook.com/docs/resp-plat-initiatives/individual-processes/app-review/submission-guide
@@ -1545,7 +1551,10 @@ parte G y la parte H.
     caso que ya pasó a «Requiere especialista» o se cerró no está. El de gestión se graba en WhatsApp
     Manager sobre la WABA de prueba, nunca la de producción: Plantillas de mensajes > Crear
     plantilla. Grabar no le cambia nada al número: no se registra de nuevo ni se mueve de WABA.
-  - **Salió bien si:** los dos permisos figuran con acceso avanzado en el panel.
+  - **Salió bien si:** los dos permisos figuran con acceso avanzado en el panel. Se mandó el
+    28/10/2026 con `whatsapp_business_messaging`, `whatsapp_business_management` y
+    `public_profile`, que Meta suma sola; queda «Review in progress» y Meta estima hasta 20
+    días. T3 se marca cuando llega la aprobación, no al mandarla.
   - **Si falla:** Meta devuelve el pedido con el motivo. Corregir el video o la explicación y
     mandarlo de nuevo. Mientras la revisión está abierta, no tocar la configuración básica
     (T5).

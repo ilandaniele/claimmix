@@ -60,9 +60,10 @@ const APP_SECRET = "test-app-secret";
 const VERIFY_TOKEN = "verify-tok";
 const TENANT = "10000000-0000-0000-0000-000000000001";
 const NUMERO = "111111111111111";
+const DESTINO = { tenantId: TENANT, wabaPropia: false };
 
 beforeEach(() => {
-  mockResolverNumeros.mockImplementation(async (ids: string[]) => new Map(ids.map((id) => [id, TENANT])));
+  mockResolverNumeros.mockImplementation(async (ids: string[]) => new Map(ids.map((id) => [id, DESTINO])));
 });
 
 function sign(body: string): string {
@@ -513,7 +514,17 @@ describe("/api/webhooks/whatsapp — a qué número le hablaron", () => {
     expect(res.status).toBe(200);
     expect(mockResolverNumeros).toHaveBeenCalledWith([NUMERO], expect.any(Map));
     expect(mockCreateWhatsAppIntake).toHaveBeenCalledTimes(1);
-    expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT }));
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT, wabaPropia: false }));
+  });
+
+  it("el número de una WABA propia entra marcado: pesa distinto en el cupo", async () => {
+    mockResolverNumeros.mockResolvedValue(new Map([[NUMERO, { tenantId: TENANT, wabaPropia: true }]]));
+    const cuerpo = payload(NUMERO);
+
+    const res = await POST(metaReq(cuerpo, sign(cuerpo)));
+
+    expect(res.status).toBe(200);
+    expect(mockCreateWhatsAppIntake).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT, wabaPropia: true }));
   });
 
   it("el de un número que nadie tiene no se guarda en la bandeja de nadie", async () => {
@@ -578,7 +589,7 @@ describe("/api/webhooks/whatsapp — avisos de la cuenta", () => {
     process.env.WHATSAPP_TENANT_ID = TENANT;
     process.env.WHATSAPP_WEBHOOK_SECRET = "bearer-secret";
     mockAtender.mockResolvedValue(undefined);
-    mockResolverNumeros.mockImplementation(async (ids: string[]) => new Map(ids.map((id) => [id, TENANT])));
+    mockResolverNumeros.mockImplementation(async (ids: string[]) => new Map(ids.map((id) => [id, DESTINO])));
   });
   afterEach(() => {
     vi.clearAllMocks();

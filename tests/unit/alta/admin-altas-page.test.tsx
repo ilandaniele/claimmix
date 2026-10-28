@@ -432,6 +432,41 @@ describe("los lugares de la WABA de la plataforma", () => {
   });
 });
 
+describe("activar un plan", () => {
+  const opciones = () =>
+    within(screen.getByRole("combobox", { name: es["altas.activar.plan"] }))
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+
+  it("ofrece los planes comerciales, con el inicial, y no «piloto»: activarlo daría una Prueba gratis sin vencimiento", async () => {
+    await pintar();
+
+    expect(opciones()).toEqual(["inicial", "operativo", "profesional", "corporativo", "enterprise"]);
+    expect(opciones()).not.toContain("piloto");
+  });
+
+  it("arranca en operativo, no en el inicial", async () => {
+    await pintar();
+
+    expect((screen.getByRole("combobox", { name: es["altas.activar.plan"] }) as HTMLSelectElement).value).toBe("operativo");
+  });
+
+  it("habla de unidades y de dólares en los tres campos", async () => {
+    await pintar();
+
+    expect(screen.getByPlaceholderText("Unidades incluidas")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Cuota mensual (US$)")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Precio por unidad excedente (US$)")).toBeTruthy();
+  });
+
+  it("en inglés también, y el plan inicial sale como Starter", async () => {
+    await pintar(undefined, "en-US");
+
+    expect(screen.getByPlaceholderText("Included units")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Starter" })).toBeTruthy();
+  });
+});
+
 describe("el resultado de la última acción", () => {
   it("las páginas despublicadas se confirman con su mensaje", async () => {
     await pintar("legales_despublicadas");

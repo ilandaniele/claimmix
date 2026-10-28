@@ -36,7 +36,7 @@ import { timingSafeStringEqual } from "@/lib/security/compare";
 import { createWhatsAppIntake } from "@/server/agents/intake-agent";
 import { logger } from "@/lib/observability/logger";
 import { atenderEventosDeCuenta } from "@/server/alta/eventos-de-cuenta";
-import { inquilinoDeLaPlataforma, resolverNumeros } from "@/server/whatsapp/numeros";
+import { inquilinoDeLaPlataforma, resolverNumeros, type Destino } from "@/server/whatsapp/numeros";
 import {
   parseCloudApiMessages,
   parseEventosDeCuenta,
@@ -127,14 +127,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // La firma dice que el evento viene de Meta, no a quién le hablaron: la app
     // puede estar suscripta a más de una WABA. Una sola consulta por pedido: de
     // quién es cada número que aparece en el lote.
-    let inquilinoDe: Map<string, string>;
+    let destinos: Map<string, Destino>;
     try {
       const wabaDe = new Map<string, string>();
       for (const m of messages) {
         const numero = m.toPhoneNumberId?.trim();
         if (numero && m.toWabaId) wabaDe.set(numero, m.toWabaId);
       }
-      inquilinoDe = await resolverNumeros(
+      destinos = await resolverNumeros(
         messages.flatMap((m) => (m.toPhoneNumberId?.trim() ? [m.toPhoneNumberId.trim()] : [])),
         wabaDe
       );
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const respuesta = await atenderLoteDeMeta(messages, (numero) => inquilinoDe.get(numero), hasta);
+    const respuesta = await atenderLoteDeMeta(messages, (numero) => destinos.get(numero), hasta);
     return NextResponse.json(respuesta.cuerpo, { status: respuesta.status });
   }
 

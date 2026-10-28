@@ -64,7 +64,7 @@ const guardado = (cambios: Record<string, unknown> = {}) => ({
   ...cambios,
 });
 
-const dePrueba = (n: string) => (n === NUMERO ? TENANT : undefined);
+const dePrueba = (n: string) => (n === NUMERO ? { tenantId: TENANT, wabaPropia: false } : undefined);
 const lejos = () => Date.now() + 300_000;
 const correrAfter = () => Promise.all(h.afterCallbacks.splice(0).map((cb) => cb()));
 
@@ -88,6 +88,7 @@ describe("ingest", () => {
 
     expect(h.crear).toHaveBeenCalledWith({
       tenantId: TENANT,
+      wabaPropia: false,
       from: "5492916426930",
       body: "Tuve un choque",
       providerMessageId: "wamid.1",
@@ -101,6 +102,14 @@ describe("ingest", () => {
     await ingest(TENANT, msg({ name: undefined }));
 
     expect(h.crear).toHaveBeenCalledWith(expect.objectContaining({ senderName: null }));
+  });
+
+  it("por omisión no es WABA propia; si se lo dicen, lo manda al intake", async () => {
+    await ingest(TENANT, msg());
+    await ingest(TENANT, msg(), true);
+
+    expect(h.crear).toHaveBeenNthCalledWith(1, expect.objectContaining({ wabaPropia: false }));
+    expect(h.crear).toHaveBeenNthCalledWith(2, expect.objectContaining({ wabaPropia: true }));
   });
 });
 
@@ -119,6 +128,14 @@ describe("atenderLoteDeMeta", () => {
     expect(r).toEqual({ status: 200, cuerpo: { ok: true, received: 1, case_ids: ["caso-1"] } });
     expect(h.crear).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT, providerMessageId: "wamid.1" }));
     expect(h.mockAfter).toHaveBeenCalledTimes(1);
+  });
+
+  it("un número de WABA propia llega marcado al intake", async () => {
+    const propia = (n: string) => (n === NUMERO ? { tenantId: TENANT, wabaPropia: true } : undefined);
+
+    await atenderLoteDeMeta([msg()], propia, lejos());
+
+    expect(h.crear).toHaveBeenCalledWith(expect.objectContaining({ tenantId: TENANT, wabaPropia: true }));
   });
 
   it("el agente corre después de contestar, con el caso, el inquilino y el reloj de la invocación", async () => {
@@ -207,10 +224,18 @@ describe("atenderLoteDeMeta", () => {
     h.crear
       .mockResolvedValueOnce(guardado())
       .mockResolvedValueOnce(guardado({ caseId: "caso-2", tenantId: OTRO_TENANT }));
-    const tenantDe = (n: string) => (n === NUMERO ? TENANT : n === OTRO_NUMERO ? OTRO_TENANT : undefined);
+    const destinoDe = (n: string) =>
+      n === NUMERO
+        ? { tenantId: TENANT, wabaPropia: false }
+        : n === OTRO_NUMERO
+          ? { tenantId: OTRO_TENANT, wabaPropia: true }
+          : undefined;
 
-    await atenderLoteDeMeta([msg(), msg({ toPhoneNumberId: OTRO_NUMERO, providerMessageId: "wamid.2" })], tenantDe, lejos());
+    await atenderLoteDeMeta([msg(), msg({ toPhoneNumberId: OTRO_NUMERO, providerMessageId: "wamid.2" })], destinoDe, lejos());
     await correrAfter();
+
+    expect(h.crear).toHaveBeenNthCalledWith(1, expect.objectContaining({ tenantId: TENANT, wabaPropia: false }));
+    expect(h.crear).toHaveBeenNthCalledWith(2, expect.objectContaining({ tenantId: OTRO_TENANT, wabaPropia: true }));
 
     expect(h.mockAfter).toHaveBeenCalledTimes(2);
     expect(h.correr).toHaveBeenCalledWith(expect.objectContaining({ caseId: "caso-1", tenantId: TENANT }));

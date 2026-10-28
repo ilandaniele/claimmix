@@ -6,6 +6,11 @@
  * cuatro decimales (un caso cuesta milésimas y con dos se vería US$ 0,00). Una
  * liquidación congelada antes de la 0054 no trae `per_case`: tiene que decir
  * «sin datos» en vez de tirar o mostrar ceros.
+ *
+ * También el cupo por unidades: la fila del cupo y el excedente salen con
+ * decimales y con el separador de es-AR en las dos lenguas, igual que el dinero
+ * de la misma tarjeta, y la nota de pesos por canal sale de `PESO_EN_DECIMAS`,
+ * sólo en las liquidaciones que los aplicaron.
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -34,12 +39,21 @@ vi.mock("@/server/i18n/idioma-de-la-cuenta", () => ({ getAccountLocale: async ()
 
 import { resolveBillingPeriod } from "@/lib/billing/period";
 import { getT } from "@/lib/i18n";
-import { computeInvoice, computeMargin } from "@/lib/billing/plans";
+import { computeInvoice, computeMargin, consumoDelMes, PESO_EN_DECIMAS } from "@/lib/billing/plans";
 import type { Statement } from "@/server/billing/statement";
 
 const RANGO = resolveBillingPeriod(null)!;
 
-function liquidacion(perCase?: { cases: number; median_usd: number; p95_usd: number }): Statement {
+function liquidacion(
+  perCase?: { cases: number; median_usd: number; p95_usd: number },
+  invoice: Statement["invoice"] = computeInvoice({
+    claims: 10,
+    monthly_fee_usd: 390,
+    included_claims: 750,
+    overage_price_usd: 0.45,
+    label: "Operativo",
+  })
+): Statement {
   return {
     month: RANGO.month,
     period: { start: RANGO.start, end: RANGO.next },
@@ -55,13 +69,7 @@ function liquidacion(perCase?: { cases: number; median_usd: number; p95_usd: num
       created_at: "2020-01-01T00:00:00.000Z",
     },
     volume: { total_cases: 12, billable_claims: 10, rejected_not_a_claim: 2, unresolved: 0 },
-    invoice: computeInvoice({
-      claims: 10,
-      monthly_fee_usd: 390,
-      included_claims: 750,
-      overage_price_usd: 0.45,
-      label: "Operativo",
-    }),
+    invoice,
     ai_cost: {
       calls: 40,
       prompt_tokens: 1000,
@@ -133,6 +141,77 @@ describe("/admin/facturacion — costo por caso", () => {
       for (const clave of ["facturacion.costoPorCasoDetalle", "facturacion.costoPorCasoSinDatos"] as const) {
         expect(t(clave)).not.toMatch(/este mes|this month/i);
       }
+    }
+  });
+});
+
+describe("/admin/facturacion — el cupo por unidades", () => {
+  /** Operativo 2027, un mes de canales mezclados: 408 denuncias, 354,9 unidades, 34,9 de excedente. */
+  function mezclada(): Statement {
+    const { claims, units } = consumoDelMes({ whatsapp: 300, email: 105, whatsapp_propia: 3 });
+    return liquidacion(
+      undefined,
+      computeInvoice({ claims, units, monthly_fee_usd: 390, included_claims: 320, overage_price_usd: 1.3, label: "Operativo" })
+    );
+  }
+
+  /** Congelada antes de los pesos: sin `units`, un caso era una unidad. */
+  function congeladaAntesDeLosPesos(): Statement {
+    const invoice = computeInvoice({ claims: 400, monthly_fee_usd: 390, included_claims: 750, overage_price_usd: 0.45, label: "Operativo" });
+    delete invoice.units;
+    return liquidacion(undefined, invoice);
+  }
+
+  it("en es-AR muestra las unidades y el excedente con coma decimal, y la nota de pesos", async () => {
+    m.getStatement.mockResolvedValue(mezclada());
+
+    const html = await pintar();
+
+    expect(html).toContain("Unidades del cupo");
+    expect(html).toContain("354,9 de 320");
+    expect(html).toContain("(34,9 × US$ 1,30)");
+    expect(html).toContain("según el canal: WhatsApp 1 · WABA propia 0,8 · mail 0,5 · web 1.");
+  });
+
+  it("en en-US los textos van en inglés y los números con el mismo separador que el dinero: una etiqueta no mezcla «34.9» con «US$ 1,30»", async () => {
+    m.locale.actual = "en-US";
+    m.getStatement.mockResolvedValue(mezclada());
+
+    const html = await pintar();
+
+    expect(html).toContain("Plan units");
+    expect(html).toContain("354,9 of 320");
+    expect(html).toContain("(34,9 × US$ 1,30)");
+    expect(html).toContain("by channel: WhatsApp 1 · own WABA 0,8 · email 0,5 · web 1.");
+  });
+
+  it("una liquidación congelada antes de los pesos muestra sus denuncias y no lleva la nota", async () => {
+    for (const locale of ["es-AR", "en-US"] as const) {
+      m.locale.actual = locale;
+      m.getStatement.mockResolvedValue(congeladaAntesDeLosPesos());
+
+      const html = await pintar();
+
+      expect(html).toContain(locale === "es-AR" ? "400 de 750" : "400 of 750");
+      expect(html).not.toContain(locale === "es-AR" ? "según el canal" : "by channel");
+    }
+  });
+
+  it("los pesos de la nota salen de PESO_EN_DECIMAS y no del texto", async () => {
+    m.getStatement.mockResolvedValue(mezclada());
+    const antes = PESO_EN_DECIMAS.web;
+    PESO_EN_DECIMAS.web = 7;
+    try {
+      expect(await pintar()).toContain("mail 0,5 · web 0,7.");
+    } finally {
+      PESO_EN_DECIMAS.web = antes;
+    }
+  });
+
+  it("el texto tiene un marcador por cada canal que pesa: uno nuevo no puede quedar fuera", () => {
+    for (const locale of ["es-AR", "en-US"] as const) {
+      const texto = getT(locale)("facturacion.pesos");
+      for (const cubeta of Object.keys(PESO_EN_DECIMAS)) expect(texto).toContain(`{${cubeta}}`);
     }
   });
 });

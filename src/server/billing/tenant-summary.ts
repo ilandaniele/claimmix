@@ -19,9 +19,10 @@
 import "server-only";
 import { and, eq, gte, lt, ne, sql } from "drizzle-orm";
 import { db, tables, type DbDueno } from "@/lib/db";
-import { computeInvoice, computeMargin, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
+import { computeInvoice, computeMargin, consumoDelMes, PLAN_CATALOG, isPlan } from "@/lib/billing/plans";
 import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period";
 import { getDemoTenantId } from "@/server/ai/budget";
+import { cuentasPorCubeta } from "@/server/billing/cuentas-sql";
 import { paraCadaBase } from "@/server/bases/cada-base";
 import { esCasoReal } from "@/server/core-sync/lectura";
 
@@ -123,7 +124,7 @@ export async function listTenantSummaries(month?: string | null): Promise<{
       .select({
         tenant_id: tables.cases.tenant_id,
         total: sql<number>`count(*)::int`,
-        billable: sql<number>`count(*) filter (where is_claim is true)::int`,
+        ...cuentasPorCubeta,
       })
       .from(tables.cases)
       .where(
@@ -194,11 +195,13 @@ export async function listTenantSummaries(month?: string | null): Promise<{
 
       // Los términos guardados del tenant mandan sobre el catálogo: un contrato
       // firmado no cambia porque alguien haya editado la lista de precios.
-      const billable = facturada ? Number(facturada.billable_claims) : counts?.billable ?? 0;
+      const { claims, units } = consumoDelMes(counts ?? {});
+      const billable = facturada ? Number(facturada.billable_claims) : claims;
       const aiCost = Math.round(cost * 10000) / 10000;
       const baseMb = t.base_mb == null ? null : Number(t.base_mb);
       const invoice = computeInvoice({
-        claims: counts?.billable ?? 0,
+        claims,
+        units,
         monthly_fee_usd: Number(t.monthly_fee_usd ?? fallback.monthly_fee_usd),
         included_claims: Number(t.included_claims ?? fallback.included_claims),
         overage_price_usd: Number(t.overage_price_usd ?? fallback.overage_price_usd),

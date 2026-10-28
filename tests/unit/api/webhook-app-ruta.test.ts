@@ -539,9 +539,9 @@ describe("POST: mensajes", () => {
   it("el dueño del número lo dice la ruta: sólo el número de la fila resuelve al inquilino", async () => {
     await postBueno(rutaNueva(), mensajes());
 
-    const tenantDe = h.atenderLote.mock.calls[0][1] as (n: string) => string | undefined;
-    expect(tenantDe(NUMERO)).toBe(TENANT);
-    expect(tenantDe(OTRO_NUMERO)).toBeUndefined();
+    const destinoDe = h.atenderLote.mock.calls[0][1] as (n: string) => { tenantId: string; wabaPropia: boolean } | undefined;
+    expect(destinoDe(NUMERO)).toEqual({ tenantId: TENANT, wabaPropia: true });
+    expect(destinoDe(OTRO_NUMERO)).toBeUndefined();
   });
 
   it("un mensaje para otro phone_number_id se descarta y se cuenta, sin tocar el inquilino", async () => {
@@ -612,8 +612,8 @@ describe("POST: mensajes", () => {
       await postBueno(rutaNueva(), mensajes());
 
       expect(h.atenderLote).toHaveBeenCalledTimes(1);
-      const tenantDe = h.atenderLote.mock.calls[0][1] as (n: string) => string | undefined;
-      expect(tenantDe(NUMERO)).toBe(TENANT);
+      const destinoDe = h.atenderLote.mock.calls[0][1] as (n: string) => { tenantId: string; wabaPropia: boolean } | undefined;
+      expect(destinoDe(NUMERO)).toEqual({ tenantId: TENANT, wabaPropia: true });
       expect(h.warn).not.toHaveBeenCalledWith(expect.anything(), "whatsapp.webhook.app_ajena");
     });
 

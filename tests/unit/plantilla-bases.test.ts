@@ -86,10 +86,10 @@ describe("la cadena empaquetada", () => {
     expect(r.status).toBe(0);
   });
 
-  it("la 0054 (case_id en ai_usage) viaja en la cadena: última versión, igual al archivo, y no toca la RLS ni los permisos", () => {
+  it("la 0054 (case_id en ai_usage) viaja en la cadena: igual al archivo, y no toca la RLS ni los permisos", () => {
     const m54 = MIGRACIONES.find((m) => m.version === 54)!;
 
-    expect(VERSION_ESPERADA).toBe(54);
+    expect(m54.version).toBe(54);
     expect(m54.nombre).toBe("0054_costo_por_caso.sql");
     expect(m54.sql).toBe(readFileSync(join(CARPETA, m54.nombre), "utf8").replace(/\r\n/g, "\n"));
     expect(m54.sql).toContain("ADD COLUMN IF NOT EXISTS case_id uuid");
@@ -103,6 +103,20 @@ describe("la cadena empaquetada", () => {
     const rls = MIGRACIONES.filter((m) => m.version < 54 && /'ai_usage',/.test(m.sql) && /ENABLE ROW LEVEL SECURITY/.test(m.sql));
     expect(rls.map((m) => m.version)).toContain(4);
     expect(MIGRACIONES.find((m) => m.version === 18)!.sql).toContain("FORCE ROW LEVEL SECURITY");
+  });
+
+  it("la 0055 (planes por unidades) es la última versión de la cadena, igual al archivo, y no toca la RLS ni los permisos", () => {
+    const m55 = MIGRACIONES.find((m) => m.version === 55)!;
+
+    expect(VERSION_ESPERADA).toBe(55);
+    expect(m55.nombre).toBe("0055_planes_por_unidades.sql");
+    expect(m55.sql).toBe(readFileSync(join(CARPETA, m55.nombre), "utf8").replace(/\r\n/g, "\n"));
+    expect(m55.sql).toContain("ADD COLUMN IF NOT EXISTS waba_propia boolean NOT NULL DEFAULT false");
+    const sinComentarios = m55.sql
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("--"))
+      .join("\n");
+    expect(sinComentarios).not.toMatch(/ROW LEVEL SECURITY|CREATE POLICY|DROP POLICY|GRANT|REVOKE/i);
   });
 
   it("lleva los permisos tal como los arman los scripts", () => {

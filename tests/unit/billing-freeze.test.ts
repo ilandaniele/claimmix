@@ -81,6 +81,7 @@ vi.mock("@/lib/db", () => ({
 
 import { getStatement, periodHasEnded } from "@/server/billing/statement";
 import { resolveBillingPeriod } from "@/lib/billing/period";
+import type { Cubeta } from "@/lib/billing/plans";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
 const MARZO = resolveBillingPeriod("2026-03")!;
@@ -100,14 +101,27 @@ const tenantRow = {
   created_at: "2026-01-01T00:00:00.000Z",
 };
 
+/** La fila de conteos del mes: una cuenta por cubeta del cupo, más rechazados y sin resolver. */
+function conteos(cubetas: Partial<Record<Cubeta, number>>) {
+  const todas = { whatsapp: 0, whatsapp_propia: 0, email: 0, web: 0, ...cubetas };
+  const facturables = Object.values(todas).reduce((a, n) => a + n, 0);
+  return { total: facturables + 5, ...todas, rejected: 5, unresolved: 0 };
+}
+
 /**
  * Lo que devuelven las tres consultas de un cálculo en vivo, en orden. La del
  * gasto trae además un número por caso real del mes (`costos_por_caso`).
+ * `billable` son denuncias de WhatsApp (una unidad cada una) salvo que se pasen cubetas.
  */
-function liveQueries(billable: number, costUsd = 2, costosPorCaso: unknown = []) {
+function liveQueries(
+  billable: number,
+  costUsd = 2,
+  costosPorCaso: unknown = [],
+  cubetas: Partial<Record<Cubeta, number>> = { whatsapp: billable }
+) {
   return [
     [tenantRow],
-    [{ total: billable + 5, billable, rejected: 5, unresolved: 0 }],
+    [conteos(cubetas)],
     [
       {
         calls: billable,
@@ -189,6 +203,76 @@ describe("getStatement — el costo por caso", () => {
   });
 });
 
+describe("getStatement — el cupo por unidades", () => {
+  /** Operativo 2027: US$ 390 por 320 unidades, US$ 1,30 la unidad de más. */
+  const operativo2027 = { ...tenantRow, included_claims: 320, overage_price_usd: "1.3000" };
+  const gasto = { calls: 400, prompt_tokens: 1000, completion_tokens: 100, cost_usd: 2, costos_por_caso: [] };
+
+  it("300 de WhatsApp y 100 mails son 400 denuncias y 350 unidades: 30 de excedente", async () => {
+    queued.push([], [operativo2027], [conteos({ whatsapp: 300, email: 100 })], [gasto]);
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-03-15T12:00:00Z"));
+
+    expect(s?.volume.billable_claims).toBe(400);
+    expect(s?.invoice.claims).toBe(400);
+    expect(s?.invoice.units).toBe(350);
+    expect(s?.invoice.overage_claims).toBe(30);
+    // US$ 390 + 30 × US$ 1,30.
+    expect(s?.invoice.total_usd).toBe(429);
+  });
+
+  it("la WABA propia pesa 0,8 y la web 1", async () => {
+    queued.push([], [operativo2027], [conteos({ whatsapp_propia: 10, web: 2 })], [gasto]);
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-03-15T12:00:00Z"));
+
+    expect(s?.volume.billable_claims).toBe(12);
+    expect(s?.invoice.units).toBe(10);
+  });
+
+  it("al congelar guarda las denuncias y las unidades", async () => {
+    queued.push([], [operativo2027], [conteos({ whatsapp: 300, email: 100 })], [gasto]);
+    queued.push([{ payload: { month: "2026-03", invoice: { total_usd: 429 } }, frozen_at: "2026-04-01T03:00:00.000Z" }]);
+
+    await getStatement(TENANT, MARZO, new Date("2026-04-01T03:00:00Z"));
+
+    expect(inserted[0]!.billable_claims).toBe(400);
+    expect(inserted[0]!.total_usd).toBe("429.00");
+    const payload = inserted[0]!.payload as { invoice: { units: number; overage_claims: number } };
+    expect(payload.invoice.units).toBe(350);
+    expect(payload.invoice.overage_claims).toBe(30);
+  });
+
+  it("una factura congelada antes de los pesos se lee tal cual, sin unidades inventadas ni recálculo", async () => {
+    queued.push([
+      {
+        payload: { month: "2026-03", invoice: { claims: 400, total_usd: 412.5 } },
+        frozen_at: "2026-04-01T03:00:00.000Z",
+      },
+    ]);
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-06-10T00:00:00Z"));
+
+    expect(s?.invoice.units).toBeUndefined();
+    expect(s?.invoice.total_usd).toBe(412.5);
+    expect(inserted).toHaveLength(0);
+    expect(queued).toHaveLength(0);
+  });
+
+  it("una factura congelada con unidades las conserva", async () => {
+    queued.push([
+      {
+        payload: { month: "2026-03", invoice: { claims: 400, units: 350, total_usd: 429 } },
+        frozen_at: "2026-04-01T03:00:00.000Z",
+      },
+    ]);
+
+    const s = await getStatement(TENANT, MARZO, new Date("2026-06-10T00:00:00Z"));
+
+    expect(s?.invoice.units).toBe(350);
+  });
+});
+
 describe("getStatement", () => {
   it("el mes en curso se recalcula y no se guarda", async () => {
     queued.push([], ...liveQueries(800));
@@ -264,7 +348,7 @@ describe("getStatement", () => {
     queued.push(
       [],
       [{ ...tenantRow, created_at: "2026-04-01T00:00:00.000Z" }],
-      [{ total: 805, billable: 800, rejected: 5, unresolved: 0 }],
+      [conteos({ whatsapp: 800 })],
       [{ calls: 800, prompt_tokens: 1000, completion_tokens: 100, cost_usd: 2 }]
     );
 
@@ -276,13 +360,14 @@ describe("getStatement", () => {
     expect(s?.invoice.monthly_fee_usd).toBe(0);
     expect(s?.invoice.total_usd).toBe(0);
     expect(s?.volume.billable_claims).toBe(800);
+    expect(s?.invoice.units).toBe(0);
   });
 
   it("un mes con el alta adentro se congela entero", async () => {
     queued.push(
       [],
       [{ ...tenantRow, created_at: "2026-03-15T00:00:00.000Z" }],
-      [{ total: 805, billable: 800, rejected: 5, unresolved: 0 }],
+      [conteos({ whatsapp: 800 })],
       [{ calls: 800, prompt_tokens: 1000, completion_tokens: 100, cost_usd: 2 }]
     );
     queued.push([{ payload: { month: "2026-03", invoice: { total_usd: 412.5 } }, frozen_at: "2026-04-01T03:00:00.000Z" }]);

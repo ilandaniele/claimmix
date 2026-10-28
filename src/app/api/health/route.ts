@@ -272,6 +272,8 @@ async function checkSchema(): Promise<Check> {
     ["tenants", "pesos_puntaje"],
     // 0054: sin esto ningún gasto de IA se anota y los topes no cortan.
     ["ai_usage", "case_id"],
+    // 0055: sin esto ningún caso se crea (Drizzle nombra la columna) y la facturación da 500.
+    ["cases", "waba_propia"],
   ];
 
   try {

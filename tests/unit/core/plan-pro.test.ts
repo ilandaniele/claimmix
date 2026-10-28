@@ -7,7 +7,7 @@ describe("esPlanPro", () => {
     expect(esPlanPro(plan)).toBe(true);
   });
 
-  it.each(["piloto", "operativo"])("%s no lo abre", (plan) => {
+  it.each(["piloto", "inicial", "operativo"])("%s no lo abre", (plan) => {
     expect(esPlanPro(plan)).toBe(false);
   });
 

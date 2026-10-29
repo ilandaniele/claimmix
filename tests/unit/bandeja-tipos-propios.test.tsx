@@ -12,6 +12,7 @@ import type { ReactElement } from "react";
 
 const m = vi.hoisted(() => ({
   listCases: vi.fn(),
+  contarPorEstado: vi.fn(),
   listarTablero: vi.fn(),
   cargarRamos: vi.fn(),
   locale: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock("@/lib/auth/user-row", () => ({
 vi.mock("@/server/i18n/idioma-de-la-cuenta", () => ({ getAccountLocale: m.locale }));
 vi.mock("@/server/cases/list", () => ({
   filtrosDePestanas: vi.fn(),
-  contarPorEstado: vi.fn(async () => []),
+  contarPorEstado: m.contarPorEstado,
   desdeDePeriodo: vi.fn(),
   listCases: m.listCases,
   listarTablero: m.listarTablero,
@@ -50,22 +51,31 @@ const RAMO = {
 
 const TOTALES = { procesando: 43, esperando: 0, confirmacion_pendiente: 0, escalado: 2, listo: 0, cerrado: 0 };
 
-/** Corre la página de servidor y devuelve las props que le pasa a `DashboardClient`. */
-async function propsDelTablero(params: Record<string, string | string[]>) {
+type Params = Record<string, string | string[]>;
+type Nodo = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
+
+/** Corre la página de servidor y devuelve el árbol que arma. */
+async function arbolDe(params: Params) {
   const raiz = BandejaPage({ searchParams: Promise.resolve(params) }) as ReactElement<never>;
-  const arbol = await (raiz.type as unknown as (p: unknown) => Promise<ReactElement>)(raiz.props);
-  const buscar = (nodo: unknown): Record<string, unknown> | null => {
-    if (!nodo || typeof nodo !== "object") return null;
-    const el = nodo as { type?: unknown; props?: { children?: unknown } };
-    if (el.type === DashboardClient) return el.props as Record<string, unknown>;
-    const hijos = el.props?.children;
-    for (const h of Array.isArray(hijos) ? hijos : [hijos]) {
-      const r = buscar(h);
-      if (r) return r;
-    }
-    return null;
-  };
-  return buscar(arbol);
+  return (raiz.type as unknown as (p: unknown) => Promise<ReactElement>)(raiz.props);
+}
+
+/** Las props del primer nodo del árbol que cumple `coincide`. */
+function buscar(nodo: unknown, coincide: (el: Nodo) => boolean): Record<string, unknown> | null {
+  if (!nodo || typeof nodo !== "object") return null;
+  const el = nodo as Nodo;
+  if (coincide(el)) return el.props ?? {};
+  const hijos = el.props?.children;
+  for (const h of Array.isArray(hijos) ? hijos : [hijos]) {
+    const r = buscar(h, coincide);
+    if (r) return r;
+  }
+  return null;
+}
+
+/** Corre la página de servidor y devuelve las props que le pasa a `DashboardClient`. */
+async function propsDelTablero(params: Params) {
+  return buscar(await arbolDe(params), (el) => el.type === DashboardClient);
 }
 
 describe("la bandeja con tipos propios", () => {
@@ -78,6 +88,7 @@ describe("la bandeja con tipos propios", () => {
       meta: { total: 0, page: 1, per_page: 20, pages: 1 },
       totales: TOTALES,
     });
+    m.contarPorEstado.mockResolvedValue([]);
     m.cargarRamos.mockResolvedValue([RAMO]);
     m.rol.mockReturnValue("owner");
   });
@@ -172,5 +183,21 @@ describe("la bandeja con tipos propios", () => {
       expect(m.listarTablero).not.toHaveBeenCalled();
       expect(props?.["totalesDelTablero"]).toBeUndefined();
     }
+  });
+
+  it("un enlace viejo con ?bienvenida=1 no pinta aviso ni suma consultas", async () => {
+    const consultas = [m.listCases, m.contarPorEstado, m.cargarRamos];
+    const llamadas = () => consultas.map((f) => f.mock.calls);
+
+    await arbolDe({});
+    const sinParametro = llamadas();
+    consultas.forEach((f) => f.mockClear());
+
+    const arbol = await arbolDe({ bienvenida: "1" });
+
+    expect(buscar(arbol, (el) => el.type === DashboardClient)).not.toBeNull();
+    expect(buscar(arbol, (el) => el.props?.["role"] === "status")).toBeNull();
+    expect(sinParametro.flat()).not.toHaveLength(0);
+    expect(llamadas()).toEqual(sinParametro);
   });
 });

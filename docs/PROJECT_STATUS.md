@@ -4791,8 +4791,9 @@ Un PR con dos partes que no se tocan.
   el tope de Meta, así que no pesa. Los cupos de código no se devuelven una vez que
   se tocó Graph (el recorrido de la WABA también cuesta), y los de alta sólo cuando
   Meta pide aflojar: ante un timeout al agregar, el número pudo entrar y lo mira el
-  operador (aviso `incierto`). La bienvenida de la bandeja depende sólo de la
-  bandera, no de que la 0049 exista: por eso la 0049 se aplica antes de prenderla.
+  operador (aviso `incierto`). La bienvenida de la bandeja dependía sólo de la
+  bandera (se borró el 28/10 con L2); hoy lo que mira sólo la bandera es el aviso
+  del número en `/alta`: por eso la 0049 se aplica antes de prenderla.
 
 ### Ambiente prd: tres proyectos y una base por cliente (2026-10-08, rama `feat/prd-bases`)
 
@@ -4841,16 +4842,17 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
 ### Alta corta: correo y WhatsApp con el mínimo de pasos (2026-10-09, rama `feat/alta-corta`)
 
 Para que un cliente nuevo de prd termine con su correo y su WhatsApp conectados sin pasar
-por el operador. Con `BASE_POR_CLIENTE` y `ALTA_NUMERO_AUTOMATICO` apagadas todo anda como
-antes.
+por el operador. Con `BASE_POR_CLIENTE` y `ALTA_NUMERO_AUTOMATICO` apagadas no hay
+`/preparando` ni número por código.
 
 - **WhatsApp mientras se prepara la base.** `/preparando` muestra el formulario del número
   (el mismo `NumeroPanel` de Configuración) a un admin de un alta automática, mientras la
   base se crea. El destino de las acciones lo decide el servidor según la base esté lista o
   no; el refresco de la página se frena mientras el usuario escribe o espera un código.
-- **Al terminar la base** va a la bandeja si el número ya está conectado y hay una casilla
-  de Gmail; si no, a Configuración con «Primeros pasos», que ahora sale de los datos y no
-  de la URL, y muestra el formulario del número en un solo lugar.
+- **Al terminar la base** va a `/bandeja`, sin aviso, si el número ya está conectado y hay
+  una casilla de Gmail; si no, a `PRIMEROS_PASOS` (`/configuracion?primeros=1`) con
+  «Primeros pasos», que ahora sale de los datos y no de la URL, y muestra el formulario
+  del número en un solo lugar.
 - **Gmail** se conecta desde Configuración, que avisa el resultado con una lista cerrada de
   diez casos y dice cómo seguir en cada falla. Conectar con la base sin terminar vuelve a
   `/preparando` sin abrir Google. El permiso pedido baja a `gmail.modify` y `gmail.send`
@@ -4859,6 +4861,10 @@ antes.
   se rechaza en el alta con un aviso que muestra cómo escribirlo.
 - **Pasos del cliente:** correo, celular con el 9, entrar con Google, el código por SMS en
   `/preparando` o Configuración y conectar Gmail en Configuración.
+- **Destino único (28/10, L2).** El alta termina en `PRIMEROS_PASOS` en los tres ambientes:
+  en dev y QA directo, en prd después de `/preparando`. Con WhatsApp y Gmail hechos va a
+  `/bandeja`, sin aviso. La bienvenida de la bandeja y sus claves se borraron: los días de
+  prueba los muestra `PruebaPanel` en Configuración.
 
 ### WABA propia por cliente: la causa de fondo del tope de números (2026-10-09, rama `feat/waba-propia`)
 

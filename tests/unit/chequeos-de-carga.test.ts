@@ -74,7 +74,9 @@ describe("INDICES_DEL_TABLERO", () => {
       const archivos = readdirSync(dir).filter((f) => f.startsWith(`${version}_`));
       expect(archivos).toHaveLength(1);
       const sql = readFileSync(join(dir, archivos[0]!), "utf8");
-      expect(sql).toMatch(new RegExp(`CREATE\\s+INDEX\\s+(IF\\s+NOT\\s+EXISTS\\s+)?(public\\.)?${indice}\\b`, "i"));
+      expect(sql).toMatch(
+        new RegExp(`CREATE\\s+INDEX\\s+(IF\\s+NOT\\s+EXISTS\\s+)?(public\\.)?${indice}\\b|CONSTRAINT\\s+${indice}\\s+UNIQUE\\b`, "i")
+      );
     }
   );
 });

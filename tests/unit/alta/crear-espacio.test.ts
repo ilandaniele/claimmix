@@ -28,6 +28,7 @@ vi.mock("@/server/alta/cupo-por-ip", () => ({ tomarCupoDeAlta: h.tomarCupo, solt
 vi.mock("@/server/bases/iniciar", () => ({ iniciarBase: h.iniciarBase }));
 
 import { conError, crearEspacio, SIN_ESPACIO } from "@/server/alta/crear-espacio";
+import { PRIMEROS_PASOS } from "@/server/alta/pasos-hechos";
 
 const USUARIO = "11111111-1111-4111-8111-111111111111";
 const TENANT = "aaaaaaaa-0000-4000-8000-00000000000a";
@@ -95,7 +96,7 @@ describe("crearEspacio: lo que se mira antes de gastar un cupo", () => {
   it("sin el número por código, el mismo número se acepta como siempre", async () => {
     const r = await crearEspacio(buenos({ numeroAutomatico: false, whatsapp: "+54 11 0000 0000" }));
 
-    expect(r.destino).toBe("/bandeja?bienvenida=1");
+    expect(r.destino).toBe(PRIMEROS_PASOS);
     expect(h.crearInquilino).toHaveBeenCalledWith(expect.objectContaining({ numero: "+541100000000" }));
   });
 });
@@ -194,12 +195,12 @@ describe("crearEspacio: la función de la base", () => {
 
 describe("crearEspacio: el espacio creado", () => {
   it.each(["ok", "ok_numero_en_revision"] as const)(
-    "%s: va a la bienvenida, devuelve `alta` para que la acción avise, y no suelta el cupo",
+    "%s: va a los primeros pasos, devuelve `alta` para que la acción avise, y no suelta el cupo",
     async (resultado) => {
       const alta = { ...ALTA, resultado };
       h.crearInquilino.mockResolvedValue(alta);
 
-      expect(await crearEspacio(buenos())).toEqual({ destino: "/bandeja?bienvenida=1", alta });
+      expect(await crearEspacio(buenos())).toEqual({ destino: PRIMEROS_PASOS, alta });
 
       expect(h.soltarCupo).not.toHaveBeenCalled();
     }

@@ -20,6 +20,7 @@ import { ipValida } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 import { crearInquilino, type AltaCreada, type ResultadoDeAlta } from "@/server/alta/crear-inquilino";
 import { soltarCupoDeAlta, tomarCupoDeAlta } from "@/server/alta/cupo-por-ip";
+import { PRIMEROS_PASOS } from "@/server/alta/pasos-hechos";
 import { faltaElNueveArgentino, normalizarE164, validarEmpresa, type ErrorDeAlta } from "@/server/alta/validar";
 import { iniciarBase } from "@/server/bases/iniciar";
 
@@ -83,7 +84,8 @@ export async function crearEspacio({
   }
 
   // Los dos resultados dicen lo mismo: no se confirma que el número ya lo había pedido otro.
-  return { destino: await prepararEspacio(alta, "/bandeja?bienvenida=1"), alta };
+  // Recién creado no tiene Gmail: pasosHechos daría este mismo destino, así que no se consulta.
+  return { destino: await prepararEspacio(alta, PRIMEROS_PASOS), alta };
 }
 
 /**

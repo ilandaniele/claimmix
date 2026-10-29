@@ -127,15 +127,12 @@ describe("i18n de la bandeja y el shell", () => {
       "configuracion.numero.r.esperar",
       "configuracion.numero.r.meta",
       "configuracion.numero.r.revision",
-      "bandeja.bienvenidaAutomatica",
       "alta.whatsapp.aviso",
     ] as const) {
       expect(esAR[key], `es-AR le falta '${key}'`).toBeTruthy();
       expect(enUS[key], `en-US le falta '${key}'`).toBeTruthy();
       expect(enUS[key]).not.toBe(esAR[key]);
     }
-    expect(esAR["bandeja.bienvenidaAutomatica"]).toContain("{n}");
-    expect(enUS["bandeja.bienvenidaAutomatica"]).toContain("{n}");
   });
 
   it("ETIQUETA_DE_ROL resuelve en los dos idiomas", () => {

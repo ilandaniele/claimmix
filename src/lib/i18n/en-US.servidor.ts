@@ -965,8 +965,6 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "correo.acceso.intro": "A person with an email address on your own domain asked for access to your company's workspace in ClaimMix. This is their address:",
   "correo.acceso.invitar": "If you know them and want to give them access, invite them from the users screen:",
   "correo.acceso.noFuiste": "If you do not know them, ignore this message: nobody received access, and nothing is created until you invite that address.",
-  "bandeja.bienvenida": "Your workspace is ready. The trial lasts {n} days. Your WhatsApp is pending: we connect it ourselves and will let you know.",
-  "bandeja.bienvenidaAutomatica": "Your workspace is ready. The trial lasts {n} days. Connect your WhatsApp from Settings with a code sent by SMS or phone call.",
   "altas.title": "Automatic sign-ups",
   "altas.subtitle": "Workspaces opened by sign-up. From here you connect the WhatsApp number, suspend, extend the trial and activate the plan.",
   "altas.stat.24h": "Sign-ups in the last 24 h",

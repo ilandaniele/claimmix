@@ -18,10 +18,10 @@ vi.mock("@/lib/observability/logger", () => ({
 }));
 
 import { prepararEspacio } from "@/server/alta/crear-espacio";
+import { PRIMEROS_PASOS } from "@/server/alta/pasos-hechos";
 
 const TENANT = "aaaaaaaa-0000-4000-8000-00000000000a";
 const ALTA = { resultado: "ok" as const, tenantId: TENANT, creadas24h: 1, tope: 20 };
-const BIENVENIDA = "/bandeja?bienvenida=1";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -31,14 +31,14 @@ beforeEach(() => {
 
 describe("prepararEspacio", () => {
   it("apagada la bandera devuelve el destino y no prepara nada", async () => {
-    expect(await prepararEspacio(ALTA, BIENVENIDA)).toBe(BIENVENIDA);
+    expect(await prepararEspacio(ALTA, PRIMEROS_PASOS)).toBe(PRIMEROS_PASOS);
     expect(h.iniciarBase).not.toHaveBeenCalled();
   });
 
   it("encendida lanza la base del espacio nuevo y manda a /preparando", async () => {
     process.env.BASE_POR_CLIENTE = "1";
 
-    expect(await prepararEspacio(ALTA, BIENVENIDA)).toBe("/preparando");
+    expect(await prepararEspacio(ALTA, PRIMEROS_PASOS)).toBe("/preparando");
     expect(h.iniciarBase).toHaveBeenCalledTimes(1);
     expect(h.iniciarBase).toHaveBeenCalledWith(TENANT);
   });
@@ -47,7 +47,7 @@ describe("prepararEspacio", () => {
     process.env.BASE_POR_CLIENTE = "1";
     h.iniciarBase.mockRejectedValue(new Error("Failed query: params: ana@example.com"));
 
-    expect(await prepararEspacio(ALTA, BIENVENIDA)).toBe("/preparando");
+    expect(await prepararEspacio(ALTA, PRIMEROS_PASOS)).toBe("/preparando");
     expect(h.error).toHaveBeenCalledWith({ error: "Error", tenantId: TENANT }, "alta.base_no_arranco");
   });
 });

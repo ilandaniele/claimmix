@@ -188,7 +188,7 @@ respaldo para cualquier caso que no cierre solo.
    consulta que la función exista) y sigue con «lo conectamos nosotros»; si alguien
    llega con una pantalla vieja, la acción termina en «revisión» sin llamar a Graph
    (el motivo queda en el log `alta.numero_automatico_no_aplica`, `sin_migracion`).
-   La bienvenida de la bandeja sólo mira la bandera: por eso la 0049 va primero.
+   El aviso del número en `/alta` sólo mira la bandera: por eso la 0049 va primero.
 3. El token del sistema (`WHATSAPP_ACCESS_TOKEN`) necesita
    `whatsapp_business_management` y `whatsapp_business_messaging`, y hacen falta
    `WHATSAPP_BUSINESS_ACCOUNT_ID` y `WHATSAPP_PHONE_NUMBER_ID` (el de la plataforma).

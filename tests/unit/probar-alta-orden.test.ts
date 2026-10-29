@@ -49,6 +49,7 @@ describe("probar-alta: los dos pasos con los módulos de verdad", () => {
     expect(apagar).toBeGreaterThan(-1);
     expect(apagar).toBeLessThan(CODIGO.indexOf('await import("@/server/alta/cuenta-del-enlace")'));
     expect(apagar).toBeLessThan(CODIGO.indexOf('await import("@/server/alta/crear-espacio")'));
+    expect(apagar).toBeLessThan(CODIGO.indexOf('await import("@/server/alta/pasos-hechos")'));
     expect(CODIGO).toMatch(/function atajarLaConsola\(\): void \{[\s\S]*?console\.error = nada;[\s\S]*?console\.warn = nada;/);
   });
 
@@ -68,9 +69,12 @@ describe("probar-alta: los dos pasos con los módulos de verdad", () => {
     expect(CODIGO).not.toContain('"/login?aviso=ya_tenes_cuenta"');
   });
 
-  it("el segundo paso espera /bandeja?bienvenida=1, que es lo que devuelve crearEspacio sin base por cliente", () => {
-    expect(SCRIPT).toContain('const DESTINO_DE_ALTA = "/bandeja?bienvenida=1";');
-    expect(ESPACIO).toContain('prepararEspacio(alta, "/bandeja?bienvenida=1")');
+  it("el segundo paso espera PRIMEROS_PASOS, que se importa del módulo y no se copia", () => {
+    expect(CODIGO).toContain('const { PRIMEROS_PASOS: DESTINO_DE_ALTA } = await import("@/server/alta/pasos-hechos")');
+    expect(SCRIPT).not.toContain('"/configuracion?primeros=1"');
+    expect(SCRIPT).not.toContain("bienvenida");
+    expect(ESPACIO).toContain('import { PRIMEROS_PASOS } from "@/server/alta/pasos-hechos";');
+    expect(ESPACIO).toContain("prepararEspacio(alta, PRIMEROS_PASOS)");
     expect(CODIGO).toContain('process.env.BASE_POR_CLIENTE = "0"');
   });
 

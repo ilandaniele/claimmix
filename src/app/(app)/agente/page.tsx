@@ -11,12 +11,13 @@ import { consultaFormularioWeb, type FormularioDelInquilino } from "@/server/web
 import { AgentConsoleClient } from "./AgentConsoleClient";
 import { EntrenamientoBasePanel } from "./EntrenamientoBasePanel";
 import { FormularioWebPanel } from "./FormularioWebPanel";
+import { tabDeLaUrl } from "./pestanas-de-la-consola";
 import { RamosPanel } from "./RamosPanel";
 import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 export const generateMetadata = tituloDePantalla("nav.agente");
 
-export default async function AgentConsolePage() {
+export default async function AgentConsolePage({ searchParams }: { searchParams: Promise<{ tab?: string | string[] }> }) {
   let role = "admin";
   let tenantId = "";
   try {
@@ -26,6 +27,9 @@ export default async function AgentConsolePage() {
   } catch (e) {
     rebotarSiNoEntra(e);
   }
+
+  // Qué pestaña abre, por ejemplo desde «Primeros pasos»: sólo una de la lista, nunca el texto de la dirección.
+  const tabInicial = tabDeLaUrl((await searchParams).tab);
 
   const idioma = await getAccountLocale();
   const t = getT(idioma);
@@ -62,6 +66,7 @@ export default async function AgentConsolePage() {
       </div>
       <AgentConsoleClient
         role={role}
+        tabInicial={tabInicial}
         ramos={<RamosPanel t={t} idioma={idioma} ramos={ramos} pendiente={pendiente0044} />}
         formulario={<FormularioWebPanel t={t} formulario={formulario} pendiente={pendiente0044} />}
         base={<EntrenamientoBasePanel t={t} idioma={idioma} />}

@@ -4865,6 +4865,16 @@ por el operador. Con `BASE_POR_CLIENTE` y `ALTA_NUMERO_AUTOMATICO` apagadas no h
   en dev y QA directo, en prd después de `/preparando`. Con WhatsApp y Gmail hechos va a
   `/bandeja`, sin aviso. La bienvenida de la bandeja y sus claves se borraron: los días de
   prueba los muestra `PruebaPanel` en Configuración.
+- **Equipo y formulario en «Primeros pasos» (29/10, L3).** `pasosHechos` lee cuatro cosas en
+  la misma consulta a control: WhatsApp conectado, una casilla de Gmail, un segundo usuario
+  activo (`offset 1`: el alta crea sólo al dueño, y el segundo nace al aceptar la invitación
+  o por SSO, no al invitar) y el formulario web activo. Configuración suma al admin de una
+  autoalta dos pasos, «Invitá a tu equipo» (`/admin/users`) y «Activá el formulario web»
+  (`/agente?tab=formulario`); cada uno sale cuando se cumple, y la sección sigue visible sólo
+  mientras falte Gmail o el WhatsApp. `/agente` abre la pestaña de `?tab=` si es una de la
+  lista (`pestanas-de-la-consola.ts`, compartido entre la página y la consola); lo demás
+  arranca en «modelos». El destino al terminar la base no cambia. Sin migración, sin
+  variable nueva, sin costo.
 
 ### WABA propia por cliente: la causa de fondo del tope de números (2026-10-09, rama `feat/waba-propia`)
 

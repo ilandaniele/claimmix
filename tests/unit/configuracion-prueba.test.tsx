@@ -178,7 +178,7 @@ beforeEach(() => {
   m.listaDelTenant.mockResolvedValue([]);
   m.panelSso.mockRejectedValue(falta("42P01"));
   m.locale.mockResolvedValue("es-AR");
-  m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+  m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
   conRol("owner");
 });
 
@@ -427,7 +427,7 @@ describe("/configuracion con la prueba", () => {
 });
 
 describe("/configuracion: los primeros pasos salen de lo que falta conectar", () => {
-  const NADA = { whatsapp: false, gmail: false };
+  const NADA = { whatsapp: false, gmail: false, equipo: false, formulario: false };
 
   beforeEach(() => {
     m.pasos.mockResolvedValue(NADA);
@@ -456,6 +456,7 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
 
     expect(html).not.toMatch(/>\s*1\. Conect/);
     expect(html).not.toMatch(/>\s*2\. Conect/);
+    expect(html).not.toMatch(/>\s*\d\. (Activá|Invitá)/);
   });
 
   it("la lista numera los pasos que faltan: sin los números escritos, los pone la lista", async () => {
@@ -480,7 +481,7 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
   });
 
   it("con Gmail ya conectado queda sólo el paso del WhatsApp", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: false, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: false, gmail: true, equipo: true, formulario: true });
     m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
     const html = await pintar();
@@ -492,7 +493,7 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
   });
 
   it("con el WhatsApp ya conectado queda sólo el paso de Gmail", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: false });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: false, equipo: true, formulario: true });
     m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
 
     const html = await pintar();
@@ -502,8 +503,8 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
     expect(html).not.toContain("Conectar WhatsApp");
   });
 
-  it("con las dos cosas conectadas no hay sección, ni con ?primeros=1", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+  it("con las dos cosas conectadas no hay sección, ni con ?primeros=1, aunque falten el equipo y el formulario", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
 
     const html = await pintar({ primeros: "1" });
@@ -511,9 +512,74 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
     expect(html).not.toContain("Primeros pasos");
     expect(html).not.toContain("Conectar WhatsApp");
     expect(html).not.toContain("Conectar Gmail");
+    expect(html).not.toContain('href="/admin/users"');
+    expect(html).not.toContain('href="/agente?tab=formulario"');
+    expect(html).not.toContain("Invitá a tu equipo");
+    expect(html).not.toContain("Activá el formulario web");
   });
 
-  it("en inglés, con los mismos dos pasos", async () => {
+  it("el formulario web no depende de Gmail: con Gmail hecho y la sección abierta por el WhatsApp, ofrece igual el formulario y el equipo", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: false, gmail: true, equipo: false, formulario: false });
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).not.toContain("Conectar Gmail");
+    expect(html).toContain('href="/agente?tab=formulario"');
+    expect(html).toContain('href="/admin/users"');
+  });
+
+  it.each(["owner", "admin"])("el %s ve el paso del formulario web y el del equipo, en la lista, después del WhatsApp", async (rol) => {
+    conRol(rol);
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    for (const trozo of [
+      "Activá el formulario web",
+      "Activar el formulario",
+      'href="/agente?tab=formulario"',
+      "Invitá a tu equipo",
+      "Invitar al equipo",
+      'href="/admin/users"',
+    ])
+      expect(html).toContain(trozo);
+    const lista = html.indexOf('<ol class="list-decimal');
+    const whatsapp = html.indexOf('href="#whatsapp"');
+    const formulario = html.indexOf('href="/agente?tab=formulario"');
+    const equipo = html.indexOf('href="/admin/users"');
+    expect(lista).toBeGreaterThan(html.indexOf("Primeros pasos"));
+    expect(formulario).toBeGreaterThan(whatsapp);
+    expect(equipo).toBeGreaterThan(formulario);
+    expect(equipo).toBeLessThan(html.indexOf('id="whatsapp"'));
+  });
+
+  it("y sin Gmail conectado el equipo sale junto al paso de Gmail, sin el formulario si ya está activo", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: false, equipo: false, formulario: true });
+    m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
+
+    const html = await pintar();
+
+    expect(html).toContain("Conectar Gmail");
+    expect(html).toContain('href="/admin/users"');
+    expect(html).not.toContain('href="/agente?tab=formulario"');
+  });
+
+  it("un paso hecho no sale: con el equipo y el formulario cumplidos faltan sólo los de siempre", async () => {
+    m.pasos.mockResolvedValue({ whatsapp: false, gmail: false, equipo: true, formulario: true });
+    m.enTenantVarias.mockResolvedValueOnce(lote({}));
+
+    const html = await pintar();
+
+    expect(html).toContain("Primeros pasos");
+    expect(html).toContain("Conectar Gmail");
+    expect(html).not.toContain('href="/admin/users"');
+    expect(html).not.toContain('href="/agente?tab=formulario"');
+    expect(html).not.toContain("Invitá a tu equipo");
+    expect(html).not.toContain("Activá el formulario web");
+  });
+
+  it("en inglés, con los mismos pasos", async () => {
     m.locale.mockResolvedValue("en-US");
     m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
@@ -522,6 +588,8 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
     expect(html).toContain("First steps");
     expect(html).toContain("Connect Gmail");
     expect(html).toContain("Connect WhatsApp");
+    expect(html).toContain("Turn on the web form");
+    expect(html).toContain("Invite your team");
   });
 
   it.each([false, null, undefined])("un espacio de siempre (autoalta %s) no tiene pasos y no lee qué hay conectado", async (autoalta) => {
@@ -532,6 +600,8 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
 
     expect(html).not.toContain("Primeros pasos");
     expect(html).not.toContain("Conectar WhatsApp");
+    expect(html).not.toContain('href="/agente?tab=formulario"');
+    expect(html).not.toContain("Invitá a tu equipo");
     expect(m.pasos).not.toHaveBeenCalled();
   });
 
@@ -542,6 +612,9 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
 
     expect(html).not.toContain("Primeros pasos");
     expect(html).not.toContain("Conectar Gmail");
+    // /agente y /admin/users rebotan a quien no administra: ni el enlace ni el texto.
+    for (const trozo of ['href="/admin/users"', 'href="/agente?tab=formulario"', "Invitá a tu equipo", "Activá el formulario web"])
+      expect(html).not.toContain(trozo);
     expect(m.pasos).not.toHaveBeenCalled();
   });
 
@@ -583,7 +656,7 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
     });
 
     it("con el WhatsApp ya conectado el panel queda en la sección de la prueba, una sola vez", async () => {
-      m.pasos.mockResolvedValue({ whatsapp: true, gmail: false });
+      m.pasos.mockResolvedValue({ whatsapp: true, gmail: false, equipo: false, formulario: false });
       m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
       const html = await pintar();
@@ -593,7 +666,7 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
     });
 
     it("con todo conectado el panel queda en la sección de la prueba, una sola vez", async () => {
-      m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+      m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
       m.enTenantVarias.mockResolvedValueOnce(lote({}));
 
       const html = await pintar();
@@ -603,7 +676,7 @@ describe("/configuracion: los primeros pasos salen de lo que falta conectar", ()
     });
 
     it("sin formularios (número conectado) el aviso de ?wa= queda en la sección de la prueba, no en los pasos", async () => {
-      m.pasos.mockResolvedValue({ whatsapp: false, gmail: false });
+      m.pasos.mockResolvedValue({ whatsapp: false, gmail: false, equipo: false, formulario: false });
       m.enTenantVarias.mockResolvedValueOnce(lote({}, [{ estado: "conectado" }]));
 
       const html = await pintar({ wa: "conectado" });
@@ -679,7 +752,7 @@ describe("/configuracion: lo que dejó conectar Gmail", () => {
   });
 
   it("al conectar, si todavía faltan pasos, no manda a la bandeja", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: false, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: false, gmail: true, equipo: false, formulario: false });
 
     const html = await pintar({ gmail: "connected" });
 
@@ -932,7 +1005,7 @@ describe("PruebaPanel", () => {
 
 describe("/configuracion con la WABA propia prendida", () => {
   const ENLACE = `data-enlace-waba="${TENANT}"`;
-  const NADA = { whatsapp: false, gmail: false };
+  const NADA = { whatsapp: false, gmail: false, equipo: false, formulario: false };
 
   beforeEach(() => {
     conWabaPropia();
@@ -976,7 +1049,7 @@ describe("/configuracion con la WABA propia prendida", () => {
   });
 
   it("quien ya anda por la plataforma no recibe el enlace de la WABA propia (Q7)", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.enTenantVarias.mockResolvedValueOnce(
       lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PLATAFORMA }])
     );
@@ -988,7 +1061,7 @@ describe("/configuracion con la WABA propia prendida", () => {
   });
 
   it("quien conectó su WABA propia ve el enlace al estado aunque ya esté conectado", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.enTenantVarias.mockResolvedValueOnce(
       lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
     );
@@ -1032,7 +1105,7 @@ describe("/configuracion con la WABA propia prendida", () => {
 
   it("apagada la bandera, un número de la plataforma que quedó en otra WABA no manda a /conectar-whatsapp", async () => {
     delete process.env.ALTA_WABA_PROPIA;
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.enTenantVarias.mockResolvedValueOnce(
       lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: false }])
     );
@@ -1045,7 +1118,7 @@ describe("/configuracion con la WABA propia prendida", () => {
 
   it("apagada la bandera, quien conectó su WABA propia sigue viendo el enlace a su estado", async () => {
     delete process.env.ALTA_WABA_PROPIA;
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.enTenantVarias.mockResolvedValueOnce(
       lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
     );
@@ -1076,7 +1149,7 @@ describe("los textos de la prueba", () => {
 
 describe("/configuracion con la app propia prendida", () => {
   const ENLACE = `data-enlace-waba="${TENANT}"`;
-  const NADA = { whatsapp: false, gmail: false };
+  const NADA = { whatsapp: false, gmail: false, equipo: false, formulario: false };
   const deApp = (extra: object = {}) => ({ origen: "app_propia", estado: "armando", numero: null, nombre: "Seguros del Sur", ...extra });
 
   beforeEach(() => {
@@ -1143,7 +1216,7 @@ describe("/configuracion con la app propia prendida", () => {
   });
 
   it("quien ya anda por la plataforma no recibe el enlace de la app propia", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.enTenantVarias.mockResolvedValueOnce(
       lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PLATAFORMA }])
     );
@@ -1155,7 +1228,7 @@ describe("/configuracion con la app propia prendida", () => {
   });
 
   it("quien conectó con su app ve el enlace al estado aunque ya esté conectado", async () => {
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.leerWaba.mockResolvedValue(deApp({ estado: "conectada", numero: "conectado" }));
     m.enTenantVarias.mockResolvedValueOnce(
       lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])
@@ -1230,7 +1303,7 @@ describe("/configuracion con la app propia prendida", () => {
   it("apagada la bandera, quien ya conectó con su app sigue viendo el enlace a su estado", async () => {
     delete process.env.ALTA_APP_PROPIA;
     conWabaPropia();
-    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
+    m.pasos.mockResolvedValue({ whatsapp: true, gmail: true, equipo: false, formulario: false });
     m.leerWaba.mockResolvedValue(deApp({ estado: "conectada", numero: "conectado" }));
     m.enTenantVarias.mockResolvedValueOnce(
       lote({}, [{ estado: "conectado", phoneNumberId: "300000000000003", wabaId: WABA_PROPIA, conToken: true }])

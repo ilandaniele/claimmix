@@ -96,7 +96,7 @@ describe("/agente lee ramos del inquilino y formulario de control", () => {
     if (Array.isArray(nodo)) return nodo.map((n) => consola(n)).find(Boolean);
     return nodo?.props?.formulario ? nodo : consola(nodo?.props?.children);
   };
-  const formularioDe = async () => consola((await AgentConsolePage()) as Nodo)?.props?.formulario?.props.formulario;
+  const formularioDe = async () => consola((await AgentConsolePage({ searchParams: Promise.resolve({}) })) as Nodo)?.props?.formulario?.props.formulario;
 
   it("apagada la bandera, un solo lote por la puerta del inquilino", async () => {
     expect(await formularioDe()).toEqual({ slug: "mi-enlace", activo: true });

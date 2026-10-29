@@ -568,7 +568,7 @@ El paso 12 lee los dos espacios.
   - **Fuentes:** `src/lib/auth/registro-permitido.ts:53`; `.env.example:312-313`, `:227-228`,
     `:207-208`, `:26`, `:216`, `:327-339`, `:363-378`;
     `src/server/alta/numero-automatico-activo.ts:10`; `scripts/sync-vercel-env.mjs:1-10`,
-    `:25-33`, `:44-56`; `src/lib/i18n/es-AR.servidor.ts:853`;
+    `:25-33`, `:44-56`; `src/lib/i18n/es-AR.servidor.ts:857`;
     `src/server/notify/remitente-sistema.ts:94-100`.
 - [ ] **2. El deploy y la salud.**
   - **Quién:** [Claude].
@@ -598,7 +598,12 @@ El paso 12 lee los dos espacios.
     invite la dirección de la cuenta (con una invitación en el navegador, lo reemplaza el enlace
     «Seguir con tu invitación») y no muestra si la empresa existe.
   - **Salió bien si:** el paso 1 termina en `/alta`, sin espacio todavía, y el paso 2 termina en
-    `/configuracion?primeros=1`, con «Primeros pasos» y «Quedan N días» de la prueba.
+    `/configuracion?primeros=1`, con «Primeros pasos» y «Quedan N días» de la prueba. Además de
+    Gmail y el WhatsApp, «Primeros pasos» ofrece al admin «Invitá a tu equipo» (a `/admin/users`)
+    y «Activá el formulario web» (a `/agente?tab=formulario`, que abre esa pestaña). Cada uno
+    desaparece cuando se cumple: un segundo usuario activo (nace al aceptar la invitación, no al
+    invitar) o el formulario activo. Esos dos no abren la sección: sigue mientras falte Gmail o
+    el WhatsApp.
   - **Si falla:**
     - `/alta?e=datos`: la empresa, el celular o la casilla de los términos están mal.
     - `/alta?e=celular`: sólo aparece donde `ALTA_NUMERO_AUTOMATICO` está en 1 (hoy, los
@@ -813,7 +818,7 @@ ambiente, la hora, una captura y el número de caso.
     Turnstile.
   - **Si falla:** si sólo aparece Google, falta alguna de las cuatro variables del remitente
     o el redeploy. Avisar al dueño por el canal de D15.
-  - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:853`.
+  - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:857`.
 - [ ] **3. Alta.**
   - **Quién:** [Gonzalo].
   - **Dónde:** `https://claimmix-qa.vercel.app/registro`.
@@ -821,12 +826,14 @@ ambiente, la hora, una captura y el número de caso.
     paso 3 de dev: la cuenta en `/registro` (el enlace a `/alta/correo?t=` vale 60 minutos) y la
     empresa y el WhatsApp en `/alta`.
   - **Salió bien si:** termina en `/configuracion?primeros=1`, con «Primeros pasos», que sólo
-    aparece para quien administra un espacio de autoalta, y «Quedan N días» de la prueba.
+    aparece para quien administra un espacio de autoalta, y «Quedan N días» de la prueba. Ahí
+    salen también «Invitá a tu equipo» y «Activá el formulario web», mientras falten (paso 3 de dev).
   - **Si falla:** los mismos casos que el paso 3 de dev (en QA, con `ALTA_NUMERO_AUTOMATICO` en 1, `?e=celular` sale si el +54 viene sin el 9). Si
     `/alta` muestra el aviso de operador, la dirección de Gonzalo está en `ADMIN_EMAILS` de
     QA.
   - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:775`;
-    `src/app/(app)/configuracion/page.tsx:152-153`, `:193-195`; `src/server/alta/pasos-hechos.ts`.
+    `src/app/(app)/configuracion/page.tsx:152-153`, `:193-199`; `src/server/alta/pasos-hechos.ts`;
+    `src/app/(app)/agente/pestanas-de-la-consola.ts`.
 - [ ] **4. El espacio de Gonzalo en `/admin/altas`.**
   - **Quién:** [Dueño], con la cuenta de operador.
   - **Dónde:** `https://claimmix-qa.vercel.app/admin/altas`.
@@ -1109,6 +1116,10 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `t_<hex>`.
   - **Salió bien si:** en unos minutos pasa sola a «Primeros pasos» (`/configuracion?primeros=1`). A
     la bandeja sólo va si el WhatsApp y Gmail ya están conectados, y en la primera vuelta Gmail no.
+    Ahí, además de Gmail y el WhatsApp, el admin ve «Invitá a tu equipo» (a `/admin/users`) y
+    «Activá el formulario web» (a `/agente?tab=formulario`). Cada uno se va cuando se cumple, y el
+    del equipo no con sólo invitar: hace falta que alguien acepte. Esos dos no abren la sección
+    ni cambian el destino.
   - **Si falla:** si a los 15 minutos no terminó, o la base falló, la pantalla ofrece
     «Reintentar» (tres veces cada diez minutos). Si sigue fallando, [Claude], con el OK del
     dueño, corre `pnpm exec
@@ -1720,6 +1731,7 @@ parte G y la parte H.
 Antes de todo, una pregunta al cliente: **qué correo usa para recibir denuncias.** Sólo existe
 conexión para Gmail y Google Workspace («Conectar Gmail»). Para otro proveedor no existe
 (ítem 18 del plan); mientras tanto, el formulario web de `/denuncia/[slug]` y WhatsApp.
+«Primeros pasos» lleva a activarlo (`/agente?tab=formulario`).
 
 Con todo lo anterior hecho, a un cliente real le queda:
 
@@ -1727,7 +1739,8 @@ Con todo lo anterior hecho, a un cliente real le queda:
   minutos) o entrar con Google; en `/alta`, «Dar de alta mi empresa» con su empresa y su
   celular. Salió bien si llega a `/preparando`. Si falla, los casos del paso 3 de dev.
 - [ ] 2. [Automático] La base propia en `/preparando`. Salió bien si pasa sola a «Primeros pasos»
-  de `/configuracion`. Si falla, el paso 5 de prd.
+  de `/configuracion`, que además de Gmail y el WhatsApp ofrece «Invitá a tu equipo» y «Activá
+  el formulario web». Si falla, el paso 5 de prd.
 - [ ] 3. [Cliente] El número: una SIM libre, «Por SMS» o «Por llamada» y el código. Salió bien
   si dice «Listo». Mientras Veltra no esté verificada, a partir del segundo número todo va a
   revisión con `sin_lugar`: el dueño sigue el paso 2 de la lista de abajo.
@@ -1736,8 +1749,9 @@ Con todo lo anterior hecho, a un cliente real le queda:
   resultados del paso 7 de dev.
 - [ ] 5. [Cliente] Invitar a su equipo desde `/admin/users`: en prueba, sólo direcciones de su
   propio dominio o un alias `+` de su propia casilla de Gmail (D4 d), y hasta 5 por día. Salió
-  bien si cada invitado entra con su rol. Si falla, el texto del rechazo dice si fue por
-  dominio o por tope.
+  bien si cada invitado entra con su rol. «Invitá a tu equipo» de «Primeros pasos» sigue hasta
+  que el primero acepte, no al invitar. Si falla, el texto del rechazo dice si fue por dominio
+  o por tope.
 
 Y al dueño:
 

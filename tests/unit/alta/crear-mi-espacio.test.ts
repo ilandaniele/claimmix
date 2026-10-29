@@ -77,6 +77,7 @@ vi.mock("@/lib/rate-limit/index", async (importOriginal) => ({
 }));
 
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { PRIMEROS_PASOS } from "@/server/alta/pasos-hechos";
 
 const DIA_MS = 24 * 60 * 60_000;
 const VENTANA = 1_700_000_000_000;
@@ -200,7 +201,7 @@ describe("lo que se mira antes de tomar un cupo", () => {
     delete process.env.ALTA_AUTOMATICA;
     process.env.SIGNUP_ALLOWED_EMAILS = "ana@example.com";
 
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
   });
 
   it("quien ya tiene espacio va a /bandeja sin tocar ningún contador", async () => {
@@ -296,12 +297,13 @@ describe("crear el espacio", () => {
     expect(params[10]).toBeNull();
   });
 
-  it.each(["ok", "ok_numero_en_revision"])("%s: va a la bienvenida", async (resultado) => {
+  it.each(["ok", "ok_numero_en_revision"])("%s: va a los primeros pasos sin otra consulta", async (resultado) => {
     h.enControl.mockImplementation(async (_ctx: unknown, armar: (db: unknown) => unknown) =>
       armar({ execute: async () => respuesta({ resultado, creadas_24h: 3, tope: 20 }) })
     );
 
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
+    expect(h.enControl).toHaveBeenCalledTimes(1);
     expect(h.liberarCupo).not.toHaveBeenCalled();
     // El redirect no se confundió con una falla: afuera del try, no pasó por el catch.
     expect(h.error).not.toHaveBeenCalled();
@@ -312,6 +314,7 @@ describe("crear el espacio", () => {
 
     expect(await crear()).toBe("/preparando");
     const { contexto } = await llamadaALaBase();
+    expect(h.enControl).toHaveBeenCalledTimes(1);
     expect(h.iniciarBase).toHaveBeenCalledTimes(1);
     expect(h.iniciarBase).toHaveBeenCalledWith(contexto.tenantId);
   });
@@ -327,7 +330,7 @@ describe("crear el espacio", () => {
   });
 
   it("apagada la bandera no lanza nada", async () => {
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
     expect(h.iniciarBase).not.toHaveBeenCalled();
   });
 
@@ -338,7 +341,7 @@ describe("crear el espacio", () => {
       })
     );
 
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
   });
 });
 
@@ -414,7 +417,7 @@ describe("el aviso al operador", () => {
   it("antes del 80 % del tope no deja nada para después", async () => {
     conteo(15, 20);
 
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
     expect(h.pendientes).toHaveLength(0);
   });
 
@@ -427,14 +430,14 @@ describe("el aviso al operador", () => {
       armar({ execute: async () => respuesta({ resultado: "ok", creadas_24h: creadas, tope }) })
     );
 
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
     expect(h.pendientes).toHaveLength(0);
   });
 
   it("al 80 % deja el aviso para después de responder, y sólo entonces lo manda", async () => {
     conteo(16, 20);
 
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
     expect(h.pendientes).toHaveLength(1);
     expect(h.enviar).not.toHaveBeenCalled();
 
@@ -459,7 +462,7 @@ describe("el aviso al operador", () => {
 
   it("con el aviso de hoy ya mandado no manda otro y devuelve el intento", async () => {
     conteo(18, 20);
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
     h.rateLimit.mockResolvedValueOnce(cupo({ allowed: false, remaining: 0 }));
 
     await h.pendientes[0]();
@@ -470,7 +473,7 @@ describe("el aviso al operador", () => {
 
   it("un aviso que no sale no rompe el alta, y deja intentar con la próxima", async () => {
     conteo(20, 20);
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
     h.enviar.mockResolvedValue({ enviado: false, motivo: "sin_casilla" });
 
     await expect(h.pendientes[0]()).resolves.toBeUndefined();
@@ -481,7 +484,7 @@ describe("el aviso al operador", () => {
   it("sin remitente del sistema no toma el cupo del aviso", async () => {
     conteo(20, 20);
     h.remitente.mockReturnValue(null);
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
 
     await h.pendientes[0]();
 
@@ -509,12 +512,12 @@ describe("un +54 sin el 9 de los celulares", () => {
   it("con el número automático prendido, el 9 y otros países pasan", async () => {
     process.env.ALTA_NUMERO_AUTOMATICO = "1";
 
-    expect(await crear()).toBe("/bandeja?bienvenida=1");
-    expect(await crear({ ...CAMPOS_BUENOS, whatsapp: "+1 202-555-0123" })).toBe("/bandeja?bienvenida=1");
+    expect(await crear()).toBe(PRIMEROS_PASOS);
+    expect(await crear({ ...CAMPOS_BUENOS, whatsapp: "+1 202-555-0123" })).toBe(PRIMEROS_PASOS);
   });
 
   it("apagado el número automático se acepta como hoy y se guarda tal cual", async () => {
-    expect(await crear(SIN_NUEVE)).toBe("/bandeja?bienvenida=1");
+    expect(await crear(SIN_NUEVE)).toBe(PRIMEROS_PASOS);
 
     const { params } = await llamadaALaBase();
     expect(params.slice(4)).toContain("+541112345678");

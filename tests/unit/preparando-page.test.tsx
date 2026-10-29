@@ -160,10 +160,11 @@ describe("lista", () => {
     await expect(pintar()).rejects.toThrow("REDIRECT:/configuracion?primeros=1");
   });
 
-  it("con el WhatsApp y Gmail conectados va a la bandeja de bienvenida", async () => {
+  it("con el WhatsApp y Gmail conectados va a la bandeja", async () => {
     h.pasos.mockResolvedValue({ whatsapp: true, gmail: true });
 
-    await expect(pintar()).rejects.toThrow("REDIRECT:/bandeja?bienvenida=1");
+    await expect(pintar()).rejects.toThrow(/^REDIRECT:\/bandeja$/);
+    expect(h.pasos).toHaveBeenCalledTimes(1);
   });
 
   it("conserva lo que dijo el último paso del número, si es de la lista", async () => {

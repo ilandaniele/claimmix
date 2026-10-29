@@ -44,6 +44,8 @@ export async function pasosHechos(tenantId: string): Promise<PasosHechos> {
   }
 }
 
+export const PRIMEROS_PASOS = "/configuracion?primeros=1";
+
 /**
  * Adónde sigue quien termina de esperar su base. A la bandeja sólo con las dos cosas
  * hechas, y es un chequeo positivo: cualquier otro caso, incluido no tener ni fila,
@@ -51,6 +53,6 @@ export async function pasosHechos(tenantId: string): Promise<PasosHechos> {
  * (ya validado contra la lista cerrada) y se conserva para que /configuracion lo diga.
  */
 export function destinoAlTerminarLaBase({ whatsapp, gmail }: PasosHechos, wa: ResultadoDelNumero | null): string {
-  if (whatsapp && gmail) return "/bandeja?bienvenida=1";
-  return `/configuracion?primeros=1${wa ? `&wa=${wa}` : ""}`;
+  if (whatsapp && gmail) return "/bandeja";
+  return `${PRIMEROS_PASOS}${wa ? `&wa=${wa}` : ""}`;
 }

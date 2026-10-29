@@ -90,7 +90,6 @@ const DESTINO_DEL_ENLACE = "/alta";
 
 /** Lo mismo que `DIA_MS` de `src/server/alta/cupo-por-ip.ts`. */
 const DIA_MS = 24 * 60 * 60_000;
-const DESTINO_DE_ALTA = "/bandeja?bienvenida=1";
 
 /* ───── Lo que se lee y se rechaza, antes de importar o conectar nada ───── */
 
@@ -396,6 +395,7 @@ async function probarTodo(): Promise<void> {
   const { conError, crearEspacio, SIN_ESPACIO } = await import("@/server/alta/crear-espacio");
   const { crearCuentaDelEnlace, YA_TENES_CUENTA } = await import("@/server/alta/cuenta-del-enlace");
   const { tomarCupoDeAlta } = await import("@/server/alta/cupo-por-ip");
+  const { PRIMEROS_PASOS: DESTINO_DE_ALTA } = await import("@/server/alta/pasos-hechos");
   const { sellarToken } = await import("@/server/alta/token-de-registro");
 
   type Espacio = Awaited<ReturnType<typeof crearEspacio>>;

@@ -17,7 +17,6 @@ import { ALL_ROLES } from "@/lib/auth/roles";
 import { resolveBaseURL } from "@/lib/auth/base-url";
 import { isOperatorEmail } from "@/lib/auth/require-operator";
 import { enPrueba, SIN_SERVICIO } from "@/lib/billing/plans";
-import { topeEntero } from "@/lib/topes";
 import { getT } from "@/lib/i18n";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { enTenant, type TenantContext } from "@/data/scope";
@@ -31,6 +30,7 @@ import { claveDeCupo } from "@/lib/rate-limit/clave";
 import { getClientIp, rateLimit } from "@/lib/rate-limit/index";
 import { SignUpSchema } from "@/lib/schemas/auth";
 import { DURACION_DE_LA_INVITACION_MS, sellarInvitacion } from "@/server/alta/invitacion";
+import { topeDeInvitacionesDelDia } from "@/server/alta/tope-de-invitaciones";
 import { correoDeInvitacion } from "@/server/notify/correos-de-alta";
 import { enviarCorreoDelSistema, remitenteDelSistema } from "@/server/notify/remitente-sistema";
 
@@ -82,10 +82,6 @@ export async function GET() {
 const InviteUserSchema = SignUpSchema.extend({ role: z.enum(ALL_ROLES) }).strict();
 
 const DIA_MS = 24 * 60 * 60_000;
-/** Cuántas invitaciones, de las que no sean pruebas, por día y por espacio. */
-const topeDeInvitaciones = () => topeEntero("ALTA_TOPE_INVITACIONES_DIA");
-/** Una prueba invita a lo sumo a cinco personas por día. */
-const TOPE_EN_PRUEBA = 5;
 
 export async function POST(request: NextRequest) {
   let t = getT("es-AR");
@@ -123,9 +119,8 @@ export async function POST(request: NextRequest) {
      * dirección tenga o no cuenta. Si el contador no contesta, no se invita.
      */
     const prueba = enPrueba(adminRow);
-    const tope = prueba ? Math.min(topeDeInvitaciones(), TOPE_EN_PRUEBA) : topeDeInvitaciones();
     const cupo = await rateLimit(claveDeCupo("usuarios:inquilino", adminRow.tenant_id), {
-      limit: tope,
+      limit: topeDeInvitacionesDelDia(adminRow),
       windowMs: DIA_MS,
       fallaCerrada: true,
     });

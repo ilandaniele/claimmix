@@ -163,9 +163,10 @@ tarda algo, la guía lo dice así.
         terminar el alta ficticia de prd y borrar su número (D5), o hasta A5. Con 2 números en
         la WABA, el código manda cualquier alta siguiente a revisión con `sin_lugar`
         (`src/server/alta/numero-automatico.ts:283`; tope `ALTA_NUMEROS_MAXIMOS_WABA`, 2 por
-        omisión, `:97`).
+        omisión, `:97`). Cada número que el alta suma a la WABA avisa al operador cuántos
+        lugares quedan («Quedan 0 de 2 lugares»), así no hace falta abrir WhatsApp Manager.
       - QA lleva la bandera en 1 y sigue sin token de WhatsApp: un alta de QA que elija el
-        teléfono termina en revisión con `sin_credencial` (`:335`, `:410`).
+        teléfono termina en revisión con `sin_credencial` (`:342`, `:417`).
       - A futuro, una WABA por ambiente. Espera a A5 (ver «Después de A5: una WABA y un token
         por ambiente»).
     - **D2:** `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada a «iguales».
@@ -470,7 +471,7 @@ QA sale de un usuario nuevo y no toca el actual. Los tokens nunca pasan por el c
 Si el dueño quiere separar también dev y prd, la receta es la misma, con un usuario del sistema
 y una WABA para cada uno.
 
-- **Fuentes:** `src/server/alta/numero-automatico.ts:97`, `:242`, `:283`, `:335`;
+- **Fuentes:** `src/server/alta/numero-automatico.ts:97`, `:242`, `:283`, `:342`;
   `docs/whatsapp-setup.md`, «El tope de Meta».
 
 ### Lo que tiene que quedar igual en los tres
@@ -893,7 +894,7 @@ ambiente, la hora, una captura y el número de caso.
   - **Si falla:** si QA manda de verdad un código por SMS o por llamada, avisar al dueño: se
     cargó un token de WhatsApp en QA y ocupa el lugar libre de la WABA, que es primero del
     cliente ficticio de prd (D1).
-  - **Fuentes:** `src/server/alta/numero-automatico.ts:335`, `:410`;
+  - **Fuentes:** `src/server/alta/numero-automatico.ts:342`, `:417`;
     `docs/PROMOCION.md:325-327`; `docs/whatsapp-setup.md:359`.
 - [ ] **8. Segundo usuario.**
   - **Quién:** [Gonzalo].

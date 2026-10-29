@@ -436,7 +436,7 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
 
     expect(h.after).toHaveBeenCalledTimes(1);
     expect(h.aviso).toHaveBeenCalledTimes(1);
-    expect(h.aviso).toHaveBeenCalledWith("agregado", TENANT);
+    expect(h.aviso).toHaveBeenCalledWith("agregado", TENANT, { lugares: { usados: 2, tope: 2 } });
   });
 
   it("el nombre visible es el de la plataforma, no algo del espacio", async () => {
@@ -500,6 +500,9 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
 
     expect(h.agregar).toHaveBeenCalledTimes(1);
+    // Los lugares salen del mismo recorrido: ni un pedido más a Graph.
+    expect(h.recorrer).toHaveBeenCalledTimes(1);
+    expect(h.aviso).toHaveBeenCalledWith("agregado", TENANT, { lugares: { usados: 3, tope: 3 } });
   });
 
   it.each([
@@ -620,7 +623,7 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
 
     expect(h.aviso).toHaveBeenCalledTimes(1);
     expect(h.aviso).toHaveBeenCalledWith("incierto", TENANT);
-    expect(h.aviso).not.toHaveBeenCalledWith("agregado", TENANT);
+    expect(h.aviso.mock.calls.map((c) => c[0])).not.toContain("agregado");
     expect(h.ejecutadas).toHaveLength(0);
     expect(h.pedirAMeta).not.toHaveBeenCalled();
     expect(clavesTomadas()).toHaveLength(5);
@@ -705,7 +708,7 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
     expect(h.verificarEnMeta).not.toHaveBeenCalled();
     expect(h.registrar).not.toHaveBeenCalled();
     // El número ya entró a la WABA: el aviso de «agregado» salió igual, antes.
-    expect(h.aviso).toHaveBeenCalledWith("agregado", TENANT);
+    expect(h.aviso).toHaveBeenCalledWith("agregado", TENANT, { lugares: { usados: 2, tope: 2 } });
     // request_code nunca salió, pero el recorrido y el alta sí: nada vuelve.
     expect(h.liberarCupo).not.toHaveBeenCalled();
   });

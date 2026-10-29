@@ -524,7 +524,7 @@ ningún doc lo dice.
 dev es el proyecto de Vercel `claimmix`, rama `main`, base `ep-proud-resonance`, en
 `https://claimmix-dev.vercel.app` (`docs/PROMOCION.md:560`). Comparte con prd la app de Meta, la
 WABA y el cliente OAuth de Google (`docs/PROMOCION.md:572-574`). No lleva base por cliente, así
-que el alta termina directo en la bandeja.
+que el alta termina directo en «Primeros pasos» (`/configuracion?primeros=1`).
 
 **El cliente de dev está partido en dos espacios.** El alta del paso 3 crea un espacio nuevo,
 «el espacio de autoalta», con la dirección del dueño que no es de operador. Ahí van el alta,
@@ -598,7 +598,7 @@ El paso 12 lee los dos espacios.
     invite la dirección de la cuenta (con una invitación en el navegador, lo reemplaza el enlace
     «Seguir con tu invitación») y no muestra si la empresa existe.
   - **Salió bien si:** el paso 1 termina en `/alta`, sin espacio todavía, y el paso 2 termina en
-    `/bandeja?bienvenida=1`.
+    `/configuracion?primeros=1`, con «Primeros pasos» y «Quedan N días» de la prueba.
   - **Si falla:**
     - `/alta?e=datos`: la empresa, el celular o la casilla de los términos están mal.
     - `/alta?e=celular`: sólo aparece donde `ALTA_NUMERO_AUTOMATICO` está en 1 (hoy, los
@@ -615,7 +615,7 @@ El paso 12 lee los dos espacios.
     - No llega el mail: la respuesta es siempre neutra (`/login?aviso=revisa_tu_correo`).
       Mirar spam y los cupos `ALTA_TOPE_CORREOS_DIA` y `ALTA_TOPE_POR_DESTINATARIO_DIA`.
   - **Fuentes:** `src/app/alta/correo`; `src/app/registro/actions.ts`; `src/app/alta/actions.ts`;
-    `src/app/alta/page.tsx`; `src/server/alta/crear-espacio.ts`;
+    `src/app/alta/page.tsx`; `src/server/alta/crear-espacio.ts`; `src/server/alta/pasos-hechos.ts`;
     `src/server/alta/cuenta-del-enlace.ts`; `src/lib/auth/registro-permitido.ts:52-53`; `src/server/alta/crear-inquilino.ts:52`,
     `:58`, `:70`; `.env.example:232-233`.
 - [ ] **4. El espacio nuevo en `/admin/altas`.**
@@ -820,13 +820,13 @@ ambiente, la hora, una captura y el número de caso.
   - **Qué hacer:** la dirección de Gonzalo, por el camino del correo, en los dos pasos del
     paso 3 de dev: la cuenta en `/registro` (el enlace a `/alta/correo?t=` vale 60 minutos) y la
     empresa y el WhatsApp en `/alta`.
-  - **Salió bien si:** termina en `/bandeja?bienvenida=1`, y `/configuracion` muestra
-    «Primeros pasos», que sólo aparece para quien administra un espacio de autoalta.
+  - **Salió bien si:** termina en `/configuracion?primeros=1`, con «Primeros pasos», que sólo
+    aparece para quien administra un espacio de autoalta, y «Quedan N días» de la prueba.
   - **Si falla:** los mismos casos que el paso 3 de dev (en QA, con `ALTA_NUMERO_AUTOMATICO` en 1, `?e=celular` sale si el +54 viene sin el 9). Si
     `/alta` muestra el aviso de operador, la dirección de Gonzalo está en `ADMIN_EMAILS` de
     QA.
-  - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:741`;
-    `src/app/(app)/configuracion/page.tsx:148-149`.
+  - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:775`;
+    `src/app/(app)/configuracion/page.tsx:152-153`, `:193-195`; `src/server/alta/pasos-hechos.ts`.
 - [ ] **4. El espacio de Gonzalo en `/admin/altas`.**
   - **Quién:** [Dueño], con la cuenta de operador.
   - **Dónde:** `https://claimmix-qa.vercel.app/admin/altas`.
@@ -1107,14 +1107,15 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Dónde:** `/preparando`.
   - **Qué hacer:** esperar. La pantalla consulta cada 5 segundos mientras se crea la base
     `t_<hex>`.
-  - **Salió bien si:** en unos minutos pasa sola a la bandeja.
+  - **Salió bien si:** en unos minutos pasa sola a «Primeros pasos» (`/configuracion?primeros=1`). A
+    la bandeja sólo va si el WhatsApp y Gmail ya están conectados, y en la primera vuelta Gmail no.
   - **Si falla:** si a los 15 minutos no terminó, o la base falló, la pantalla ofrece
     «Reintentar» (tres veces cada diez minutos). Si sigue fallando, [Claude], con el OK del
     dueño, corre `pnpm exec
     tsx --tsconfig tsconfig.rehearsal.json scripts/preparar-base.mts --env prd --tenant
     <uuid>`. Además, `/api/cron/reap-stuck` vuelve a lanzar las bases que quedaron a medias:
     lo llama Vercel una vez por día y, en prd, el barrido de Actions cada 2 h.
-  - **Fuentes:** `src/app/preparando`; `docs/PROMOCION.md:704`;
+  - **Fuentes:** `src/app/preparando`; `src/server/alta/pasos-hechos.ts`; `docs/PROMOCION.md:704`;
     `src/app/api/cron/reap-stuck/route.ts:18-20`; `vercel.json:10-11`;
     `.github/workflows/barrer-trabados.yml:86`.
 - [ ] **6. El espacio en `/admin/altas`.**
@@ -1725,8 +1726,8 @@ Con todo lo anterior hecho, a un cliente real le queda:
 - [ ] 1. [Cliente] `/registro` con su nombre y su correo; confirmar el correo con el enlace (60
   minutos) o entrar con Google; en `/alta`, «Dar de alta mi empresa» con su empresa y su
   celular. Salió bien si llega a `/preparando`. Si falla, los casos del paso 3 de dev.
-- [ ] 2. [Automático] La base propia en `/preparando`. Salió bien si pasa sola a la bandeja. Si
-  falla, el paso 5 de prd.
+- [ ] 2. [Automático] La base propia en `/preparando`. Salió bien si pasa sola a «Primeros pasos»
+  de `/configuracion`. Si falla, el paso 5 de prd.
 - [ ] 3. [Cliente] El número: una SIM libre, «Por SMS» o «Por llamada» y el código. Salió bien
   si dice «Listo». Mientras Veltra no esté verificada, a partir del segundo número todo va a
   revisión con `sin_lugar`: el dueño sigue el paso 2 de la lista de abajo.

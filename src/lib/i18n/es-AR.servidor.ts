@@ -975,8 +975,6 @@ export const esARServidor = {
   "correo.acceso.intro": "Una persona con un correo de tu mismo dominio pidió acceso al espacio de tu empresa en ClaimMix. Esta es su dirección:",
   "correo.acceso.invitar": "Si la conocés y querés darle acceso, invitala desde la pantalla de usuarios:",
   "correo.acceso.noFuiste": "Si no la conocés, ignorá este mensaje: nadie recibió acceso y no se crea nada hasta que invites a esa dirección.",
-  "bandeja.bienvenida": "Tu espacio está listo. La prueba dura {n} días. Tu WhatsApp quedó pendiente: lo conectamos nosotros y te avisamos.",
-  "bandeja.bienvenidaAutomatica": "Tu espacio está listo. La prueba dura {n} días. Conectá tu WhatsApp desde Configuración con un código que te llega por SMS o llamada.",
   "altas.title": "Altas automáticas",
   "altas.subtitle": "Los espacios que se abrieron solos. Desde acá se conecta el número de WhatsApp, se suspende, se extiende la prueba y se activa el plan.",
   "altas.stat.24h": "Altas en las últimas 24 h",

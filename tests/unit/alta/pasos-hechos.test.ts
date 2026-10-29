@@ -34,7 +34,7 @@ vi.mock("@/lib/observability/logger", () => ({
 }));
 
 import { RESULTADOS_DEL_NUMERO } from "@/server/alta/numero-resultados";
-import { destinoAlTerminarLaBase, pasosHechos } from "@/server/alta/pasos-hechos";
+import { destinoAlTerminarLaBase, PRIMEROS_PASOS, pasosHechos } from "@/server/alta/pasos-hechos";
 
 const TENANT = "11111111-1111-4111-8111-111111111111";
 
@@ -122,8 +122,12 @@ describe("pasosHechos", () => {
 });
 
 describe("destinoAlTerminarLaBase", () => {
-  it("con el WhatsApp y Gmail hechos, a la bandeja de bienvenida", () => {
-    expect(destinoAlTerminarLaBase({ whatsapp: true, gmail: true }, null)).toBe("/bandeja?bienvenida=1");
+  it("PRIMEROS_PASOS es /configuracion?primeros=1", () => {
+    expect(PRIMEROS_PASOS).toBe("/configuracion?primeros=1");
+  });
+
+  it("con el WhatsApp y Gmail hechos, a la bandeja sin aviso", () => {
+    expect(destinoAlTerminarLaBase({ whatsapp: true, gmail: true }, null)).toBe("/bandeja");
   });
 
   it.each([
@@ -131,14 +135,14 @@ describe("destinoAlTerminarLaBase", () => {
     [{ whatsapp: false, gmail: true }],
     [{ whatsapp: false, gmail: false }],
   ])("con %j todavía falta algo: a los primeros pasos", (pasos) => {
-    expect(destinoAlTerminarLaBase(pasos, null)).toBe("/configuracion?primeros=1");
+    expect(destinoAlTerminarLaBase(pasos, null)).toBe(PRIMEROS_PASOS);
   });
 
   it.each(RESULTADOS_DEL_NUMERO)("lo que dijo el número (%s) viaja a los primeros pasos", (wa) => {
-    expect(destinoAlTerminarLaBase({ whatsapp: false, gmail: false }, wa)).toBe(`/configuracion?primeros=1&wa=${wa}`);
+    expect(destinoAlTerminarLaBase({ whatsapp: false, gmail: false }, wa)).toBe(`${PRIMEROS_PASOS}&wa=${wa}`);
   });
 
   it("con todo hecho a la bandeja no se arrastra el resultado del número", () => {
-    expect(destinoAlTerminarLaBase({ whatsapp: true, gmail: true }, "conectado")).toBe("/bandeja?bienvenida=1");
+    expect(destinoAlTerminarLaBase({ whatsapp: true, gmail: true }, "conectado")).toBe("/bandeja");
   });
 });

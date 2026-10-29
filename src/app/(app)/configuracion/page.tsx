@@ -8,8 +8,8 @@
  *   4. Info del sistema: app version, Node version (server env), region
  *
  * Arriba de todo, sólo para admin: lo que dejó conectar Gmail (`?gmail=`) y, en un
- * espacio del alta automática, los «Primeros pasos» que todavía faltan (correo y
- * WhatsApp). Salen de lo que hay conectado, no de la dirección.
+ * espacio del alta automática, los «Primeros pasos» que todavía faltan (correo,
+ * WhatsApp, formulario web y equipo). Salen de lo que hay hecho, no de la dirección.
  *
  * Server Component fetches user data; ConfiguracionClient handles the
  * password change form (requires interactivity).
@@ -195,6 +195,8 @@ export default async function ConfiguracionPage({
   const primerosPasos = faltaGmail || faltaWhatsapp;
   // El panel del código vive en un solo lugar: en el paso del WhatsApp si está, y si no en la sección de la prueba.
   const numeroEnPrimeros = faltaWhatsapp && panelDelCodigo?.formularios === true;
+  const faltaFormulario = pasos !== null && !pasos.formulario;
+  const faltaEquipo = pasos !== null && !pasos.equipo;
 
   const resultadoGmail = esAdmin && esResultadoGmail(gmail) ? gmail : null;
 
@@ -230,7 +232,7 @@ export default async function ConfiguracionPage({
           </p>
         )}
 
-        {/* ── Primeros pasos (espacio recién dado de alta, sólo admin): lo que falta conectar, el correo y el WhatsApp ── */}
+        {/* ── Primeros pasos (espacio recién dado de alta, sólo admin): lo que falta, el correo, el WhatsApp, el formulario y el equipo ── */}
         {primerosPasos && (
           <Section title={t("configuracion.primeros.titulo")}>
             <ol className="list-decimal space-y-4 pl-5">
@@ -253,6 +255,20 @@ export default async function ConfiguracionPage({
                     boton={t("configuracion.primeros.conectarWhatsapp")}
                   />
                 ))}
+              {faltaFormulario && (
+                <Paso
+                  texto={t("configuracion.primeros.formulario")}
+                  href="/agente?tab=formulario"
+                  boton={t("configuracion.primeros.activarFormulario")}
+                />
+              )}
+              {faltaEquipo && (
+                <Paso
+                  texto={t("configuracion.primeros.equipo")}
+                  href="/admin/users"
+                  boton={t("configuracion.primeros.invitar")}
+                />
+              )}
             </ol>
           </Section>
         )}

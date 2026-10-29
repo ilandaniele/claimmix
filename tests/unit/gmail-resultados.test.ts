@@ -74,10 +74,15 @@ describe("los textos de Gmail en /configuracion", () => {
 
 describe("los textos de los primeros pasos", () => {
   it("los pasos no llevan el número escrito: sobra el 2 cuando falta uno solo", () => {
-    for (const clave of ["configuracion.primeros.gmail", "configuracion.primeros.whatsapp"]) {
+    for (const clave of ["gmail", "whatsapp", "formulario", "equipo"].map((paso) => `configuracion.primeros.${paso}`)) {
       expect(es[clave], clave).not.toMatch(/^\d+\./);
       expect(en[clave], clave).not.toMatch(/^\d+\./);
     }
+  });
+
+  it("ninguno viaja al navegador", () => {
+    for (const diccionario of [esARCliente, enUSCliente])
+      expect(Object.keys(diccionario).filter((k) => k.startsWith("configuracion.primeros."))).toEqual([]);
   });
 
   it("siguen estando en los dos idiomas", () => {

@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { Activity, Brain, CheckCircle2, ClipboardList, ListChecks, Settings2, SlidersHorizontal, Layers } from "lucide-react";
 
 import { useT } from "@/lib/i18n/LocaleContext";
-import type { ClaveDelCliente } from "@/lib/i18n";
 import { useTeclasDePestanas } from "@/lib/ui/pestanas";
 
 import { AiProviderPanel } from "../configuracion/AiProviderPanel";
@@ -16,28 +14,7 @@ import { TrabajoPanel } from "./TrabajoPanel";
 import { AgentExportPanel } from "./AgentExportPanel";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import { BatchSimulatePanel } from "./BatchSimulatePanel";
-
-type TabId = "modelos" | "campos" | "ramos" | "formulario" | "reglas" | "ejemplos" | "entrenamiento" | "uso" | "lote" | "trabajo" | "base";
-
-/**
- * La etiqueta es una CLAVE, no un texto: la lista se arma una sola vez cuando
- * carga el módulo, y ahí todavía no hay locale ni hook. Traducir en el `map`,
- * que sí corre dentro del componente, es lo que hace que las solapas cambien
- * de idioma sin recargar.
- */
-const TABS = [
-  { id: "modelos", clave: "consola.tab.modelos", icon: Settings2 },
-  { id: "campos", clave: "consola.tab.campos", icon: SlidersHorizontal },
-  { id: "ramos", clave: "consola.tab.ramos", icon: ListChecks },
-  { id: "formulario", clave: "consola.tab.formulario", icon: ClipboardList },
-  { id: "reglas", clave: "consola.tab.reglas", icon: ListChecks },
-  { id: "ejemplos", clave: "consola.tab.ejemplos", icon: CheckCircle2 },
-  { id: "entrenamiento", clave: "consola.tab.entrenamiento", icon: Brain },
-  { id: "uso", clave: "consola.tab.uso", icon: Activity },
-  { id: "lote", clave: "consola.tab.lote", icon: Layers },
-  { id: "trabajo", clave: "consola.tab.trabajo", icon: ClipboardList },
-  { id: "base", clave: "consola.tab.base", icon: Brain },
-] as const satisfies readonly { id: TabId; clave: ClaveDelCliente; icon: unknown }[];
+import { TABS, type TabId } from "./pestanas-de-la-consola";
 
 /** `aria-controls` necesita un id, y el panel es uno solo para todas. */
 const ID_PANEL = "panel-de-la-consola";
@@ -60,16 +37,18 @@ const ID_PANEL = "panel-de-la-consola";
  */
 export function AgentConsoleClient({
   role,
+  tabInicial,
   ramos,
   formulario,
   base,
 }: {
   role: string;
+  tabInicial?: TabId;
   ramos: ReactNode;
   formulario: ReactNode;
   base: ReactNode;
 }) {
-  const [tab, setTab] = useState<TabId>("modelos");
+  const [tab, setTab] = useState<TabId>(tabInicial ?? "modelos");
   const t = useT();
   const lista = useRef<HTMLDivElement>(null);
 

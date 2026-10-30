@@ -37,7 +37,7 @@ export const INDICES_DEL_TABLERO: Record<string, string> = {
   idx_cases_policyholder_name_trgm: "0020",
   idx_cases_policy_number_trgm: "0020",
   idx_cases_tenant_created_at: "0010",
-  idx_extracted_fields_case_id: "0001",
+  uq_extracted_field: "0001",
   idx_outbound_messages_case_id: "0001",
   idx_audit_log_trayecto: "0043",
 };

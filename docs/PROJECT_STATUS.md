@@ -5360,7 +5360,7 @@ La segunda corrida de los catorce prompts (un Workflow de sólo lectura, con seg
 - **Guía.** El mail agente es la Gmail de Veltra en los tres ambientes (decisión del dueño del 22/10), «Activa» sólo donde se prueba; en prd primero sale de `CASILLAS_DE_DEV`.
 - **Comprobación.** `pnpm check --local` en verde salvo `mail-tardio-pregunta-como-va`, que cortó por un timeout de Gemini en el clasificador del mensaje tardío; ensayado solo dio verde, y `pnpm smoke` contra dev también.
 - **Ambientes.** Entra a qa por #499 y sigue a main y a prd el mismo día, por la regla de ambientes iguales.
-- **Queda afuera.** H3 (índice duplicado) espera una corrida de Carga en QA, y «marcar respondido» sigue como está: hoy lo hace cualquiera del equipo, por diseño de la cola.
+- **Queda afuera.** «Marcar respondido» sigue como está: hoy lo hace cualquiera del equipo, por diseño de la cola. H3 (índice duplicado) se resolvió el 29/10: el A/B de `pnpm load` en QA dio igual con y sin `idx_extracted_fields_case_id` (194/205/212 ms contra 292/213/231 ms de peor p95, con el mismo corrimiento en consultas que no tocan la tabla), y por buscar por `case_id` entra por `uq_extracted_field`. Lo saca la migración 0056, que trae el orden de aplicación por base, y `INDICES_DEL_TABLERO` pasa a vigilar `uq_extracted_field`.
 
 ### Lote 2 de la auditoría (22/10)
 

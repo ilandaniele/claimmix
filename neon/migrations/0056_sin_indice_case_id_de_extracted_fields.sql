@@ -1,0 +1,63 @@
+-- =============================================================================
+-- 0056 — Sale idx_extracted_fields_case_id: uq_extracted_field ya lo cubre
+-- =============================================================================
+--
+-- extracted_fields tiene dos índices que empiezan por case_id, los dos de la 0001:
+--
+--   idx_extracted_fields_case_id   (case_id)
+--   uq_extracted_field             (case_id, field_key)   UNIQUE
+--
+-- Un btree sirve para cualquier prefijo de sus columnas, así que buscar por
+-- case_id solo entra por uq_extracted_field con `Index Cond: (case_id = …)`. El
+-- de una columna es un duplicado que se paga en cada INSERT y UPDATE de la
+-- extracción.
+--
+-- Medido antes de tocarlo, como pide la 0024 (H3, 29/10/2026):
+--
+--   Uso en dev (2921 filas): uq_extracted_field 3.368.076 lecturas,
+--   idx_extracted_fields_case_id 242.779.
+--
+--   QA, `pnpm load` de sólo lectura, peor p95 de cada corrida:
+--     con el índice   194 / 205 / 212 ms
+--     sin el índice   292 / 213 / 231 ms
+--   Sin el índice, cada consulta tardó unos 15 ms más, también las que no tocan
+--   extracted_fields: es ruido de la red, no el índice. El chequeo de índices del
+--   tablero pasó en todas las corridas.
+--
+--   EXPLAIN de `select * from extracted_fields where case_id = $1` en QA sin el
+--   índice: con 65 filas el planificador elige Seq Scan; con enable_seqscan = off
+--   entra por Bitmap Index Scan on uq_extracted_field. Treinta EXPLAIN ANALYZE:
+--   mediana 0,044 ms, p95 0,047 ms.
+--
+-- En QA el índice ya se sacó a mano el 29/10 (DROP INDEX CONCURRENTLY): ahí esta
+-- migración sólo deja el asiento. Va sin CONCURRENTLY porque migrate.mjs corre
+-- cada migración en una transacción; la tabla es chica y el bloqueo dura poco.
+--
+-- El código que viene con esta migración vigila uq_extracted_field en
+-- INDICES_DEL_TABLERO; el anterior vigila idx_extracted_fields_case_id, y la
+-- Carga da rojo si corre contra una base que ya no lo tiene. A la vez,
+-- /api/health marca desfase si el código espera la 56 y la base está en la 55, y
+-- `migrate.mjs --exigir-al-dia` da rojo en CI y en el Post-deploy. Por eso se
+-- aplica en cada base justo antes de que le llegue el código, con
+-- `node scripts/migrate.mjs --apply` por TCP:
+--   1. ep-wispy-flower (QA, QA_DATABASE_URL) y la rama production de Veltra
+--      (STAGING_DATABASE_URL, la que exige al día ci.yml): antes del PR a qa.
+--   2. ep-proud-resonance (la viva, y también la de los secretos DATABASE_URL del
+--      CI): antes de mergear la promoción a main.
+--   3. `node scripts/migrar-bases.mjs --env prd`: control de prd, la rama ensayo y
+--      cada base t_<hex> (confirmar el ensayo antes con `--env ensayo --dry`):
+--      antes de mergear la promoción a prd.
+-- Identificar cada base por su canal de casos, no por su nombre.
+--
+-- Verificar después de aplicarla, en cada base:
+--   SELECT indexname FROM pg_indexes
+--    WHERE schemaname = 'public' AND tablename = 'extracted_fields' ORDER BY 1;
+--   (extracted_fields_pkey y uq_extracted_field, nada más)
+--
+-- Vuelta atrás (primero el código, o la Carga da rojo por el índice que falta):
+--   CREATE INDEX IF NOT EXISTS idx_extracted_fields_case_id
+--     ON public.extracted_fields(case_id);
+--   node scripts/migrate.mjs --env <VAR> --forget 0056 --apply
+-- =============================================================================
+
+DROP INDEX IF EXISTS public.idx_extracted_fields_case_id;

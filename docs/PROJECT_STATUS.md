@@ -4875,6 +4875,26 @@ por el operador. Con `BASE_POR_CLIENTE` y `ALTA_NUMERO_AUTOMATICO` apagadas no h
   lista (`pestanas-de-la-consola.ts`, compartido entre la página y la consola); lo demás
   arranca en «modelos». El destino al terminar la base no cambia. Sin migración, sin
   variable nueva, sin costo.
+- **Invitaciones en lote (29/10, L1, rama `alta/invitar-en-lote`).** El diálogo «Invitar
+  usuario» de `/admin/users` carga varias personas de una vez: una fila de nombre y correo por
+  persona, un solo rol para todas y «Agregar otra persona» hasta el tope del día
+  (`topeDeInvitacionesDelDia`, `src/server/alta/tope-de-invitaciones.ts`: el valor de
+  `ALTA_TOPE_INVITACIONES_DIA`, 20 por omisión, y en una prueba a lo sumo 5; la página lo pasa
+  como número al cliente, sin consulta nueva). El cliente manda un POST por fila, de a uno, a
+  la ruta de siempre, que no cambió: contrato, Turnstile, cupos por red, `enAlta`, el 422 por
+  dominio y la cookie `cm_pedido` quedan como estaban. Un 400 marca su fila y el lote sigue (no
+  tocó el cupo); el 422 por dominio también la marca pero lo corta, porque la ruta toma el cupo
+  antes del filtro de dominio (decisión vigente: probar direcciones ajenas no sale gratis) y
+  seguir gastaría una invitación del día por fila, las cinco de una prueba en un clic; el
+  primer 429 lo corta y marca lo que falta «sin cupo», sin reintento, porque en
+  Postgres los intentos rechazados también cuentan (si el `Retry-After` es de un minuto o menos,
+  el contador no contestó: no es «sin cupo hoy», y lo que falta queda rechazado con el mensaje
+  del servidor); un error de red, un 403 o un 502 también
+  cortan, porque valen para todas las filas. Un correo repetido en el lote, o ya invitado antes
+  en el mismo diálogo, no se manda dos veces. El diálogo no se cierra mientras envía (Escape y
+  Cancelar no hacen nada), y al final hay un solo aviso y una sola recarga de la lista. Sin
+  migración ni variable nueva. Tests: `tests/unit/admin-users-lote.test.tsx` y
+  `tests/unit/alta/tope-de-invitaciones.test.ts`.
 
 ### WABA propia por cliente: la causa de fondo del tope de números (2026-10-09, rama `feat/waba-propia`)
 
@@ -5303,7 +5323,7 @@ Tres ítems más del «Plan para que el alta sea automática» que no esperaban 
 
 No hay dominio propio, así que en un espacio de prueba ninguna invitación pasaba el filtro de dominio, y D4 (b) pedía que el dueño activara a mano cada espacio con cuota 0 antes de invitar al analista. #489 lo resuelve sin activar nada y sin escribir en el espacio: D4 (d), la opción B del diseño, aprobada con cambios de seguridad. Sin migración ni variables nuevas.
 
-- **Qué cambia.** En `POST /api/admin/users`, con el espacio en prueba (`enPrueba`: autoalta y prueba), además de una dirección del dominio del administrador se acepta un alias `+` de su propia casilla de Gmail (`aSuPropiaCasilla`, `src/app/api/admin/users/route.ts:134-153`). `casillaDeGmail` (`src/lib/email/reserved.ts:86-98`) reduce `local[+alias]@gmail.com` a la casilla de fondo, sin puntos ni alias, y no cruza gmail.com con googlemail.com: la invitada y la del administrador tienen que dar la misma. La casilla del administrador tiene que tener el correo verificado (`user.emailVerified === true`); si no, la invitación se rechaza por dominio.
+- **Qué cambia.** En `POST /api/admin/users`, con el espacio en prueba (`enPrueba`: autoalta y prueba), además de una dirección del dominio del administrador se acepta un alias `+` de su propia casilla de Gmail (`aSuPropiaCasilla`, `src/app/api/admin/users/route.ts:131-150`). `casillaDeGmail` (`src/lib/email/reserved.ts:86-98`) reduce `local[+alias]@gmail.com` a la casilla de fondo, sin puntos ni alias, y no cruza gmail.com con googlemail.com: la invitada y la del administrador tienen que dar la misma. La casilla del administrador tiene que tener el correo verificado (`user.emailVerified === true`); si no, la invitación se rechaza por dominio.
 - **Qué no cambia.** El orden del endpoint: cupo (cinco por día), dominio, dirección de operador (202 sin enviar), asiento `USER_INVITED`, sello y envío. Las direcciones de `ADMIN_EMAILS` siguen bloqueadas aunque lleguen por un alias, porque se comparan exactas (`isOperatorEmail`). El botón «activar» de `/admin/altas` queda como estaba. No hay activación automática ni escrituras nuevas en el espacio.
 - **Qué queda asentado.** El asiento de `USER_INVITED` lleva `{ rol, alias: true }` cuando la invitación salió por la casilla propia, sin la dirección; `{ rol, bloqueada: true }` para un operador; `{ rol }` en el resto.
 - **El texto del rechazo.** `usuarios.error.dominio` (`src/lib/i18n/es-AR.servidor.ts:397`) ahora dice que en la prueba se puede invitar a personas del propio dominio o a un alias `+` de la misma casilla de Gmail.
@@ -5340,7 +5360,7 @@ La segunda corrida de los catorce prompts (un Workflow de sólo lectura, con seg
 - **Guía.** El mail agente es la Gmail de Veltra en los tres ambientes (decisión del dueño del 22/10), «Activa» sólo donde se prueba; en prd primero sale de `CASILLAS_DE_DEV`.
 - **Comprobación.** `pnpm check --local` en verde salvo `mail-tardio-pregunta-como-va`, que cortó por un timeout de Gemini en el clasificador del mensaje tardío; ensayado solo dio verde, y `pnpm smoke` contra dev también.
 - **Ambientes.** Entra a qa por #499 y sigue a main y a prd el mismo día, por la regla de ambientes iguales.
-- **Queda afuera.** H3 (índice duplicado) espera una corrida de Carga en QA, y «marcar respondido» sigue como está: hoy lo hace cualquiera del equipo, por diseño de la cola.
+- **Queda afuera.** «Marcar respondido» sigue como está: hoy lo hace cualquiera del equipo, por diseño de la cola. H3 (índice duplicado) se resolvió el 29/10: el A/B de `pnpm load` en QA dio igual con y sin `idx_extracted_fields_case_id` (194/205/212 ms contra 292/213/231 ms de peor p95, con el mismo corrimiento en consultas que no tocan la tabla), y por buscar por `case_id` entra por `uq_extracted_field`. Lo saca la migración 0056, que trae el orden de aplicación por base, y `INDICES_DEL_TABLERO` pasa a vigilar `uq_extracted_field`.
 
 ### Lote 2 de la auditoría (22/10)
 

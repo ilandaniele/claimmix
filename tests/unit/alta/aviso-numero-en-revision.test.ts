@@ -280,6 +280,52 @@ describe("avisarNumeroEnRevision", () => {
     });
   });
 
+  describe("lugares en la WABA (L5)", () => {
+    it("agregado suma cuántos lugares quedan, a continuación del motivo", async () => {
+      await avisarNumeroEnRevision("agregado", TENANT, { lugares: { usados: 2, tope: 3 } });
+
+      expect(h.enviar).toHaveBeenCalledTimes(2);
+      for (const [mail] of h.enviar.mock.calls) {
+        expect(mail.texto).toContain("Quedan 1 de 3 lugares");
+        expect(mail.texto.indexOf("Quedan 1 de 3")).toBeGreaterThan(mail.texto.indexOf(esAR["alta.avisoNumero.motivo.agregado"]));
+        expect(mail.texto).not.toMatch(/\{(quedan|tope)\}/);
+      }
+    });
+
+    it("sin la opción, el mail es el de siempre", async () => {
+      await avisarNumeroEnRevision("agregado", TENANT);
+
+      for (const [mail] of h.enviar.mock.calls) expect(mail.texto).not.toContain("lugares");
+    });
+
+    it.each(MOTIVOS.filter((m) => m !== "agregado"))("la opción no cambia el mail de %s: la línea es sólo del número agregado", async (motivo) => {
+      await avisarNumeroEnRevision(motivo, TENANT, { lugares: { usados: 1, tope: 2 } });
+
+      for (const [mail] of h.enviar.mock.calls) expect(mail.texto).not.toContain("Quedan 1 de 2");
+    });
+
+    it("con la WABA pasada del tope dice que no queda ninguno, no un número negativo", async () => {
+      await avisarNumeroEnRevision("agregado", TENANT, { lugares: { usados: 5, tope: 3 } });
+
+      for (const [mail] of h.enviar.mock.calls) expect(mail.texto).toContain("Quedan 0 de 3");
+    });
+
+    it("el cupo es el mismo con o sin la opción", async () => {
+      await avisarNumeroEnRevision("agregado", TENANT, { lugares: { usados: 2, tope: 3 } });
+      await avisarNumeroEnRevision("agregado", TENANT);
+
+      expect(h.rateLimit.mock.calls.map(([clave]) => clave)).toEqual([`alta:aviso-numero:agregado:${TENANT}`, `alta:aviso-numero:agregado:${TENANT}`]);
+    });
+
+    it("la línea existe en los dos idiomas, con los mismos huecos y el nombre de la variable", () => {
+      for (const texto of [esAR["alta.avisoNumero.lugares"], enUS["alta.avisoNumero.lugares"]]) {
+        expect(texto).toContain("{quedan}");
+        expect(texto).toContain("{tope}");
+        expect(texto).toContain("ALTA_NUMEROS_MAXIMOS_WABA");
+      }
+    });
+  });
+
   it("cupo_semanal: un solo aviso por día para todos los espacios, porque el tope es de todos", async () => {
     await avisarNumeroEnRevision("cupo_semanal", TENANT);
     await avisarNumeroEnRevision("cupo_semanal", OTRO_TENANT);

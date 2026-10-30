@@ -340,6 +340,7 @@ describe("las claves con marcas del lote de decisiones", () => {
     "usuarios.darDeBajaConfirmar": ["{nombre}"],
     "usuarios.toast.sesionesCerradas": ["{n}"],
     "usuarios.toast.sesionCerrada": [],
+    "usuarios.lote.resumen": ["{hechas}", "{rechazadas}", "{sinCupo}"],
   } as const;
   const DE_SERVIDOR = {
     "presupuesto.aviso.cuerpo": ["{hora}", "{motivo}", "{plazo}"],

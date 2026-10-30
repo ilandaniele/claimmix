@@ -512,7 +512,7 @@ ningún doc lo dice.
 | `AGENT_DELIBERATION`, `AGENT_COMPOSE_REPLIES` (`.env.example:91-92`) | bandera | igual | sin documentar | `/api/health` con `CRON_SECRET` |
 | `VERTEX_AI_TUNING_ENABLED` (`.env.example:104`), `RETENCION_MODO` (`:471`), `PURGA_ADJUNTOS_MODO` (`:477`), `ALTA_WABA_PROPIA` (`:266`), `ALTA_APP_PROPIA` (`:280`) | bandera | igual | apagadas en los tres | Vercel |
 | `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` (`.env.example:363-378`) | secreto y valor | dev y prd iguales (comparten app y WABA); QA vacías hasta que tenga su propia WABA y su propio token (después de A5; ver «Después de A5: una WABA y un token por ambiente»), excepción (D3) | dev cargadas; prd según el paso 2 de prd | chequeo `whatsapp` de `/api/health` |
-| `WHATSAPP_PHONE_NUMBER_ID` | valor | dev y prd iguales (el id del número de la plataforma), si el dueño acepta el paso 2 de prd; QA vacía hasta su propia WABA (después de A5) | dev cargada; prd vacía según `docs/PROMOCION.md:736-738` | chequeo `whatsapp` de `/api/health` |
+| `WHATSAPP_PHONE_NUMBER_ID` | valor | dev y prd iguales (el id del número de la plataforma; paso 2 de prd); QA vacía hasta su propia WABA (después de A5) | dev cargada; prd cargada el 30/10 (`docs/PROMOCION.md:736-738`) | chequeo `whatsapp` de `/api/health` |
 | `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`, `GMAIL_USER_EMAIL`, `GMAIL_REFRESH_TOKEN` | valor y secreto | excepción: sólo dev tiene número y casilla de la plataforma | prd vacías según `docs/PROMOCION.md:736-738` | Vercel |
 | `PUBSUB_TOPIC`, `PUBSUB_AUDIENCE`, `PUBSUB_SERVICE_ACCOUNT` (`.env.example:327-339`) | valor | excepción: un tópico por ambiente; QA sin Pub/Sub | dev y prd cargadas | log `webhooks.gmail.sin_audiencia_en_produccion` |
 | `NEXT_PUBLIC_SITE_URL` (`.env.example:187`), `DEFAULT_TENANT_ID`, `GOOGLE_DEFAULT_TENANT_ID` (`:47-49`) | valor | excepción: uno por ambiente | cargadas | login; respuestas 403 `INVALID_ORIGIN` de `/api/auth` |
@@ -1082,12 +1082,12 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     5. [Claude] Por nombre: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`,
        `WHATSAPP_VERIFY_TOKEN`, `NUMEROS_DE_DEV`, `ADMIN_EMAILS` y el remitente.
        `NEXT_PUBLIC_SITE_URL` con https (`https://claimmix.vercel.app`).
-    6. [Dueño] `WHATSAPP_PHONE_NUMBER_ID`, el id del número de la plataforma. Recomendación:
-       cargarla. Sin ella el pedido termina en `sin_credencial`. Con `WHATSAPP_TENANT_ID` y
-       `GMAIL_TENANT_ID` vacías, no le asigna el número de la plataforma a ningún espacio de
-       prd: ni lo que entra ni lo que sale. `docs/PROMOCION.md:736-738` la deja vacía a
-       propósito; si el dueño acepta, [Claude] corrige ese doc.
-    7. Un redeploy de `claimmix-prd`, que cuenta como la promoción del día.
+    6. [Claude] `WHATSAPP_PHONE_NUMBER_ID`, el id del número de la plataforma, el mismo de dev.
+       **Cargada el 30/10** con el OK del dueño. Sin ella el pedido termina en `sin_credencial`.
+       Con `WHATSAPP_TENANT_ID` y `GMAIL_TENANT_ID` vacías, no le asigna el número de la
+       plataforma a ningún espacio de prd: ni lo que entra ni lo que sale
+       (`docs/PROMOCION.md:736-738`).
+    7. Un redeploy de `claimmix-prd`, que cuenta como la promoción del día (el 30/10, la de L1, L5 y H3).
   - **Salió bien si:** el chequeo `whatsapp` ya no dice «sin configurar». Se ve en el log del
     paso «Smoke de prd» del Post-deploy PRD, o con `GET /api/health` y el `CRON_SECRET` de prd.
   - **Si falla:** «graph respondió …»: [Claude] lee el código y el dueño revisa los permisos

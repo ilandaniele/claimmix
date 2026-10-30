@@ -733,9 +733,9 @@ detrás de pruebas y de un orden fijo:
 - Presupuestos de IA: US$ 50 en total, US$ 1 por inquilino de prueba y US$ 30 para todos los
   de prueba juntos.
 - Cargadas: `GMAIL_CLIENT_*`, `ALTA_NUMERO_AUTOMATICO=1`, `ALTA_REMITENTE_*`, `TURNSTILE_*` y `R2_*`.
-- Vacías a propósito: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`,
-  `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL` y `DEMO_TENANT_ID`. prd no tiene número ni casilla
-  propios hasta que un cliente los conecte.
+- Vacías a propósito: `WHATSAPP_TENANT_ID`, `GMAIL_TENANT_ID`, `GMAIL_REFRESH_TOKEN`, `GMAIL_USER_EMAIL`
+  y `DEMO_TENANT_ID`: prd no tiene casilla propia hasta que un cliente la conecte. `WHATSAPP_PHONE_NUMBER_ID` lleva desde el
+  2026-10-30 el número de la plataforma (el de dev), para que el alta sume el del cliente a la WABA; no atiende a ningún espacio.
 
 ### El move del dominio, en este orden y sin plan B
 

@@ -894,6 +894,7 @@ export const esARServidor = {
   "alta.avisoNumero.motivo.recordatorio": "Se le mandó el recordatorio a un espacio que dejó el alta de WhatsApp a medias hace más de 24 horas. Si pasan 48 sin avanzar, el aviso de WABA huérfana lo vuelve a poner acá.",
   "alta.avisoNumero.motivo.baja_fallida": "Al desconectar un espacio, Meta no dio de baja su número: sigue registrado en la API de WhatsApp y el cliente no puede usarlo en la app del celular hasta que se lo suelte. El código de error está en los registros, en whatsapp.alta_numero.graph; hay que darlo de baja a mano o avisarle al cliente.",
   "alta.avisoNumero.dosPasos": "La verificación en dos pasos de ese número la generamos nosotros: decile al cliente que cambie o desactive el PIN en WhatsApp Manager (guía: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/two-step-verification).",
+  "alta.avisoNumero.lugares": "Quedan {quedan} de {tope} lugares en la WABA (ALTA_NUMEROS_MAXIMOS_WABA).",
   "alta.recordatorio.asunto": "ClaimMix: seguí conectando tu WhatsApp",
   "alta.recordatorio.paso.P1": "cargar el secreto y el ID de tu app de Meta",
   "alta.recordatorio.paso.P1B": "pegar la dirección del webhook en tu app de Meta",

@@ -307,7 +307,8 @@ async function sumarALaWaba(
   }
 
   // Desde acá el número está en la WABA: el operador se entera pase lo que pase después.
-  after(() => avisarNumeroEnRevision("agregado", tenantId));
+  const lugares = { usados: waba.filas.length + 1, tope: topes.numerosWaba };
+  after(() => avisarNumeroEnRevision("agregado", tenantId, { lugares }));
   const id = agregado.valor;
   if (!ID_DE_META.test(id) || id === entorno.plataforma) return corta(sinDueno(quien, "agregado", "datos_invalidos"));
   const guardado = await guardarPaso(quien, "agregado", id, entorno.cred.wabaId, entorno.plataforma);

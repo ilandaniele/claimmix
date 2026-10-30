@@ -884,6 +884,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "alta.avisoNumero.motivo.recordatorio": "The reminder was sent to a workspace that left its WhatsApp signup half done more than 24 hours ago. If 48 hours go by without progress, the orphan WABA notice puts it here again.",
   "alta.avisoNumero.motivo.baja_fallida": "When a workspace disconnected, Meta did not deregister its number: it is still registered on the WhatsApp API and the client cannot use it in the phone app until it is released. The error code is in the logs, under whatsapp.alta_numero.graph; deregister it by hand or tell the client.",
   "alta.avisoNumero.dosPasos": "We generated that number's two-step verification PIN: tell the client to change or turn it off in WhatsApp Manager (guide: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/two-step-verification).",
+  "alta.avisoNumero.lugares": "{quedan} of {tope} spots left in the WABA (ALTA_NUMEROS_MAXIMOS_WABA).",
   "alta.recordatorio.asunto": "ClaimMix: keep connecting your WhatsApp",
   "alta.recordatorio.paso.P1": "entering the secret and the ID of your Meta app",
   "alta.recordatorio.paso.P1B": "pasting the webhook address into your Meta app",

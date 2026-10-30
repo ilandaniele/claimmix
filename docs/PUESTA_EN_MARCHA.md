@@ -163,9 +163,10 @@ tarda algo, la guía lo dice así.
         terminar el alta ficticia de prd y borrar su número (D5), o hasta A5. Con 2 números en
         la WABA, el código manda cualquier alta siguiente a revisión con `sin_lugar`
         (`src/server/alta/numero-automatico.ts:283`; tope `ALTA_NUMEROS_MAXIMOS_WABA`, 2 por
-        omisión, `:97`).
+        omisión, `:97`). Cada número que el alta suma a la WABA avisa al operador cuántos
+        lugares quedan («Quedan 0 de 2 lugares»), así no hace falta abrir WhatsApp Manager.
       - QA lleva la bandera en 1 y sigue sin token de WhatsApp: un alta de QA que elija el
-        teléfono termina en revisión con `sin_credencial` (`:335`, `:410`).
+        teléfono termina en revisión con `sin_credencial` (`:342`, `:417`).
       - A futuro, una WABA por ambiente. Espera a A5 (ver «Después de A5: una WABA y un token
         por ambiente»).
     - **D2:** `BASE_POR_CLIENTE` en 0 en dev y QA, excepción declarada a «iguales».
@@ -280,7 +281,7 @@ tarda algo, la guía lo dice así.
   - **Fuentes:** `src/server/alta/crear-inquilino.ts:5`, `:38`; `.env.example:404`
     (`ADMIN_EMAILS`), `:295` (`CASILLAS_DE_DEV`); `src/app/alta/page.tsx`;
     `src/lib/auth/require-operator.ts:42-47` (comparación exacta);
-    `src/app/api/admin/users/route.ts:134-153` (dominio y alias propio), `:155-179`
+    `src/app/api/admin/users/route.ts:131-150` (dominio y alias propio), `:152-176`
     (invitación a un operador); `src/lib/email/reserved.ts:86-98` (`casillaDeGmail`);
     `src/app/invitacion/page.tsx:162` (sin Google para un alias `+`);
     `src/app/api/admin/gmail-accounts/callback/route.ts` (`otro_ambiente`,
@@ -470,7 +471,7 @@ QA sale de un usuario nuevo y no toca el actual. Los tokens nunca pasan por el c
 Si el dueño quiere separar también dev y prd, la receta es la misma, con un usuario del sistema
 y una WABA para cada uno.
 
-- **Fuentes:** `src/server/alta/numero-automatico.ts:97`, `:242`, `:283`, `:335`;
+- **Fuentes:** `src/server/alta/numero-automatico.ts:97`, `:242`, `:283`, `:342`;
   `docs/whatsapp-setup.md`, «El tope de Meta».
 
 ### Lo que tiene que quedar igual en los tres
@@ -505,7 +506,7 @@ ningún doc lo dice.
 | `MONTHLY_BUDGET_USD` (`src/lib/topes.ts:117`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
 | `AI_TENANT_DAILY_TOKEN_CAP` (`.env.example:159`) | valor | excepción en dev y QA (D7); en esos dos, igual a la variable del repo (`.github/workflows/deploy-checks.yml:383`) | QA 20 M; dev y prd desconocido | Vercel y Settings > Variables del repo |
 | `ALTA_NUMEROS_MAXIMOS_WABA`, `ALTA_TOPE_NUMEROS_DIA` y los cupos de códigos (`.env.example:246-256`) | valor | igual; se sube recién con Veltra verificada | sin cargar (2, 2, 3, 5, 10, 5) | Vercel |
-| `ALTA_TOPE_IP_DIA` (`src/server/alta/cupo-por-ip.ts:20`), `ALTA_TOPE_CORREO_POR_IP_DIA`, `ALTA_TOPE_CORREOS_DIA`, `ALTA_TOPE_POR_DESTINATARIO_DIA`, `ALTA_TOPE_INVITACIONES_DIA` (`.env.example:232-237`), `ALTA_TOPE_PLANTILLAS_PRUEBA_DIA` (`src/server/whatsapp/cloud-api.ts:783`) | valor | igual | sin cargar (valores por omisión) | Vercel |
+| `ALTA_TOPE_IP_DIA` (`src/server/alta/cupo-por-ip.ts:20`), `ALTA_TOPE_CORREO_POR_IP_DIA`, `ALTA_TOPE_CORREOS_DIA`, `ALTA_TOPE_POR_DESTINATARIO_DIA`, `ALTA_TOPE_INVITACIONES_DIA` (`.env.example:270-275`, 20 por omisión; una prueba invita a lo sumo a 5 por día aunque la variable diga más, `src/server/alta/tope-de-invitaciones.ts`), `ALTA_TOPE_PLANTILLAS_PRUEBA_DIA` (`src/server/whatsapp/cloud-api.ts:783`) | valor | igual | sin cargar (valores por omisión) | Vercel |
 | `ADMIN_EMAILS` (`.env.example:404`), `SIGNUP_ALLOWED_EMAILS` (`:401`) | valor | igual, salvo D8. `ADMIN_EMAILS` habilita al operador junto con el rol owner o admin, el correo verificado y la sesión en el espacio casa (`src/lib/auth/require-operator.ts:55-67`) | QA sin comprobar | entrar a `/admin/altas`: si redirige a `/bandeja`, falta una de las cuatro |
 | `GEMINI_TRANSPORT` (`.env.example:118`) en `vertex`, sin `VERTEX_EXTRACTION_MODEL`, `MOCK_AI` y `AI_MOCK` apagadas (`src/server/ai/provider.ts:293`) | valor | igual | iguales desde el 15/10 | Vercel; un caso de prueba que el agente conteste |
 | `AGENT_DELIBERATION`, `AGENT_COMPOSE_REPLIES` (`.env.example:91-92`) | bandera | igual | sin documentar | `/api/health` con `CRON_SECRET` |
@@ -694,21 +695,35 @@ El paso 12 lee los dos espacios.
     (D4 d): en prueba, el administrador puede invitar a un alias `+` de su propia casilla de
     Gmail, y el de analista es de la misma casilla que el de administrador. El enlace a
     `/invitacion?t=` vale 72 horas. El analista acepta con una contraseña: la pantalla no
-    ofrece Google para un alias `+`.
+    ofrece Google para un alias `+`. El diálogo deja cargar varias personas de una vez: una
+    fila por persona (nombre y correo), un solo rol para todas, y «Agregar otra persona» hasta
+    el tope del día. Si el cupo se agota a mitad del lote, las filas que faltan quedan
+    marcadas «sin cupo» y se vuelve a probar más tarde: el cupo se renueva a las 00:00 UTC, las
+    21:00 de Argentina, no a la medianoche de acá. Para probarlo, direcciones
+    `@example.com` o alias propios: ninguna casilla ajena.
   - **Salió bien si:** el invitado entra y ve la bandeja del espacio con su rol.
   - **Si falla:**
     - «Durante la prueba sólo podés invitar a personas de tu propio dominio de correo o a un
       alias + de tu misma casilla de Gmail»: el espacio está en prueba y la dirección es de
       otro dominio, de un proveedor abierto o un alias de otra Gmail, o la casilla del
       administrador no tiene el correo verificado (D4).
-    - Un espacio en prueba invita a lo sumo a cinco personas por día.
+    - Un espacio en prueba invita a lo sumo a cinco personas por día (`ALTA_TOPE_INVITACIONES_DIA`
+      rige fuera de la prueba, 20 por omisión). El diálogo no deja armar más filas que ese
+      tope; si ya se invitó hoy, las últimas filas del lote pueden salir «sin cupo». El primer
+      rechazo por cupo corta el lote: no se reintenta. El rechazo por dominio (422) también lo
+      corta, porque el servidor lo cuenta contra el cupo del día: la fila queda marcada y las
+      demás sin enviar, para corregirla y mandar de nuevo sin gastar una invitación por fila. Si
+      el contador de cupos no contesta, el
+      servidor pide esperar un minuto: las filas que faltan quedan rechazadas con ese mensaje, no
+      «sin cupo», y se vuelve a probar en un rato.
     - La pantalla dice «invitación enviada» y el mail no llega nunca: la dirección está en
       `ADMIN_EMAILS` (A3). [Claude] lo confirma con el log `admin_users.invitacion_a_operador`.
     - La invitación termina en `ENVIO_FALLIDO`: el problema es el remitente.
   - **Fuentes:** `src/app/(app)/admin/users`; `src/lib/i18n/es-AR.ts:825`;
     `src/app/invitacion`, `src/app/invitacion/page.tsx:162`;
-    `src/lib/i18n/es-AR.servidor.ts:397`; `src/app/api/admin/users/route.ts:85`,
-    `:134-153`, `:155-179`; `src/lib/email/reserved.ts:86-98`.
+    `src/lib/i18n/es-AR.servidor.ts:397`; `src/server/alta/tope-de-invitaciones.ts:13-20`;
+    `src/app/api/admin/users/route.ts:121-129`, `:131-150`, `:152-176`;
+    `src/lib/email/reserved.ts:86-98`.
 - [ ] **9. Denuncia por WhatsApp.**
   - **Quién:** [Dueño].
   - **Dónde:** el celular personal; la bandeja del espacio de la plataforma.
@@ -879,7 +894,7 @@ ambiente, la hora, una captura y el número de caso.
   - **Si falla:** si QA manda de verdad un código por SMS o por llamada, avisar al dueño: se
     cargó un token de WhatsApp en QA y ocupa el lugar libre de la WABA, que es primero del
     cliente ficticio de prd (D1).
-  - **Fuentes:** `src/server/alta/numero-automatico.ts:335`, `:410`;
+  - **Fuentes:** `src/server/alta/numero-automatico.ts:342`, `:417`;
     `docs/PROMOCION.md:325-327`; `docs/whatsapp-setup.md:359`.
 - [ ] **8. Segundo usuario.**
   - **Quién:** [Gonzalo].
@@ -891,7 +906,7 @@ ambiente, la hora, una captura y el número de caso.
   - **Si falla:** si sale el rechazo por dominio, el alias es de otra Gmail o la casilla del
     administrador no tiene el correo verificado. Si dice «invitación enviada» y el mail no
     llega, la dirección está en `ADMIN_EMAILS` (A3).
-  - **Fuentes:** `src/app/api/admin/users/route.ts:134-153`, `:155-179`;
+  - **Fuentes:** `src/app/api/admin/users/route.ts:131-150`, `:152-176`;
     `src/lib/email/reserved.ts:86-98`.
 - [ ] **9. Denuncia por WhatsApp: el transcripto del ensayo.**
   - **Quién:** [Claude] lo copia; [Dueño] se lo manda; [Gonzalo] lo lee.
@@ -1189,7 +1204,8 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     prueba). Si es por dominio, el alias es de otra Gmail o la casilla del administrador no
     tiene el correo verificado. Si dice «invitación enviada» y el mail no llega, la
     dirección está en `ADMIN_EMAILS` (A3).
-  - **Fuentes:** `src/app/api/admin/users/route.ts:85`, `:134-153`, `:155-179`;
+  - **Fuentes:** `src/server/alta/tope-de-invitaciones.ts:13-20`;
+    `src/app/api/admin/users/route.ts:121-129`, `:131-150`, `:152-176`;
     `src/lib/email/reserved.ts:86-98`; `src/app/api/admin/sso/route.ts:6-11`.
 - [ ] **11. Denuncia por WhatsApp.**
   - **Quién:** [Dueño].

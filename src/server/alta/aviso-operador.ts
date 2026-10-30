@@ -192,6 +192,8 @@ const POR_ESPACIO: ReadonlySet<MotivoDeRevision> = new Set<MotivoDeRevision>([
 export interface OpcionesDelAviso {
   /** La cuenta es de la vía de la app propia: `revocada` suma la línea de la verificación en dos pasos (R6). */
   appPropia?: boolean;
+  /** Números en la WABA de la plataforma, el nuevo incluido, y su tope: `agregado` suma cuántos lugares quedan. */
+  lugares?: { usados: number; tope: number };
 }
 
 /**
@@ -222,7 +224,13 @@ export async function avisarNumeroEnRevision(
 
     const t = getT("es-AR");
     const dosPasos = motivo === "revocada" && opciones.appPropia ? ` ${t("alta.avisoNumero.dosPasos")}` : "";
-    const texto = t("alta.avisoNumero.texto").replace("{motivo}", `${t(`alta.avisoNumero.motivo.${motivo}`)}${dosPasos}`);
+    const lugares =
+      motivo === "agregado" && opciones.lugares
+        ? ` ${t("alta.avisoNumero.lugares")
+            .replace("{quedan}", String(Math.max(0, opciones.lugares.tope - opciones.lugares.usados)))
+            .replace("{tope}", String(opciones.lugares.tope))}`
+        : "";
+    const texto = t("alta.avisoNumero.texto").replace("{motivo}", `${t(`alta.avisoNumero.motivo.${motivo}`)}${dosPasos}${lugares}`);
     const salio = await mandarAlOperador(destinatarios, t("alta.avisoNumero.asunto"), texto, "operador");
     if (!salio) await liberarCupo(clave, DIA_MS, cupo.ventana);
   } catch (e) {

@@ -11,13 +11,12 @@
 
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+import { useEffect, useRef, useState, useCallback, type FormEvent, type RefObject } from "react";
 
 import { useDialogoModal } from "../../_components/dialogo-modal";
 import { useT, useLocale } from "@/lib/i18n/LocaleContext";
 import { textoDeSesionesCerradas } from "@/lib/i18n/sesiones-cerradas";
+import { REINTENTO_SIN_CONTADOR_MS } from "@/lib/rate-limit/espera";
 import { formatDate } from "@/lib/utils";
 
 interface UserRow {
@@ -40,6 +39,8 @@ interface Props {
   currentUserId: string;
   currentUserRole: string;
   emailAyuda: string;
+  /** Cuántas filas deja armar el diálogo de una vez: el tope de invitaciones del día. */
+  topeDelLote: number;
 }
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -88,25 +89,6 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-// ── Submit button with pending state ──────────────────────────────────────────
-
-function SubmitButton({ label, pendingLabel }: { label: string; pendingLabel: string }) {
-  const { pending } = useFormStatus();
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-    >
-      {pending ? pendingLabel : label}
-    </button>
-  );
-}
-
-// ── Create user form action ───────────────────────────────────────────────────
-
-type FormState = { error?: string; success?: boolean };
-
 async function readApiError(res: Response, fallback: string): Promise<string> {
   const data = await res.json().catch(() => null);
   return data?.error?.message ?? fallback;
@@ -114,55 +96,129 @@ async function readApiError(res: Response, fallback: string): Promise<string> {
 
 // ── Create user dialog ────────────────────────────────────────────────────────
 
+/** Lo que el diálogo le cuenta al padre al terminar el lote. */
+interface ResumenDelLote {
+  hechas: number;
+  rechazadas: number;
+  sinCupo: number;
+}
+
+/** `aviso` es lo último que dijo el envío sobre la fila: el 422 del servidor, «sin cupo», «repetido». */
+interface Fila {
+  id: number;
+  aviso?: string;
+}
+
+/** Los campos del diálogo, el selector de rol incluido, comparten estilo. */
+const campo =
+  "w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none disabled:opacity-50";
+
+function FilaDeInvitacion({
+  fila,
+  n,
+  correoRef,
+  quitar,
+  enviando,
+}: {
+  fila: Fila;
+  n: number;
+  correoRef?: RefObject<HTMLInputElement | null>;
+  quitar?: () => void;
+  enviando: boolean;
+}) {
+  const t = useT();
+  return (
+    <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+      <div>
+        <label
+          htmlFor={`full_name-${fila.id}`}
+          className="mb-1 block text-xs font-medium text-slate-600"
+        >
+          {t("usuarios.form.nombre")}
+        </label>
+        <input
+          id={`full_name-${fila.id}`}
+          name="full_name"
+          type="text"
+          required
+          minLength={2}
+          maxLength={100}
+          autoFocus={fila.id > 0}
+          disabled={enviando}
+          className={campo}
+          placeholder={t("usuarios.form.nombrePlaceholder")}
+        />
+      </div>
+      <div>
+        <label
+          htmlFor={`email-${fila.id}`}
+          className="mb-1 block text-xs font-medium text-slate-600"
+        >
+          {t("usuarios.form.email")}
+        </label>
+        <input
+          ref={correoRef}
+          id={`email-${fila.id}`}
+          name="email"
+          type="email"
+          required
+          disabled={enviando}
+          className={campo}
+          placeholder={t("usuarios.form.emailPlaceholder")}
+          aria-describedby="email-ayuda"
+        />
+      </div>
+      {quitar && (
+        <button
+          type="button"
+          onClick={quitar}
+          disabled={enviando}
+          aria-label={`${t("usuarios.lote.quitar")} ${n}`}
+          className="self-end rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+        >
+          ×
+        </button>
+      )}
+      {fila.aviso && (
+        <p role="alert" className="text-xs text-red-700 sm:col-span-full">
+          {fila.aviso}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function CreateUserDialog({
-  onClose,
+  cerrar,
   onCreated,
   currentUserRole,
   emailAyuda,
+  topeDelLote,
 }: {
-  onClose: () => void;
-  onCreated: () => void;
+  cerrar: () => void;
+  onCreated: (resumen: ResumenDelLote) => void;
   currentUserRole: string;
   emailAyuda: string;
+  topeDelLote: number;
 }) {
   const t = useT();
+  const [filas, setFilas] = useState<Fila[]>([{ id: 0 }]);
+  const [enviando, setEnviando] = useState(false);
+  const proximoId = useRef(1);
+  /*
+   * Los correos ya aceptados. Después de un lote partido las filas hechas salen
+   * de la lista, pero la misma dirección escrita de nuevo en otra fila no tiene
+   * que volver a invitarse.
+   */
+  const enviados = useRef(new Set<string>());
 
   /*
-   * La acción vive adentro porque los mensajes de error son texto visible y
-   * necesitan el idioma. `t` es estable mientras no cambie el idioma, así que
-   * la identidad de la acción tampoco cambia entre renders.
+   * Mientras envía no se cierra: la respuesta que vuelve necesita el diálogo para
+   * marcar las filas. Escape y Cancelar pasan por acá.
    */
-  const createUserAction = useCallback(
-    async (_prev: FormState, formData: FormData): Promise<FormState> => {
-      const body = {
-        full_name: formData.get("full_name"),
-        email: formData.get("email"),
-        role: formData.get("role"),
-      };
-
-      try {
-        const res = await fetch("/api/admin/users", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          return {
-            error: data?.error?.message ?? t("usuarios.error.crear"),
-          };
-        }
-
-        return { success: true };
-      } catch {
-        return { error: t("usuarios.error.red") };
-      }
-    },
-    [t]
-  );
-
-  const [state, action] = useActionState<FormState, FormData>(createUserAction, {});
+  const onClose = () => {
+    if (!enviando) cerrar();
+  };
 
   /*
    * El foco arranca en el correo, que es el primer campo que se llena.
@@ -174,12 +230,101 @@ function CreateUserDialog({
   const correoRef = useRef<HTMLInputElement>(null);
   const dialogRef = useDialogoModal<HTMLDivElement>(onClose, correoRef);
 
+  /*
+   * Quitar una fila o apagar los controles al enviar deja el foco en el aire; se
+   * vuelve al primer correo. Va después del hook: en el montaje el foco ya lo
+   * puso él y esto no hace nada.
+   */
   useEffect(() => {
-    if (state.success) {
-      onCreated();
-      onClose();
+    if (!enviando && !dialogRef.current?.contains(document.activeElement)) {
+      correoRef.current?.focus();
     }
-  }, [state.success, onCreated, onClose]);
+  }, [enviando, filas.length, dialogRef]);
+
+  function agregar() {
+    const id = proximoId.current++;
+    setFilas((prev) => [...prev, { id }]);
+  }
+
+  async function enviar(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (enviando) return;
+    // Un campo por fila y en el orden de `filas`: los `key` estables mantienen el orden del DOM.
+    const datos = new FormData(e.currentTarget);
+    const nombres = datos.getAll("full_name");
+    const correos = datos.getAll("email");
+    const role = datos.get("role");
+    setEnviando(true);
+
+    const avisos = new Map<number, string>();
+    const hechas = new Set<number>();
+    const vistos = new Set(enviados.current);
+    let rechazadas = 0;
+    let sinCupo = 0;
+    for (let i = 0; i < filas.length; i++) {
+      const fila = filas[i]!;
+      const correo = String(correos[i]).trim().toLowerCase();
+      if (vistos.has(correo)) {
+        avisos.set(fila.id, t("usuarios.lote.repetido"));
+        rechazadas++;
+        continue;
+      }
+      vistos.add(correo);
+
+      let res: Response;
+      try {
+        res = await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ full_name: nombres[i], email: correos[i], role }),
+        });
+      } catch {
+        // No se sabe si el servidor llegó a tomar el cupo: no se sigue ni se reintenta.
+        avisos.set(fila.id, t("usuarios.error.red"));
+        rechazadas++;
+        break;
+      }
+
+      if (res.ok) {
+        enviados.current.add(correo);
+        hechas.add(fila.id);
+        continue;
+      }
+      /*
+       * En Postgres los intentos rechazados también cuentan contra el cupo: al
+       * primer 429 se corta, sin reintento. Si el contador no contestó el servidor
+       * pide esperar a lo sumo un minuto: eso no es «sin cupo hoy», y lo que falta
+       * queda con el mensaje del servidor entre las rechazadas.
+       */
+      if (res.status === 429) {
+        const porHoy = Number(res.headers.get("Retry-After")) > REINTENTO_SIN_CONTADOR_MS / 1000;
+        const aviso = porHoy ? t("usuarios.lote.sinCupo") : await readApiError(res, t("usuarios.error.crear"));
+        for (const f of filas.slice(i)) avisos.set(f.id, aviso);
+        if (porHoy) sinCupo = filas.length - i;
+        else rechazadas += filas.length - i;
+        break;
+      }
+      avisos.set(fila.id, await readApiError(res, t("usuarios.error.crear")));
+      rechazadas++;
+      /*
+       * Sólo un 400 habla de esta fila y sigue: no tocó el cupo. El 422 de dominio sí lo
+       * gastó (el servidor cuenta cada intento: probar direcciones ajenas no sale gratis), así
+       * que seguir quemaría una invitación del día por fila. Lo demás (sesión, permiso,
+       * remitente, error) vale para todas y seguir lo repetiría.
+       */
+      if (res.status !== 400) break;
+    }
+
+    const quedan = filas
+      .filter((f) => !hechas.has(f.id))
+      .map((f) => ({ id: f.id, aviso: avisos.get(f.id) }));
+    setFilas(quedan);
+    setEnviando(false);
+    if (hechas.size + rechazadas + sinCupo > 0) {
+      onCreated({ hechas: hechas.size, rechazadas, sinCupo });
+    }
+    if (quedan.length === 0) cerrar();
+  }
 
   return (
     <div
@@ -197,52 +342,37 @@ function CreateUserDialog({
         pantalla esconde todo lo de afuera, así que la persona quedaba parada
         en la nada — y es el formulario que crea usuarios con su rol.
       */}
-      <div ref={dialogRef} className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+      <div
+        ref={dialogRef}
+        className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
+      >
         <h2 className="mb-4 text-base font-semibold text-slate-900">
           {t("usuarios.invitar")}
         </h2>
 
-        <form action={action} className="space-y-4">
-          <div>
-            <label
-              htmlFor="full_name"
-              className="mb-1 block text-xs font-medium text-slate-600"
-            >
-              {t("usuarios.form.nombre")}
-            </label>
-            <input
-              id="full_name"
-              name="full_name"
-              type="text"
-              required
-              minLength={2}
-              maxLength={100}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              placeholder={t("usuarios.form.nombrePlaceholder")}
+        <form onSubmit={(e) => void enviar(e)} className="space-y-4">
+          {filas.map((fila, i) => (
+            <FilaDeInvitacion
+              key={fila.id}
+              fila={fila}
+              n={i + 1}
+              correoRef={i === 0 ? correoRef : undefined}
+              quitar={i === 0 ? undefined : () => setFilas((prev) => prev.filter((f) => f.id !== fila.id))}
+              enviando={enviando}
             />
-          </div>
+          ))}
+          <p id="email-ayuda" className="text-xs text-slate-500">
+            {emailAyuda}
+          </p>
 
-          <div>
-            <label
-              htmlFor="email"
-              className="mb-1 block text-xs font-medium text-slate-600"
-            >
-              {t("usuarios.form.email")}
-            </label>
-            <input
-              ref={correoRef}
-              id="email"
-              name="email"
-              type="email"
-              required
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
-              placeholder={t("usuarios.form.emailPlaceholder")}
-              aria-describedby="email-ayuda"
-            />
-            <p id="email-ayuda" className="mt-1 text-xs text-slate-500">
-              {emailAyuda}
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={agregar}
+            disabled={enviando || filas.length >= topeDelLote}
+            className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+          >
+            + {t("usuarios.lote.agregar")}
+          </button>
 
           <div>
             <label
@@ -255,7 +385,8 @@ function CreateUserDialog({
               id="role"
               name="role"
               defaultValue="analyst"
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none"
+              disabled={enviando}
+              className={campo}
             >
               {ROLE_ORDER.map((value) => (
                 <option
@@ -271,27 +402,22 @@ function CreateUserDialog({
             </select>
           </div>
 
-          {state.error && (
-            <div
-              role="alert"
-              className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"
-            >
-              {state.error}
-            </div>
-          )}
-
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              disabled={enviando}
+              className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
             >
               {t("usuarios.cancelar")}
             </button>
-            <SubmitButton
-              label={t("usuarios.enviarInvitacion")}
-              pendingLabel={t("usuarios.enviandoInvitacion")}
-            />
+            <button
+              type="submit"
+              disabled={enviando}
+              className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            >
+              {enviando ? t("usuarios.enviandoInvitacion") : t("usuarios.enviarInvitacion")}
+            </button>
           </div>
         </form>
       </div>
@@ -306,6 +432,7 @@ export function AdminUsersClient({
   currentUserId,
   currentUserRole,
   emailAyuda,
+  topeDelLote,
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
@@ -339,8 +466,15 @@ export function AdminUsersClient({
     refreshUsers();
   }, [refreshUsers]);
 
-  function handleCreated() {
-    setToast(t("usuarios.toast.creado"));
+  function handleCreated({ hechas, rechazadas, sinCupo }: ResumenDelLote) {
+    setToast(
+      hechas === 1 && rechazadas + sinCupo === 0
+        ? t("usuarios.toast.creado")
+        : t("usuarios.lote.resumen")
+            .replace("{hechas}", String(hechas))
+            .replace("{rechazadas}", String(rechazadas))
+            .replace("{sinCupo}", String(sinCupo))
+    );
     refreshUsers();
     setTimeout(() => setToast(null), 4000);
   }
@@ -437,17 +571,6 @@ export function AdminUsersClient({
 
   return (
     <>
-      {/* Toast */}
-      {toast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-4 right-4 z-50 rounded-lg bg-slate-800 px-4 py-3 text-sm text-white shadow-lg"
-        >
-          {toast}
-        </div>
-      )}
-
       {error && (
         <div
           role="alert"
@@ -460,11 +583,23 @@ export function AdminUsersClient({
       {/* Dialog */}
       {showDialog && (
         <CreateUserDialog
-          onClose={() => setShowDialog(false)}
+          cerrar={() => setShowDialog(false)}
           onCreated={handleCreated}
           currentUserRole={currentUserRole}
           emailAyuda={emailAyuda}
+          topeDelLote={topeDelLote}
         />
+      )}
+
+      {/* Toast: después del diálogo, para que si éste sigue abierto el telón no lo tape */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 rounded-lg bg-slate-800 px-4 py-3 text-sm text-white shadow-lg"
+        >
+          {toast}
+        </div>
       )}
 
       {/* Table header with action */}

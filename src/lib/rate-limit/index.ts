@@ -27,6 +27,7 @@ import {
   clearAllRateLimits,
 } from "./memory";
 import { claveDeCupo } from "./clave";
+import { REINTENTO_SIN_CONTADOR_MS } from "./espera";
 import { logger } from "@/lib/observability/logger";
 
 export { resetRateLimit, clearAllRateLimits };
@@ -388,9 +389,6 @@ export interface ConfigDeCupo {
 }
 
 type Cuenta = Omit<RateLimitResult, "retryAfterSeconds">;
-
-/** Cuánto esperar, como mucho, cuando el contador no contestó: el aviso es «probá en un rato», no «mañana». */
-const REINTENTO_SIN_CONTADOR_MS = 60_000;
 
 /**
  * Check the rate limit for the given key and profile.

@@ -4819,8 +4819,9 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
   webhook de WhatsApp y el push de Gmail de dev apuntan a `claimmix-dev`, y prd tiene su
   propio tópico `gmail-push-prd`.
 - **Falta:** la prueba de punta a punta de un alta con el dueño, 24 h de logs y la
-  verificación del negocio en Meta. R2 de prd quedó el 09/10 (#401) y Turnstile anda en dev y
-  en prd (leído en `/registro` el 16/10).
+  verificación del negocio en Meta.
+- **Hecho después:** R2 de prd anda desde el 09/10 (#401) con su bucket propio,
+  `claimmix-prd-attachments`, y Turnstile anda en dev y en prd (leído en `/registro` el 16/10).
 - **El flag es de ida.** Con clientes vivos no se apaga `BASE_POR_CLIENTE`: la base de
   control no tiene sus datos de negocio. Para frenar se usa `ALTA_AUTOMATICA=0` y se arregla
   hacia adelante.
@@ -4903,6 +4904,11 @@ verificar el negocio. Ahora cada cliente puede traer la suya con el popup de Met
 (Embedded Signup v4) y los mensajes salen de su número, con su token. Todo detrás de
 `ALTA_WABA_PROPIA` (apagada); con ella apagada nada cambia. Receta, avisos y runbook en la
 Parte G de `docs/whatsapp-setup.md`.
+
+- **Estado.** Esta vía y la de la app propia (la sección siguiente) están en `main` por #413
+  y en prd por #414, las dos con su bandera apagada. La 0051 se aplicó el 14/10 en QA, dev,
+  staging y prd. Prenderlas espera a Meta (la lista «WABA propia: lo que queda de Meta» en
+  «Waiting on you») y al abogado.
 
 - **Tiempo de ejecución y panel del operador.** El token del cliente (cifrado con
   `wa:<tenantId>:<wabaId>` como AAD) lo abre `numeros.ts`; la WABA de la plataforma sigue
@@ -5533,9 +5539,9 @@ Quien crea una cuenta puede venir a dar de alta su empresa o a sumarse a una que
   corren contra Postgres en la sección 7 de `pnpm capa-datos`, en cada corrida
   del CI; no hace falta repetirlos a mano en QA. Pendiente, lo que esa prueba no
   cubre (simula R2 y no enciende ningún modo):
-  - Confirmar la separación de buckets de R2: QA tiene el suyo
-    (`claimmix-qa-attachments`); falta confirmar el de staging contra el de
-    producción.
+  - La separación de buckets de R2 ya está: QA tiene el suyo
+    (`claimmix-qa-attachments`) y prd el suyo (`claimmix-prd-attachments`, desde
+    el 09/10 por #401). Staging no tiene bucket: los e2e del CI suben al de QA.
   - Decidir cuándo pasar `RETENCION_MODO` y `PURGA_ADJUNTOS_MODO` de `apagado` a
     `simular` y después a `borrar`. No se encendieron en ningún ambiente.
   - Verificar la ventana de PITR de Neon en el plan vigente y probar una

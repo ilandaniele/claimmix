@@ -1124,6 +1124,8 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Si falla:** los mismos casos que el paso 3 de dev. Acá sí puede salir `?e=celular` en
     `/alta`: el +54 vino sin el 9.
   - **Fuentes:** `src/app/registro/actions.ts`; `src/app/alta/actions.ts`.
+  - **Estado (30/10):** hecho. El alta de Brimonte Gestiones salió con la Gmail personal del
+    dueño, fuera de `ADMIN_EMAILS` de prd (ahí queda sólo la casilla de Veltra).
 - [ ] **5. Base propia.**
   - **Quién:** [Automático]; [Claude] si se traba.
   - **Dónde:** `/preparando`.
@@ -1144,6 +1146,8 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Fuentes:** `src/app/preparando`; `src/server/alta/pasos-hechos.ts`; `docs/PROMOCION.md:704`;
     `src/app/api/cron/reap-stuck/route.ts:18-20`; `vercel.json:10-11`;
     `.github/workflows/barrer-trabados.yml:86`.
+  - **Estado (30/10):** hecho. La base `t_<hex>` de la autoalta se creó sola y la pantalla pasó a
+    «Primeros pasos» sin reintentos.
 - [ ] **6. El espacio en `/admin/altas`.**
   - **Quién:** [Dueño], con la cuenta de operador.
   - **Dónde:** `https://claimmix.vercel.app/admin/altas`.
@@ -1151,6 +1155,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Salió bien si:** el espacio figura con el número en estado pedido y el contador de 24 h.
   - **Si falla:** si no figura, [Claude] busca el alta en los logs. Si la página lleva a
     `/bandeja`, falta una condición de operador (dev, paso 4).
+  - **Estado (30/10):** hecho. Hay que entrar con la cuenta de operador de Veltra, la que está en
+    `ADMIN_EMAILS`, parada en el tenant de la casa; con la cuenta del admin del cliente la
+    página lleva a `/bandeja`.
 - [ ] **7. Número de WhatsApp.**
   - **Quién:** [Cliente ficticio]; [Claude] mira los logs.
   - **Dónde:** `/configuracion` (o desde `/preparando`).
@@ -1163,6 +1170,10 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     el número entró con el 9.
   - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:728-729`; `docs/whatsapp-setup.md:326-345`,
     `:369-370`.
+  - **Estado (30/10):** pendiente. Un primer «Por SMS», antes del redeploy que trae
+    `WHATSAPP_PHONE_NUMBER_ID` a prd, terminó en `sin_credencial`: sólo avisa al equipo, la fila
+    queda en pedido sin número ni token y el cupo del día se libera. Con el deploy de
+    `1d3e9aa7` y el smoke de prd sin «whatsapp: sin configurar», se aprieta una sola vez más.
 - [ ] **8. El número en WhatsApp Manager.**
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > WhatsApp Manager, la WABA de Veltra.
@@ -1188,6 +1199,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     (`gmail-push-prd`), así que el correo entra en minutos.
   - **Si falla:** con `otro_ambiente`, la casilla figura en `CASILLAS_DE_DEV`. Los demás
     resultados, como en el paso 7 de dev.
+  - **Estado (30/10):** hecho. La casilla propia del agente de prd quedó conectada, activa y sin
+    error; no es la de Veltra ni la del login. Las filas de `gmail_accounts` viven en la base
+    de control (por `tenant_id`), no en la `t_<hex>` del cliente.
 - [ ] **10. Segundo usuario.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/admin/users`, «Invitar usuario».

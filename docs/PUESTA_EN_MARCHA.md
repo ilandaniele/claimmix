@@ -1097,6 +1097,10 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `src/server/alta/numero-automatico.ts:243`; `src/app/api/health/route.ts:412-415`;
     `.github/workflows/post-deploy.yml:657`; `scripts/smoke-production.mts:265-269`;
     `docs/PROJECT_STATUS.md:5267-5272`.
+  - **Estado (30/10):** hecho. La promoción #546 (`1d3e9aa7`) hizo de redeploy del punto 7, y
+    el smoke del Post-deploy PRD dio `whatsapp` operativo, TIER_250. El único aviso es
+    `gmail: GMAIL_TENANT_ID sin configurar`, esperable en prd (la casilla de la plataforma es
+    sólo de dev).
 - [ ] **3. Antes del alta: salud de las bases.**
   - **Quién:** [Claude].
   - **Dónde:** la terminal.
@@ -1109,6 +1113,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Si falla:** con desfase, A11. Con sobrantes, el dueño decide cada una (borrar no se
     deshace).
   - **Fuentes:** `src/app/api/health/route.ts:20-25`; `docs/PROMOCION.md:715`.
+  - **Estado (30/10):** hecho. El paso «Las bases no están desfasadas» del Post-deploy PRD de
+    `1d3e9aa7` pidió `health?deep=1` y dio `bases.desfase` en `false`; `purgar-bases.mjs --env
+    prd` listó 0 candidatas.
 - [ ] **4. Alta.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** una ventana privada, `https://claimmix.vercel.app/registro`.
@@ -1173,7 +1180,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Estado (30/10):** pendiente. Un primer «Por SMS», antes del redeploy que trae
     `WHATSAPP_PHONE_NUMBER_ID` a prd, terminó en `sin_credencial`: sólo avisa al equipo, la fila
     queda en pedido sin número ni token y el cupo del día se libera. Con el deploy de
-    `1d3e9aa7` y el smoke de prd sin «whatsapp: sin configurar», se aprieta una sola vez más.
+    `1d3e9aa7` el smoke de prd ya da `whatsapp` operativo (paso 2): se aprieta una sola vez más.
 - [ ] **8. El número en WhatsApp Manager.**
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > WhatsApp Manager, la WABA de Veltra.

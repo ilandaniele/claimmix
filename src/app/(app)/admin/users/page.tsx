@@ -13,6 +13,7 @@ import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
 import { AdminUsersClient } from "./AdminUsersClient";
 import { getT } from "@/lib/i18n";
+import { topeDeInvitacionesDelDia } from "@/server/alta/tope-de-invitaciones";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
@@ -86,6 +87,7 @@ export default async function AdminUsersPage() {
         currentUserId={ctx.user.id}
         currentUserRole={userRow.role}
         emailAyuda={t("usuarios.form.emailAyuda")}
+        topeDelLote={topeDeInvitacionesDelDia(userRow)}
       />
     </div>
   );

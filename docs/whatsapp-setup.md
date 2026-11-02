@@ -255,7 +255,12 @@ texto de Graph.
    - guarda el id que Graph devolvió con la función de la 0049 (paso `agregado`) y
      avisa al operador (aviso `agregado`).
 4. Pide el código: `POST /{id}/request_code` con `code_method` (`SMS` o `VOICE`) y
-   `language` (`es` o `en`, según la cuenta).
+   `language` (`es` o `en`, según la cuenta). Cómo termina:
+   - 429 y los códigos 4, 80007, 130429, 133016 y 136024 dan «esperar»: Meta no mandó nada y la
+     persona ve que pruebe de nuevo en unos minutos, sin revisión ni aviso al operador;
+   - cualquier otro 4xx da revisión y aviso `rechazo`, y un timeout, un 5xx o un 2xx raro dan «meta».
+
+   En ningún caso vuelven los cupos del código (ver «Los topes» más abajo).
 
 **Verificar el código** (`verificarCodigo`):
 
@@ -314,9 +319,9 @@ dato».
 | `ALTA_NUMERO_AUTOMATICO` | apagado | `1` prende | la función entera |
 | `ALTA_NUMEROS_MAXIMOS_WABA` | 2 | 1-1000 | números en total de la WABA, el de la plataforma incluido |
 | `ALTA_TOPE_NUMEROS_DIA` | 2 | 0-50 | números nuevos por día, de todos los espacios juntos (0 cierra) |
-| `ALTA_TOPE_CODIGOS_INQUILINO_DIA` | 3 | 0-20 | pedidos de código por espacio cada 24 h |
-| `ALTA_TOPE_CODIGOS_IP_DIA` | 5 | 0-50 | pedidos de código por red cada 24 h (/56 en IPv6) |
-| `ALTA_TOPE_CODIGOS_DIA` | 10 | 0-500 | pedidos de código de todos los espacios, cada 24 h (0 cierra) |
+| `ALTA_TOPE_CODIGOS_INQUILINO_DIA` | 10 | 0-20 | pedidos de código por espacio cada 24 h |
+| `ALTA_TOPE_CODIGOS_IP_DIA` | 10 | 0-50 | pedidos de código por red cada 24 h (/56 en IPv6) |
+| `ALTA_TOPE_CODIGOS_DIA` | 30 | 0-500 | pedidos de código de todos los espacios, cada 24 h (0 cierra) |
 | `ALTA_TOPE_VERIFICACIONES_HORA` | 5 | 0-20 | intentos de entregar un código por espacio por hora |
 
 Además hay dos cupos fijos, sin variable: **un número nuevo por hora por espacio** y
@@ -325,9 +330,11 @@ Todos fallan cerrados: si el contador no contesta, no sale nada. Los cupos de c�
 sólo se devuelven si ningún pedido a Graph salió: una compuerta cortó antes (la fila,
 el espacio, la migración, las credenciales o un código de país que no se reconoce). Desde el
 recorrido de la WABA se quedan gastados, aunque el recorrido falle, porque cada
-vuelta cuesta contra los topes de Meta; un timeout o una respuesta rara en
-`request_code` también cuentan como código pedido, porque Meta pudo haber mandado el
-SMS. Los cupos de alta (un número por hora por espacio y el tope diario) vuelven cuando
+vuelta cuesta contra los topes de Meta; `request_code` también los gasta, sea cual sea
+la respuesta. Con «esperar» o un rechazo, porque el reintento lo provoca la persona y cada
+uno es otro pedido a Graph (sin un cupo propio por espacio, uno solo gastaría el global de
+todos); con un timeout, un 5xx o un 2xx raro, porque Meta pudo haber mandado el SMS.
+Para repetir están los diez por día. Los cupos de alta (un número por hora por espacio y el tope diario) vuelven cuando
 Meta pide aflojar. Si Meta rechaza el pedido de agregar vuelve sólo el tope diario: no entró
 ningún número y, sin esto, un solo número mal tipeado o de un país donde WhatsApp Business no
 opera lo agotaría para toda la plataforma. El cupo del espacio se queda.

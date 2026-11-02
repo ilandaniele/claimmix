@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { TOKEN_INVALIDO, efectoDeError, motivoDeAlta, sinLaWaba, type PasoDeAlta } from "@/server/whatsapp/errores-de-graph";
+import { ESPERA_DE_META, TOKEN_INVALIDO, efectoDeError, motivoDeAlta, sinLaWaba, type PasoDeAlta } from "@/server/whatsapp/errores-de-graph";
 
 describe("efectoDeError", () => {
   it("el código del token muerto es uno solo, exportado: el revisor de tokens, los eventos y la salud lo comparten", () => {
@@ -52,7 +52,7 @@ describe("efectoDeError con los códigos de la app propia", () => {
   });
 
   it("los códigos de espera y de datos del mensaje siguen sin efecto sobre la cuenta", () => {
-    for (const codigo of [17, 130429, 133008, 133009, 131026, 131051]) expect(efectoDeError(codigo)).toBeNull();
+    for (const codigo of [17, 130429, 133008, 133009, 136024, 131026, 131051]) expect(efectoDeError(codigo)).toBeNull();
   });
 });
 
@@ -132,8 +132,16 @@ describe("motivoDeAlta", () => {
   });
 
   describe("esperar", () => {
-    it.each([4, 17, 80007, 130429, 133016, 133008, 133009])("%i es cuota o ritmo: esperar, en cualquier paso", (codigo) => {
+    it.each([4, 17, 80007, 130429, 133016, 133008, 133009, 136024])("%i es cuota o ritmo: esperar, en cualquier paso", (codigo) => {
       for (const paso of PASOS) expect(motivoDeAlta(paso, codigo)).toBe("esperar");
+    });
+
+    it("136025 no es de espera", () => {
+      for (const paso of PASOS) expect(motivoDeAlta(paso, 136025)).not.toBe("esperar");
+    });
+
+    it("la lista que comparte con graph.ts (ESPERA_DE_META) entra entera como «esperar»", () => {
+      for (const codigo of ESPERA_DE_META) expect(motivoDeAlta("numero", codigo)).toBe("esperar");
     });
 
     it("133005 (el PIN no coincide) no es de espera", () => {

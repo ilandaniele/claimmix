@@ -1632,10 +1632,24 @@ describe("codigoWaba", () => {
     expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
-  it("si Meta pide esperar, «esperar»", async () => {
-    h.pedirAMeta.mockResolvedValue(falla("esperar"));
+  it.each([
+    ["Meta pide esperar (130429)", falla("esperar", 130429)],
+    ["Meta no pudo mandar por ese medio (136024)", falla("esperar", 136024)],
+  ])("%s: «esperar», sin anotar una causa, y el cupo queda gastado (cada reintento es otro pedido a Graph)", async (_cual, respuesta) => {
+    h.pedirAMeta.mockResolvedValue(respuesta);
 
     expect(await codigoWaba(QUIEN, { accion: "SMS" })).toBe("esperar");
+
+    expect(h.ejecutadas).toHaveLength(0);
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it("si Meta no contesta bien (timeout o 5xx): «meta» y el cupo queda gastado, porque el SMS pudo salir", async () => {
+    h.pedirAMeta.mockResolvedValue(falla("meta"));
+
+    expect(await codigoWaba(QUIEN, { accion: "SMS" })).toBe("meta");
+
+    expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
   describe("verificar", () => {
@@ -2092,6 +2106,14 @@ describe("con la app propia del cliente: qué es un rechazo de Graph", () => {
       expect(await codigoWaba(QUIEN, { accion: "SMS" })).toBe("app_invalida");
 
       expect(datosDe("estado")).toEqual({ estado: "falla", falla: "secreto_invalido" });
+    });
+
+    it("pidiendo el código con un 17 (límite por usuario): «esperar», y el cupo queda gastado como con cualquier otra espera", async () => {
+      h.pedirAMeta.mockResolvedValue(falla("rechazo", 17));
+
+      expect(await codigoWaba(QUIEN, { accion: "SMS" })).toBe("esperar");
+
+      expect(h.liberarCupo).not.toHaveBeenCalled();
     });
 
     it("con Embedded Signup no hay secreto que mirar: el 100 sigue siendo de la WABA y no se llama a la app", async () => {

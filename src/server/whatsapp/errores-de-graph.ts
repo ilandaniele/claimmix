@@ -71,10 +71,12 @@ export type MotivoDeAlta =
   | "meta";
 
 /**
- * Cuota o límite de ritmo: se espera y se reintenta. Es el de `CODIGOS_DE_ESPERA` de `alta-de-numero.ts`
- * más 17 (límite por usuario) y los dos de espera del PIN.
+ * Meta pide aflojar con estos códigos, venga el status que venga; `clasificar` (graph.ts) los vuelve «esperar».
+ * 136024: `request_code` no pudo mandar por ese medio en ese momento; no salió nada y otro intento más tarde sirve.
  */
-const CODIGOS_DE_ESPERA: ReadonlySet<number> = new Set([4, 17, 80007, 130429, 133016, 133008, 133009]);
+export const ESPERA_DE_META: readonly number[] = [4, 80007, 130429, 133016, 136024];
+/** Para las causas del alta se suman 17 (límite por usuario) y los dos de espera del PIN, que en el camino de la plataforma siguen siendo rechazo. */
+const CODIGOS_DE_ESPERA: ReadonlySet<number> = new Set([...ESPERA_DE_META, 17, 133008, 133009]);
 /** El PIN de verificación en dos pasos no coincide. */
 const PIN_NO_COINCIDE = 133005;
 /** 463 y 467: el token venció o se invalidó. Con 190 y sin ellos el motivo puede ser el `appsecret_proof`. */

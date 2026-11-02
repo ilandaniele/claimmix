@@ -19,6 +19,7 @@ import {
   diasDePrueba,
   enPrueba,
   llamadasDiariasDePrueba,
+  notaDePesos,
   pruebaVencida,
   topeDiarioDelPlan,
 } from "@/lib/billing/plans";
@@ -228,5 +229,38 @@ describe("consumoDelMes", () => {
   it("un mail solo gasta media unidad: sin coma flotante", () => {
     expect(consumoDelMes({ email: 1 }).units).toBe(0.5);
     expect(consumoDelMes({ email: 7, whatsapp_propia: 7 }).units).toBe(9.1);
+  });
+});
+
+describe("notaDePesos", () => {
+  const TEXTO = "{whatsapp} / {whatsapp_propia} / {email} / {web}";
+
+  it("pone el peso de cada cubeta que se aplica de verdad, en es-AR por omisión", () => {
+    expect(notaDePesos(TEXTO)).toBe("1 / 0,8 / 0,5 / 1");
+  });
+
+  it("con String sale con punto decimal: es lo que aceptan los campos de la activación", () => {
+    expect(notaDePesos(TEXTO, String)).toBe("1 / 0.8 / 0.5 / 1");
+  });
+
+  it("los pesos salen de PESO_EN_DECIMAS: no hay un número a mano", () => {
+    const esperado = (Object.keys(PESO_EN_DECIMAS) as (keyof typeof PESO_EN_DECIMAS)[])
+      .map((cubeta) => String(PESO_EN_DECIMAS[cubeta] / 10))
+      .join(" / ");
+    expect(notaDePesos("{whatsapp} / {whatsapp_propia} / {email} / {web}", String)).toBe(esperado);
+  });
+
+  it("no deja ningún marcador sin reemplazar y no toca el resto del texto", () => {
+    const nota = notaDePesos("Cuenta {email} por mail y {web} por la web.", String);
+    expect(nota).toBe("Cuenta 0.5 por mail y 1 por la web.");
+    expect(nota).not.toMatch(/[{}]/);
+  });
+
+  it("{whatsapp} no pisa a {whatsapp_propia}", () => {
+    expect(notaDePesos("{whatsapp_propia}", String)).toBe("0.8");
+  });
+
+  it("un texto sin marcadores vuelve igual", () => {
+    expect(notaDePesos("Sin pesos.")).toBe("Sin pesos.");
   });
 });

@@ -24,7 +24,7 @@ import { resolveBillingPeriod, periodoAntesDelAlta } from "@/lib/billing/period"
 import { getStatement } from "@/server/billing/statement";
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { nombreDePlan } from "@/lib/billing/plan-label";
-import { PESO_EN_DECIMAS, type Cubeta } from "@/lib/billing/plans";
+import { notaDePesos } from "@/lib/billing/plans";
 import { getT } from "@/lib/i18n";
 import { getAccountLocale } from "@/server/i18n/idioma-de-la-cuenta";
 import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
@@ -33,15 +33,6 @@ export const dynamic = "force-dynamic";
 
 // Uno solo para todo el producto: ver formatUsd en lib/utils.
 const money = (n: number) => formatUsd(n);
-
-// El texto lleva un marcador por cubeta ({whatsapp}, {email}…): el peso que se lee es el que se aplica.
-// Los números van en es-AR en las dos lenguas, como `money`: una etiqueta no mezcla «34.9» con «US$ 1,30».
-function notaDePesos(texto: string): string {
-  return (Object.keys(PESO_EN_DECIMAS) as Cubeta[]).reduce(
-    (nota, cubeta) => nota.replace(`{${cubeta}}`, (PESO_EN_DECIMAS[cubeta] / 10).toLocaleString("es-AR")),
-    texto
-  );
-}
 
 function shiftMonth(month: string, delta: number): string {
   const [year, m] = month.split("-");

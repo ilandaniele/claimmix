@@ -349,6 +349,10 @@ describe("las claves con marcas del lote de decisiones", () => {
     "alta.avisoTope.linea100": ["{llena}", "{nombre}", "{tope}", "{usado}"],
     "usuarios.eliminar.confirmar": ["{nombre}"],
     "registro.enviado.texto": ["{minutos}"],
+    "usuarios.operacion.aviso": ["{altas}"],
+    "altas.equipo.usuarios": ["{n}"],
+    "altas.equipo.admin": ["{quien}"],
+    "altas.activar.ayudaIncluidas": ["{email}", "{web}", "{whatsapp}", "{whatsapp_propia}"],
   } as const;
 
   it("las de cliente llevan las mismas marcas en los dos idiomas", () => {
@@ -363,6 +367,19 @@ describe("las claves con marcas del lote de decisiones", () => {
       expect(marcas(esARServidor[clave as keyof typeof DE_SERVIDOR]), clave).toEqual([...esperadas].sort());
       expect(marcas(enUSServidor[clave as keyof typeof DE_SERVIDOR]), clave).toEqual([...esperadas].sort());
     }
+  });
+
+  it("el aviso del equipo de Veltra y su rótulo están sólo en el servidor, en los dos idiomas y con el enlace a Altas en su marca", () => {
+    for (const clave of ["usuarios.operacion.aviso", "usuarios.operacion.rotulo"] as const) {
+      expect(esARServidor[clave], clave).toBeTruthy();
+      expect(enUSServidor[clave], clave).toBeTruthy();
+      expect(enUSServidor[clave], clave).not.toBe(esARServidor[clave]);
+      expect(Object.keys(esARCliente)).not.toContain(clave);
+      expect(Object.keys(enUSCliente)).not.toContain(clave);
+    }
+    expect(esARServidor["usuarios.operacion.aviso"].split("{altas}")).toHaveLength(2);
+    expect(enUSServidor["usuarios.operacion.aviso"].split("{altas}")).toHaveLength(2);
+    expect(esARServidor["usuarios.operacion.aviso"]).toMatch(/^Este es el equipo de Veltra \(operación\)\./);
   });
 
   it("los textos de eliminar a una persona y de «Revisá tu correo» están en los dos idiomas y sólo en el servidor", () => {

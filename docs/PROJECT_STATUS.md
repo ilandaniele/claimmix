@@ -4616,7 +4616,7 @@ sola migración (la 0047).
   inquilino. Quien abre el enlace elige su contraseña y entra; si la cuenta no
   tenía perfil, `on-password-reset` se lo da con el correo verificado. Todos los
   finales (creada, ya existía, sin casilla) redirigen a
-  `/login?aviso=revisa_tu_correo`, así que tampoco se averigua qué direcciones
+  `/registro?enviado=1`, así que tampoco se averigua qué direcciones
   existen. El mail consume el mismo cupo `auth:reset` que `/recuperar`, y el alta
   lo descuenta para cualquier dirección, esté o no en la lista: si no, el 429 de
   `/recuperar` delataba quién está habilitado. Quien da

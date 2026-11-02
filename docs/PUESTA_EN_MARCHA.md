@@ -70,7 +70,7 @@ y `docs/PROJECT_STATUS.md` se corrigieron en este mismo cambio.
 |---|---|---|
 | 1. Alta automática con número, mail y base propia | prd pasos 2 a 9; altas de dev (pasos 3 a 7) y de QA (pasos 2 a 6) | En curso: falta la primera alta de punta a punta en prd |
 | 2. Cuánto consume | «Cuánto consume» y C1; dev paso 12, QA paso 13, prd paso 14 | El costo por caso se guarda desde la 0054 y `/admin/facturacion` lo muestra (ítem 15, 25/10); falta que el dueño aplique la 0054 a mano |
-| 3. prd con base por cliente y dos usuarios | prd pasos 4, 5 y 10 | La base propia anda; el analista entra como alias de la Gmail del administrador, sin activar el espacio (D4 d) |
+| 3. prd con base por cliente y dos usuarios | prd pasos 4, 5 y 10 | La base propia anda; el analista se invita después de activar el espacio desde `/admin/altas` (D4, 02/11) |
 | 4. Correr el prompt de nuevo | «Ensayo del prompt» (E1 a E3) | El ensayo corre en dev y QA; prd no ensaya, a propósito |
 | 5. MCP de Meta para WhatsApp | «MCP de WhatsApp (opcional)» y D14 | No hace falta para el alta; queda opcional |
 
@@ -146,7 +146,7 @@ tarda algo, la guía lo dice así.
     | D1. Número por código | (c): dejarlo prendido sólo en prd; el alta del cliente ficticio es la prueba | prd pasos 2 y 7; la fila «Número por código» de la tabla |
     | D2. `BASE_POR_CLIENTE` en dev y QA | 0 en los dos. Es una excepción a «iguales»: la bandera no tiene vuelta y no existe herramienta para pasar los datos de dev | dev paso 5, QA paso 5, A12 |
     | D3. QA con canales reales | Gmail del agente: la de Veltra, la misma en los tres ambientes (cambiado el 22/10). Número de WhatsApp, no: ocuparía el único lugar libre de la WABA | QA pasos 6, 7 y 10 |
-    | D4. Invitaciones en un espacio en prueba | (d): el administrador invita al analista como un alias `+` de su propia Gmail, sin activar el espacio; la invitación sale sola. (a), un dominio propio que no sea un proveedor abierto, no aplica: no hay dominio propio. (b), activar con cuota 0 desde `/admin/altas`, queda como botón manual | A3; dev paso 8, QA paso 8, prd pasos 10 y 14 |
+    | D4. Invitaciones en un espacio en prueba | (d): el administrador invita al analista como un alias `+` de su propia Gmail, sin activar el espacio; la invitación sale sola. (a), un dominio propio que no sea un proveedor abierto, no aplica: no hay dominio propio. (b), activar con cuota 0 desde `/admin/altas`, queda como botón manual. **02/11:** para las pruebas no se usan alias; con casillas reales distintas, el analista se invita después de (b). El código de (d) queda | A3; dev paso 8, QA paso 8, prd pasos 10 y 14 |
     | D5. El cliente ficticio, después | Si Veltra sigue sin verificar: borrar su número en WhatsApp Manager para liberar el lugar y suspender el espacio. Purgar la base sólo si hacen falta los MB | prd paso 16 |
     | D6. `ALTA_AUTOMATICA` en QA | 1, igual que dev y prd | QA paso 1 |
     | D7. Cifras de los topes | Los topes del alta y de la prueba, iguales a prd en los tres. `MONTHLY_BUDGET_USD` y `AI_TENANT_DAILY_TOKEN_CAP`: excepción en dev y QA, porque ahí gasta el ensayo | A12 |
@@ -180,7 +180,10 @@ tarda algo, la guía lo dice así.
       prueba, el administrador puede invitar a un alias `+` de su propia casilla de Gmail, y la
       invitación sale sola, sin activar nada. La casilla del administrador tiene que tener el
       correo verificado. El botón de activación de `/admin/altas` sigue como estaba, para
-      levantar los topes de la prueba cuando el cliente paga.
+      levantar los topes de la prueba cuando el cliente paga. **02/11:** el dueño descartó los
+      alias para las cuentas de prueba: administrador y analista son casillas reales
+      distintas, así que el analista se invita después de activar el espacio (b), o con una
+      casilla del mismo dominio propio. El código de (d) queda como está.
     - **D5:** después de la prueba, borrar el número del cliente ficticio en WhatsApp Manager y
       suspender el espacio. Purgar la base sólo si faltan MB.
     - **D6:** `ALTA_AUTOMATICA` en 1 en QA.
@@ -193,8 +196,8 @@ tarda algo, la guía lo dice así.
 
   - **Salió bien si:** cada fila tiene una opción anotada.
   - **Si falla:** sin D1 no se empieza prd; sin D3, QA se hace con simulaciones; si el analista
-    no es un alias de la misma Gmail que el administrador (D4), la invitación termina en el
-    rechazo por dominio.
+    es de otro dominio o de un proveedor abierto y el espacio sigue en prueba (D4), la
+    invitación termina en el rechazo por dominio: activar el espacio primero.
   - **Fuentes:** `docs/PROMOCION.md:779-784` (D2); `docs/PROMOCION.md:268-292` y
     `.github/workflows/deploy-checks.yml:378-383` (D7: el ensayo gasta unos 1,5 M de tokens
     por corrida y el tope de dev y QA tiene que ser igual a la variable del repo);
@@ -209,22 +212,19 @@ tarda algo, la guía lo dice así.
   - **Fuentes:** `src/app/alta/page.tsx`.
 - [ ] **A3. Las direcciones de correo: administrador, analista y mail agente, por ambiente.**
   - **Quién:** [Dueño]; en QA, Gonzalo.
-  - **Dónde:** Gmail. Las cuentas nuevas se crean en
-    [accounts.google.com/signup](https://accounts.google.com/signup); los alias no se crean en
-    ningún lado.
-  - **Qué hacer:** tener tres direcciones en cada ambiente.
-    - **Administrador:** un alias `+` de una Gmail: la dirección con `+dev-admin` antes de la arroba. Gmail
-      lo entrega en la bandeja de la cuenta sin configurar nada. Hace la autoalta en
-      `/registro` y `/alta` por el camino del correo. `ADMIN_EMAILS` compara la dirección exacta, así
-      que el alias de una cuenta de operador no cuenta como operador.
-    - **Analista:** otro alias `+` de la misma Gmail que el administrador, con `+dev-analista`
-      antes de la arroba. Se invita desde `/admin/users` sin activar el espacio (D4 d): en
-      prueba el administrador puede invitar a un alias `+` de su propia casilla, y la
-      invitación sale sola. Un alias de otra Gmail o una dirección de otro dominio se rechaza
-      por dominio. El analista acepta con una contraseña: `/invitacion` no ofrece Google para
-      un alias `+`, porque Google devolvería la casilla base y no coincidiría con la
-      invitada.
-    - **Mail agente:** una cuenta de Gmail propia, no un alias, porque Google conecta la
+  - **Dónde:** Gmail u otro proveedor de correo. Las cuentas nuevas de Gmail se crean en
+    [accounts.google.com/signup](https://accounts.google.com/signup).
+  - **Qué hacer:** tener tres casillas reales en cada ambiente. Sin alias `+`: el dueño los
+    descartó el 02/11.
+    - **Administrador:** una casilla sin cuenta en ese ambiente y fuera de `ADMIN_EMAILS`.
+      Hace la autoalta en `/registro` y `/alta`, con Google o por el camino del correo.
+    - **Analista:** otra casilla real, distinta de la del administrador y también sin cuenta
+      en ese ambiente. Mientras el espacio está en prueba, una Gmail distinta o cualquier
+      dirección de un proveedor abierto se rechaza por dominio (D4). Se invita desde
+      `/admin/users` después de que el operador active el espacio desde `/admin/altas` con
+      cuota 0. Una casilla del mismo dominio propio del administrador, si no es un proveedor
+      abierto, sale sin activar nada. El analista acepta con Google o con una contraseña.
+    - **Mail agente:** una cuenta de Gmail propia, porque Google conecta la
       cuenta entera. Se conecta en `/configuracion` → «Conectar Gmail»; el agente lee ahí las
       denuncias y desde ahí contesta. prd rechaza las casillas de `CASILLAS_DE_DEV` con
       `otro_ambiente`, y una casilla ya conectada a otro espacio del mismo ambiente termina en
@@ -242,49 +242,36 @@ tarda algo, la guía lo dice así.
         del dueño); si no, el connect vuelve con `otro_ambiente`. 24/10: la casilla del agente
         (veltra) salió de `CASILLAS_DE_DEV` en prd.
     - Por ambiente:
-      - dev: la Gmail de Veltra para el agente; administrador y analista, alias de la Gmail
-        del dueño.
-      - QA: la Gmail de Veltra para el agente; administrador y analista, alias de una cuenta
-        de Gonzalo.
-      - prd: desde el 24/10, una Gmail propia del dueño para el agente. El dueño eligió su
-        Gmail personal como administrador y analista, y una dirección de otro dominio como
-        segundo analista. Tres choques, con su salida:
-        - Si la Gmail personal sin alias está en `ADMIN_EMAILS` de prd (operador, D8), `/alta`
-          le muestra el aviso de operador: el administrador va con un alias `+` de esa Gmail.
-        - Una dirección tiene un solo usuario por ambiente: no puede ser administrador y
-          analista a la vez. El analista va con otro alias `+` de la misma Gmail.
-        - Una dirección de otro dominio se rechaza mientras el espacio está en prueba (D4 d):
-          se invita después de activar el espacio desde `/admin/altas`.
-    - El administrador y el analista son alias de la misma Gmail: el servidor compara la
-      casilla de fondo, sin puntos ni alias, y gmail.com no se cruza con googlemail.com.
-      Además la casilla del administrador tiene que estar verificada; si no, la invitación se
-      rechaza por dominio.
-    - El administrador y el analista nunca son alias de la Gmail del agente: los mails de alta
-      y de invitación caerían en la bandeja que lee el agente.
+      - dev: la Gmail de Veltra para el agente; administrador y analista, dos casillas reales
+        del dueño, ni su Gmail personal (la del operador de dev) ni la de Veltra.
+      - QA: la Gmail de Veltra para el agente; administrador y analista, dos casillas de
+        Gonzalo. El dueño, operador de QA (D8), activa el espacio.
+      - prd: desde el 24/10, una Gmail propia del dueño para el agente. El administrador es
+        la Gmail personal del dueño (el `ADMIN_EMAILS` de prd tiene sólo la de Veltra). El
+        analista es una casilla de otro dominio, y se invita después de activar el espacio
+        desde `/admin/altas` con la cuenta de Veltra.
+    - Una dirección tiene un solo usuario por ambiente: no puede ser administrador y analista
+      a la vez.
+    - El administrador y el analista nunca son la Gmail del agente: los mails de alta y de
+      invitación caerían en la bandeja que lee el agente.
     - Ni el administrador ni el analista de ningún ambiente están en `ADMIN_EMAILS`. Si el
       analista lo está, la pantalla dice «invitación enviada», pero la invitación se bloquea
       sin aviso y el mail nunca llega.
-    - En dev, `ADMIN_EMAILS` tiene dos direcciones: la Gmail de Veltra y la Gmail del dueño
-      sin alias, que es la del operador (D8). No choca con la prueba: la comparación es
-      exacta, así que los alias `+` del administrador y del analista no son operadores, y la
-      Gmail de Veltra entra como mail agente por «Conectar Gmail», que no mira
-      `ADMIN_EMAILS`. Los avisos al operador llegan a las dos.
-    - Los alias de la Gmail personal del dueño no reciben avisos de derivación (veto en
-      `src/lib/email/reserved.ts`); la prueba no los necesita.
+    - En dev, `ADMIN_EMAILS` tiene dos direcciones: la Gmail de Veltra y la Gmail personal del
+      dueño, que es la del operador (D8). La Gmail de Veltra entra como mail agente por
+      «Conectar Gmail», que no mira `ADMIN_EMAILS`. Los avisos al operador llegan a las dos.
     - La casilla de la plataforma de dev no se conecta en ningún otro lado.
-  - **Salió bien si:** los seis alias (dos por ambiente) existen, ninguno se repite entre
-    ambientes y ninguno está en `ADMIN_EMAILS`; en dev, `ADMIN_EMAILS` tiene sólo la Gmail de
-    Veltra y la Gmail del dueño sin alias. El dueño avisa «listo» sin escribirlas.
+  - **Salió bien si:** las seis casillas (dos por ambiente) existen, ninguna se repite entre
+    ambientes y ninguna está en `ADMIN_EMAILS`; en dev, `ADMIN_EMAILS` tiene sólo la Gmail de
+    Veltra y la Gmail personal del dueño. El dueño avisa «listo» sin escribirlas.
   - **Si falla:** una persona tiene un solo espacio por ambiente. Con una dirección repetida,
     el alta termina en `ya_tiene_espacio`; con una de `ADMIN_EMAILS`, `/alta` muestra el
     aviso de operador en vez de abrir un espacio.
   - **Fuentes:** `src/server/alta/crear-inquilino.ts:5`, `:38`; `.env.example:404`
     (`ADMIN_EMAILS`), `:295` (`CASILLAS_DE_DEV`); `src/app/alta/page.tsx`;
     `src/lib/auth/require-operator.ts:42-47` (comparación exacta);
-    `src/app/api/admin/users/route.ts:131-150` (dominio y alias propio), `:152-176`
-    (invitación a un operador); `src/lib/email/reserved.ts:86-98` (`casillaDeGmail`);
-    `src/app/invitacion/page.tsx:162` (sin Google para un alias `+`);
-    `src/app/api/admin/gmail-accounts/callback/route.ts` (`otro_ambiente`,
+    `src/app/api/admin/users/route.ts:131-150` (dominio en prueba), `:152-176`
+    (invitación a un operador); `src/app/api/admin/gmail-accounts/callback/route.ts` (`otro_ambiente`,
     `mailbox_taken`); `docs/PROMOCION.md:572-574`.
 - [ ] **A4. Una SIM libre para el número del cliente ficticio de prd.**
   - **Quién:** [Dueño].
@@ -589,7 +576,7 @@ El paso 12 lee los dos espacios.
 - [ ] **3. Alta.**
   - **Quién:** [Dueño].
   - **Dónde:** una ventana privada, `https://claimmix-dev.vercel.app/registro`.
-  - **Qué hacer:** el alta tiene dos pasos. Paso 1, en `/registro`: el nombre, el alias de
+  - **Qué hacer:** el alta tiene dos pasos. Paso 1, en `/registro`: el nombre, la casilla de
     administrador de A3 y la casilla de los términos, por el camino del correo (no pide
     empresa ni celular). Llega un mail del remitente con un enlace a `/alta/correo?t=` que
     vale 60 minutos; ahí se elige una contraseña de 8 a 128 caracteres y se crea sólo la
@@ -691,22 +678,21 @@ El paso 12 lee los dos espacios.
 - [ ] **8. Segundo usuario.**
   - **Quién:** [Dueño].
   - **Dónde:** `/admin/users` del espacio de autoalta, «Invitar usuario».
-  - **Qué hacer:** el alias de analista de A3, con rol analista, sin activar el espacio
-    (D4 d): en prueba, el administrador puede invitar a un alias `+` de su propia casilla de
-    Gmail, y el de analista es de la misma casilla que el de administrador. El enlace a
-    `/invitacion?t=` vale 72 horas. El analista acepta con una contraseña: la pantalla no
-    ofrece Google para un alias `+`. El diálogo deja cargar varias personas de una vez: una
-    fila por persona (nombre y correo), un solo rol para todas, y «Agregar otra persona» hasta
-    el tope del día. Si el cupo se agota a mitad del lote, las filas que faltan quedan
-    marcadas «sin cupo» y se vuelve a probar más tarde: el cupo se renueva a las 00:00 UTC, las
-    21:00 de Argentina, no a la medianoche de acá. Para probarlo, direcciones
-    `@example.com` o alias propios: ninguna casilla ajena.
+  - **Qué hacer:** la casilla de analista de A3, con rol analista. Antes, el dueño, operador
+    de dev (D8), activa el espacio desde `/admin/altas` con cuota 0: en prueba, otra Gmail o
+    cualquier proveedor abierto se rechaza por dominio (D4). Una casilla del mismo dominio
+    propio del administrador sale sin activar nada. El enlace a `/invitacion?t=` vale 72
+    horas. El analista acepta con Google o con una contraseña. El diálogo deja cargar varias
+    personas de una vez: una fila por persona (nombre y correo), un solo rol para todas, y
+    «Agregar otra persona» hasta el tope del día. Si el cupo se agota a mitad del lote, las
+    filas que faltan quedan marcadas «sin cupo» y se vuelve a probar más tarde: el cupo se
+    renueva a las 00:00 UTC, las 21:00 de Argentina, no a la medianoche de acá. Para probarlo,
+    direcciones `@example.com` o casillas propias: ninguna casilla ajena.
   - **Salió bien si:** el invitado entra y ve la bandeja del espacio con su rol.
   - **Si falla:**
     - «Durante la prueba sólo podés invitar a personas de tu propio dominio de correo o a un
-      alias + de tu misma casilla de Gmail»: el espacio está en prueba y la dirección es de
-      otro dominio, de un proveedor abierto o un alias de otra Gmail, o la casilla del
-      administrador no tiene el correo verificado (D4).
+      alias + de tu misma casilla de Gmail»: el espacio sigue en prueba y la dirección es de
+      otro dominio o de un proveedor abierto: activar el espacio desde `/admin/altas` (D4).
     - Un espacio en prueba invita a lo sumo a cinco personas por día (`ALTA_TOPE_INVITACIONES_DIA`
       rige fuera de la prueba, 20 por omisión). El diálogo no deja armar más filas que ese
       tope; si ya se invitó hoy, las últimas filas del lote pueden salir «sin cupo». El primer
@@ -899,15 +885,14 @@ ambiente, la hora, una captura y el número de caso.
 - [ ] **8. Segundo usuario.**
   - **Quién:** [Gonzalo].
   - **Dónde:** `/admin/users`, «Invitar usuario».
-  - **Qué hacer:** Gonzalo invita al alias de analista de A3, sin activar el espacio (D4 d):
-    en prueba, un alias `+` de la misma Gmail que el alias de administrador entra directo. El
-    analista acepta con una contraseña.
+  - **Qué hacer:** antes, el dueño, operador de QA (D8), activa el espacio desde
+    `/admin/altas` con cuota 0. Después Gonzalo invita a la casilla de analista de A3. El
+    analista acepta con Google o con una contraseña.
   - **Salió bien si:** el invitado entra con su rol.
-  - **Si falla:** si sale el rechazo por dominio, el alias es de otra Gmail o la casilla del
-    administrador no tiene el correo verificado. Si dice «invitación enviada» y el mail no
-    llega, la dirección está en `ADMIN_EMAILS` (A3).
-  - **Fuentes:** `src/app/api/admin/users/route.ts:131-150`, `:152-176`;
-    `src/lib/email/reserved.ts:86-98`.
+  - **Si falla:** si sale el rechazo por dominio, el espacio sigue en prueba: activarlo
+    primero. Si dice «invitación enviada» y el mail no llega, la dirección está en
+    `ADMIN_EMAILS` (A3).
+  - **Fuentes:** `src/app/api/admin/users/route.ts:131-150`, `:152-176`.
 - [ ] **9. Denuncia por WhatsApp: el transcripto del ensayo.**
   - **Quién:** [Claude] lo copia; [Dueño] se lo manda; [Gonzalo] lo lee.
   - **Dónde:** el paso «Ensayar las conversaciones» del Post-deploy de QA.
@@ -1120,7 +1105,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Quién:** [Cliente ficticio].
   - **Dónde:** una ventana privada, `https://claimmix.vercel.app/registro`.
   - **Qué hacer:** en dos pasos, como el paso 3 de dev. En `/registro`: la Gmail personal del
-    dueño, sin alias (decisión del 24/10), y el nombre de quien hace de cliente. Esa dirección
+    dueño (decisión del 24/10), y el nombre de quien hace de cliente. Esa dirección
     no puede estar en `ADMIN_EMAILS` de prd: una cuenta de operador no crea empresa
     (`/registro` no manda el correo y `/alta` vuelve a sí misma). Si figura, con el OK del
     dueño [Claude] deja `ADMIN_EMAILS` de prd sólo con la casilla de Veltra y redeploya, y esa
@@ -1221,22 +1206,21 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
 - [ ] **10. Segundo usuario.**
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/admin/users`, «Invitar usuario».
-  - **Qué hacer:** invitar a quien el dueño elija como analista, sin activar el espacio
-    (D4 d). No hace falta que sea de Brimonte.
-    - En prueba sólo entra directo un alias `+` de la Gmail del administrador del paso 4. El
-      paso ya no tiene que esperar al 14. Otra dirección, después de activar el espacio.
-    - El analista acepta con una contraseña: `/invitacion` no ofrece Google para un alias `+`.
-    - El espacio sigue en prueba, así que el tope de un dólar del paso 14 sigue valiendo.
+  - **Qué hacer:** invitar a quien el dueño elija como analista, con una casilla real de otro
+    dominio. No hace falta que sea de Brimonte.
+    - Antes, el operador de Veltra activa Brimonte desde `/admin/altas` (plan inicial, cuota
+      0): en prueba, una dirección de otro dominio o de un proveedor abierto se rechaza (D4).
+    - El analista acepta con Google o con una contraseña.
+    - Con el espacio activo ya no rige el tope de un dólar del paso 14.
     - SSO no sirve para esto: pide un dominio corporativo verificado por DNS y un proveedor
       OIDC.
   - **Salió bien si:** el invitado entra con su rol y ve la misma bandeja.
-  - **Si falla:** el texto del rechazo dice si fue por dominio o por tope (cinco por día en
-    prueba). Si es por dominio, el alias es de otra Gmail o la casilla del administrador no
-    tiene el correo verificado. Si dice «invitación enviada» y el mail no llega, la
-    dirección está en `ADMIN_EMAILS` (A3).
+  - **Si falla:** el texto del rechazo dice si fue por dominio o por el tope del día. Si es
+    por dominio, el espacio sigue en prueba: activarlo primero. Si dice «invitación enviada»
+    y el mail no llega, la dirección está en `ADMIN_EMAILS` (A3).
   - **Fuentes:** `src/server/alta/tope-de-invitaciones.ts:13-20`;
     `src/app/api/admin/users/route.ts:121-129`, `:131-150`, `:152-176`;
-    `src/lib/email/reserved.ts:86-98`; `src/app/api/admin/sso/route.ts:6-11`.
+    `src/app/api/admin/sso/route.ts:6-11`.
 - [ ] **11. Denuncia por WhatsApp.**
   - **Quién:** [Dueño].
   - **Dónde:** el celular personal, no la SIM del cliente.
@@ -1270,10 +1254,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Quién:** [Dueño].
   - **Dónde:** `/metricas` como cliente; `/admin/cartera` y `/admin/altas` como operador.
   - **Qué hacer:** anotar el gasto del espacio.
-  - **Salió bien si:** en prueba, el gasto está debajo del dólar del mes. Con D4 (d) el espacio
-    sigue en prueba durante todo el paso, también con el analista adentro. Si el dueño lo
-    activa a mano, ya no hay ese tope: el gasto se compara con el presupuesto de prd (US$ 50
-    en total).
+  - **Salió bien si:** el espacio se activa antes del paso 10 (02/11), así que el gasto se
+    compara con el presupuesto de prd (US$ 50 en total). Si todavía está en prueba, tiene que
+    estar debajo del dólar del mes.
   - **Si falla:** si el espacio llegó al dólar, el agente deja de analizar y el equipo recibe
     un mail por día. Esperar al mes siguiente o que el dueño active el espacio con cuota 0
     desde `/admin/altas`.
@@ -1330,8 +1313,8 @@ Para quien no es el dueño ni Gonzalo y prueba ClaimMix en prd.
   - US$ 1 de IA por espacio y US$ 30 entre todas las pruebas: el agente deja de analizar.
     Activar con cuota 0 a quien siga probando, a mano desde `/admin/altas`, o esperar al mes
     siguiente.
-  - Invitaciones: cinco por día y, en prueba, del mismo dominio o un alias `+` de la propia
-    casilla de Gmail (D4 d).
+  - Invitaciones: cinco por día y, en prueba, del mismo dominio propio; otra Gmail, después de
+    activar el espacio (D4).
 - **Fuentes:** `docs/whatsapp-setup.md:283-299`; `src/server/alta/aviso-operador.ts:30-35`;
   `docs/PROMOCION.md:727-734`; `src/server/alta/crear-inquilino.ts:52`, `:70`; `src/server/alta/catalogo.ts:15-22`.
 
@@ -1793,8 +1776,8 @@ Con todo lo anterior hecho, a un cliente real le queda:
 - [ ] 4. [Cliente] «Conectar Gmail» con la casilla donde recibe las denuncias, pasando la
   pantalla de app no verificada. Salió bien si vuelve con `?gmail=connected`. Si falla, los
   resultados del paso 7 de dev.
-- [ ] 5. [Cliente] Invitar a su equipo desde `/admin/users`: en prueba, sólo direcciones de su
-  propio dominio o un alias `+` de su propia casilla de Gmail (D4 d), y hasta 5 por día. Salió
+- [ ] 5. [Cliente] Invitar a su equipo desde `/admin/users`: en prueba, direcciones de su
+  propio dominio; otra Gmail, después de que el operador active el espacio (D4); hasta 5 por día. Salió
   bien si cada invitado entra con su rol. «Invitá a tu equipo» de «Primeros pasos» sigue hasta
   que el primero acepte, no al invitar. Si falla, el texto del rechazo dice si fue por dominio
   o por tope.
@@ -1858,7 +1841,10 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   casilla del propio administrador, así que el mail del remitente nunca llega a un tercero. Un
   alias de otra Gmail o una casilla sin verificar sigue rechazado por dominio. Para invitar a
   un compañero con su propia Gmail hace falta (b) o (a); el botón de activación de
-  `/admin/altas` no cambió.
+  `/admin/altas` no cambió. **02/11:** el dueño descartó los alias para las cuentas de prueba:
+  administrador y analista son casillas reales distintas, así que el analista se invita
+  después de activar el espacio (b), o con una casilla del mismo dominio propio. El código de
+  (d) queda como está.
 - **D5. El cliente ficticio de prd, después.** Conservarlo como cliente de prueba permanente
   (ocupa una base, MB y el número) o suspenderlo y purgar su base, que no se deshace.
   **Recomendación:** si Veltra sigue sin verificar, borrar su número en WhatsApp Manager para

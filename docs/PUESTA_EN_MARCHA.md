@@ -505,7 +505,7 @@ ningún doc lo dice.
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
 | `MONTHLY_BUDGET_USD` (`src/lib/topes.ts:117`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
 | `AI_TENANT_DAILY_TOKEN_CAP` (`.env.example:159`) | valor | excepción en dev y QA (D7); en esos dos, igual a la variable del repo (`.github/workflows/deploy-checks.yml:383`) | QA 20 M; dev y prd desconocido | Vercel y Settings > Variables del repo |
-| `ALTA_NUMEROS_MAXIMOS_WABA`, `ALTA_TOPE_NUMEROS_DIA` y los cupos de códigos (`.env.example:246-256`) | valor | igual; se sube recién con Veltra verificada | sin cargar (2, 2, 3, 5, 10, 5) | Vercel |
+| `ALTA_NUMEROS_MAXIMOS_WABA`, `ALTA_TOPE_NUMEROS_DIA` y los cupos de códigos (`.env.example:284-294`) | valor | igual; se sube recién con Veltra verificada | sin cargar (2, 2, 10, 10, 30, 5; los de códigos subieron de 3, 5 y 10 en #548) | Vercel |
 | `ALTA_TOPE_IP_DIA` (`src/server/alta/cupo-por-ip.ts:20`), `ALTA_TOPE_CORREO_POR_IP_DIA`, `ALTA_TOPE_CORREOS_DIA`, `ALTA_TOPE_POR_DESTINATARIO_DIA`, `ALTA_TOPE_INVITACIONES_DIA` (`.env.example:270-275`, 20 por omisión; una prueba invita a lo sumo a 5 por día aunque la variable diga más, `src/server/alta/tope-de-invitaciones.ts`), `ALTA_TOPE_PLANTILLAS_PRUEBA_DIA` (`src/server/whatsapp/cloud-api.ts:783`) | valor | igual | sin cargar (valores por omisión) | Vercel |
 | `ADMIN_EMAILS` (`.env.example:404`), `SIGNUP_ALLOWED_EMAILS` (`:401`) | valor | igual, salvo D8. `ADMIN_EMAILS` habilita al operador junto con el rol owner o admin, el correo verificado y la sesión en el espacio casa (`src/lib/auth/require-operator.ts:55-67`) | QA sin comprobar | entrar a `/admin/altas`: si redirige a `/bandeja`, falta una de las cuatro |
 | `GEMINI_TRANSPORT` (`.env.example:118`) en `vertex`, sin `VERTEX_EXTRACTION_MODEL`, `MOCK_AI` y `AI_MOCK` apagadas (`src/server/ai/provider.ts:293`) | valor | igual | iguales desde el 15/10 | Vercel; un caso de prueba que el agente conteste |
@@ -1172,7 +1172,8 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Salió bien si:** dice «Listo» y el número queda conectado.
   - **Si falla:** el aviso dice el motivo, y qué hacer ante cada uno está en los docs:
     `sin_lugar` (la WABA está llena o se agotó el cupo diario), `sin_credencial` (paso 2),
-    `rechazo`, `sin_webhook` o `incierto`. [Claude] mira en los logs
+    `rechazo`, `sin_webhook`, `incierto` o `esperar` (Meta pide esperar: probar en unos minutos
+    y, si vuelve a salir, al otro día). [Claude] mira en los logs
     `whatsapp.alta_numero.graph` y `alta.numero_en_revision`, y anota los códigos de Meta y si
     el número entró con el 9.
   - **Fuentes:** `src/lib/i18n/es-AR.servidor.ts:728-729`; `docs/whatsapp-setup.md:326-345`,
@@ -1181,6 +1182,14 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `WHATSAPP_PHONE_NUMBER_ID` a prd, terminó en `sin_credencial`: sólo avisa al equipo, la fila
     queda en pedido sin número ni token y el cupo del día se libera. Con el deploy de
     `1d3e9aa7` el smoke de prd ya da `whatsapp` operativo (paso 2): se aprieta una sola vez más.
+  - **Estado (02/11):** pendiente. «Por SMS» sumó el número a la WABA y Meta aceptó el pedido,
+    pero el SMS no llegó; «Por llamada», media hora después, volvió con 136024 (hay un código
+    pendiente) y el alta lo mandó a revisión. Un tercer pedido salió, y verificar dio 136025
+    (código incorrecto). Con eso se gastaron los 3 pedidos del día. #548 sube los topes a 10 por
+    espacio, 10 por red y 30 en total, y hace que 136024 diga «esperar» en vez de mandar a
+    revisión; los pedidos quedan gastados con cualquier respuesta de Meta. Siguiente: con #548 en
+    prd, pedir el código una vez más; si no llega, verificar el número desde WhatsApp Manager y
+    después 000000 y «Conectar».
 - [ ] **8. El número en WhatsApp Manager.**
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > WhatsApp Manager, la WABA de Veltra.

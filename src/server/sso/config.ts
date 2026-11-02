@@ -44,7 +44,7 @@ export const CONFIG_COMPLETA = and(
 );
 
 /** Sólo vale una config prendida, con el dominio probado y completa. */
-const VIGENTE = and(eq(ssoSettings.activo, true), CONFIG_COMPLETA);
+export const VIGENTE = and(eq(ssoSettings.activo, true), CONFIG_COMPLETA);
 
 type FilaDeLaConfig = {
   [K in keyof ConfigSso]: string | null;

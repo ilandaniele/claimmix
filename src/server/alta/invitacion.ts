@@ -12,6 +12,9 @@
  * el enlace pasa por historiales y reenvíos. La clave sale de BETTER_AUTH_SECRET
  * por HKDF con su propio `info`. Dura 72 horas y no se gasta: abrirlo dos veces da
  * lo mismo, y que el segundo uso no cree nada lo resuelve el perfil, que ya existe.
+ * Pero borrar a la persona (`auth.user_deleted`) revoca los enlaces emitidos antes
+ * del borrado: sin eso, el enlace de la primera vez la volvería a crear con el rol
+ * de entonces. Una invitación nueva, emitida después, sí vale.
  *
  * **El enlace sólo prueba que la casilla es de quien lo abre.** Aceptar vuelve a
  * mirar en la base que quien invitó siga siendo admin del espacio (el owner, si el
@@ -26,7 +29,7 @@
 
 import "server-only";
 
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { cookies } from "next/headers";
 
 import { enControl } from "@/data/scope";
@@ -34,6 +37,7 @@ import { AuditEvent } from "@/lib/audit/log";
 import { ALL_ROLES, type UserRole } from "@/lib/auth/roles";
 import { filasDe } from "@/lib/db/filas";
 import { SignUpSchema } from "@/lib/schemas/auth";
+import { huellaDeCorreo } from "@/server/alta/huella-de-correo";
 import { abrir, sellar } from "@/server/alta/sellado";
 import { espejarSinFallar } from "@/server/bases/espejar-sin-fallar";
 import { correoExigeSso } from "@/server/sso/usuarios";
@@ -121,6 +125,21 @@ export function puedeInvitar(rolDeQuienInvita: string | null | undefined, rolInv
   return rolDeQuienInvita === "admin" && rolInvitado !== "owner";
 }
 
+/**
+ * La invitación quedó revocada: a esa dirección se la borró del espacio después de
+ * emitir el enlace. El instante de emisión sale del vencimiento sellado.
+ */
+function revocada(d: DatosDeInvitacion): SQL {
+  const emitidaEnSegundos = (d.exp - DURACION_DE_LA_INVITACION_MS) / 1000;
+  return sql`exists (
+    select 1 from public.audit_log b
+    where b.tenant_id = ${d.t}::uuid
+      and b.event_type = ${AuditEvent.USER_DELETED}::text
+      and b.payload->>'huella' = ${huellaDeCorreo(d.t, sql`${d.e}::text`)}
+      and b.created_at > to_timestamp(${emitidaEnSegundos}::double precision)
+  )`;
+}
+
 export interface ResumenDeInvitacion {
   espacio: string;
   quien: string;
@@ -134,7 +153,8 @@ export interface ResumenDeInvitacion {
 /**
  * Lo que la pantalla de la invitación muestra: el nombre del espacio y de quien
  * invita. Null si la invitación ya no sirve: el espacio se suspendió o dio de
- * baja, o quien invitó dejó de poder hacerlo o fue dado de baja. La consulta de la invitación es una
+ * baja, o quien invitó dejó de poder hacerlo o fue dado de baja, o la persona fue
+ * borrada del espacio después de emitir el enlace. La consulta de la invitación es una
  * sola, con el espacio del enlace como contexto: la base devuelve su fila de
  * `tenants` y nada de otro. Con una invitación que sirve, una segunda mira si ese
  * espacio exige el SSO para el dominio invitado.
@@ -145,7 +165,7 @@ export async function resumenDeInvitacion(d: DatosDeInvitacion): Promise<Resumen
       select x.name as espacio, x.billing_status as estado, i.full_name as quien, i.role as rol_de_quien
       from public.tenants x
       left join public.users i on i.id = ${d.i}::uuid and i.tenant_id = x.id and i.dado_de_baja_en is null
-      where x.id = ${d.t}::uuid
+      where x.id = ${d.t}::uuid and not ${revocada(d)}
     `)
   );
   const fila = filasDe<{ espacio?: string; estado?: string; quien?: string | null; rol_de_quien?: string | null }>(
@@ -160,7 +180,8 @@ export async function resumenDeInvitacion(d: DatosDeInvitacion): Promise<Resumen
 /**
  * Crea el perfil de quien acepta, en el espacio del enlace. Devuelve true si
  * quedó creado; false si ya no se puede: quien invitó perdió el rol o fue dado de
- * baja, el espacio está suspendido o dado de baja, o la persona ya tenía perfil.
+ * baja, el espacio está suspendido o dado de baja, la persona ya tenía perfil, o
+ * se la borró del espacio después de emitir el enlace (`revocada`).
  *
  * Una sola sentencia con el espacio del enlace como contexto. Las comprobaciones
  * viajan dentro del INSERT, así que no hay un hueco entre mirar y escribir. Con
@@ -188,6 +209,7 @@ export async function aceptarInvitacion(
             select 1 from public.tenants x
             where x.id = ${d.t}::uuid and x.billing_status not in ('suspended', 'churned')
           )
+          and not ${revocada(d)}
         on conflict (id) do nothing
         returning id
       ), auditoria as (

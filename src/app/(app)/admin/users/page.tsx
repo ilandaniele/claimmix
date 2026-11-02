@@ -87,6 +87,12 @@ export default async function AdminUsersPage() {
         currentUserId={ctx.user.id}
         currentUserRole={userRow.role}
         emailAyuda={t("usuarios.form.emailAyuda")}
+        textosEliminar={{
+          boton: t("usuarios.eliminar.boton"),
+          confirmar: t("usuarios.eliminar.confirmar"),
+          hecho: t("usuarios.eliminar.hecho"),
+          error: t("usuarios.eliminar.error"),
+        }}
         topeDelLote={topeDeInvitacionesDelDia(userRow)}
       />
     </div>

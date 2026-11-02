@@ -10,6 +10,12 @@
  *
  * El motivo de un rechazo vuelve en `?e=`; uno que no está en la lista no muestra
  * nada.
+ *
+ * `?enviado` es la pantalla «Revisá tu correo» a la que termina siempre el
+ * formulario de correo (ver `signUp`). Importa sólo que esté, nunca su valor, y
+ * se resuelve antes de mirar el remitente o Turnstile: es la misma para una
+ * dirección nueva, una que ya tenía cuenta, una bloqueada y un desafío fallido, y
+ * no dice «registro exitoso» porque nada de eso se sabe.
  */
 
 import { headers } from "next/headers";
@@ -17,6 +23,7 @@ import Link from "next/link";
 
 import { getT, type ClaveDelServidor } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/i18n/locale";
+import { DURACION_DEL_TOKEN_MS } from "@/server/alta/token-de-registro";
 import { clavesDeTurnstile } from "@/server/alta/turnstile";
 import { remitenteDelSistema } from "@/server/notify/remitente-sistema";
 
@@ -35,16 +42,26 @@ const ERRORES: Record<string, ClaveDelServidor> = {
 export default async function RegistroPage({
   searchParams,
 }: {
-  searchParams: Promise<{ e?: string | string[] }>;
+  searchParams: Promise<{ e?: string | string[]; enviado?: string | string[] }>;
 }) {
   const locale = await getServerLocale();
   const t = getT(locale);
-  const { e } = await searchParams;
-  const motivo = Array.isArray(e) ? e.at(-1) : e;
-  const claveError = motivo !== undefined && Object.hasOwn(ERRORES, motivo) ? ERRORES[motivo] : null;
-  const nonce = (await headers()).get("x-csp-nonce") ?? undefined;
-  // Sin remitente del sistema no hay camino por correo: queda sólo Google.
-  const conCorreo = remitenteDelSistema() !== null;
+  const { e, enviado } = await searchParams;
+
+  const tarjeta =
+    enviado !== undefined ? (
+      <>
+        <h2 className="mb-2 text-lg font-medium text-slate-800">{t("registro.enviado.titulo")}</h2>
+        <p role="status" className="mb-6 text-sm text-slate-600">
+          {t("registro.enviado.texto").replace("{minutos}", () => String(DURACION_DEL_TOKEN_MS / 60_000))}
+        </p>
+        <Link href="/login" className="text-sm font-medium text-slate-800 underline-offset-2 hover:underline">
+          {t("registro.enviado.irAlLogin")}
+        </Link>
+      </>
+    ) : (
+      await formulario(t, e)
+    );
 
   return (
     <main lang={locale} className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
@@ -56,37 +73,54 @@ export default async function RegistroPage({
         </div>
 
         {/* Sign-up card */}
-        <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-          <h2 className="mb-2 text-lg font-medium text-slate-800">{t("registro.titulo")}</h2>
-          <p className="mb-6 text-sm text-slate-600">{t(conCorreo ? "registro.ayuda" : "registro.ayudaGoogle")}</p>
+        <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">{tarjeta}</div>
 
-          {claveError && (
-            <div
-              role="alert"
-              className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
-            >
-              {t(claveError)}
-            </div>
-          )}
+        {enviado === undefined && (
+          <>
+            {/* Texto fijo: no consulta nada, así que no dice qué empresas usan ClaimMix. */}
+            <p className="mt-4 text-center text-xs text-slate-500">{t("registro.yaUsa")}</p>
 
-          <SignUpForm
-            t={t}
-            conCorreo={conCorreo}
-            claveDeTurnstile={clavesDeTurnstile()?.sitio ?? null}
-            nonce={nonce}
-          />
-        </div>
-
-        {/* Texto fijo: no consulta nada, así que no dice qué empresas usan ClaimMix. */}
-        <p className="mt-4 text-center text-xs text-slate-500">{t("registro.yaUsa")}</p>
-
-        <p className="mt-2 text-center text-sm text-slate-500">
-          {t("registro.yaTenes")}{" "}
-          <Link href="/login" className="font-medium text-slate-800 underline-offset-2 hover:underline">
-            {t("auth.signIn.title")}
-          </Link>
-        </p>
+            <p className="mt-2 text-center text-sm text-slate-500">
+              {t("registro.yaTenes")}{" "}
+              <Link href="/login" className="font-medium text-slate-800 underline-offset-2 hover:underline">
+                {t("auth.signIn.title")}
+              </Link>
+            </p>
+          </>
+        )}
       </div>
     </main>
+  );
+}
+
+/** El formulario, que sí mira el remitente y Turnstile: el `?enviado` no pasa por acá. */
+async function formulario(t: ReturnType<typeof getT>, e: string | string[] | undefined) {
+  const motivo = Array.isArray(e) ? e.at(-1) : e;
+  const claveError = motivo !== undefined && Object.hasOwn(ERRORES, motivo) ? ERRORES[motivo] : null;
+  const nonce = (await headers()).get("x-csp-nonce") ?? undefined;
+  // Sin remitente del sistema no hay camino por correo: queda sólo Google.
+  const conCorreo = remitenteDelSistema() !== null;
+
+  return (
+    <>
+      <h2 className="mb-2 text-lg font-medium text-slate-800">{t("registro.titulo")}</h2>
+      <p className="mb-6 text-sm text-slate-600">{t(conCorreo ? "registro.ayuda" : "registro.ayudaGoogle")}</p>
+
+      {claveError && (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+        >
+          {t(claveError)}
+        </div>
+      )}
+
+      <SignUpForm
+        t={t}
+        conCorreo={conCorreo}
+        claveDeTurnstile={clavesDeTurnstile()?.sitio ?? null}
+        nonce={nonce}
+      />
+    </>
   );
 }

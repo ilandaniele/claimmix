@@ -347,6 +347,8 @@ describe("las claves con marcas del lote de decisiones", () => {
     "formulario.ayuda": ["{porDia}", "{porHora}"],
     "alta.avisoTope.linea80": ["{nombre}", "{tope}", "{usado}"],
     "alta.avisoTope.linea100": ["{llena}", "{nombre}", "{tope}", "{usado}"],
+    "usuarios.eliminar.confirmar": ["{nombre}"],
+    "registro.enviado.texto": ["{minutos}"],
   } as const;
 
   it("las de cliente llevan las mismas marcas en los dos idiomas", () => {
@@ -360,6 +362,28 @@ describe("las claves con marcas del lote de decisiones", () => {
     for (const [clave, esperadas] of Object.entries(DE_SERVIDOR)) {
       expect(marcas(esARServidor[clave as keyof typeof DE_SERVIDOR]), clave).toEqual([...esperadas].sort());
       expect(marcas(enUSServidor[clave as keyof typeof DE_SERVIDOR]), clave).toEqual([...esperadas].sort());
+    }
+  });
+
+  it("los textos de eliminar a una persona y de «Revisá tu correo» están en los dos idiomas y sólo en el servidor", () => {
+    const delLote = (clave: string) => clave.startsWith("usuarios.eliminar.") || clave.startsWith("registro.enviado.");
+    const es = Object.keys(esARServidor).filter(delLote).sort();
+    const en = Object.keys(enUSServidor).filter(delLote).sort();
+
+    expect(es.length).toBeGreaterThan(0);
+    expect(en).toEqual(es);
+    for (const clave of es) {
+      expect(esARServidor[clave as keyof typeof esARServidor], clave).toBeTruthy();
+      expect(enUSServidor[clave as keyof typeof enUSServidor], clave).toBeTruthy();
+      expect(esARServidor[clave as keyof typeof esARServidor], clave).not.toBe(enUSServidor[clave as keyof typeof enUSServidor]);
+    }
+    expect(Object.keys(esARCliente).filter(delLote)).toEqual([]);
+    expect(Object.keys(enUSCliente).filter(delLote)).toEqual([]);
+  });
+
+  it("el aviso viejo de /login (`login.aviso.revisaTuCorreo`) ya no está en ningún diccionario", () => {
+    for (const diccionario of [esARCliente, enUSCliente, esARServidor, enUSServidor]) {
+      expect(Object.keys(diccionario)).not.toContain("login.aviso.revisaTuCorreo");
     }
   });
 

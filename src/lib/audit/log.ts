@@ -123,6 +123,14 @@ export const AuditEvent = {
    */
   USER_DEACTIVATED: "auth.user_deactivated",
   USER_REACTIVATED: "auth.user_reactivated",
+  /**
+   * USER_DELETED: un admin borró a una persona que ya estaba dada de baja, y su
+   * dirección queda libre para invitarla de nuevo. Payload: { rol, huella }: el rol
+   * que tenía y el hash de espacio + dirección (`huellaDeCorreo`), sin nombre ni mail.
+   * Lo escribe la misma sentencia del borrado, en el registro de control; con la
+   * huella, una invitación emitida antes del borrado deja de valer.
+   */
+  USER_DELETED: "auth.user_deleted",
 
   // ── Case lifecycle ─────────────────────────────────────────────────────────
   CASE_CREATED: "case.created",

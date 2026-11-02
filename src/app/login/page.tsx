@@ -68,7 +68,6 @@ export const CODIGOS_DE_ERROR = [
 
 /** Los avisos que la pantalla sabe decir (`?aviso=`), cada uno con su texto. */
 const AVISOS = {
-  revisa_tu_correo: "login.aviso.revisaTuCorreo",
   ya_tenes_cuenta: "login.aviso.yaTenesCuenta",
 } as const;
 

@@ -56,7 +56,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "auth.signIn.error.invalid": "Invalid credentials. Please try again.",
   "auth.signIn.error.rateLimited": "Too many attempts. Please wait before retrying.",
   "auth.signIn.error.generic": "Sign in error. Please try again.",
-  "login.aviso.revisaTuCorreo": "If that address can sign in, we sent you a link to choose your password.",
   "registro.sinContraseña.ayuda": "You choose your password from the link we email you.",
 
   // ── Status labels ──────────────────────────────────────────────────────────

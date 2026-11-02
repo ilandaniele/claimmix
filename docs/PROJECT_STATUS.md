@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-10-24. This file is the single source of truth for "where things stand."
+_Last updated: 2026-11-02. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5442,6 +5442,19 @@ Quien crea una cuenta puede venir a dar de alta su empresa o a sumarse a una que
 - **Tests.** `tests/unit/alta/pedir-acceso.test.ts` y `pedir-acceso-accion.test.ts` nuevos; `alta-page.test.tsx`, `acciones-de-alta-sin-reexportar.test.ts`, `remitente-sistema.test.ts`, `core/sso.test.ts`, `admin-users-invitacion.test.ts` y `integration/admin/sso.test.ts` ampliados. `ultimoValor` (`src/lib/ultimo-valor.ts`, con su test) reemplaza las copias de `/alta`, `/alta/correo` e `/invitacion`.
 - **Falta.** La prueba en QA, que corre el dueño (`alta:probar` no ejecuta `after()` y usa un remitente falso): un administrador en un dominio de QA, una persona nueva de ese dominio con el correo verificado, «Pedir acceso» y el mail una sola vez. El check completo en dev (`b1b9c6bf`) dio rojo sólo en goteo T4 por timeouts de Vertex; goteo dio verde solo y `pnpm smoke` también.
 - **Ambientes.** En los tres ambientes desde el 26/10, por la regla de ambientes iguales.
+
+### Pedir el código más de una vez (02/11, rama `alta/codigos-por-dia`)
+
+Paso 7 del alta (número de WhatsApp). En prd la persona pidió «Por SMS» (Meta lo aceptó y no llegó) y después «Por llamada», que Meta rechazó con el código 136024: gastó 2 de los 3 pedidos del día y la pantalla le mostró «lo revisamos» en vez de «esperá». Sin migración ni variables.
+
+- **Topes.** `ALTA_TOPE_CODIGOS_INQUILINO_DIA` 3→10, `ALTA_TOPE_CODIGOS_IP_DIA` 5→10 y `ALTA_TOPE_CODIGOS_DIA` 10→30, sólo la omisión en `src/lib/topes.ts`: los rangos no cambian. Si un ambiente tiene escrita alguna de las tres variables en Vercel, esa manda sobre la omisión; hay que mirarlas antes de promover.
+- **Cupos.** Sin cambio de regla: los cupos del código cuentan pedidos a Graph, que cuestan contra los topes de Meta, y sólo vuelven si ningún pedido salió. Con `request_code` quedan gastados sea cual sea la respuesta (esperar, rechazo, «meta» o un throw). Se evaluó devolver el del espacio y el de la red con «esperar» (Meta no mandó nada) y se descartó: el reintento lo provoca la propia persona (el 136024 de prd salió al pedir por llamada justo después del SMS; 130429, 80007 y 4 se disparan por volumen), cada «esperar» es otro pedido a Graph, y sin cupo propio un espacio, o uno malicioso, gastaría los 30 globales y dejaría a todos sin código hasta las 00:00 UTC (21:00 ART). Devolver los tres sería peor: nadie frenaría a quien golpea Graph. Las salidas del recorrido, del agregar y de guardar, que cortan antes de `request_code`, también dejan los cupos gastados. Lo que cambia la experiencia es el tope: 10 pedidos por día alcanzan para el SMS que no llega más la llamada. `codigoWaba` (WABA propia) sigue igual porque comparte las cubetas.
+- **136024.** Pasa a «esperar» (sin revisión ni aviso `rechazo` al operador) con una sola lista, `ESPERA_DE_META` en `src/server/whatsapp/errores-de-graph.ts`, módulo puro que `graph.ts` importa para `clasificar`; nunca el import inverso, que metería `server-only` y el logger en el bundle del flujo durable. 136025 en verify sigue en `codigo_incorrecto`.
+- **Texto.** `configuracion.numero.r.esperar` dice que se vuelva a probar en unos minutos y, si el aviso vuelve, al día siguiente; es-AR y en-US juntos, sin placeholders, porque la pantalla no distingue Meta, los cupos diarios, los de hora ni el contador caído. `waba.r.esperar` (la WABA propia, donde el 136024 también termina en «esperar») dice lo mismo: su texto viejo, «demasiados intentos seguidos», era falso para ese código.
+- **Riesgos aceptados.** (1) Un espacio que cae en «esperar» o en rechazo gasta un cupo por intento: llega a 10 pedidos por día, como antes llegaba a 3, y en el peor caso tres espacios gastan los 30 globales (la misma proporción que antes, 3 de 10). (2) La red vale lo mismo que el espacio (10), y los pedidos sin IP comparten `sin-ip`. (3) Un 136024 persistente en la WABA propia tampoco avisa al operador.
+- **Tests.** `topes.test.ts`, `numero-automatico.test.ts` (esperar, rechazo, «meta» y el throw dejan los cupos gastados), `numero-prd.test.ts` (136024 con el `clasificar` real), `waba-propia.test.ts` (esperar con 130429 y 136024 y el 17 de la app propia: gastado), `alta-de-numero.test.ts`, `errores-de-graph.test.ts` y `WabaPropiaPanel.test.tsx` (el texto nuevo de `waba.r.esperar`).
+- **Comprobación.** `pnpm check --local` en una copia limpia: tipos, lint, 749 archivos de vitest, flujos, datos personales y arquitectura en verde; el ensayo dio 25/26, con `poliza-vencida` rojo por dos timeouts de Vertex a 30 s y verde al correrlo solo.
+- **Ambientes.** qa, main y prd el mismo día, por la regla de ambientes iguales.
 
 ### 🙋 Waiting on you (not code)
 

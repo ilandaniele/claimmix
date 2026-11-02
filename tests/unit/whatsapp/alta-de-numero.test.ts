@@ -524,13 +524,18 @@ describe("lo que no llega al log ni a quien llama", () => {
 });
 
 describe("clasificar", () => {
-  it("429 y los códigos 4, 80007, 130429 y 133016 son «esperar», con el status que traigan", () => {
+  it("429 y los códigos 4, 80007, 130429, 133016 y 136024 son «esperar», con el status que traigan", () => {
     expect(clasificar(429, null)).toBe("esperar");
     expect(clasificar(429, 100)).toBe("esperar");
-    for (const codigo of [4, 80007, 130429, 133016]) {
+    for (const codigo of [4, 80007, 130429, 133016, 136024]) {
       expect(clasificar(400, codigo)).toBe("esperar");
       expect(clasificar(500, codigo)).toBe("esperar");
     }
+  });
+
+  it("136024 es «esperar» porque request_code no mandó nada; 136025 (otro de la familia) sigue siendo un rechazo", () => {
+    expect(clasificar(400, 136024)).toBe("esperar");
+    expect(clasificar(400, 136025)).toBe("rechazo");
   });
 
   it("133008 y 133009 (demasiados intentos de PIN) no cambian el camino de la plataforma: siguen siendo un rechazo", () => {
@@ -560,6 +565,7 @@ describe("clasificar", () => {
       [async () => respuesta({ error: { code: 80007 } }, 400), "esperar", 80007],
       [async () => respuesta({ error: { code: 130429 } }, 400), "esperar", 130429],
       [async () => respuesta({ error: { code: 133016 } }, 400), "esperar", 133016],
+      [async () => respuesta({ error: { code: 136024 } }, 400), "esperar", 136024],
       [async () => respuesta({ error: { code: 100 } }, 400), "rechazo", 100],
       [async () => respuesta({}, 404), "rechazo", null],
       [async () => respuesta({}, 500), "meta", null],

@@ -17,6 +17,7 @@
 import "server-only";
 import { logger } from "@/lib/observability/logger";
 import { urlDeGraph } from "@/server/whatsapp/cloud-api";
+import { ESPERA_DE_META } from "@/server/whatsapp/errores-de-graph";
 
 /** Lo que se espera a Graph antes de darlo por caído. */
 export const PLAZO_GRAPH_MS = 10_000;
@@ -31,7 +32,7 @@ export type RespuestaDeAlta<T> =
 export type Falla = Extract<RespuestaDeAlta<never>, { ok: false }>;
 
 /** Meta pide aflojar con estos códigos, venga el status que venga. */
-const CODIGOS_DE_ESPERA = new Set([4, 80007, 130429, 133016]);
+const CODIGOS_DE_ESPERA: ReadonlySet<number> = new Set(ESPERA_DE_META);
 
 /** Qué hacer con lo que Meta contestó, venga o no con un `code`. `status` es null si ni hubo respuesta. */
 export function clasificar(status: number | null, codigo: number | null): FallaDeGraph {

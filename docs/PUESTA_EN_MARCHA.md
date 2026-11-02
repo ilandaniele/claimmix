@@ -515,7 +515,10 @@ WABA y el cliente OAuth de Google (`docs/PROMOCION.md:572-574`). No lleva base p
 que el alta termina directo en «Primeros pasos» (`/configuracion?primeros=1`).
 
 **El cliente de dev está partido en dos espacios.** El alta del paso 3 crea un espacio nuevo,
-«el espacio de autoalta», con la dirección del dueño que no es de operador. Ahí van el alta,
+«el espacio de autoalta», con la casilla de administrador de A3: una tercera casilla real, sin
+cuenta en dev. La Gmail de Veltra y la Gmail personal del dueño no sirven: las dos ya son
+cuentas de operador del espacio de la plataforma, y `/registro` les contesta «Ya tenés una
+cuenta» (decisión del dueño del 02/11). Ahí van el alta,
 su revisión del paso 4 y el segundo usuario del paso 8. Las dos denuncias caen en el otro
 espacio, el de la plataforma (el de `WHATSAPP_TENANT_ID`, `.env.example:372`), en el que entra
 la cuenta de operador:
@@ -603,6 +606,8 @@ El paso 12 lee los dos espacios.
     - `registro_cerrado`, o la tarjeta «cerrada» en `/alta`: `ALTA_AUTOMATICA` no vale
       exactamente `1` y la dirección no está en la lista.
     - Aviso de operador: la dirección está en `ADMIN_EMAILS`.
+    - «Ya tenés una cuenta»: la dirección ya tiene cuenta en dev, aunque esté dada de baja.
+      Usar otra casilla real (A3); nunca un alias `+`.
     - Resultado `alta_cerrada` al crear el espacio: se llegó al tope
       `ALTA_TOPE_GLOBAL_DIA` o falta una función de la base.
     - No llega el mail: la respuesta es siempre neutra (`/login?aviso=revisa_tu_correo`).
@@ -1221,6 +1226,13 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Fuentes:** `src/server/alta/tope-de-invitaciones.ts:13-20`;
     `src/app/api/admin/users/route.ts:121-129`, `:131-150`, `:152-176`;
     `src/app/api/admin/sso/route.ts:6-11`.
+  - **Estado (02/11):** hecho. El operador de Veltra activó Brimonte desde `/admin/altas` (plan
+    inicial, cuota 0, excedente 0, «Unidades incluidas» vacío, que toma las 12 del catálogo) y
+    el admin invitó a un analista con una casilla de otro proveedor, que entró con su rol. La
+    cuenta de Veltra no figura en `/admin/users` de Brimonte, y es correcto: el operador vive en
+    el espacio de la casa. La rama `altas/equipos-por-cliente` suma un aviso y una etiqueta
+    «Operación» en la lista de la casa, el equipo de cada cliente en `/admin/altas` y una ayuda
+    por campo en «Activar plan».
 - [ ] **11. Denuncia por WhatsApp.**
   - **Quién:** [Dueño].
   - **Dónde:** el celular personal, no la SIM del cliente.

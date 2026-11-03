@@ -64,6 +64,7 @@ function abrir(topeDelLote = 5) {
       currentUserId="u-1"
       currentUserRole="admin"
       emailAyuda="Ayuda del correo"
+      textosEliminar={{ boton: "Eliminar", confirmar: "¿Eliminar a {nombre}?", hecho: "Eliminada.", error: "No se pudo." }}
       topeDelLote={topeDelLote}
     />
   );

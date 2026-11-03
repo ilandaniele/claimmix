@@ -69,7 +69,6 @@ export const esAR = {
   "auth.signIn.error.rateLimited":
     "Demasiados intentos. Esperá un momento antes de reintentar.",
   "auth.signIn.error.generic": "Error al iniciar sesión. Intentá de nuevo.",
-  "login.aviso.revisaTuCorreo": "Si esa dirección puede entrar, te mandamos un enlace para elegir tu contraseña.",
   "registro.sinContraseña.ayuda": "La contraseña la elegís desde el enlace que te llega por correo.",
 
   // ── Status labels ──────────────────────────────────────────────────────────

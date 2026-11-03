@@ -273,6 +273,10 @@ export interface FilaDeAlta {
   numeroEnRevision: boolean;
   /** Los otros espacios con el mismo número (en cualquier forma de escribir el 9 argentino): vivos, o dados de baja hace menos de 90 días. */
   repetidoEn: OtroTitular[];
+  /** Cuentas del espacio que no están dadas de baja. */
+  usuariosActivos: number;
+  /** Quien administra el espacio: el dueño y, si no hay, el admin más antiguo; null sin ninguno activo. */
+  admin: { nombre: string; email: string | null } | null;
 }
 
 export interface PanelDeAltas {
@@ -308,6 +312,8 @@ function lista(v: unknown): Cruda[] {
 
 function aFila(f: Cruda): FilaDeAlta {
   const numeroId = texto(f.numero_id);
+  const adminNombre = texto(f.admin_nombre);
+  const adminEmail = texto(f.admin_email);
   return {
     tenantId: String(f.tenant_id),
     nombre: String(f.nombre ?? ""),
@@ -354,6 +360,8 @@ function aFila(f: Cruda): FilaDeAlta {
       estado: String(o.estado ?? ""),
       desde: fecha(o.desde),
     })),
+    usuariosActivos: Number(f.usuarios_activos ?? 0) || 0,
+    admin: adminNombre || adminEmail ? { nombre: adminNombre ?? "", email: adminEmail } : null,
   };
 }
 
@@ -363,6 +371,10 @@ function aFila(f: Cruda): FilaDeAlta {
  * titulares del mismo número, cuántas altas van en 24 h y cuánto tardó en quedar
  * lista la base de las de los últimos 30 días (mediana y p95, de `tenant_bases`).
  * El 9 argentino se ignora al comparar, igual que `mismoNumero`: «+549…» y «+54…» son el mismo.
+ *
+ * El equipo de cada espacio (cuántas cuentas activas y quién administra) sale del espejo de usuarios de control:
+ * las altas, las invitaciones, los cambios de rol y las bajas escriben en control antes que en la base del cliente,
+ * así que no hace falta entrar a cada base.
  *
  * El conteo de 24 h y la demora van aparte de la lista para que una lista vacía igual los traiga.
  */
@@ -404,6 +416,7 @@ async function altasDe(conWabas: boolean, tope: PanelDeAltas["tope"]): Promise<P
           t.id as tenant_id, t.name as nombre, t.contact_email, t.created_at, t.plan, t.billing_status,
           t.trial_ends_at, t.activated_at,
           n.id as numero_id, n.numero_e164, n.estado as numero_estado, n.phone_number_id, n.waba_id,
+          ua.usuarios_activos, ad.admin_nombre, ad.admin_email,
           ${
             conWabas
               ? sql`b.estado as waba_estado, b.falla as waba_falla, b.paso_cancelado as waba_paso_cancelado,
@@ -439,6 +452,19 @@ async function altasDe(conWabas: boolean, tope: PanelDeAltas["tope"]): Promise<P
           order by (w.estado = 'baja'), w.creado_en desc
           limit 1
         ) n on true
+        left join lateral (
+          select count(*)::int as usuarios_activos
+          from public.users u
+          where u.tenant_id = t.id and u.dado_de_baja_en is null
+        ) ua on true
+        left join lateral (
+          select u.full_name as admin_nombre, au.email as admin_email
+          from public.users u
+          left join public."user" au on au.id = u.id
+          where u.tenant_id = t.id and u.dado_de_baja_en is null and u.role in ('owner', 'admin')
+          order by (u.role = 'owner') desc, u.created_at
+          limit 1
+        ) ad on true
         ${conWabas ? sql`left join public.whatsapp_wabas b on b.tenant_id = t.id` : sql``}
         where t.autoalta
         order by t.created_at desc

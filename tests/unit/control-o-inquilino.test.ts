@@ -130,6 +130,7 @@ describe("ningún archivo de control vuelve a enTenant", () => {
     ["src/server/sso/panel.ts", 1],
     ["src/app/api/admin/sso/route.ts", 3],
     ["src/app/api/admin/users/[id]/sessions/route.ts", 1],
+    ["src/app/api/admin/users/[id]/cuenta/route.ts", 0],
   ])("%s: %i llamada(s) a enControl y ninguna a enTenant", (archivo, esperadas) => {
     expect(llamadas(archivo, "enControl")).toBe(esperadas);
     expect(llamadas(archivo, "enTenant")).toBe(0);

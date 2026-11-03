@@ -426,6 +426,39 @@ describe("cuando Meta no da lugar", () => {
   });
 });
 
+describe("cuando request_code no manda el código (a nivel de fetch)", () => {
+  beforeEach(() => {
+    h.leer.mockResolvedValue([fila({ phone_number_id: ID })]);
+  });
+
+  it("136024 (el caso de prd con «Por llamada»): «esperar», sin aviso al operador, y los cupos de código se quedan", async () => {
+    forzadas.set(RUTA.pedirCodigo, json({ error: { code: 136024 } }, 400));
+
+    expect(await pedirCodigo(QUIEN, "VOICE")).toBe("esperar");
+
+    expect(h.aviso).not.toHaveBeenCalled();
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it("un 400 que no es de espera: «revision», avisa al operador y los cupos de código se quedan", async () => {
+    forzadas.set(RUTA.pedirCodigo, json({ error: { code: 100 } }, 400));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
+
+    expect(h.aviso).toHaveBeenCalledWith("rechazo", TENANT);
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it("un 500 de Meta: «meta» y no vuelve ningún cupo, porque el SMS pudo haber salido", async () => {
+    forzadas.set(RUTA.pedirCodigo, json({}, 500));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("meta");
+
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+    expect(h.aviso).not.toHaveBeenCalled();
+  });
+});
+
 describe("avisar que el número no puede seguir en la app de WhatsApp", () => {
   it.each([
     ["es-AR", esAR, /app de WhatsApp/],

@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
+import { candadoDeAdmins } from "@/lib/auth/candado-de-admins";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { ALL_ROLES, type UserRole } from "@/lib/auth/roles";
 import { tables } from "@/lib/db";
@@ -65,7 +66,7 @@ async function cambiarUsuario(
   // Un solo fragmento: el mensaje de error y la regla no pueden discrepar sobre quién es un actor vivo.
   const actorVivo = sql`public.users a where a.id = ${actorId}::uuid and a.dado_de_baja_en is null`;
   const res = await enControlVarias(tenantCtx, (db) => [
-    db.execute(sql`select pg_advisory_xact_lock(hashtext('admins'), hashtext(${tenantCtx.tenantId}::text))`),
+    db.execute(candadoDeAdmins(tenantCtx.tenantId)),
     db
       .select({
         role: tables.users.role,

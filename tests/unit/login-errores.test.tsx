@@ -18,7 +18,6 @@ vi.mock("@/app/login/SignInForm", () => ({ SignInForm: () => null }));
 vi.mock("@/lib/i18n/locale", () => ({ getServerLocale: async () => h.locale }));
 
 import LoginPage, { CODIGOS_DE_ERROR } from "@/app/login/page";
-import { getT } from "@/lib/i18n";
 import { enUSServidor } from "@/lib/i18n/en-US.servidor";
 import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 
@@ -180,13 +179,13 @@ describe("los avisos", () => {
 
       expect(screen.getByRole("status")).toHaveTextContent(DICCIONARIO[idioma]["login.aviso.yaTenesCuenta"]);
     });
-
-    it(`revisa_tu_correo se muestra en ${idioma}`, async () => {
-      await pintar({ aviso: "revisa_tu_correo" }, idioma);
-
-      expect(screen.getByRole("status")).toHaveTextContent(getT(idioma)("login.aviso.revisaTuCorreo"));
-    });
   }
+
+  it("revisa_tu_correo ya no pinta nada: esa pantalla es la de /registro", async () => {
+    await pintar({ aviso: "revisa_tu_correo" }, "es-AR");
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 
   it("un aviso que no existe no pinta nada", async () => {
     await pintar({ aviso: "constructor" }, "es-AR");

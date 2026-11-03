@@ -43,7 +43,7 @@ function shiftMonth(month: string, delta: number): string {
 // El aviso que ocupa la página entera cuando no hay una factura que mostrar.
 function Aviso({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
-    <div className="px-6 py-8 max-w-3xl">
+    <div className="px-4 py-6 sm:px-6 sm:py-8 max-w-3xl">
       <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{titulo}</h1>
       <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
         {children}
@@ -102,8 +102,8 @@ export default async function FacturacionPage({
   const anteriorAntesDelAlta = !!alta && periodoAntesDelAlta({ next: statement.period.start }, alta);
 
   return (
-    <div className="px-6 py-8 max-w-5xl">
-      <div className="mb-6 flex items-start justify-between gap-4">
+    <div className="px-4 py-6 sm:px-6 sm:py-8 max-w-5xl">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
             {t("nav.facturacion")}

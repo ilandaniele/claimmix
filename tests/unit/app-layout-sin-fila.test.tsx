@@ -29,6 +29,7 @@ vi.mock("@/lib/i18n/locale", () => ({
 }));
 vi.mock("@/app/(app)/_components/Sidebar", () => ({ Sidebar: () => null }));
 vi.mock("@/app/(app)/_components/TopBar", () => ({ TopBar: () => null }));
+vi.mock("@/lib/ui/barra", () => ({ leerBarraContraida: async () => false }));
 vi.mock("@/app/(app)/_components/AsistenteFlotante", () => ({ AsistenteFlotante: () => null }));
 vi.mock("@/app/(app)/_components/EstadoDelAgente", () => ({ EstadoDelAgente: () => null }));
 

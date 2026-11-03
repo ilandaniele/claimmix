@@ -120,7 +120,7 @@ export default async function AltasPage({
   const [panel, lugares] = await Promise.all([listarAltas(), lugaresDeLaWaba()]);
 
   return (
-    <div className="px-6 py-8 max-w-6xl">
+    <div className="px-4 py-6 sm:px-6 sm:py-8 max-w-6xl">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{t("altas.title")}</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("altas.subtitle")}</p>
@@ -170,7 +170,7 @@ export default async function AltasPage({
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-            <table className="w-full text-sm">
+            <table className="tabla-apilada w-full text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
                 <tr>
                   <th className="px-4 py-2.5 font-medium">{t("altas.col.espacio")}</th>
@@ -387,7 +387,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
 
   return (
     <tr className="align-top hover:bg-slate-50 dark:hover:bg-slate-800/40">
-      <td className="px-4 py-3">
+      <td data-entera className="px-4 py-3">
         <p className="font-medium text-slate-900 dark:text-slate-100">{fila.nombre}</p>
         {fila.contactEmail && (
           <p className="text-xs text-slate-500 dark:text-slate-400">{fila.contactEmail}</p>
@@ -404,7 +404,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
         )}
       </td>
 
-      <td className="px-4 py-3 text-xs text-slate-600 [overflow-wrap:anywhere] dark:text-slate-300">
+      <td data-entera className="px-4 py-3 text-xs text-slate-600 [overflow-wrap:anywhere] dark:text-slate-300">
         <p className="tabular-nums">{t("altas.equipo.usuarios").replace("{n}", String(fila.usuariosActivos))}</p>
         {admin ? (
           <p>
@@ -416,7 +416,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
         )}
       </td>
 
-      <td className="px-4 py-3">
+      <td data-entera className="px-4 py-3">
         <p className="text-slate-600 dark:text-slate-300">{nombreDePlan(fila.plan, fila.plan, t)}</p>
         <span
           className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -432,7 +432,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
         )}
       </td>
 
-      <td className="px-4 py-3">
+      <td data-entera className="px-4 py-3">
         {numero ? (
           <>
             <p className="tabular-nums text-slate-900 dark:text-slate-100">{numero.e164}</p>
@@ -494,7 +494,7 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
         )}
       </td>
 
-      <td className="px-4 py-3">
+      <td data-entera className="px-4 py-3">
         <div className="flex flex-wrap gap-2">
           {numero?.estado === "conectado" && (
             <Accion accion={suspenderElNumero} campos={{ numero_id: numero.id }} etiqueta={t("altas.numero.suspender")} />

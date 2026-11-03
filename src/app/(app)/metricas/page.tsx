@@ -241,7 +241,7 @@ export default async function MetricasPage({
   const cuelloMayor = Math.max(0, ...cuellos.map((c) => c.horas_promedio));
 
   return (
-    <div className="px-6 py-8 max-w-6xl">
+    <div className="px-4 py-6 sm:px-6 sm:py-8 max-w-6xl">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="mb-8">
         <h1 className="text-xl font-semibold text-slate-900">
@@ -450,7 +450,7 @@ export default async function MetricasPage({
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
                 <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
                     {t("metricas.ia.porUsuario")}
@@ -507,7 +507,7 @@ export default async function MetricasPage({
                 )}
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70">
                 <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-100">
                     {t("metricas.ia.porModelo")}
@@ -644,7 +644,7 @@ export default async function MetricasPage({
           </div>
 
           {/* ── Top analysts table ───────────────────────────────────────────── */}
-          <div className="rounded-lg border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <div className="border-b border-slate-100 px-5 py-3">
               <h2 className="text-sm font-semibold text-slate-700">
                 {t("metricas.topAnalistas")}

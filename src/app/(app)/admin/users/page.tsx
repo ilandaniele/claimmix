@@ -83,7 +83,7 @@ export default async function AdminUsersPage() {
     : undefined;
 
   return (
-    <div className="px-6 py-8 max-w-5xl">
+    <div className="px-4 py-6 sm:px-6 sm:py-8 max-w-5xl">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">

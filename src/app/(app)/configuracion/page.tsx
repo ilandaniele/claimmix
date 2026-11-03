@@ -87,9 +87,9 @@ function Section({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-4 py-1.5">
-      <span className="w-44 flex-none text-xs text-slate-500">{label}</span>
-      <div className="text-sm text-slate-800">{children}</div>
+    <div className="flex flex-col gap-0.5 py-1.5 sm:flex-row sm:items-center sm:gap-4">
+      <span className="flex-none text-xs text-slate-500 sm:w-44">{label}</span>
+      <div className="min-w-0 break-words text-sm text-slate-800">{children}</div>
     </div>
   );
 }
@@ -206,7 +206,7 @@ export default async function ConfiguracionPage({
   const region = process.env.VERCEL_REGION ?? "local";
 
   return (
-    <div className="px-6 py-8 max-w-2xl">
+    <div className="px-4 py-6 sm:px-6 sm:py-8 max-w-2xl">
       <div className="mb-8">
         <h1 className="text-xl font-semibold text-slate-900">{t("configuracion.title")}</h1>
         <p className="mt-1 text-sm text-slate-500">{t("configuracion.subtitle")}</p>

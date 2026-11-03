@@ -35,11 +35,11 @@
 export default function CargandoPantalla() {
   return (
     <div className="flex h-full flex-col" aria-hidden="true">
-      <div className="px-6 pb-5 pt-1">
+      <div className="px-4 pb-5 pt-1 sm:px-6">
         <div className="h-8 w-56 animate-pulse rounded-lg bg-slate-200" />
         <div className="mt-2 h-4 w-72 animate-pulse rounded bg-slate-100" />
       </div>
-      <div className="flex-1 overflow-hidden px-6 pb-8">
+      <div className="flex-1 overflow-hidden px-4 pb-8 sm:px-6">
         <div className="h-full rounded-2xl border border-slate-200 bg-white p-5">
           <div className="h-5 w-40 animate-pulse rounded bg-slate-100" />
           <div className="mt-6 space-y-3">

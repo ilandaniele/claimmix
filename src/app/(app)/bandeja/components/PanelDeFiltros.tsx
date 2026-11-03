@@ -104,7 +104,7 @@ function Panel({
       id={ID_PANEL}
       role="dialog"
       aria-label={t("filter.titulo")}
-      className="absolute left-5 top-full z-30 mt-1 max-h-[70vh] w-[320px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-lg"
+      className="panel-de-filtros absolute left-5 top-full z-30 mt-1 max-h-[70vh] w-[320px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-lg"
     >
       <div className="mb-1.5 flex items-center justify-between">
         <h3 className="text-[13.5px] font-semibold text-slate-900">

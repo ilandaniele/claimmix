@@ -53,7 +53,7 @@ export function CampoDeBusqueda() {
   }
 
   return (
-    <div className="relative flex-shrink-0">
+    <div className="relative max-sm:basis-full sm:w-56 sm:flex-shrink-0">
       <Search
         size={14}
         aria-hidden="true"
@@ -66,7 +66,7 @@ export function CampoDeBusqueda() {
         placeholder={t("bandeja.buscarPlaceholder")}
         aria-label={t("bandeja.buscarPlaceholder")}
         maxLength={80}
-        className="w-56 rounded-lg border border-control bg-white py-1.5 pl-8 pr-7 text-[13px] text-slate-700 shadow-sm placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+        className="w-full rounded-lg border border-control bg-white py-1.5 pl-8 pr-7 text-[13px] text-slate-700 shadow-sm placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
       />
       {valor && (
         <button

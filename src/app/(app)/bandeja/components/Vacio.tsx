@@ -20,7 +20,7 @@ import { useT } from "@/lib/i18n/LocaleContext";
 export function Vacio() {
   const t = useT();
   return (
-    <span className="text-slate-300" aria-label={t("vacio.sinDato")}>
+    <span className="text-slate-300" data-vacio aria-label={t("vacio.sinDato")}>
       —
     </span>
   );

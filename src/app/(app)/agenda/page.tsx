@@ -102,14 +102,14 @@ export default async function AgendaPage({ searchParams }: AgendaPageProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="px-6 pb-5 pt-1">
-        <h1 className="text-balance text-[26px] font-semibold tracking-tight text-slate-900">
+      <div className="px-4 pb-5 pt-1 sm:px-6">
+        <h1 className="text-balance text-[22px] sm:text-[26px] font-semibold tracking-tight text-slate-900">
           {t("agenda.title")}
         </h1>
         <p className="mt-1 text-[13px] text-slate-500">{t("agenda.subtitle")}</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 pb-8">
+      <div className="flex-1 overflow-y-auto px-4 pb-8 sm:px-6">
         <Card className="flex flex-col divide-y divide-slate-100">
           {grupos.length === 0 ? (
             <p className="px-5 py-8 text-center text-[13px] text-slate-500">{t("agenda.empty")}</p>

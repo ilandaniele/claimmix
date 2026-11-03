@@ -408,3 +408,147 @@ body {
 @keyframes barra-espera { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 .barra-espera { animation: barra-espera 1.1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .barra-espera { animation: none; width: 100%; } }
+
+/*
+ * La barra lateral: el cajón del teléfono y la versión contraída a íconos.
+ *
+ * Va en la hoja de estilos y no en variantes de Tailwind por dos razones: el
+ * indicador del agente es un componente de servidor que no conoce el estado de
+ * la barra pero sí cuelga de ella, y cada variante repetida en cada ítem se
+ * suma al JavaScript que baja toda página. Sin `@layer`, a propósito: tiene que
+ * ganarle a las utilidades (`px-3`, `justify-*`) del mismo elemento.
+ */
+.barra-menu {
+  position: fixed;
+  z-index: 30;
+  left: calc(env(safe-area-inset-left) + 0.75rem);
+  top: calc(env(safe-area-inset-top) + 0.75rem);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+/* La X del cajón sólo se ve en el teléfono, y la flecha de contraer sólo en escritorio: se reparten el mismo lugar. */
+.barra-cerrar,
+.barra-contraer {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+}
+.barra-cerrar { width: 2.25rem; height: 2.25rem; }
+.barra-contraer { width: 1.75rem; height: 1.75rem; }
+@media (width < 48rem) {
+  /* El botón del menú sólo se ve en el teléfono; en escritorio la barra ya está a la vista. */
+  .barra-menu,
+  .barra-cerrar { display: flex; }
+  /* El cajón: sobre el telón, con lugar para la muesca del iPhone y el fondo de las tarjetas, que sigue al tema. */
+  .barra-cajon {
+    position: fixed;
+    inset-block: 0;
+    left: 0;
+    z-index: 50;
+    width: 18rem;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background: var(--card-bg);
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  }
+  .barra-telon {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: rgb(0 0 0 / 0.4);
+  }
+}
+@media (width >= 48rem) {
+  .barra-contraer { display: flex; }
+  .barra[data-contraida="true"] { width: 4rem; }
+  .barra[data-contraida="true"] .barra-logo {
+    flex-direction: column;
+    height: auto;
+    gap: 0.5rem;
+    padding: 0.75rem 0;
+  }
+  .barra[data-contraida="true"] .barra-contraer { margin-left: 0; }
+  .barra[data-contraida="true"] .barra-item { justify-content: center; padding-inline: 0; }
+  /* Como `sr-only` de Tailwind: afuera de la vista pero leído por el lector de pantalla. */
+  .barra[data-contraida="true"] .barra-texto {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+
+@media (width < 48rem) {
+  /* La lista en el teléfono: cada fila es una tarjeta apilada y no hay scroll al costado. Los rótulos de columna se quedan para el lector de pantalla. */
+  .tabla-apilada,
+  .tabla-apilada > tbody {
+    display: block;
+    min-width: 0 !important;
+  }
+  .tabla-apilada > thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .tabla-apilada > tbody > tr {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+  .tabla-apilada > tbody > tr > td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    order: 5;
+  }
+  .tabla-apilada > tbody > tr > td > div {
+    max-width: none;
+  }
+  /* Una celda sin dato no pinta un guion suelto en la tarjeta. */
+  .tabla-apilada > tbody > tr > td:has(> [data-vacio]) {
+    display: none;
+  }
+  .tabla-apilada > tbody > tr > td[data-c="select"] { order: 0; }
+  .tabla-apilada > tbody > tr > td[data-c="fecha_siniestro"] { order: 1; flex: 1 1 0; }
+  .tabla-apilada > tbody > tr > td[data-c="status"] { order: 2; }
+  .tabla-apilada > tbody > tr > td[data-c="policyholder_name"],
+  .tabla-apilada > tbody > tr > td[data-c="motivo_descarte"] { order: 3; flex-basis: 100%; }
+  /* La papelera va en la esquina de la tarjeta. En CasesTable nace transparente y sólo el mouse la revela, y al tacto nada la revela: tocar esa esquina borraba sin que se viera el botón. En la tarjeta se ve siempre, y la fila le deja lugar para que no tape el texto. */
+  .tabla-apilada > tbody > tr > td[data-c="row-delete"] { position: absolute; right: 0.25rem; bottom: 0.25rem; }
+  .tabla-apilada > tbody > tr > td[data-c="row-delete"] > button { opacity: 1; }
+  .tabla-apilada > tbody > tr:has(> td[data-c="row-delete"]) { padding-right: 2.5rem; }
+  /* Las tablas de administración (usuarios, altas): la celda que lo pide ocupa el renglón entero, y la fila de «cargando» o «vacío» también. */
+  .tabla-apilada > tbody > tr > td[data-entera],
+  .tabla-apilada > tbody > tr > td[colspan] { flex-basis: 100%; }
+}
+
+/* El panel de filtros en el teléfono: una hoja con margen parejo, no un cuadro de 320 px que se sale por la derecha.
+ * Por encima del asistente flotante (z-40), que vive en la misma esquina de abajo: con menos, el lanzador tapaba
+ * los últimos chips y tocarlo contaba como clic afuera, que cierra la hoja. */
+@media (width < 40rem) {
+  .panel-de-filtros {
+    z-index: 41;
+    position: fixed;
+    inset-inline: 0.75rem;
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom) + 0.75rem);
+    width: auto;
+    max-height: 75dvh;
+  }
+}

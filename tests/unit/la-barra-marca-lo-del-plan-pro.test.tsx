@@ -34,6 +34,7 @@ vi.mock("@/lib/i18n/locale", () => ({
     accountLocale === "es-AR" || accountLocale === "en-US" ? accountLocale : "es-AR",
 }));
 vi.mock("@/app/(app)/_components/TopBar", () => ({ TopBar: () => null }));
+vi.mock("@/lib/ui/barra", () => ({ leerBarraContraida: async () => false }));
 
 import AppLayout from "../../src/app/(app)/layout";
 

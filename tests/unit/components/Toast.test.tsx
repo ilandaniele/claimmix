@@ -36,6 +36,15 @@ describe("ToastContainer", () => {
     expect(screen.getByRole("status", { name: "Notifications" })).toBeTruthy();
   });
 
+  it("la región se ancla a la esquina respetando la zona segura de abajo y de la derecha", () => {
+    pintar([]);
+
+    const clase = screen.getByRole("status", { name: "Notifications" }).className;
+    expect(clase).toContain("fixed");
+    expect(clase).toContain("bottom-[max(1rem,env(safe-area-inset-bottom))]");
+    expect(clase).toContain("right-[max(1rem,env(safe-area-inset-right))]");
+  });
+
   it("los avisos entran dentro de esa región", () => {
     pintar([{ id: "1", message: "Case closed", type: "success" }]);
 

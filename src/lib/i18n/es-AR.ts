@@ -40,6 +40,10 @@ export const esAR = {
   "nav.cartera": "Cartera",
   "nav.altas": "Altas",
   "nav.asistente": "Asistente",
+  "nav.abrirMenu": "Abrir el menú",
+  "nav.cerrarMenu": "Cerrar el menú",
+  "nav.contraerBarra": "Contraer la barra lateral",
+  "nav.expandirBarra": "Expandir la barra lateral",
 
   /*
    * La antigüedad de un siniestro. El `{n}` es el número, y es el único lugar

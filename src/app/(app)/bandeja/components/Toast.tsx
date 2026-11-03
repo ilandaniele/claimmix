@@ -69,7 +69,7 @@ export function ToastContainer({ toasts, onDismiss }: ToastProps) {
     <div
       role="status"
       aria-label={t("toast.region")}
-      className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-80"
+      className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-50 flex flex-col gap-2 w-80"
     >
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />

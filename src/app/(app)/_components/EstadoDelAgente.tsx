@@ -28,18 +28,21 @@ export async function EstadoDelAgente({
   if (!estado) return null;
 
   const t = getT(locale);
+  const texto =
+    t(`agente.estado.${estado.estado}`) +
+    (estado.procesando > 0
+      ? ` · ${t("agente.estado.procesando").replace("{n}", String(estado.procesando))}`
+      : "");
+  // `barra-item` y `barra-texto`: con la barra contraída queda sólo el punto de color
+  // y el texto pasa a la vista del lector de pantalla y al tooltip (`globals.css`).
   return (
     <Link
       href="/agente"
-      className="mx-2 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-[13.5px] text-slate-600 hover:bg-slate-100"
+      title={texto}
+      className="barra-item mx-2 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-[13.5px] text-slate-600 hover:bg-slate-100"
     >
       <span className={`h-2 w-2 flex-shrink-0 rounded-full ${COLOR[estado.estado]}`} />
-      <span className="truncate">
-        {t(`agente.estado.${estado.estado}`)}
-        {estado.procesando > 0
-          ? ` · ${t("agente.estado.procesando").replace("{n}", String(estado.procesando))}`
-          : null}
-      </span>
+      <span className="barra-texto truncate">{texto}</span>
     </Link>
   );
 }

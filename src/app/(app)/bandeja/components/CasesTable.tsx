@@ -582,7 +582,7 @@ export function CasesTable({
           * cambia.
           */}
         <table
-          className="w-full table-auto text-left"
+          className="tabla-apilada w-full table-auto text-left"
           style={{ minWidth }}
           aria-label={t("bandeja.tableLabel")}
         >
@@ -655,6 +655,7 @@ export function CasesTable({
                   {columns.map((c) => (
                     <td
                       key={c.id}
+                      data-c={c.id}
                       className="px-3 py-3 align-middle first:pl-5 last:pr-5"
                       onClick={
                         c.id === "select" || c.id === "row-delete"

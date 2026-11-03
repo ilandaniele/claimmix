@@ -108,7 +108,8 @@ describe("22 — se puede saltar al contenido", () => {
 
   it("se destapa al enfocarlo, y no está oculto para el lector", () => {
     // Fuera de pantalla y no con `hidden`: tiene que existir para el lector.
-    expect(LAYOUT).toContain("-translate-y-[200%]");
+    // El `calc(` suma la zona segura de arriba del iPhone al desplazamiento.
+    expect(LAYOUT).toContain("-translate-y-[calc(200%");
     expect(LAYOUT).toContain("focus:translate-y-0");
   });
 });

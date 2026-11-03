@@ -34,6 +34,10 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "nav.facturacion": "Billing",
   "nav.cartera": "Portfolio",
   "nav.altas": "Sign-ups",
+  "nav.abrirMenu": "Open the menu",
+  "nav.cerrarMenu": "Close the menu",
+  "nav.contraerBarra": "Collapse the sidebar",
+  "nav.expandirBarra": "Expand the sidebar",
 
   "age.now": "Now",
   "age.minutes": "{n}m ago",

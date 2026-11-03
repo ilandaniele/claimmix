@@ -66,7 +66,8 @@ export function TopBar({ fullName, role }: TopBarProps) {
   const roleLabel = t(ETIQUETA_DE_ROL[role] ?? "role.analyst");
 
   return (
-    <header className="flex h-16 flex-shrink-0 items-center justify-end px-6">
+    // En el teléfono el lugar de la izquierda es del botón del menú (`Sidebar`, `fixed`).
+    <header className="flex h-16 flex-shrink-0 items-center justify-end px-6 max-md:pl-16 max-md:pr-4">
       <div className="flex items-center gap-2">
         <Ayuda />
         <ThemeToggle />

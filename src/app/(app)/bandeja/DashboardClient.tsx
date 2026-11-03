@@ -180,7 +180,7 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
 
   return (
     <div className="flex flex-shrink-0 flex-col gap-3 border-t border-slate-200 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <p className="text-[13px] text-slate-500">
           {t("bandeja.showing")} {from}-{to} {t("pagination.of")} {total} {t("bandeja.claims")}
         </p>
@@ -205,7 +205,7 @@ function Pagination({ page, perPage, total, onPageChange, onPerPageChange }: Pag
         </label>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <button
           onClick={() => onPageChange(1)}
           disabled={current <= 1}
@@ -650,7 +650,7 @@ function DashboardClientInterno({
            * que es.
            */
           alLadoDelTitulo={
-            <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 max-sm:w-full sm:flex-shrink-0">
               {/*
                 * "vista" no es un filtro más: cambia cómo se mira la MISMA
                 * lista, así que va aparte y no adentro del panel de filtros.

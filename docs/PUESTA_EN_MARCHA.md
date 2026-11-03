@@ -606,11 +606,11 @@ El paso 12 lee los dos espacios.
     - `registro_cerrado`, o la tarjeta «cerrada» en `/alta`: `ALTA_AUTOMATICA` no vale
       exactamente `1` y la dirección no está en la lista.
     - Aviso de operador: la dirección está en `ADMIN_EMAILS`.
-    - «Ya tenés una cuenta»: la dirección ya tiene cuenta en dev, aunque esté dada de baja.
+    - «Ya tenés una cuenta»: la dirección ya tiene cuenta en dev, aunque esté dada de baja («Eliminar» en /admin/users la libera si no tiene casos asignados ni firmó nada en un caso).
       Usar otra casilla real (A3); nunca un alias `+`.
     - Resultado `alta_cerrada` al crear el espacio: se llegó al tope
       `ALTA_TOPE_GLOBAL_DIA` o falta una función de la base.
-    - No llega el mail: la respuesta es siempre neutra (`/login?aviso=revisa_tu_correo`).
+    - No llega el mail: la respuesta es siempre neutra (`/registro?enviado=1`, «Revisá tu correo»).
       Mirar spam y los cupos `ALTA_TOPE_CORREOS_DIA` y `ALTA_TOPE_POR_DESTINATARIO_DIA`.
   - **Fuentes:** `src/app/alta/correo`; `src/app/registro/actions.ts`; `src/app/alta/actions.ts`;
     `src/app/alta/page.tsx`; `src/server/alta/crear-espacio.ts`; `src/server/alta/pasos-hechos.ts`;

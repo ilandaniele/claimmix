@@ -52,6 +52,8 @@ interface Props {
   textosEliminar: TextosEliminar;
   /** Cuántas filas deja armar el diálogo de una vez: el tope de invitaciones del día. */
   topeDelLote: number;
+  /** Sólo en el espacio de la casa y para quien opera: qué cuentas son de la operación y con qué rótulo se marcan. */
+  operacion?: { rotulo: string; ids: string[] };
 }
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -445,6 +447,7 @@ export function AdminUsersClient({
   emailAyuda,
   textosEliminar,
   topeDelLote,
+  operacion,
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
@@ -686,6 +689,11 @@ export function AdminUsersClient({
                   >
                     <td className="px-5 py-3 font-medium text-slate-800">
                       {user.full_name}
+                      {!deBaja && operacion?.ids.includes(user.id) && (
+                        <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                          {operacion.rotulo}
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-slate-600">
                       {user.email || "—"}

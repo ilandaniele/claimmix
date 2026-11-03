@@ -12,9 +12,11 @@
  * Lee todo en una consulta (`listarAltas`).
  */
 
+import type { ReactNode } from "react";
+
 import { duracionLegible } from "@/core/fecha/duracion";
 import { dominioDelMail } from "@/core/sso";
-import { PLANES_COMERCIALES } from "@/lib/billing/plans";
+import { notaDePesos, PLAN_CATALOG, PLANES_COMERCIALES } from "@/lib/billing/plans";
 import { nombreDePlan } from "@/lib/billing/plan-label";
 import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireOperator } from "@/lib/auth/require-operator";
@@ -172,6 +174,7 @@ export default async function AltasPage({
               <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
                 <tr>
                   <th className="px-4 py-2.5 font-medium">{t("altas.col.espacio")}</th>
+                  <th className="px-4 py-2.5 font-medium">{t("altas.col.equipo")}</th>
                   <th className="px-4 py-2.5 font-medium">{t("altas.col.plan")}</th>
                   <th className="px-4 py-2.5 font-medium">{t("altas.col.numero")}</th>
                   <th className="px-4 py-2.5 font-medium">{t("altas.col.acciones")}</th>
@@ -183,7 +186,7 @@ export default async function AltasPage({
                 ))}
                 {panel.altas.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
                       {t("altas.empty")}
                     </td>
                   </tr>
@@ -198,6 +201,37 @@ export default async function AltasPage({
 }
 
 type Traducir = (clave: TranslationKey) => string;
+
+/** Los importes del catálogo salen como se tipean en el campo (punto decimal, sin miles): «1.100» se guardaría como 1,1. */
+const usd = (n: number) => `US$ ${n}`;
+
+/**
+ * Un campo con su rótulo y su ayuda siempre a la vista: el `title` repite la ayuda, pero la ayuda no depende de él
+ * (ni del hover). `aria-describedby` la ata al control para quien usa lector de pantalla.
+ */
+function Campo({
+  id,
+  etiqueta,
+  ayuda,
+  control,
+}: {
+  id: string;
+  etiqueta: string;
+  ayuda: string;
+  control: (propios: { id: string; title: string; "aria-describedby": string }) => ReactNode;
+}) {
+  return (
+    <div className="flex min-w-36 max-w-xs flex-1 flex-col gap-1">
+      <label htmlFor={id} className="text-xs font-medium text-slate-700 dark:text-slate-200">
+        {etiqueta}
+      </label>
+      {control({ id, title: ayuda, "aria-describedby": `${id}-ayuda` })}
+      <p id={`${id}-ayuda`} className="text-xs text-slate-500 dark:text-slate-400">
+        {ayuda}
+      </p>
+    </div>
+  );
+}
 
 function Resultado({ resultado, t }: { resultado: ResultadoDelPanel; t: Traducir }) {
   const bien = resultado === "ok";
@@ -342,12 +376,14 @@ function Waba({ waba, tenantId, locale, t }: { waba: WabaDeAlta; tenantId: strin
 }
 
 function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traducir }) {
-  const { numero } = fila;
+  const { numero, admin } = fila;
   const dominio = fila.contactEmail ? dominioDelMail(fila.contactEmail) : null;
   const estado = fila.estadoDeFacturacion;
   const enPrueba = estado === "trial";
   const operable = estado === "trial" || estado === "active";
   const repetido = fila.repetidoEn.length > 0;
+  // Un id por fila: las ayudas se atan a su campo con `aria-describedby`, y con varias filas en la página no pueden repetirse.
+  const idDelForm = `alta-${fila.tenantId}`;
 
   return (
     <tr className="align-top hover:bg-slate-50 dark:hover:bg-slate-800/40">
@@ -365,6 +401,18 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {t("altas.alta")} {formatDate(fila.creadoEn, locale, dia)}
           </p>
+        )}
+      </td>
+
+      <td className="px-4 py-3 text-xs text-slate-600 [overflow-wrap:anywhere] dark:text-slate-300">
+        <p className="tabular-nums">{t("altas.equipo.usuarios").replace("{n}", String(fila.usuariosActivos))}</p>
+        {admin ? (
+          <p>
+            {/* Con función: el nombre lo eligió el cliente y un `$&` o `$'` en un string se expande como patrón. */}
+            {t("altas.equipo.admin").replace("{quien}", () => [admin.nombre, admin.email].filter(Boolean).join(" · "))}
+          </p>
+        ) : (
+          <p className="text-amber-700 dark:text-amber-300">{t("altas.equipo.sinAdmin")}</p>
         )}
       </td>
 
@@ -476,30 +524,52 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
             <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{t("altas.conectar.titulo")}</p>
             <p className="text-xs text-slate-500">{t("altas.conectar.ayuda")}</p>
             <input type="hidden" name="numero_id" value={numero.id} />
-            <div className="flex flex-wrap gap-2">
-              <input
-                name="phone_number_id"
-                required
-                inputMode="numeric"
-                pattern={ID_DE_META.source}
-                placeholder={t("altas.numero.phoneNumberId")}
-                aria-label={t("altas.numero.phoneNumberId")}
-                className={CAMPO}
+            <div className="flex flex-wrap gap-3">
+              <Campo
+                id={`${idDelForm}-conectar-phone`}
+                etiqueta={t("altas.numero.phoneNumberId")}
+                ayuda={t("altas.conectar.ayudaPhoneNumberId")}
+                control={(propios) => (
+                  <input
+                    {...propios}
+                    name="phone_number_id"
+                    required
+                    inputMode="numeric"
+                    pattern={ID_DE_META.source}
+                    className={CAMPO}
+                  />
+                )}
               />
-              <input
-                name="waba_id"
-                required
-                inputMode="numeric"
-                pattern={ID_DE_META.source}
-                placeholder={t("altas.numero.waba")}
-                aria-label={t("altas.numero.waba")}
-                className={CAMPO}
+              <Campo
+                id={`${idDelForm}-conectar-waba`}
+                etiqueta={t("altas.numero.waba")}
+                ayuda={t("altas.conectar.ayudaWaba")}
+                control={(propios) => (
+                  <input
+                    {...propios}
+                    name="waba_id"
+                    required
+                    inputMode="numeric"
+                    pattern={ID_DE_META.source}
+                    className={CAMPO}
+                  />
+                )}
               />
             </div>
             <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
-              <input type="checkbox" name="prueba_de_control" required className="mt-0.5" />
+              <input
+                type="checkbox"
+                name="prueba_de_control"
+                required
+                title={t("altas.conectar.ayudaConfirmo")}
+                aria-describedby={`${idDelForm}-conectar-confirmo-ayuda`}
+                className="mt-0.5"
+              />
               <span>{t("altas.conectar.confirmo").replace("{correo}", fila.contactEmail ?? "—")}</span>
             </label>
+            <p id={`${idDelForm}-conectar-confirmo-ayuda`} className="text-xs text-slate-500 dark:text-slate-400">
+              {t("altas.conectar.ayudaConfirmo")}
+            </p>
             <button type="submit" className={BOTON}>
               {t("altas.conectar.boton")}
             </button>
@@ -529,19 +599,64 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
           <form action={activarElInquilino} className="mt-3 space-y-2">
             <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{t("altas.activar.titulo")}</p>
             <input type="hidden" name="tenant_id" value={fila.tenantId} />
-            <div className="flex flex-wrap gap-2">
-              <select name="plan" defaultValue="operativo" aria-label={t("altas.activar.plan")} className={CAMPO}>
-                {PLANES_COMERCIALES.map((plan) => (
-                  <option key={plan} value={plan}>
-                    {nombreDePlan(plan, plan, t)}
-                  </option>
-                ))}
-              </select>
-              <input name="cuota" inputMode="decimal" placeholder={t("altas.activar.cuota")} aria-label={t("altas.activar.cuota")} className={`${CAMPO} w-36`} />
-              <input name="incluidas" inputMode="numeric" placeholder={t("altas.activar.incluidas")} aria-label={t("altas.activar.incluidas")} className={`${CAMPO} w-36`} />
-              <input name="excedente" inputMode="decimal" placeholder={t("altas.activar.excedente")} aria-label={t("altas.activar.excedente")} className={`${CAMPO} w-36`} />
+            <div className="flex flex-wrap gap-3">
+              <Campo
+                id={`${idDelForm}-activar-plan`}
+                etiqueta={t("altas.activar.plan")}
+                ayuda={t("altas.activar.ayudaPlan")}
+                control={(propios) => (
+                  <select {...propios} name="plan" defaultValue="operativo" className={CAMPO}>
+                    {PLANES_COMERCIALES.map((plan) => (
+                      <option key={plan} value={plan}>
+                        {nombreDePlan(plan, plan, t)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              />
+              <Campo
+                id={`${idDelForm}-activar-cuota`}
+                etiqueta={t("altas.activar.cuota")}
+                ayuda={t("altas.activar.ayudaCuota")}
+                control={(propios) => <input {...propios} name="cuota" inputMode="decimal" className={CAMPO} />}
+              />
+              <Campo
+                id={`${idDelForm}-activar-incluidas`}
+                etiqueta={t("altas.activar.incluidas")}
+                ayuda={notaDePesos(t("altas.activar.ayudaIncluidas"), String)}
+                control={(propios) => <input {...propios} name="incluidas" inputMode="numeric" className={CAMPO} />}
+              />
+              <Campo
+                id={`${idDelForm}-activar-excedente`}
+                etiqueta={t("altas.activar.excedente")}
+                ayuda={t("altas.activar.ayudaExcedente")}
+                control={(propios) => <input {...propios} name="excedente" inputMode="decimal" className={CAMPO} />}
+              />
             </div>
-            <p className="text-xs text-slate-500">{t("altas.activar.ayuda")}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t("altas.activar.ayuda")}</p>
+            <details className="text-xs text-slate-600 dark:text-slate-300">
+              <summary className="cursor-pointer font-medium">{t("altas.activar.catalogo")}</summary>
+              <table className="mt-1 w-full text-left tabular-nums">
+                <thead className="text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.plan")}</th>
+                    <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.cuota")}</th>
+                    <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.incluidas")}</th>
+                    <th scope="col" className="py-1 font-medium">{t("altas.activar.excedente")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {PLANES_COMERCIALES.map((plan) => (
+                    <tr key={plan} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="py-1 pr-3">{nombreDePlan(plan, plan, t)}</td>
+                      <td className="py-1 pr-3">{usd(PLAN_CATALOG[plan].monthly_fee_usd)}</td>
+                      <td className="py-1 pr-3">{PLAN_CATALOG[plan].included_claims}</td>
+                      <td className="py-1">{usd(PLAN_CATALOG[plan].overage_price_usd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
             <button type="submit" className={BOTON}>
               {t("altas.activar.boton")}
             </button>

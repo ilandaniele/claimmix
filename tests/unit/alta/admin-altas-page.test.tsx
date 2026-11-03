@@ -53,6 +53,7 @@ vi.mock("@/app/(app)/admin/altas/actions", () => ({
 }));
 
 import AltasPage from "@/app/(app)/admin/altas/page";
+import { notaDePesos, PLAN_CATALOG, PLANES_COMERCIALES } from "@/lib/billing/plans";
 import { AppError } from "@/lib/errors";
 import { enUSServidor } from "@/lib/i18n/en-US.servidor";
 import { esARServidor } from "@/lib/i18n/es-AR.servidor";
@@ -100,6 +101,8 @@ const alta = (cambios: Partial<FilaDeAlta> = {}): FilaDeAlta => ({
   waba: waba(),
   numeroEnRevision: false,
   repetidoEn: [],
+  usuariosActivos: 3,
+  admin: { nombre: "Ana Pérez", email: "ana@example.com" },
   ...cambios,
 });
 
@@ -454,15 +457,15 @@ describe("activar un plan", () => {
   it("habla de unidades y de dólares en los tres campos", async () => {
     await pintar();
 
-    expect(screen.getByPlaceholderText("Unidades incluidas")).toBeTruthy();
-    expect(screen.getByPlaceholderText("Cuota mensual (US$)")).toBeTruthy();
-    expect(screen.getByPlaceholderText("Precio por unidad excedente (US$)")).toBeTruthy();
+    expect(screen.getByLabelText("Unidades incluidas")).toBeTruthy();
+    expect(screen.getByLabelText("Cuota mensual (US$)")).toBeTruthy();
+    expect(screen.getByLabelText("Precio por unidad excedente (US$)")).toBeTruthy();
   });
 
   it("en inglés también, y el plan inicial sale como Starter", async () => {
     await pintar(undefined, "en-US");
 
-    expect(screen.getByPlaceholderText("Included units")).toBeTruthy();
+    expect(screen.getByLabelText("Included units")).toBeTruthy();
     expect(screen.getByRole("option", { name: "Starter" })).toBeTruthy();
   });
 });
@@ -491,5 +494,282 @@ describe("en inglés", () => {
     expect(screen.getByText(`${en["altas.waba.puedeEnviar"]}: ${en["altas.waba.puedeEnviar.AVAILABLE"]}`)).toBeTruthy();
     expect(screen.getByText(`${en["altas.waba.legales"]}: ${en["altas.waba.legales.publicadas"]}`)).toBeTruthy();
     expect(screen.getByRole("button", { name: en["altas.legales.despublicar"] })).toBeTruthy();
+  });
+});
+
+describe("el equipo de cada espacio", () => {
+  it("la tabla tiene su columna «Equipo»", async () => {
+    await pintar();
+
+    expect(screen.getByRole("columnheader", { name: es["altas.col.equipo"] })).toBeTruthy();
+  });
+
+  it("dice cuántas cuentas activas tiene y quién administra, con nombre y correo", async () => {
+    await pintar();
+
+    expect(screen.getByText("Usuarios activos: 3")).toBeTruthy();
+    expect(screen.getByText("Administra: Ana Pérez · ana@example.com")).toBeTruthy();
+    expect(screen.queryByText(es["altas.equipo.sinAdmin"])).toBeNull();
+  });
+
+  it("un espacio sin nadie activo muestra 0 y que no tiene administrador, sin inventar uno", async () => {
+    h.listar.mockResolvedValue(panel(alta({ usuariosActivos: 0, admin: null })));
+
+    await pintar();
+
+    expect(screen.getByText("Usuarios activos: 0")).toBeTruthy();
+    expect(screen.getByText(es["altas.equipo.sinAdmin"])).toBeTruthy();
+    expect(screen.queryByText(/^Administra:/)).toBeNull();
+  });
+
+  it("un administrador sin nombre sale sólo con su correo, sin separador colgado", async () => {
+    h.listar.mockResolvedValue(panel(alta({ admin: { nombre: "", email: "ana@example.com" } })));
+
+    await pintar();
+
+    expect(screen.getByText("Administra: ana@example.com")).toBeTruthy();
+  });
+
+  it("un nombre con patrones de reemplazo ($&, $') sale tal cual, no expandido", async () => {
+    h.listar.mockResolvedValue(panel(alta({ admin: { nombre: "Ana $& $$", email: "ana$'@example.com" } })));
+
+    await pintar();
+
+    expect(screen.getByText("Administra: Ana $& $$ · ana$'@example.com")).toBeTruthy();
+  });
+
+  it("y en inglés", async () => {
+    await pintar(undefined, "en-US");
+
+    expect(screen.getByRole("columnheader", { name: en["altas.col.equipo"] })).toBeTruthy();
+    expect(screen.getByText("Active users: 3")).toBeTruthy();
+    expect(screen.getByText("Admin: Ana Pérez · ana@example.com")).toBeTruthy();
+  });
+
+  it("con la tabla vacía el mensaje ocupa las cinco columnas", async () => {
+    h.listar.mockResolvedValue(panel());
+
+    const { container } = await pintar();
+
+    expect(container.querySelector("td[colspan]")?.getAttribute("colspan")).toBe("5");
+  });
+});
+
+describe("el formulario de activar se explica solo", () => {
+  /** La app propia también trae su <details>: el del catálogo se busca por su resumen. */
+  const catalogo = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("details")).find(
+      (d) => d.querySelector("summary")?.textContent === es["altas.activar.catalogo"]
+    ) as HTMLDetailsElement;
+
+  /** La ayuda atada al campo por `aria-describedby`: tiene que existir en la página, no sólo en el hover. */
+  const ayudaDe = (campo: HTMLElement) => {
+    const id = campo.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    const ayuda = document.getElementById(id as string);
+    expect(ayuda).not.toBeNull();
+    return (ayuda as HTMLElement).textContent;
+  };
+
+  it.each([
+    ["altas.activar.plan", "altas.activar.ayudaPlan"],
+    ["altas.activar.cuota", "altas.activar.ayudaCuota"],
+    ["altas.activar.excedente", "altas.activar.ayudaExcedente"],
+  ] as const)("el campo «%s» muestra su ayuda, atada con aria-describedby y repetida en el title", async (campo, ayuda) => {
+    await pintar();
+
+    const control = screen.getByLabelText(es[campo]);
+    expect(ayudaDe(control)).toBe(es[ayuda]);
+    expect(control.getAttribute("title")).toBe(es[ayuda]);
+    expect(screen.getByText(es[ayuda])).toBeTruthy();
+  });
+
+  it("las unidades incluidas explican el peso de cada canal con las constantes que se aplican de verdad", async () => {
+    await pintar();
+
+    const control = screen.getByLabelText(es["altas.activar.incluidas"]);
+    const ayuda = ayudaDe(control) as string;
+    expect(ayuda).toBe(notaDePesos(es["altas.activar.ayudaIncluidas"], String));
+    expect(ayuda).toContain("1 por WhatsApp");
+    expect(ayuda).toContain("0.8 por WhatsApp de su WABA propia");
+    expect(ayuda).toContain("0.5 por mail");
+    expect(ayuda).not.toMatch(/[{}]/);
+    expect(control.getAttribute("title")).toBe(ayuda);
+  });
+
+  it("los pesos de la ayuda salen con punto: es lo que el campo acepta, no la coma de la factura", async () => {
+    await pintar();
+
+    expect(ayudaDe(screen.getByLabelText(es["altas.activar.incluidas"]))).not.toMatch(/\d,\d/);
+  });
+
+  it("en inglés la ayuda y los pesos salen en inglés", async () => {
+    await pintar(undefined, "en-US");
+
+    const ayuda = ayudaDe(screen.getByLabelText(en["altas.activar.incluidas"]));
+    expect(ayuda).toBe(notaDePesos(en["altas.activar.ayudaIncluidas"], String));
+    expect(ayuda).toContain("0.8 by WhatsApp on its own WABA");
+    expect(ayudaDe(screen.getByLabelText(en["altas.activar.cuota"]))).toBe(en["altas.activar.ayudaCuota"]);
+  });
+
+  it.each([
+    ["es-AR", es, /Vacío = .* 0 = sin cuota/, /Vacío = .* 0 = no se cobra/, /Vacío = .* 0 = ninguna/, /catálogo/],
+    ["en-US", en, /Empty = .* 0 = no fee/, /Empty = .* 0 = not charged/, /Empty = .* 0 = none/, /catalog/],
+  ] as const)(
+    "en %s la ayuda distingue vacío (el valor del plan) de 0 y dice de dónde salen los valores del plan",
+    async (locale, textos, cuota, excedente, incluidas, catalogoDelPlan) => {
+      await pintar(undefined, locale);
+
+      const ayuda = (clave: keyof typeof es) => ayudaDe(screen.getByLabelText(textos[clave]));
+      expect(ayuda("altas.activar.cuota")).toMatch(cuota);
+      expect(ayuda("altas.activar.excedente")).toMatch(excedente);
+      expect(ayuda("altas.activar.incluidas")).toMatch(incluidas);
+      expect(ayuda("altas.activar.plan")).toMatch(catalogoDelPlan);
+      expect(textos["altas.activar.ayuda"]).toMatch(/ 0 /);
+    }
+  );
+
+  it("la ayuda general está en frases cortas y avisa lo del punto decimal y el piloto guiado", async () => {
+    await pintar();
+
+    const ayuda = screen.getByText(es["altas.activar.ayuda"]);
+    expect(ayuda).toBeTruthy();
+    expect(es["altas.activar.ayuda"]).toContain("punto");
+    expect(es["altas.activar.ayuda"]).toContain("Piloto guiado");
+    for (const frase of es["altas.activar.ayuda"].split(". ")) expect(frase.split(" ").length).toBeLessThanOrEqual(20);
+  });
+
+  it("el catálogo es un <details> cerrado con un renglón por plan comercial y los importes como se tipean", async () => {
+    const { container } = await pintar();
+
+    const detalle = catalogo(container);
+    expect(detalle.open).toBe(false);
+
+    const filas = Array.from(detalle.querySelectorAll("table > tbody > tr")).map((tr) =>
+      Array.from(tr.querySelectorAll("td")).map((td) => td.textContent)
+    );
+    expect(filas.map((f) => f.slice(1))).toEqual(
+      PLANES_COMERCIALES.map((plan) => [
+        `US$ ${PLAN_CATALOG[plan].monthly_fee_usd}`,
+        String(PLAN_CATALOG[plan].included_claims),
+        `US$ ${PLAN_CATALOG[plan].overage_price_usd}`,
+      ])
+    );
+    expect(filas.map((f) => f[0]).every(Boolean)).toBe(true);
+    for (const [, cuota, , excedente] of filas) {
+      // «US$ 1100» y «US$ 1.5»: sin separador de miles ni coma, porque el campo guardaría «1.100» como 1,1 y rechazaría «1,5».
+      expect(cuota).toMatch(/^US\$ \d+(\.\d+)?$/);
+      expect(excedente).toMatch(/^US\$ \d+(\.\d+)?$/);
+    }
+  });
+
+  it("el catálogo no ofrece «piloto»", async () => {
+    const { container } = await pintar();
+
+    expect(catalogo(container).querySelectorAll("table > tbody > tr")).toHaveLength(PLANES_COMERCIALES.length);
+    expect(catalogo(container).textContent).not.toMatch(/piloto/i);
+  });
+
+  it("con dos filas los ids de las ayudas no se repiten", async () => {
+    h.listar.mockResolvedValue(
+      panel(alta(), alta({ tenantId: "33333333-3333-4333-8333-333333333333", nombre: "Otra Fake" }))
+    );
+
+    const { container } = await pintar();
+
+    const ids = Array.from(container.querySelectorAll("[id]")).map((e) => e.id);
+    expect(ids.length).toBeGreaterThan(8);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("no cambia lo que el formulario manda: mismos nombres de campo y el plan sigue en operativo", async () => {
+    const { container } = await pintar();
+
+    const form = container.querySelector("form input[name=cuota]")?.closest("form") as HTMLFormElement;
+    expect(Array.from(form.elements).map((e) => (e as HTMLInputElement).name).filter(Boolean)).toEqual([
+      "tenant_id",
+      "plan",
+      "cuota",
+      "incluidas",
+      "excedente",
+    ]);
+    expect((screen.getByLabelText(es["altas.activar.plan"]) as HTMLSelectElement).value).toBe("operativo");
+  });
+});
+
+describe("conectar el número se explica solo", () => {
+  const pedido = () =>
+    alta({
+      numero: { id: NUMERO, e164: "+5491100000000", estado: "pedido", phoneNumberId: null, wabaId: null },
+      waba: null,
+    });
+
+  it("cada campo trae su ayuda a la vista, atada con aria-describedby", async () => {
+    h.listar.mockResolvedValue(panel(pedido()));
+
+    await pintar();
+
+    for (const [campo, ayuda] of [
+      [screen.getByLabelText(es["altas.numero.phoneNumberId"]), es["altas.conectar.ayudaPhoneNumberId"]],
+      [screen.getByLabelText(es["altas.numero.waba"]), es["altas.conectar.ayudaWaba"]],
+    ] as const) {
+      const id = campo.getAttribute("aria-describedby") as string;
+      expect(document.getElementById(id)?.textContent).toBe(ayuda);
+      expect(campo.getAttribute("title")).toBe(ayuda);
+    }
+  });
+
+  it("la casilla de confirmación explica de dónde sale el código", async () => {
+    h.listar.mockResolvedValue(panel(pedido()));
+
+    await pintar();
+
+    const casilla = screen.getByRole("checkbox");
+    expect(document.getElementById(casilla.getAttribute("aria-describedby") as string)?.textContent).toBe(
+      es["altas.conectar.ayudaConfirmo"]
+    );
+  });
+
+  it("sigue pidiendo sólo dígitos y los dos ids", async () => {
+    h.listar.mockResolvedValue(panel(pedido()));
+
+    await pintar();
+
+    for (const nombre of [es["altas.numero.phoneNumberId"], es["altas.numero.waba"]]) {
+      const campo = screen.getByLabelText(nombre) as HTMLInputElement;
+      expect(campo.required).toBe(true);
+      expect(campo.getAttribute("pattern")).toBeTruthy();
+    }
+  });
+
+  it("en inglés también", async () => {
+    h.listar.mockResolvedValue(panel(pedido()));
+
+    await pintar(undefined, "en-US");
+
+    const campo = screen.getByLabelText(en["altas.numero.phoneNumberId"]);
+    expect(document.getElementById(campo.getAttribute("aria-describedby") as string)?.textContent).toBe(
+      en["altas.conectar.ayudaPhoneNumberId"]
+    );
+  });
+});
+
+describe("los textos nuevos del panel", () => {
+  const claves = Object.keys(es).filter((k) =>
+    /^altas\.(equipo\.|activar\.(ayuda|catalogo)|conectar\.ayuda)/.test(k)
+  ) as (keyof typeof es)[];
+
+  it("están todos, en los dos idiomas", () => {
+    expect(claves.length).toBeGreaterThanOrEqual(13);
+    for (const k of claves) expect(en[k as keyof typeof en]).toBeTruthy();
+  });
+
+  it("no dicen token, secreto, slug ni ruta_webhook, y no traen ningún id de Meta", () => {
+    for (const k of claves) {
+      for (const texto of [es[k], en[k as keyof typeof en]]) {
+        expect(texto, k).not.toMatch(/token|secreto|secret|slug|ruta_webhook/i);
+        expect(texto, k).not.toMatch(/\d{9,}/);
+      }
+    }
   });
 });

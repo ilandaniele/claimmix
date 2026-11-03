@@ -103,6 +103,18 @@ export const PESO_EN_DECIMAS: Record<Cubeta, number> = {
   web: 10,
 };
 
+/**
+ * Un texto con un marcador por cubeta ({whatsapp}, {email}…) donde va el peso que se aplica de verdad.
+ * Por omisión los pesos salen en es-AR (coma), como los montos de facturación; quien muestra campos que se
+ * tipean con punto decimal pasa `String`.
+ */
+export function notaDePesos(texto: string, formato: (n: number) => string = (n) => n.toLocaleString("es-AR")): string {
+  return (Object.keys(PESO_EN_DECIMAS) as Cubeta[]).reduce(
+    (nota, cubeta) => nota.replace(`{${cubeta}}`, formato(PESO_EN_DECIMAS[cubeta] / 10)),
+    texto
+  );
+}
+
 /** Denuncias y unidades de un mes a partir de las denuncias de cada cubeta. */
 export function consumoDelMes(cuentas: Partial<Record<Cubeta, number>>): { claims: number; units: number } {
   let claims = 0;

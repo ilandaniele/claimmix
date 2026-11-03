@@ -1291,6 +1291,7 @@ console.log("\n▸ Lo de control va por enControl");
     "src/server/sso/panel.ts",
     "src/app/api/admin/sso/route.ts",
     "src/app/api/admin/users/[id]/sessions/route.ts",
+    "src/app/api/admin/users/[id]/cuenta/route.ts",
   ];
   const VUELVEN = /\benTenant(?:Varias|DeUsuarioVarias)?\b/;
   const faltan = SOLO_DE_CONTROL.filter((f) => !existsSync(f));

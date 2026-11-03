@@ -221,8 +221,23 @@ describe("aceptarInvitacion", () => {
     await aceptarInvitacion(datos(), quien);
 
     const { params } = compilar(h.ejecutadas[1]);
-    expect(JSON.stringify(params)).not.toContain("lucia@example.com");
+    // La dirección viaja una vez, como entrada de la huella que la base calcula para comparar: no se guarda.
+    expect(params.filter((p) => typeof p === "string" && p.includes("lucia@example.com"))).toEqual(["lucia@example.com"]);
     expect(params).toContain(JSON.stringify({ rol: "analyst" }));
+  });
+
+  // Borrar a la persona deja un asiento con la huella de su dirección: el enlace emitido antes
+  // no la vuelve a crear con el rol de entonces. Uno emitido después sí vale.
+  it("no crea el perfil si se borró a esa dirección del espacio después de emitir el enlace", async () => {
+    const emitida = 1_800_000_000_000;
+    await aceptarInvitacion(datos({ exp: emitida + DURACION_DE_LA_INVITACION_MS }), quien);
+
+    const { sql, params } = compilar(h.ejecutadas[1]);
+    expect(sql).toMatch(/and not exists \(\s*select 1 from public\.audit_log b[\s\S]*?b\.created_at > to_timestamp\(\$\d+::double precision\)\s*\)\s*on conflict/);
+    expect(sql).toMatch(/b\.payload->>'huella' = encode\(sha256\(convert_to\(\$\d+::text \|\| ':' \|\| lower\(btrim\(\$\d+::text\)\), 'utf8'\)\), 'hex'\)/);
+    expect(params).toContain("auth.user_deleted");
+    // Instante de emisión = vencimiento sellado menos las 72 horas, en segundos.
+    expect(params).toContain(emitida / 1000);
   });
 
   it("si la base falla, tira: no se confunde con una invitación rechazada", async () => {
@@ -259,6 +274,18 @@ describe("resumenDeInvitacion", () => {
 
     expect(await resumenDeInvitacion(datos())).toBeNull();
     expect(h.exigeSso).not.toHaveBeenCalled();
+  });
+
+  it("no devuelve nada si se borró a esa dirección del espacio después de emitir el enlace", async () => {
+    const emitida = 1_800_000_000_000;
+    h.filas = [fila];
+    await resumenDeInvitacion(datos({ exp: emitida + DURACION_DE_LA_INVITACION_MS }));
+
+    const { sql, params } = new PgDialect().sqlToQuery(h.ejecutadas[1] as never);
+    expect(sql).toMatch(/where x\.id = \$\d+::uuid and not exists \(\s*select 1 from public\.audit_log b/);
+    expect(sql).toMatch(/b\.payload->>'huella' = encode\(sha256\(/);
+    expect(params).toContain("auth.user_deleted");
+    expect(params).toContain(emitida / 1000);
   });
 
   it("es null si el espacio no existe o quien invitó ya no está", async () => {

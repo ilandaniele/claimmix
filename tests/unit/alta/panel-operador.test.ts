@@ -1872,6 +1872,91 @@ describe("listarAltas", () => {
   });
 });
 
+describe("listarAltas: el equipo de cada espacio", () => {
+  const base = { creadas_24h: 1, tenant_id: CLIENTE, nombre: "Seguros Fake", plan: "operativo", billing_status: "active", numero_id: null };
+
+  it("cuenta las cuentas activas y busca al administrador en la MISMA consulta, sobre el espejo de control", async () => {
+    h.execute.mockResolvedValue(filas({ ...base, usuarios_activos: 4, admin_nombre: "Ana Pérez", admin_email: "ana@example.com" }));
+
+    const panel = await listarAltas();
+
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    const { sql: texto } = consulta();
+    expect(texto).toContain("count(*)::int as usuarios_activos");
+    expect(texto).toContain("from public.users u");
+    expect(texto).toContain('left join public."user" au on au.id = u.id');
+    expect(texto).toContain("u.tenant_id = t.id and u.dado_de_baja_en is null");
+    expect(panel.altas[0]).toMatchObject({ usuariosActivos: 4, admin: { nombre: "Ana Pérez", email: "ana@example.com" } });
+  });
+
+  it("el administrador es el dueño y, si no hay, el admin más antiguo: nunca un analista", async () => {
+    h.execute.mockResolvedValue(filas(base));
+
+    await listarAltas();
+
+    const { sql: texto } = consulta();
+    expect(texto).toContain("u.role in ('owner', 'admin')");
+    expect(texto).toContain("order by (u.role = 'owner') desc, u.created_at");
+    expect(texto).not.toMatch(/u\.role in \([^)]*'analyst'/);
+  });
+
+  it("los datos de los usuarios no se pegan al SQL ni se piden de más: sólo cuenta, nombre y correo", async () => {
+    h.execute.mockResolvedValue(filas(base));
+
+    await listarAltas();
+
+    const { sql: texto } = consulta();
+    expect(texto).not.toMatch(/au\.(password|token|image)/i);
+    expect(texto).not.toMatch(/public\."account"|public\.session/);
+  });
+
+  it("también en la consulta de respaldo sin whatsapp_wabas: el equipo no depende de la 0051", async () => {
+    h.execute
+      .mockRejectedValueOnce(errorPg("42P01"))
+      .mockResolvedValueOnce(filas({ ...base, usuarios_activos: 2, admin_nombre: "Ana Pérez", admin_email: "ana@example.com" }));
+
+    const panel = await listarAltas();
+
+    expect(h.execute).toHaveBeenCalledTimes(2);
+    for (const n of [0, 1]) {
+      expect(consulta(n).sql).toContain("count(*)::int as usuarios_activos");
+      expect(consulta(n).sql).toContain('left join public."user" au on au.id = u.id');
+    }
+    expect(consulta(1).sql).not.toContain("whatsapp_wabas");
+    expect(panel.altas[0]).toMatchObject({ usuariosActivos: 2, admin: { nombre: "Ana Pérez", email: "ana@example.com" } });
+  });
+
+  it("sin administrador activo la fila trae admin null, no un administrador inventado", async () => {
+    h.execute.mockResolvedValue(filas({ ...base, usuarios_activos: 1, admin_nombre: null, admin_email: null }));
+
+    expect((await listarAltas()).altas[0]).toMatchObject({ usuariosActivos: 1, admin: null });
+  });
+
+  it.each([undefined, null, "", "x"])("un conteo ausente o raro (%s) sale como 0", async (crudo) => {
+    h.execute.mockResolvedValue(filas({ ...base, usuarios_activos: crudo }));
+
+    expect((await listarAltas()).altas[0].usuariosActivos).toBe(0);
+  });
+
+  it("el conteo de la base viene a veces como texto: se lee como número", async () => {
+    h.execute.mockResolvedValue(filas({ ...base, usuarios_activos: "7" }));
+
+    expect((await listarAltas()).altas[0].usuariosActivos).toBe(7);
+  });
+
+  it("un administrador sin nombre (el espejo lo trae vacío) queda sólo con su correo", async () => {
+    h.execute.mockResolvedValue(filas({ ...base, usuarios_activos: 1, admin_nombre: "", admin_email: "ana@example.com" }));
+
+    expect((await listarAltas()).altas[0].admin).toEqual({ nombre: "", email: "ana@example.com" });
+  });
+
+  it("un administrador sin correo (la cuenta de better-auth no está) queda sólo con su nombre", async () => {
+    h.execute.mockResolvedValue(filas({ ...base, usuarios_activos: 1, admin_nombre: "Ana Pérez", admin_email: null }));
+
+    expect((await listarAltas()).altas[0].admin).toEqual({ nombre: "Ana Pérez", email: null });
+  });
+});
+
 // ── Lo que dice la pantalla ─────────────────────────────────────────────────
 
 describe("resultadoDelPanel", () => {

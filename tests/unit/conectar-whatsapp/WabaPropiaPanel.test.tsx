@@ -396,7 +396,7 @@ describe("del inicio al botón de Meta", () => {
   it.each([
     ["el servidor dice cupo", ok("cupo"), /no tenemos lugar para conectar más cuentas/],
     ["el servidor dice apagado", ok("apagado"), /no está disponible por ahora/],
-    ["el servidor dice esperar", ok("esperar"), /demasiados intentos/],
+    ["el servidor dice esperar", ok("esperar"), /esperar antes de otro intento/],
     ["falta el inicio", ok("listo", { appId: "a", configId: "c", version: "v" }), /Meta no pudo terminar la conexión/],
     ["falta el config_id", ok("listo", { inicio: "i", appId: "a", version: "v" }), /Meta no pudo terminar la conexión/],
   ])("%s: se queda en la lista con el aviso, sin cargar el SDK", async (_caso, respuesta, texto) => {

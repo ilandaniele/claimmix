@@ -6,6 +6,7 @@
  *   - Create user dialog (POST /api/admin/users)
  *   - Role badge display
  *   - Dar de baja (DELETE /api/admin/users/:id) y volver a habilitar (PATCH)
+ *   - Eliminar a quien ya está de baja (DELETE /api/admin/users/:id/cuenta)
  *   - Toast notifications
  */
 
@@ -34,13 +35,25 @@ type UserRole = "owner" | "admin" | "specialist" | "analyst" | "viewer";
 /** El `t` de los ayudantes que viven fuera del componente y lo reciben por parámetro. */
 type Translate = ReturnType<typeof useT>;
 
+/** Los textos de «Eliminar» viajan por prop desde el servidor: en el diccionario del cliente no entran (pesa el bundle). */
+export interface TextosEliminar {
+  boton: string;
+  /** Lleva `{nombre}`. */
+  confirmar: string;
+  hecho: string;
+  error: string;
+}
+
 interface Props {
   initialUsers: UserRow[];
   currentUserId: string;
   currentUserRole: string;
   emailAyuda: string;
+  textosEliminar: TextosEliminar;
   /** Cuántas filas deja armar el diálogo de una vez: el tope de invitaciones del día. */
   topeDelLote: number;
+  /** Sólo en el espacio de la casa y para quien opera: qué cuentas son de la operación y con qué rótulo se marcan. */
+  operacion?: { rotulo: string; ids: string[] };
 }
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -432,7 +445,9 @@ export function AdminUsersClient({
   currentUserId,
   currentUserRole,
   emailAyuda,
+  textosEliminar,
   topeDelLote,
+  operacion,
 }: Props) {
   const t = useT();
   const { locale } = useLocale();
@@ -444,6 +459,7 @@ export function AdminUsersClient({
   const [changingUserId, setChangingUserId] = useState<string | null>(null);
   const [closingSessionsId, setClosingSessionsId] = useState<string | null>(null);
   const [bajaId, setBajaId] = useState<string | null>(null);
+  const [eliminandoId, setEliminandoId] = useState<string | null>(null);
 
   // Fetch full user list (with emails) from the API route on mount
   const refreshUsers = useCallback(async () => {
@@ -569,6 +585,27 @@ export function AdminUsersClient({
     }
   }
 
+  async function handleEliminar(user: UserRow) {
+    if (!window.confirm(textosEliminar.confirmar.replace("{nombre}", () => user.full_name))) return;
+    setError(null);
+    setEliminandoId(user.id);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/cuenta`, { method: "DELETE" });
+      // 404: ya no estaba. Sin refrescar la lista: el espejo puede seguir devolviendo la fila un rato.
+      if (!res.ok && res.status !== 404) {
+        setError(await readApiError(res, textosEliminar.error));
+        return;
+      }
+      setUsers((prev) => prev.filter((item) => item.id !== user.id));
+      setToast(textosEliminar.hecho);
+      setTimeout(() => setToast(null), 4000);
+    } catch {
+      setError(textosEliminar.error);
+    } finally {
+      setEliminandoId(null);
+    }
+  }
+
   return (
     <>
       {error && (
@@ -652,6 +689,11 @@ export function AdminUsersClient({
                   >
                     <td className="px-5 py-3 font-medium text-slate-800">
                       {user.full_name}
+                      {!deBaja && operacion?.ids.includes(user.id) && (
+                        <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                          {operacion.rotulo}
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-slate-600">
                       {user.email || "—"}
@@ -701,12 +743,23 @@ export function AdminUsersClient({
                           <button
                             type="button"
                             onClick={() => void handleBaja(user, !deBaja)}
-                            disabled={bajaId === user.id}
+                            disabled={bajaId === user.id || eliminandoId === user.id}
                             className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
                           >
                             {bajaId === user.id
                               ? t(deBaja ? "usuarios.habilitando" : "usuarios.dandoDeBaja")
                               : t(deBaja ? "usuarios.habilitar" : "usuarios.darDeBaja")}
+                          </button>
+                        )}
+                        {canChangeRole && deBaja && (
+                          <button
+                            type="button"
+                            onClick={() => void handleEliminar(user)}
+                            disabled={bajaId === user.id || eliminandoId === user.id}
+                            aria-label={`${textosEliminar.boton} ${user.full_name}`}
+                            className="rounded-md border border-red-200 px-2.5 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50"
+                          >
+                            {textosEliminar.boton}
                           </button>
                         )}
                       </div>

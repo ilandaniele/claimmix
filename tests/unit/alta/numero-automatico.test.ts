@@ -223,13 +223,13 @@ afterEach(() => {
 });
 
 describe("topesDelNumero", () => {
-  it("sin variables: 2 números en la WABA, 2 nuevos por día, 3 códigos por espacio, 5 por red, 10 en total y 5 verificaciones por hora", () => {
+  it("sin variables: 2 números en la WABA, 2 nuevos por día, 10 códigos por espacio, 10 por red, 30 en total y 5 verificaciones por hora", () => {
     expect(topesDelNumero()).toEqual({
       numerosWaba: 2,
       numerosDia: 2,
-      codigosInquilino: 3,
-      codigosIp: 5,
-      codigosDia: 10,
+      codigosInquilino: 10,
+      codigosIp: 10,
+      codigosDia: 30,
       verificacionesHora: 5,
     });
   });
@@ -245,8 +245,8 @@ describe("topesDelNumero", () => {
       numerosWaba: 20,
       numerosDia: 0,
       codigosInquilino: 1,
-      codigosIp: 5,
-      codigosDia: 10,
+      codigosIp: 10,
+      codigosDia: 30,
       verificacionesHora: 20,
     });
   });
@@ -275,9 +275,9 @@ describe("pedirCodigo: antes de tocar nada", () => {
 
     const llamadas = h.rateLimit.mock.calls as Array<[string, { limit: number; windowMs: number; fallaCerrada: boolean }]>;
     expect(llamadas.map(([clave, c]) => [clave, c.limit, c.windowMs])).toEqual([
-      [`wa:codigo:${TENANT}`, 3, DIA_MS],
-      [`wa:codigo-ip:${IP}`, 5, DIA_MS],
-      ["wa:codigos", 10, DIA_MS],
+      [`wa:codigo:${TENANT}`, 10, DIA_MS],
+      [`wa:codigo-ip:${IP}`, 10, DIA_MS],
+      ["wa:codigos", 30, DIA_MS],
       [`wa:alta-numero:${TENANT}`, 1, HORA_MS],
       ["wa:altas-numero", 2, DIA_MS],
     ]);
@@ -428,6 +428,16 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
     expect(valoresDe(h.ejecutadas[0])).toEqual([TENANT, USUARIO, "agregado", ID, WABA, PLATAFORMA, IP]);
     expect(h.pedirAMeta).toHaveBeenCalledWith(CRED, ID, "SMS", "es-AR");
     // Ya se contó el código: no se devuelve ningún cupo.
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it("agrega y guarda, y request_code contesta «esperar»: ningún cupo vuelve, ni los del código ni los del alta", async () => {
+    h.pedirAMeta.mockResolvedValue(falla("esperar", 136024));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
+
+    expect(h.agregar).toHaveBeenCalledTimes(1);
+    expect(h.ejecutadas).toHaveLength(1);
     expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
@@ -754,14 +764,32 @@ describe("pedirCodigo: fila con el número ya agregado", () => {
     expect(clavesLiberadas()).toHaveLength(3);
   });
 
-  it("request_code «esperar»: esperar, y los cupos de código se quedan (el pedido salió)", async () => {
-    h.pedirAMeta.mockResolvedValue(falla("esperar", 130429));
+  it.each([[130429], [136024]])(
+    "request_code «esperar» (%i): esperar, sin aviso al operador, y los cupos de código se quedan (cada reintento es otro pedido a Graph)",
+    async (codigo) => {
+      h.pedirAMeta.mockResolvedValue(falla("esperar", codigo));
 
-    expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
+      expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
 
-    expect(h.liberarCupo).not.toHaveBeenCalled();
-    expect(h.aviso).not.toHaveBeenCalled();
-  });
+      expect(h.liberarCupo).not.toHaveBeenCalled();
+      expect(h.aviso).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["rechazo", falla("rechazo", 100)],
+    ["rechazo sin pedido (SIN_PEDIDO)", falla("rechazo")],
+  ] as const)(
+    "request_code «%s»: revision y aviso rechazo, y los cupos de código se quedan",
+    async (_cual, respuesta) => {
+      h.pedirAMeta.mockResolvedValue(respuesta);
+
+      expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
+
+      expect(h.aviso).toHaveBeenCalledWith("rechazo", TENANT);
+      expect(h.liberarCupo).not.toHaveBeenCalled();
+    }
+  );
 
   it("request_code «meta» (timeout o respuesta rara): meta, y los cupos de código NO vuelven: Meta pudo haber mandado el SMS", async () => {
     h.pedirAMeta.mockResolvedValue(falla("meta"));
@@ -770,15 +798,6 @@ describe("pedirCodigo: fila con el número ya agregado", () => {
 
     expect(h.liberarCupo).not.toHaveBeenCalled();
     expect(h.aviso).not.toHaveBeenCalled();
-  });
-
-  it("request_code rechazado: revision y aviso rechazo, y los cupos se quedan", async () => {
-    h.pedirAMeta.mockResolvedValue(falla("rechazo", 100));
-
-    expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
-
-    expect(h.aviso).toHaveBeenCalledWith("rechazo", TENANT);
-    expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
   it("si devolver un cupo falla, el resultado no cambia", async () => {
@@ -802,6 +821,7 @@ describe("pedirCodigo: nunca tira", () => {
 
     expect(h.error).toHaveBeenCalledWith({ error: "Error" }, "alta.numero_automatico_fallo");
     expect(JSON.stringify(h.error.mock.calls)).not.toContain(TOKEN);
+    expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 });
 

@@ -321,9 +321,13 @@ async function sumarALaWaba(
  *
  * Los cupos de código se devuelven sólo si Graph no se tocó: una compuerta cortó
  * antes de cualquier pedido. Desde el recorrido de la WABA (un GET que también
- * cuesta contra los topes de Meta) se quedan gastados, y los de `request_code`,
- * aunque haya dado timeout o una respuesta rara: Meta puede haber mandado el SMS
- * o hecho la llamada.
+ * cuesta contra los topes de Meta) se quedan gastados, y los de `request_code`
+ * también, sea cual sea la respuesta. Con un timeout o una respuesta rara, porque
+ * Meta puede haber mandado el SMS o hecho la llamada. Con «esperar» (136024 si se
+ * pide por llamada justo después del SMS) o un rechazo, porque el reintento lo
+ * provoca la persona y cada uno es otro pedido a Graph: devolverlos dejaría a un
+ * espacio golpeando sin más freno que el global de todos. Para repetir están los
+ * diez por día.
  */
 export async function pedirCodigo(quien: QuienPide, metodo: MetodoDeCodigo): Promise<ResultadoDelNumero> {
   if (!numeroAutomatico()) return "revision";

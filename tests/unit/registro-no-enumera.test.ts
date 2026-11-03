@@ -7,10 +7,10 @@
  * en un producto B2B lo que revela es el padrón de empleados.
  *
  * TODOS los finales de `signUp` terminan en el mismo lugar y sin devolver nada
- * (/login?aviso=revisa_tu_correo): la dirección ya tenía cuenta, es nueva, no
- * está habilitada, es de operación, su dominio exige SSO, el mail no salió o la
- * base se cayó. Lo que cambia —el mail que le llega a su dueña— no se ve desde
- * afuera.
+ * (/registro?enviado=1, la pantalla «Revisá tu correo»): la dirección ya tenía
+ * cuenta, es nueva, no está habilitada, es de operación, su dominio exige SSO, el
+ * desafío de Turnstile no pasó, el mail no salió o la base se cayó. Lo que cambia
+ * —el mail que le llega a su dueña— no se ve desde afuera.
  *
  * Y tampoco por el tiempo: la base, la lista y el mail corren en `after`, con la
  * respuesta ya enviada, así que una dirección habilitada no tarda más que una
@@ -82,7 +82,7 @@ vi.mock("@/lib/rate-limit/index", async (importOriginal) => ({
 vi.mock("@/server/notify/remitente-sistema", () => ({ enviarCorreoDelSistema: h.enviar }));
 vi.mock("@/server/sso/usuarios", () => ({ dominioExigeSsoEnAlgunInquilino: h.dominioExigeSso }));
 
-const AVISO = "/login?aviso=revisa_tu_correo";
+const AVISO = "/registro?enviado=1";
 const LIBRE = { allowed: true, remaining: 2, resetAt: 0, retryAfterSeconds: 0 };
 
 const BUENOS = {
@@ -140,6 +140,8 @@ afterEach(() => {
   delete process.env.BETTER_AUTH_SECRET;
   delete process.env.NEXT_PUBLIC_SITE_URL;
   delete process.env.ALTA_AUTOMATICA;
+  delete process.env.TURNSTILE_SITE_KEY;
+  delete process.env.TURNSTILE_SECRET_KEY;
 });
 
 /*
@@ -155,6 +157,10 @@ const FINALES: Array<[string, () => void, Record<string, string>?]> = [
   }],
   ["una dirección de operación", () => {}, { ...BUENOS, email: "ops@example.com" }],
   ["un dominio que exige SSO", () => h.dominioExigeSso.mockResolvedValue(true)],
+  ["un desafío de Turnstile no pasado", () => {
+    process.env.TURNSTILE_SITE_KEY = "test-turnstile-site-key";
+    process.env.TURNSTILE_SECRET_KEY = "test-turnstile-secret-key";
+  }],
   ["sin remitente del sistema", () => h.enviar.mockResolvedValue({ enviado: false, motivo: "sin_remitente" })],
   ["sin cupo de mails", () => h.enviar.mockResolvedValue({ enviado: false, motivo: "sin_cupo" })],
   ["un mail que no salió", () => h.enviar.mockResolvedValue({ enviado: false, motivo: "no_salio" })],
@@ -162,7 +168,7 @@ const FINALES: Array<[string, () => void, Record<string, string>?]> = [
 ];
 
 describe("signUp no distingue una dirección que ya existe", () => {
-  it.each(FINALES)("%s va al login con el aviso neutro, sin devolver nada", async (_caso, preparar, campos) => {
+  it.each(FINALES)("%s va a la pantalla «Revisá tu correo», sin devolver nada", async (_caso, preparar, campos) => {
     preparar();
 
     const r = await darDeAlta(campos);
@@ -180,6 +186,8 @@ describe("signUp no distingue una dirección que ya existe", () => {
       h.enviar.mockResolvedValue({ enviado: true });
       process.env.ALTA_AUTOMATICA = "1";
       delete process.env.SIGNUP_ALLOWED_EMAILS;
+      delete process.env.TURNSTILE_SITE_KEY;
+      delete process.env.TURNSTILE_SECRET_KEY;
       preparar();
 
       await darDeAlta(campos);

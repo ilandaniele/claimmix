@@ -364,3 +364,81 @@ describe("/registro: el idioma", () => {
     expect(screen.queryByText(/Continuar con Google/)).toBeNull();
   });
 });
+
+describe("/registro?enviado: «Revisá tu correo»", () => {
+  const pintarEnviado = async (enviado: string | string[] = "1") =>
+    render(await RegistroPage({ searchParams: Promise.resolve({ enviado }) }));
+
+  it("dice «Revisá tu correo» y que el enlace vence en 60 minutos, sin formulario ni Turnstile", async () => {
+    conRemitente();
+    conClaves();
+    const { container } = await pintarEnviado();
+
+    expect(screen.getByRole("heading", { level: 2, name: "Revisá tu correo" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Si la dirección puede crear una cuenta, te llega un enlace para elegir la contraseña (vence en 60 minutos). Si ya tenías cuenta, te llega cómo entrar."
+    );
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+    expect(container.querySelector(".cf-turnstile")).toBeNull();
+    expect(scriptDeTurnstile()).toBeNull();
+  });
+
+  it("no tiene formulario de ingreso: sólo un enlace a /login", async () => {
+    const { container } = await pintarEnviado();
+
+    expect(screen.getByRole("link", { name: "Ir a iniciar sesión" })).toHaveAttribute("href", "/login");
+    expect(container.querySelectorAll("a")).toHaveLength(1);
+    expect(container.querySelector('input[type="password"]')).toBeNull();
+  });
+
+  it("nunca dice que el registro salió bien: no se sabe si la dirección puede crear una cuenta", async () => {
+    const { container } = await pintarEnviado();
+
+    expect(container.textContent).not.toMatch(/exitos|éxito|creada|ya existe|bienvenid/i);
+  });
+
+  it("es la misma pantalla con y sin remitente, con y sin Turnstile, y con cualquier valor", async () => {
+    const base = (await pintarEnviado()).container.innerHTML;
+    document.body.innerHTML = "";
+
+    conRemitente();
+    conClaves();
+    const conTodo = (await pintarEnviado("1")).container.innerHTML;
+    document.body.innerHTML = "";
+    const otroValor = (await pintarEnviado("cualquier-cosa")).container.innerHTML;
+    document.body.innerHTML = "";
+    const repetido = (await pintarEnviado(["1", "2"])).container.innerHTML;
+
+    expect(conTodo).toBe(base);
+    expect(otroValor).toBe(base);
+    expect(repetido).toBe(base);
+  });
+
+  it("no consulta el remitente ni refleja el valor del parámetro", async () => {
+    const { container } = await pintarEnviado("<script>alert(1)</script>");
+
+    expect(h.remitente).not.toHaveBeenCalled();
+    expect(container.innerHTML).not.toContain("alert(1)");
+  });
+
+  it("en inglés", async () => {
+    h.locale.mockResolvedValue("en-US");
+    await pintarEnviado();
+
+    expect(screen.getByRole("heading", { level: 2, name: "Check your email" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "If the address can create an account, we send you a link to choose your password (it expires in 60 minutes). If you already had an account, we send you how to sign in."
+    );
+    expect(screen.getByRole("link", { name: "Go to sign in" })).toHaveAttribute("href", "/login");
+    expect(document.body.textContent).not.toMatch(/success/i);
+  });
+
+  it("sin `enviado` sigue siendo el formulario", async () => {
+    conRemitente();
+    const { container } = await pintar();
+
+    expect(container.querySelector("form")).not.toBeNull();
+    expect(screen.queryByText("Revisá tu correo")).toBeNull();
+  });
+});

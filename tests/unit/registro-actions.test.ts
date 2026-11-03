@@ -96,7 +96,7 @@ import { abrirToken } from "@/server/alta/token-de-registro";
 
 const SECRETO = "fake-secreto-del-registro-0123456789";
 const BASE = "https://app.example.com";
-const AVISO = "/login?aviso=revisa_tu_correo";
+const AVISO = "/registro?enviado=1";
 const IP = "203.0.113.7";
 const LIBRE = { allowed: true, remaining: 2, resetAt: 0, retryAfterSeconds: 0 };
 const AGOTADO = { allowed: false, remaining: 0, resetAt: 0, retryAfterSeconds: 3600 };

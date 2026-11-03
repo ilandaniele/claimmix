@@ -7,8 +7,10 @@
  *   se crea cuando la persona vuelve de ese enlace (/alta/correo). Quien tipea
  *   direcciones ajenas no deja filas en la base: sólo cupos del limitador.
  *
- * `signUp` termina siempre en el mismo aviso: una dirección nueva, una que ya
- * tenía cuenta y una que no está habilitada no se distinguen desde afuera. Ni por
+ * `signUp` termina siempre en la misma pantalla («Revisá tu correo», en /registro,
+ * sin formulario de ingreso que parezca un error de login): una dirección nueva,
+ * una que ya tenía cuenta, una que no está habilitada y un Turnstile fallido no
+ * se distinguen desde afuera. Ni por
  * la respuesta ni por cuánto tarda: todo lo que depende de la dirección (la base,
  * la lista, el mail) corre en `after`, con la respuesta ya enviada. Por eso
  * tampoco llama nunca a `signUpEmail`.
@@ -48,7 +50,7 @@ import { correoDeEnlace, correoYaTenesCuenta } from "@/server/notify/correos-de-
 import { enviarCorreoDelSistema } from "@/server/notify/remitente-sistema";
 import { dominioExigeSsoEnAlgunInquilino } from "@/server/sso/usuarios";
 
-const AVISO_NEUTRO = "/login?aviso=revisa_tu_correo";
+const AVISO_NEUTRO = "/registro?enviado=1";
 const ERROR_DE_GOOGLE = "/login?error=google_signin_failed";
 
 const conError = (e: "datos" | "intentos" | "terminos") => `/registro?e=${e}`;

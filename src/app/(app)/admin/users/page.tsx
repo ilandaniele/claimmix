@@ -6,9 +6,11 @@
  */
 
 import { eq } from "drizzle-orm";
+import Link from "next/link";
 
 import { rebotarSiNoEntra } from "@/lib/auth/rebotar-si-no-entra";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { esOperadorDe } from "@/lib/auth/require-operator";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { authUsers, users } from "@/lib/db/schema";
 import { AdminUsersClient } from "./AdminUsersClient";
@@ -54,6 +56,7 @@ export default async function AdminUsersPage() {
         created_at: users.created_at,
         dado_de_baja_en: users.dado_de_baja_en,
         email: authUsers.email,
+        emailVerified: authUsers.emailVerified,
       })
       .from(users)
       .leftJoin(authUsers, eq(users.id, authUsers.id))
@@ -69,6 +72,16 @@ export default async function AdminUsersPage() {
     dado_de_baja_en: r.dado_de_baja_en,
   }));
 
+  // Sólo en el espacio de la casa y para quien opera: el cliente no tiene por qué ver quién nos opera ni dónde están los demás.
+  const verOperacion = esOperadorDe(ctx.user, userRow.tenant_id);
+  const [avisoAntes, avisoDespues] = t("usuarios.operacion.aviso").split("{altas}");
+  const operacion = verOperacion
+    ? {
+        rotulo: t("usuarios.operacion.rotulo"),
+        ids: rows.filter((r) => esOperadorDe(r, userRow.tenant_id)).map((r) => r.id),
+      }
+    : undefined;
+
   return (
     <div className="px-6 py-8 max-w-5xl">
       <div className="mb-6 flex items-center justify-between">
@@ -82,12 +95,32 @@ export default async function AdminUsersPage() {
         </div>
       </div>
 
+      {verOperacion && (
+        <p
+          role="note"
+          className="mb-6 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200"
+        >
+          {avisoAntes}
+          <Link href="/admin/altas" className="font-medium underline">
+            {t("nav.altas")}
+          </Link>
+          {avisoDespues}
+        </p>
+      )}
+
       <AdminUsersClient
         initialUsers={initialUsers}
         currentUserId={ctx.user.id}
         currentUserRole={userRow.role}
         emailAyuda={t("usuarios.form.emailAyuda")}
+        textosEliminar={{
+          boton: t("usuarios.eliminar.boton"),
+          confirmar: t("usuarios.eliminar.confirmar"),
+          hecho: t("usuarios.eliminar.hecho"),
+          error: t("usuarios.eliminar.error"),
+        }}
         topeDelLote={topeDeInvitacionesDelDia(userRow)}
+        operacion={operacion}
       />
     </div>
   );

@@ -1523,6 +1523,11 @@ export const esARServidor = {
   // Quién hizo cada evento del historial: el nombre cuando lo hay, y si no, esto.
   "audit.actor.sistema": "Automático",
   "audit.actor.persona": "Alguien del equipo",
+  "admin.users.title": "Gestión de analistas",
+  "app.name": "ClaimMix",
+  "auth.signIn.email": "Correo electrónico",
+  "auth.signIn.title": "Iniciar sesión",
+  "simulate.scenario": "Tipo de siniestro",
 } as const;
 
 export type ClaveDelServidor = keyof typeof esARServidor;

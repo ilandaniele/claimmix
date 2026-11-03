@@ -14,9 +14,6 @@
  */
 
 export const esAR = {
-  // ── App ────────────────────────────────────────────────────────────────────
-  "app.name": "ClaimMix",
-  "app.tagline": "Gestión inteligente de siniestros FNOL",
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   "nav.bandeja": "Bandeja",
@@ -57,22 +54,12 @@ export const esAR = {
   "age.days": "Hace {n}d",
   "role.admin": "Administrador",
   "role.analyst": "Analista",
-  "theme.toggle": "Cambiar tema",
   "theme.light": "Modo claro",
   "theme.dark": "Modo oscuro",
   "common.yes": "Sí",
   "common.no": "No",
 
   // ── Auth ───────────────────────────────────────────────────────────────────
-  "auth.signIn.title": "Iniciar sesión",
-  "auth.signIn.email": "Correo electrónico",
-  "auth.signIn.password": "Contraseña",
-  "auth.signIn.submit": "Ingresar",
-  "auth.signIn.submitting": "Ingresando...",
-  "auth.signIn.error.invalid": "Credenciales inválidas. Intentá de nuevo.",
-  "auth.signIn.error.rateLimited":
-    "Demasiados intentos. Esperá un momento antes de reintentar.",
-  "auth.signIn.error.generic": "Error al iniciar sesión. Intentá de nuevo.",
   "registro.sinContraseña.ayuda": "La contraseña la elegís desde el enlace que te llega por correo.",
 
   // ── Status labels ──────────────────────────────────────────────────────────
@@ -112,25 +99,21 @@ export const esAR = {
   "type.other": "Otro",
 
   // ── Dashboard tabs ─────────────────────────────────────────────────────────
-  "tabs.todos": "Todos",
   "tabs.listo": "Listos",
   "tabs.esperando": "Esperando",
   "tabs.escalado": "Escalados",
   "tabs.procesando": "Procesando",
   "tabs.cerrado": "Cerrados",
-  "tabs.filtrarPorEstado": "Filtrar por situación",
 
   // ── Case table columns ─────────────────────────────────────────────────────
   "table.col.incidentDate": "Fecha de siniestro",
   "table.col.policyholder": "Asegurado",
-  "table.col.policy": "Póliza",
   "table.col.type": "Tipo",
   "table.col.status": "Situación",
   "table.col.replied": "Respondido",
   "table.replied.yes": "Respondido",
   "table.replied.pending": "Sin responder",
   "table.col.confidence": "Score",
-  "table.col.age": "Antigüedad",
   "table.col.received": "Recibido",
   "table.col.assignedTo": "Asignación",
   "table.col.vencimiento": "Vence",
@@ -150,7 +133,6 @@ export const esAR = {
   "bandeja.buscarPlaceholder": "Buscá por nombre, póliza o número de caso",
   "bandeja.buscarLimpiar": "Limpiar búsqueda",
   "bandeja.empty": "No hay siniestros que coincidan con los filtros.",
-  "bandeja.loading": "Cargando casos...",
   "bandeja.delete": "Eliminar caso",
   "bandeja.deleteSelected": "Eliminar seleccionados",
   "bandeja.deleteConfirm": "Eliminar",
@@ -168,8 +150,6 @@ export const esAR = {
   "bandeja.selected": "seleccionado(s)",
   "bandeja.deleteManySuccess": "siniestro(s) eliminados.",
   "bandeja.deleteManyPartial": "siniestro(s) no se pudieron eliminar.",
-  "bandeja.selectAll": "Seleccionar todos",
-  "bandeja.selectCase": "Seleccionar",
   "bandeja.tableLabel": "Tabla de siniestros",
   "bandeja.toastNew": "Nuevo siniestro recibido:",
   "bandeja.toastUpdated": "actualizado:",
@@ -182,22 +162,13 @@ export const esAR = {
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simular nuevo siniestro",
-  "simulate.scenario": "Tipo de siniestro",
-  "simulate.scenario.choque": "Choque",
-  "simulate.scenario.robo": "Robo",
-  "simulate.scenario.granizo": "Granizo",
-  "simulate.scenario.incendio": "Incendio",
-  "simulate.scenario.random": "Aleatorio",
   "simulate.submit": "Simular",
   "simulate.submitting": "Simulando...",
-  "simulate.success": "Caso creado correctamente. Procesando...",
   "simulate.error": "Error al simular el siniestro. Intentá de nuevo.",
 
   // ── Case detail ────────────────────────────────────────────────────────────
-  "case.detail.title": "Detalle del caso",
   "case.detail.docsGroup": "Documentación",
   "case.detail.fieldsGroup": "Datos por confirmar",
-  "case.detail.confidence": "Confianza",
   "case.detail.close": "Cerrar siniestro",
   "case.detail.escalate": "Escalar",
   "case.detail.reAnalyze": "Re-analizar",
@@ -227,7 +198,6 @@ export const esAR = {
   "case.detail.salidaConfirmar": "No se puede deshacer. ¿Confirmás?",
   "case.detail.salidaSi": "Sí, confirmar",
   "case.detail.salidaNo": "Cancelar",
-  "case.detail.email": "Email",
   "case.detail.assigned": "Asignado",
   "case.detail.unassigned": "Sin asignar",
   // B9: asignación desde la ficha, sólo para el equipo.
@@ -364,17 +334,6 @@ export const esAR = {
   "docs.inventario_bienes": "Listado de bienes dañados o robados",
   "docs.presupuesto_reparacion": "Presupuesto de la reparación",
 
-  // ── Confidence thresholds (UI labels) ─────────────────────────────────────
-  "confidence.high": "Alta",
-  "confidence.medium": "Media",
-  "confidence.low": "Baja",
-
-  // ── Supplemental pages ─────────────────────────────────────────────────────
-  "analisis.title": "Análisis",
-  "analisis.subtitle": "Estadísticas agregadas de siniestros",
-  "admin.users.title": "Gestión de analistas",
-  "admin.users.invite": "Invitar analista",
-
   // ── Configuración — cuenta, umbrales de IA, sistema y avisos (E10) ─
   "configuracion.alertas.titulo": "Avisos de casos urgentes",
   "configuracion.alertas.ayuda": "Un correo por línea, hasta 10. Si la dejás vacía, se avisa como hasta ahora.",
@@ -422,18 +381,9 @@ export const esAR = {
   "core.motivo.http": "El sistema central respondió con el código HTTP {n}.",
   "core.motivo.otro": "No hay detalle del motivo.",
 
-  // ── Health ─────────────────────────────────────────────────────────────────
-  "health.ok": "ok",
-
   // ── Errors (generic) ──────────────────────────────────────────────────────
   "error.generic": "Ocurrió un error inesperado. Intentá de nuevo.",
-  "error.notFound": "El recurso solicitado no existe.",
-  "error.unauthorized": "Acceso no autorizado.",
-  "error.forbidden": "No tenés permisos para realizar esta acción.",
-  "error.validation": "Los datos enviados no son válidos.",
   "error.rateLimited": "Demasiadas solicitudes. Esperá un momento.",
-  "error.serverError": "Error interno del servidor.",
-  "error.notImplemented": "Esta función no está disponible en esta versión.",
   "error.pantalla.titulo": "Algo salió mal",
   "error.pantalla.reintentar": "Reintentar",
   "error.pantalla.codigo": "Código para soporte: {codigo}",
@@ -442,7 +392,6 @@ export const esAR = {
   "pagination.previous": "Anterior",
   "pagination.next": "Siguiente",
   "pagination.of": "de",
-  "pagination.results": "resultados",
   "pagination.perPage": "Por página",
   "pagination.page": "Página",
   "pagination.first": "Primera página",
@@ -455,7 +404,6 @@ export const esAR = {
   "severity.critical": "Crítico",
 
   // ── Channel labels ──────────────────────────────────────────────────────────
-  "channel.todos": "Todos",
   "channel.email": "Email",
   "channel.email_sim": "Simulación",
   "channel.whatsapp": "WhatsApp",
@@ -474,7 +422,6 @@ export const esAR = {
    * mensaje es un siniestro.
    */
   "filter.isClaim": "Relevancia",
-  "filter.todos": "Todos",
   "filter.reclamos": "Reclamos",
   "filter.no_relevantes": "No relevantes",
   "filter.estado": "Situación",
@@ -558,7 +505,6 @@ export const esAR = {
   "case.detail.fieldKey": "Campo",
   "case.detail.proposedValue": "Valor propuesto",
   "case.detail.conflictValue": "Valor en conflicto",
-  "case.detail.status": "Situación",
   "case.detail.statusUpdated": "Situación actualizada.",
   "case.detail.sendToCore": "Enviar al sistema central",
   "case.detail.sendingToCore": "Enviando...",
@@ -657,8 +603,6 @@ export const esAR = {
 
   // ── Messages thread (W2) ────────────────────────────────────────────────────
   "messages.thread.title": "Conversación",
-  "messages.thread.from": "De",
-  "messages.thread.received_at": "Recibido",
   "messages.thread.attachments": "adjunto(s)",
   "messages.thread.no_subject": "(sin asunto)",
   "messages.thread.expand": "Ver más",
@@ -685,10 +629,6 @@ export const esAR = {
   "messages.reply.fallo": "No se pudo enviar. Probá de nuevo.",
   "messages.reply.venceEn": "Podés responder hasta el {fecha}.",
 
-  // ── Customers page ──────────────────────────────────────────────────────────
-  "clientes.col.policies": "Pólizas",
-  "clientes.col.cases": "Casos",
-  "clientes.detail.personalInfo": "Datos personales",
   // ── Las baldosas de indicador de la bandeja ─────────────────────────────────
   // Estaban escritas a mano en castellano dentro de `bandeja/page.tsx`, asi que
   // con la interfaz en ingles la fila de indicadores seguia en castellano.
@@ -794,7 +734,6 @@ export const esAR = {
   "usuarios.toast.sesionesCerradas": "Se cerraron {n} sesiones.",
   "usuarios.vacio": "No hay usuarios registrados.",
 
-
   // ── La consola del agente — /agente, la pantalla entera ───────────
   // Distinto de `agente.*`, que es el panel de análisis adentro de un caso.
   // Acá se configura el agente; allá se lee lo que el agente extrajo.
@@ -811,13 +750,11 @@ export const esAR = {
   "consola.tab.reglas": "Reglas de prompt",
   "consola.tab.uso": "Uso del proveedor",
 
-
   // ── Lo que dice un lector de pantalla donde no hay texto ──────────
   // Un guión y un porcentaje no se leen solos en voz alta: el `aria-label` es
   // el único texto que existe ahí, así que es el que más falta hace traducir.
   "confianza.aria": "Confianza: {n}%",
   "vacio.sinDato": "Sin dato",
-
 
   // ── Las dos insignias del análisis automático, en el detalle ──────
   // Un nivel que el modelo devuelva y no esté acá se muestra crudo: el valor
@@ -830,11 +767,9 @@ export const esAR = {
   "riesgo.lesiones.none": "Sin lesiones",
   "riesgo.lesiones.severe": "Graves",
 
-
   // ── El shell — lo poco que el layout dice por sí mismo ────────────
   "toast.cerrar": "Cerrar notificación",
   "toast.region": "Notificaciones",
-
 
   // ── Ejemplos aprobados — la solapa de la consola del agente ───────
   // `status` es `text` en la base, no un enum: un estado que no esté acá se
@@ -853,7 +788,6 @@ export const esAR = {
   "ejemplos.vacio.titulo": "Todavía no hay ejemplos aprobados.",
   "ejemplos.verCasos": "Ver casos",
 
-
   // ── La clave de Gemini propia de cada usuario, en configuración ───
   "claveIa.actualizar": "Actualizar clave",
   "claveIa.agregar": "Agregar clave",
@@ -870,7 +804,6 @@ export const esAR = {
   "claveIa.obtene": "Obtené tu clave en",
   "claveIa.personal": "(personal — solo usada para tus casos)",
 
-
   // ── Exportar la memoria y la configuración del agente ─────────────
   // Los valores de los desplegables —`config_only`, `masked`, `csv_summary`—
   // quedan crudos a propósito: son los parámetros que viajan a la API y los
@@ -883,7 +816,6 @@ export const esAR = {
   "exportar.listo": "Export listo.",
   "exportar.pii": "Modo PII",
   "exportar.tipo": "Tipo de export",
-
 
   // ── Cambiar la contraseña, en configuración ───────────────────────
   "password.actual": "Contraseña actual",
@@ -900,7 +832,6 @@ export const esAR = {
   "password.nueva": "Nueva contraseña",
   "password.nuevaPlaceholder": "Mínimo 8 caracteres",
   "password.ok": "Contraseña actualizada. Se cerraron las sesiones abiertas en otros dispositivos —puede tardar hasta un minuto en hacerse efectivo— y en éste seguís conectado.",
-
 
   // ── Simulación en lote — la solapa que fabrica casos de prueba ────
   // Los tipos de siniestro NO se repiten acá: son los mismos `type.*` que usan
@@ -922,7 +853,6 @@ export const esAR = {
   "lote.mas": "+{n} más",
   "lote.tipo": "Tipo de siniestro",
   "lote.titulo": "Simulación en lote — del lado del servidor",
-
 
   // ── Campos personalizados — la solapa que define qué extraer ──────
   // Los tipos de campo —`text`, `enum`, `phone`— quedan crudos: son el valor
@@ -950,7 +880,6 @@ export const esAR = {
   "campos.phOpciones": "opciones, separadas, por coma",
   "campos.requerido": "Requerido",
 
-
   // ── Lo que le faltaba al modal de simular un siniestro ────────────
   // El resto de `simulate.*` ya estaba arriba. Esto es lo que quedaba suelto,
   // más lo que el modal traducía con el `t` de módulo —que es siempre es-AR.
@@ -964,7 +893,6 @@ export const esAR = {
   "simulate.procesando": "Procesando siniestro…",
   "simulate.textoLabel": "Texto del siniestro",
   "simulate.textoPlaceholder": "Pegá acá el texto del email del siniestro…",
-
 
   // ── Uso del proveedor — llamadas, errores y latencia de la IA ─────
   // El estado de una llamada (`success`, `rate_limited`) y el código de error
@@ -1000,7 +928,6 @@ export const esAR = {
   "uso.ultimas24": "Últimas 24 horas",
   "uso.ultimos7": "Últimos 7 días",
 
-
   // ── Reglas de prompt — lo que el asegurador le enseña al agente ───
   // `rule_type` es `text` en la base: un tipo que no esté acá se muestra crudo.
   // Los ejemplos del placeholder están escritos con el vocabulario del
@@ -1026,7 +953,6 @@ export const esAR = {
   "reglas.tipo.severity": "Severidad",
   "reglas.tipoRegla": "Tipo de regla",
   "reglas.vacio": "Todavía no hay reglas de entrenamiento.",
-
 
   // ── Fine-tuning — el paquete de Gemini y los trabajos de Vertex ───
   // El estado de un trabajo (`draft`, `eval_pending`, `approved`) queda crudo:
@@ -1079,13 +1005,11 @@ export const esAR = {
   "ft.vertex.trabajoUno": "1 trabajo iniciado",
   "ft.vertex.trabajosVarios": "{n} trabajos iniciados",
 
-
   // ── Guardar el modelo, en el panel del proveedor ──────────────────
   // «Guardar modelos» estaba escrito a mano y sobrevivió a la pasada de i18n:
   // el archivo ya usaba `useT`, así que la medición no lo marcó.
   "aiProvider.guardando": "Guardando…",
   "aiProvider.guardarModelo": "Guardar modelo",
-
 
   // ── Las acciones de un trabajo de Vertex ──────────────────────────
   // Estaban en el bloque de fine-tuning junto a las de OpenAI. El panel de
@@ -1093,7 +1017,6 @@ export const esAR = {
   "ft.iniciar": "Iniciar",
   "ft.rollback": "Rollback",
   "ft.sincronizar": "Sincronizar",
-
 
   // ── La bandeja que responde al click, y la selección sin recuadros ───
   // «Actualizando…» es lo que dice la lista mientras la navegación está en

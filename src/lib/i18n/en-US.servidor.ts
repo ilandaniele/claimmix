@@ -1513,4 +1513,9 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   // Who did each history event: the name when there is one, otherwise this.
   "audit.actor.sistema": "Automatic",
   "audit.actor.persona": "A team member",
+  "admin.users.title": "Analyst management",
+  "app.name": "ClaimMix",
+  "auth.signIn.email": "Email address",
+  "auth.signIn.title": "Sign in",
+  "simulate.scenario": "Claim type",
 } as const;

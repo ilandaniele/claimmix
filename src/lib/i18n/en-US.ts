@@ -8,9 +8,6 @@
 import type { ClaveDelCliente } from "./es-AR";
 
 export const enUS: Record<ClaveDelCliente, string> = {
-  // ── App ────────────────────────────────────────────────────────────────────
-  "app.name": "ClaimMix",
-  "app.tagline": "Intelligent FNOL claims management",
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   "nav.bandeja": "Inbox",
@@ -45,21 +42,12 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "age.days": "{n}d ago",
   "role.admin": "Administrator",
   "role.analyst": "Analyst",
-  "theme.toggle": "Toggle theme",
   "theme.light": "Light mode",
   "theme.dark": "Dark mode",
   "common.yes": "Yes",
   "common.no": "No",
 
   // ── Auth ───────────────────────────────────────────────────────────────────
-  "auth.signIn.title": "Sign in",
-  "auth.signIn.email": "Email address",
-  "auth.signIn.password": "Password",
-  "auth.signIn.submit": "Sign in",
-  "auth.signIn.submitting": "Signing in...",
-  "auth.signIn.error.invalid": "Invalid credentials. Please try again.",
-  "auth.signIn.error.rateLimited": "Too many attempts. Please wait before retrying.",
-  "auth.signIn.error.generic": "Sign in error. Please try again.",
   "registro.sinContraseña.ayuda": "You choose your password from the link we email you.",
 
   // ── Status labels ──────────────────────────────────────────────────────────
@@ -97,25 +85,21 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "type.other": "Other",
 
   // ── Dashboard tabs ─────────────────────────────────────────────────────────
-  "tabs.todos": "All",
   "tabs.listo": "Ready",
   "tabs.esperando": "Waiting",
   "tabs.escalado": "Escalated",
   "tabs.procesando": "Processing",
   "tabs.cerrado": "Closed",
-  "tabs.filtrarPorEstado": "Filter by status",
 
   // ── Case table columns ─────────────────────────────────────────────────────
   "table.col.incidentDate": "Date of loss",
   "table.col.policyholder": "Policyholder",
-  "table.col.policy": "Policy",
   "table.col.type": "Type",
   "table.col.status": "Status",
   "table.col.replied": "Replied",
   "table.replied.yes": "Replied",
   "table.replied.pending": "Not replied",
   "table.col.confidence": "Score",
-  "table.col.age": "Age",
   "table.col.received": "Received",
   "table.col.assignedTo": "Assigned to",
   "table.col.vencimiento": "Due",
@@ -133,7 +117,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "bandeja.buscarPlaceholder": "Search by name, policy, or case number",
   "bandeja.buscarLimpiar": "Clear search",
   "bandeja.empty": "No claims match the filters.",
-  "bandeja.loading": "Loading cases...",
   "bandeja.delete": "Delete case",
   "bandeja.deleteSelected": "Delete selected",
   "bandeja.deleteConfirm": "Delete",
@@ -151,8 +134,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "bandeja.selected": "selected",
   "bandeja.deleteManySuccess": "claim(s) deleted.",
   "bandeja.deleteManyPartial": "claim(s) could not be deleted.",
-  "bandeja.selectAll": "Select all",
-  "bandeja.selectCase": "Select",
   "bandeja.tableLabel": "Claims table",
   "bandeja.toastNew": "New claim received:",
   "bandeja.toastUpdated": "updated:",
@@ -165,22 +146,13 @@ export const enUS: Record<ClaveDelCliente, string> = {
 
   // ── Simulate modal ─────────────────────────────────────────────────────────
   "simulate.title": "Simulate new claim",
-  "simulate.scenario": "Claim type",
-  "simulate.scenario.choque": "Collision",
-  "simulate.scenario.robo": "Theft",
-  "simulate.scenario.granizo": "Hail",
-  "simulate.scenario.incendio": "Fire",
-  "simulate.scenario.random": "Random",
   "simulate.submit": "Simulate",
   "simulate.submitting": "Simulating...",
-  "simulate.success": "Case created successfully. Processing...",
   "simulate.error": "Error simulating the claim. Please try again.",
 
   // ── Case detail ────────────────────────────────────────────────────────────
-  "case.detail.title": "Case detail",
   "case.detail.docsGroup": "Documents",
   "case.detail.fieldsGroup": "Data to confirm",
-  "case.detail.confidence": "Confidence",
   "case.detail.close": "Close claim",
   "case.detail.escalate": "Escalate",
   "case.detail.reAnalyze": "Re-analyze",
@@ -210,7 +182,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "case.detail.salidaConfirmar": "This can't be undone. Confirm?",
   "case.detail.salidaSi": "Yes, confirm",
   "case.detail.salidaNo": "Cancel",
-  "case.detail.email": "Email",
   "case.detail.assigned": "Assigned",
   "case.detail.unassigned": "Unassigned",
   // B9: asignación desde la ficha, sólo para el equipo.
@@ -347,17 +318,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "docs.inventario_bienes": "List of damaged or stolen goods",
   "docs.presupuesto_reparacion": "Repair quote",
 
-  // ── Confidence thresholds (UI labels) ─────────────────────────────────────
-  "confidence.high": "High",
-  "confidence.medium": "Medium",
-  "confidence.low": "Low",
-
-  // ── Supplemental pages ─────────────────────────────────────────────────────
-  "analisis.title": "Analysis",
-  "analisis.subtitle": "Aggregated claim statistics",
-  "admin.users.title": "Analyst management",
-  "admin.users.invite": "Invite analyst",
-
   // ── Configuración — account, AI thresholds, system and alerts (E10) ─
   "configuracion.alertas.titulo": "Urgent case alerts",
   "configuracion.alertas.ayuda": "One address per line, up to 10. Leave it empty to keep the current behaviour.",
@@ -405,18 +365,9 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "core.motivo.http": "The core system answered with HTTP status {n}.",
   "core.motivo.otro": "No details on the reason.",
 
-  // ── Health ─────────────────────────────────────────────────────────────────
-  "health.ok": "ok",
-
   // ── Errors (generic) ──────────────────────────────────────────────────────
   "error.generic": "An unexpected error occurred. Please try again.",
-  "error.notFound": "The requested resource does not exist.",
-  "error.unauthorized": "Unauthorized access.",
-  "error.forbidden": "You do not have permission to perform this action.",
-  "error.validation": "The submitted data is not valid.",
   "error.rateLimited": "Too many requests. Please wait a moment.",
-  "error.serverError": "Internal server error.",
-  "error.notImplemented": "This feature is not available in this version.",
   "error.pantalla.titulo": "Something went wrong",
   "error.pantalla.reintentar": "Try again",
   "error.pantalla.codigo": "Code for support: {codigo}",
@@ -425,7 +376,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "pagination.previous": "Previous",
   "pagination.next": "Next",
   "pagination.of": "of",
-  "pagination.results": "results",
   "pagination.perPage": "Per page",
   "pagination.page": "Page",
   "pagination.first": "First page",
@@ -438,7 +388,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "severity.critical": "Critical",
 
   // ── Channel labels ──────────────────────────────────────────────────────────
-  "channel.todos": "All",
   "channel.email": "Email",
   "channel.email_sim": "Simulation",
   "channel.whatsapp": "WhatsApp",
@@ -451,7 +400,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "filter.fraude": "Fraud",
   // Was "Type", colliding with the claim-type chips above. See the es-AR note.
   "filter.isClaim": "Relevance",
-  "filter.todos": "All",
   "filter.reclamos": "Claims",
   "filter.no_relevantes": "Not relevant",
   "filter.estado": "Status",
@@ -533,7 +481,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "case.detail.fieldKey": "Field",
   "case.detail.proposedValue": "Proposed value",
   "case.detail.conflictValue": "Conflicting value",
-  "case.detail.status": "Status",
   "case.detail.statusUpdated": "Status updated.",
   "case.detail.sendToCore": "Send to core system",
   "case.detail.sendingToCore": "Sending...",
@@ -630,8 +577,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
 
   // ── Messages thread ────────────────────────────────────────────────────────
   "messages.thread.title": "Conversation",
-  "messages.thread.from": "From",
-  "messages.thread.received_at": "Received",
   "messages.thread.attachments": "attachment(s)",
   "messages.thread.no_subject": "(no subject)",
   "messages.thread.expand": "Show more",
@@ -659,9 +604,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "messages.reply.venceEn": "You can reply until {fecha}.",
 
   // ── Customers page ──────────────────────────────────────────────────────────
-  "clientes.col.policies": "Policies",
-  "clientes.col.cases": "Cases",
-  "clientes.detail.personalInfo": "Personal info",
   // Inbox KPI tiles — see the es-AR note.
 
   /*
@@ -765,7 +707,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "usuarios.toast.sesionesCerradas": "{n} sessions closed.",
   "usuarios.vacio": "No users on record.",
 
-
   // ── La consola del agente — /agente, la pantalla entera ───────────
   // Distinto de `agente.*`, que es el panel de análisis adentro de un caso.
   // Acá se configura el agente; allá se lee lo que el agente extrajo.
@@ -782,13 +723,11 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "consola.tab.reglas": "Prompt rules",
   "consola.tab.uso": "Provider usage",
 
-
   // ── Lo que dice un lector de pantalla donde no hay texto ──────────
   // Un guión y un porcentaje no se leen solos en voz alta: el `aria-label` es
   // el único texto que existe ahí, así que es el que más falta hace traducir.
   "confianza.aria": "Confidence: {n}%",
   "vacio.sinDato": "No data",
-
 
   // ── Las dos insignias del análisis automático, en el detalle ──────
   // Un nivel que el modelo devuelva y no esté acá se muestra crudo: el valor
@@ -801,11 +740,9 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "riesgo.lesiones.none": "No injuries",
   "riesgo.lesiones.severe": "Severe",
 
-
   // ── El shell — lo poco que el layout dice por sí mismo ────────────
   "toast.cerrar": "Close notification",
   "toast.region": "Notifications",
-
 
   // ── Ejemplos aprobados — la solapa de la consola del agente ───────
   // `status` es `text` en la base, no un enum: un estado que no esté acá se
@@ -824,7 +761,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "ejemplos.vacio.titulo": "No approved examples yet.",
   "ejemplos.verCasos": "View cases",
 
-
   // ── La clave de Gemini propia de cada usuario, en configuración ───
   "claveIa.actualizar": "Update key",
   "claveIa.agregar": "Add key",
@@ -841,7 +777,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "claveIa.obtene": "Get your key at",
   "claveIa.personal": "(personal — only used for your cases)",
 
-
   // ── Exportar la memoria y la configuración del agente ─────────────
   // Los valores de los desplegables —`config_only`, `masked`, `csv_summary`—
   // quedan crudos a propósito: son los parámetros que viajan a la API y los
@@ -854,7 +789,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "exportar.listo": "Export ready.",
   "exportar.pii": "PII mode",
   "exportar.tipo": "Export type",
-
 
   // ── Cambiar la contraseña, en configuración ───────────────────────
   "password.actual": "Current password",
@@ -871,7 +805,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "password.nueva": "New password",
   "password.nuevaPlaceholder": "At least 8 characters",
   "password.ok": "Password updated. Sessions on your other devices have been closed —it can take up to a minute to take effect— and you are still signed in on this one.",
-
 
   // ── Simulación en lote — la solapa que fabrica casos de prueba ────
   // Los tipos de siniestro NO se repiten acá: son los mismos `type.*` que usan
@@ -893,7 +826,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "lote.mas": "+{n} more",
   "lote.tipo": "Claim type",
   "lote.titulo": "Batch simulation — server-side",
-
 
   // ── Campos personalizados — la solapa que define qué extraer ──────
   // Los tipos de campo —`text`, `enum`, `phone`— quedan crudos: son el valor
@@ -921,7 +853,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "campos.phOpciones": "options, separated, by commas",
   "campos.requerido": "Required",
 
-
   // ── Lo que le faltaba al modal de simular un siniestro ────────────
   // El resto de `simulate.*` ya estaba arriba. Esto es lo que quedaba suelto,
   // más lo que el modal traducía con el `t` de módulo —que es siempre es-AR.
@@ -935,7 +866,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "simulate.procesando": "Processing claim…",
   "simulate.textoLabel": "Claim text",
   "simulate.textoPlaceholder": "Paste the claim email text here…",
-
 
   // ── Uso del proveedor — llamadas, errores y latencia de la IA ─────
   // El estado de una llamada (`success`, `rate_limited`) y el código de error
@@ -971,7 +901,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "uso.ultimas24": "Last 24 hours",
   "uso.ultimos7": "Last 7 days",
 
-
   // ── Reglas de prompt — lo que el asegurador le enseña al agente ───
   // `rule_type` es `text` en la base: un tipo que no esté acá se muestra crudo.
   // Los ejemplos del placeholder están escritos con el vocabulario del
@@ -997,7 +926,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "reglas.tipo.severity": "Severity",
   "reglas.tipoRegla": "Rule type",
   "reglas.vacio": "No training rules yet.",
-
 
   // ── Fine-tuning — el paquete de Gemini y los trabajos de Vertex ───
   // El estado de un trabajo (`draft`, `eval_pending`, `approved`) queda crudo:
@@ -1050,13 +978,11 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "ft.vertex.trabajoUno": "1 job started",
   "ft.vertex.trabajosVarios": "{n} jobs started",
 
-
   // ── Guardar el modelo, en el panel del proveedor ──────────────────
   // «Guardar modelos» estaba escrito a mano y sobrevivió a la pasada de i18n:
   // el archivo ya usaba `useT`, así que la medición no lo marcó.
   "aiProvider.guardando": "Saving…",
   "aiProvider.guardarModelo": "Save model",
-
 
   // ── Las acciones de un trabajo de Vertex ──────────────────────────
   // Estaban en el bloque de fine-tuning junto a las de OpenAI. El panel de
@@ -1064,7 +990,6 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "ft.iniciar": "Start",
   "ft.rollback": "Roll back",
   "ft.sincronizar": "Sync",
-
 
   // ── La bandeja que responde al click, y la selección sin recuadros ───
   // «Actualizando…» es lo que dice la lista mientras la navegación está en

@@ -62,10 +62,12 @@ export const esARServidor = {
   "tardio.aviso.caso": "Caso: {caso}",
   "tardio.aviso.abrir": "Abrir: {link}",
   "presupuesto.aviso.asunto": "ClaimMix dejó de analizar denuncias: presupuesto de IA agotado",
-  "presupuesto.aviso.cuerpo": "Desde las {hora} las denuncias que entran por correo, WhatsApp y el formulario quedan sin analizar {plazo}. Motivo: {motivo}. Las que ya entraron quedan en la bandeja como escaladas: reanalizalas a mano cuando se levante el tope.",
+  "presupuesto.aviso.asuntoFrenada": "ClaimMix dejó de analizar denuncias: la IA está pausada a propósito",
+  "presupuesto.aviso.cuerpo": "Desde las {hora} las denuncias que entran por correo, WhatsApp y el formulario quedan sin analizar {plazo}. Motivo: {motivo}. Las que ya entraron quedan en la bandeja como escaladas: reanalizalas a mano cuando la IA vuelva a andar.",
   "presupuesto.aviso.motivo.anonimo": "el cupo diario de los canales sin usuario",
   "presupuesto.aviso.motivo.inquilino": "el cupo diario de la aseguradora",
   "presupuesto.aviso.motivo.mensual": "el presupuesto mensual del proyecto",
+  "presupuesto.aviso.motivo.frenada": "la IA está pausada a propósito: el tope mensual del proyecto está en 0",
   "presupuesto.aviso.motivo.prueba_vencida": "la prueba del espacio terminó",
   "presupuesto.aviso.motivo.suspendido": "el espacio está suspendido",
   "presupuesto.aviso.motivo.prueba_diaria": "el cupo diario de llamadas de la prueba",
@@ -75,6 +77,7 @@ export const esARServidor = {
   "presupuesto.aviso.plazo.anonimo": "hasta mañana",
   "presupuesto.aviso.plazo.inquilino": "hasta mañana",
   "presupuesto.aviso.plazo.mensual": "hasta que empiece el mes que viene o alguien suba el tope",
+  "presupuesto.aviso.plazo.frenada": "hasta que el equipo de ClaimMix active la IA",
   "presupuesto.aviso.plazo.prueba_vencida": "hasta que el espacio pase a un plan",
   "presupuesto.aviso.plazo.suspendido": "hasta que se reactive el espacio",
   "presupuesto.aviso.plazo.prueba_diaria": "hasta mañana",
@@ -108,6 +111,7 @@ export const esARServidor = {
   "configuracion.umbralAyuda": "(ajustable vía variable CONFIDENCE_THRESHOLD)",
   "configuracion.capMensual": "Cap mensual de IA",
   "configuracion.capAyuda": "(configurado en el plan de despliegue)",
+  "configuracion.capAyudaFrenada": "La IA está pausada a propósito en este proyecto. Pedile al equipo de ClaimMix que la active.",
   "configuracion.iaFrenada": "IA frenada (tope en 0)",
   "configuracion.soloAdmins": "Solo los administradores pueden modificar los umbrales de IA.",
   "configuracion.miClave": "Mi clave de IA",
@@ -225,6 +229,7 @@ export const esARServidor = {
   "agente.estado.activo": "Agente activo",
   "agente.estado.modo_prueba": "Modo de prueba",
   "agente.estado.sin_presupuesto": "Sin presupuesto",
+  "agente.estado.ia_frenada": "IA pausada",
   "agente.estado.procesando": "{n} en curso",
 
   // ── Los nombres comerciales de los planes ──────────────────────────
@@ -437,6 +442,7 @@ export const esARServidor = {
 
   // ── Asistente — preguntas en lenguaje natural sobre los casos ──────────
   "asistente.subtitulo": "Preguntá por los casos del inquilino, en lenguaje natural.",
+  "asistente.presupuestoMensual": "Se agotó el presupuesto de IA de este mes. Volvé a intentar cuando empiece el mes que viene.",
 
   // ── Ayuda — cómo se usa la interfaz, mismo texto en la demo y en la app ─
   // B6, B21, B23: cobertura, monto y presupuesto del taller. Sólo para el equipo.
@@ -867,6 +873,7 @@ export const esARServidor = {
   "alta.avisoTope.intro": "Estos topes de ClaimMix llegaron a un umbral de aviso:",
   "alta.avisoTope.linea80": "- {nombre}: {usado} de {tope}. Ya pasó el 80 %.",
   "alta.avisoTope.linea100": "- {nombre}: {usado} de {tope}. Llegó al tope. {llena}",
+  "operador.iaFrenada": "La IA de los clientes está pausada a propósito: MONTHLY_BUDGET_USD está en 0. Para activarla, poné en esa variable un valor mayor que 0 y redeployá.",
   "alta.avisoTope.cierre": "Para subir un tope, cambiá su variable en el ambiente. El aviso se manda una sola vez por umbral y por mes.",
   "alta.avisoTope.presupuesto.nombre": "Gasto de IA del mes (USD)",
   "alta.avisoTope.presupuesto.llena": "La IA queda frenada hasta que empiece el mes que viene o se suba MONTHLY_BUDGET_USD.",
@@ -1050,11 +1057,11 @@ export const esARServidor = {
   "altas.activar.cuota": "Cuota mensual (US$)",
   "altas.activar.incluidas": "Unidades incluidas",
   "altas.activar.excedente": "Precio por unidad excedente (US$)",
-  "altas.activar.ayudaPlan": "Elegí el plan que contrató. Su cuota, sus unidades y su precio por excedente salen del catálogo de abajo.",
-  "altas.activar.ayudaCuota": "Lo que paga el cliente por mes, en dólares. Vacío = la cuota del plan elegido. 0 = sin cuota.",
-  "altas.activar.ayudaIncluidas": "Unidades que cubre la cuota cada mes. Una denuncia gasta {whatsapp} por WhatsApp, {whatsapp_propia} por WhatsApp de su WABA propia, {email} por mail y {web} por la web. Vacío = las del plan elegido. 0 = ninguna.",
-  "altas.activar.ayudaExcedente": "Lo que se cobra por cada unidad por encima de las incluidas, en dólares. Vacío = el precio del plan elegido. 0 = no se cobra.",
-  "altas.activar.ayuda": "Los campos vacíos toman el valor del plan. Un 0 no es vacío: se guarda tal cual. Los decimales van con punto, sin separador de miles. Piloto guiado: la mitad de la cuota por 60 días. Después activá de nuevo con la cuota entera.",
+  "altas.activar.ayudaPlan": "El que contrató el cliente. Sus valores están en el catálogo de abajo.",
+  "altas.activar.ayudaCuota": "Por mes, en dólares. Vacío = la del plan. 0 = sin cuota.",
+  "altas.activar.ayudaIncluidas": "Las que cubre la cuota cada mes. Una denuncia gasta {whatsapp} por WhatsApp, {whatsapp_propia} por WhatsApp de su WABA propia, {email} por mail y {web} por la web. Vacío = las del plan. 0 = ninguna.",
+  "altas.activar.ayudaExcedente": "Por cada unidad sobre las incluidas, en dólares. Vacío = el precio del plan. 0 = no se cobra.",
+  "altas.activar.ayuda": "Elegí el plan. Cuota, unidades y excedente vacíos toman el valor del catálogo. Escribí un valor sólo si se acordó otro: un 0 se guarda tal cual. Decimales con punto, sin separador de miles. Piloto guiado: la mitad de la cuota por 60 días. Después activá de nuevo con la cuota entera.",
   "altas.activar.catalogo": "Catálogo de planes",
   "altas.activar.boton": "Activar",
   "altas.r.ok": "Listo.",
@@ -1514,6 +1521,7 @@ export const esARServidor = {
   "audit.case.exported_to_core": "Se exportó el JSON para el sistema central",
   "audit.tenant.work_settings_updated": "Se cambió cómo trabaja el equipo (asignación, plazos, plan o puntaje)",
   "audit.ai.budget_exceeded": "No se analizó: se terminó el cupo de IA",
+  "audit.ai.ia_pausada": "No se analizó: la IA está pausada a propósito",
   "audit.ai.budget_alerted": "Se avisó a los especialistas: presupuesto de IA agotado",
   "audit.training.example_approved": "Se aprobó como ejemplo de referencia",
   "audit.training.example_rejected": "Se descartó como ejemplo de referencia",

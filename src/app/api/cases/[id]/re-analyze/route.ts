@@ -28,6 +28,8 @@ import { reservaViva } from "@/core/case/reserva-de-extraccion";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { getT } from "@/lib/i18n";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
@@ -35,6 +37,7 @@ import {
   getClientIp,
   type RateLimitResult,
 } from "@/lib/rate-limit/index";
+import { iaFrenadaAProposito } from "@/lib/topes";
 
 export const maxDuration = 300;
 
@@ -185,6 +188,11 @@ export async function POST(
   // ── Budget check ──────────────────────────────────────────────────────────────
   const budgetResult = await checkBudget(userRow.tenant_id, userRow.id);
   if (budgetResult.exceeded) {
+    // Con la IA pausada a propósito la pantalla muestra este mensaje —dice cómo se prende—, marcado con `frenada`.
+    if (iaFrenadaAProposito(budgetResult.motivo)) {
+      const t = getT(await resolveAccountLocale(userRow.locale));
+      return err(new AppError("AI_BUDGET_EXCEEDED", t("configuracion.capAyudaFrenada"), { frenada: true }));
+    }
     return err(new AppError("AI_BUDGET_EXCEEDED", "Presupuesto de IA agotado para este mes."));
   }
 

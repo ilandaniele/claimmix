@@ -25,6 +25,8 @@
  * global del tipo `topes` acota el resto.
  *
  * Sale por el remitente del sistema, en un solo mail por barrido a cada dirección de `ADMIN_EMAILS`.
+ * Con `MONTHLY_BUDGET_USD=0` el mail que sale por otro tope suma una línea que recuerda la pausa.
+ *
  * El mail lleva números y nombres de tope, nada de nadie. Nunca lanza: va en el barrido de
  * `reap-stuck` y no puede frenar lo demás.
  */
@@ -133,7 +135,8 @@ export async function avisarTopes(ahora: Date = new Date()): Promise<number> {
         .replace("{tope}", FORMATO[c.nombre](c.tope))
         .replace("{llena}", t(`alta.avisoTope.${c.nombre}.llena`))
     );
-    const texto = [t("alta.avisoTope.intro"), ...lineas, "", t("alta.avisoTope.cierre")].join("\n");
+    const frenada = topes.presupuesto === 0 ? [t("operador.iaFrenada"), ""] : [];
+    const texto = [t("alta.avisoTope.intro"), ...lineas, "", ...frenada, t("alta.avisoTope.cierre")].join("\n");
     // Si no salió a ninguno el aviso no se dio: sin marca, el barrido siguiente lo intenta de nuevo.
     if (!(await mandarAlOperador(destinatarios, t("alta.avisoTope.asunto"), texto, "topes"))) return 0;
     await ponerMarcas(

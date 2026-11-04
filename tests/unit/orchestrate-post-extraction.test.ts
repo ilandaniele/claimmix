@@ -3170,6 +3170,43 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
       NO_MATCHES
     );
 
+    // Con la lista idéntica a la que ya mandamos se acusa recibo: contestar sí,
+    // repetir el pedido no.
+    const calls = vi.mocked(dispatchOutboundEmail).mock.calls;
+    expect(calls.some((c) => c[0].template === "information_received")).toBe(true);
+    expect(calls.some((c) => c[0].template === "missing_information_request")).toBe(false);
+  });
+
+  it("still asks when a file arrives and the list is not the one we sent", async () => {
+    setupDbMocks({
+      lastAskRows: [
+        { asked_keys: ["parte_amistoso", "licencia"], created_at: "2026-08-20T18:00:00Z" },
+      ],
+      newAttachmentRows: [{ id: "att-1" }],
+    });
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["parte_amistoso"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    vi.mocked(deliberate).mockResolvedValue({
+      intent: "wait",
+      askFor: [],
+      question: null,
+      reasoning: "el pedido no cambió",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
     const ask = vi
       .mocked(dispatchOutboundEmail)
       .mock.calls.find((c) => c[0].template === "missing_information_request");

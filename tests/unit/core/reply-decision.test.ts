@@ -97,11 +97,54 @@ describe("qué rompe la espera", () => {
     expect(queHacer(con({ yaSePidio: true, nosPreguntoAlgo: true }))).toBe("pedir");
   });
 
-  it("un archivo que llegó: cambió el estado del pedido", () => {
-    expect(elPedidoQuedaEnEspera(con({ yaSePidio: true, llegoUnArchivo: true }))).toBe(
+  it("un archivo con el pedido todavía sin hacer: se pide, aunque el agente espere", () => {
+    expect(elPedidoQuedaEnEspera(con({ elAgenteEspera: true, llegoUnArchivo: true }))).toBe(
       false
     );
-    expect(queHacer(con({ yaSePidio: true, llegoUnArchivo: true }))).toBe("pedir");
+    expect(queHacer(con({ elAgenteEspera: true, llegoUnArchivo: true }))).toBe("pedir");
+    expect(queHacer(con({ llegoUnArchivo: true }))).toBe("pedir");
+  });
+
+  it("un archivo con la misma lista que ya se mandó: se acusa recibo, no se repite", () => {
+    // El ensayo nota-de-voz-y-pdf lo encontró: mandaba la lista idéntica un
+    // minuto después de la primera, con un «recibimos tu archivo» pegado.
+    const s = con({ yaSePidio: true, llegoUnArchivo: true });
+    expect(elPedidoQuedaEnEspera(s)).toBe(true);
+    expect(queHacer(s)).toBe("acusar-recibo");
+  });
+
+  it("el archivo gana sobre el juicio del agente de esperar", () => {
+    expect(
+      queHacer(con({ yaSePidio: true, elAgenteEspera: true, llegoUnArchivo: true }))
+    ).toBe("acusar-recibo");
+  });
+
+  it("si además otro archivo no entró, sale el pedido con el aviso al pie", () => {
+    expect(
+      queHacer(con({ yaSePidio: true, llegoUnArchivo: true, unArchivoNoEntro: true }))
+    ).toBe("pedir");
+  });
+
+  it("un archivo no alcanza si además hay una pregunta o una devolución", () => {
+    expect(queHacer(con({ yaSePidio: true, llegoUnArchivo: true, nosPreguntoAlgo: true }))).toBe(
+      "pedir"
+    );
+    expect(
+      queHacer(con({ yaSePidio: true, llegoUnArchivo: true, nosContestoElPedido: true }))
+    ).toBe("pedir");
+    expect(
+      queHacer(con({ yaSePidio: true, llegoUnArchivo: true, nosLoDevolvieron: true }))
+    ).toBe("pedir");
+  });
+
+  it("un archivo no inventa un mensaje cuando no falta nada o el caso es grave", () => {
+    // Sin nada que pedir no hay «misma lista»: el caso cierra por otro lado.
+    expect(
+      queHacer(con({ elAgenteEspera: true, llegoUnArchivo: true, datosQueFaltan: 0 }))
+    ).toBe("callar");
+    expect(queHacer(con({ yaSePidio: true, llegoUnArchivo: true, esGrave: true }))).toBe(
+      "callar"
+    );
   });
 
   it("el juicio del agente pone el pedido en espera por sí solo", () => {

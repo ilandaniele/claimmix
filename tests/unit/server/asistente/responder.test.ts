@@ -44,7 +44,9 @@ vi.mock("@/lib/audit/log", () => ({
   writeAuditLog: mockWriteAuditLog,
 }));
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { enUSServidor } from "@/lib/i18n/en-US.servidor";
+import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 import { responderPregunta } from "@/server/asistente/responder";
 import type { RoleContext } from "@/lib/auth/require-role";
 import { AppError } from "@/lib/errors";
@@ -74,12 +76,80 @@ beforeEach(() => {
   mockWriteAuditLog.mockResolvedValue(undefined);
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("responderPregunta — presupuesto", () => {
   it("no llama al modelo cuando el presupuesto está agotado", async () => {
     mockCheckBudget.mockResolvedValue({ exceeded: true, reason: "tope mensual" });
 
     await expect(responderPregunta(ctx(), "¿cuántos casos hay?")).rejects.toThrow(AppError);
     expect(mockCallGemini).not.toHaveBeenCalled();
+  });
+
+  it("con el tope mensual en 0 dice que la IA está pausada a propósito y no filtra cifras del proyecto", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    mockCheckBudget.mockResolvedValue({
+      exceeded: true,
+      motivo: "mensual",
+      reason: "Presupuesto mensual agotado ($84.12 / $0)",
+    });
+
+    const error = await responderPregunta(ctx(), "¿cuántos casos hay?").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).message).toBe(esARServidor["configuracion.capAyudaFrenada"]);
+    expect((error as AppError).message).not.toMatch(/\$|\d/);
+    expect((error as AppError).details).toEqual({ frenada: true });
+    expect(mockCallGemini).not.toHaveBeenCalled();
+  });
+
+  // La caja muestra este mensaje tal cual: una cuenta en inglés no puede leerlo en castellano.
+  it("el mensaje de la IA pausada sale en el idioma de la cuenta", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "mensual", reason: "Presupuesto mensual agotado ($84.12 / $0)" });
+
+    const error = await responderPregunta(ctx(), "how many cases?", "en-US").catch((e: unknown) => e);
+
+    expect((error as AppError).message).toBe(enUSServidor["configuracion.capAyudaFrenada"]);
+    expect((error as AppError).details).toEqual({ frenada: true });
+  });
+
+  // El tope mensual suma el gasto de TODOS los inquilinos: su `reason` («$184.12 / $200») le diría a
+  // un inquilino cuánto gastaron los demás, y el 429 se lo manda a quien preguntó.
+  it("con un tope mayor que 0 el motivo mensual dice que se agotó el mes, sin las cifras del chequeo", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+    mockCheckBudget.mockResolvedValue({
+      exceeded: true,
+      motivo: "mensual",
+      reason: "Presupuesto mensual de IA agotado ($184.12 / $200).",
+    });
+
+    const error = await responderPregunta(ctx(), "¿cuántos casos hay?").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).message).toBe(esARServidor["asistente.presupuestoMensual"]);
+    expect((error as AppError).message).not.toMatch(/\$|\d/);
+    expect((error as AppError).details).toBeUndefined();
+    expect(mockCallGemini).not.toHaveBeenCalled();
+  });
+
+  it("el cupo del propio inquilino conserva su mensaje: las cifras son suyas", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "inquilino", reason: "tope del inquilino (900 / 1.000)" });
+
+    await expect(responderPregunta(ctx(), "¿cuántos casos hay?")).rejects.toThrow("tope del inquilino (900 / 1.000)");
+  });
+
+  it("con el tope en 0 otro motivo (el del inquilino) conserva su mensaje: no es la pausa a propósito", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "inquilino", reason: "tope del inquilino" });
+
+    const error = await responderPregunta(ctx(), "¿cuántos casos hay?").catch((e: unknown) => e);
+
+    expect((error as AppError).message).toBe("tope del inquilino");
+    expect((error as AppError).details).toBeUndefined();
   });
 });
 

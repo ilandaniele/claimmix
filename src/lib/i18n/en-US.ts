@@ -1054,7 +1054,7 @@ export const enUS: Record<ClaveDelCliente, string> = {
   "presupuesto.alerta.moneda_no_comparable": "The currency cannot be compared with the range",
   "presupuesto.alerta.sin_rango": "No range to compare with",
   "lectura.sinLeer.mock": "Not read: the AI is in test mode.",
-  "lectura.sinLeer.presupuesto": "Not read: the account's AI budget is used up.",
+  "lectura.sinLeer.presupuesto": "Not read: the AI is paused for now.",
   "lectura.sinLeer.cupo": "Not read: the daily reading limit was reached.",
   "lectura.sinLeer.archivo": "Not read: the file cannot be sent to the model.",
   "lectura.sinLeer.paginas": "Not read: the document is too long to read in full.",

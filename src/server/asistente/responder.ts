@@ -17,6 +17,7 @@ import "server-only";
 
 import { AppError } from "@/lib/errors";
 import type { RoleContext } from "@/lib/auth/require-role";
+import { iaFrenadaAProposito } from "@/lib/topes";
 import { checkBudget, registrarConsumoDelModelo } from "@/server/ai/budget";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
@@ -33,7 +34,7 @@ import {
 } from "@/server/asistente/herramientas";
 import type { TenantContext } from "@/data/scope";
 import { AuditEvent, writeAuditLog } from "@/lib/audit/log";
-import { getT, type TranslationKey } from "@/lib/i18n";
+import { getT, type Locale, type TranslationKey } from "@/lib/i18n";
 import { etiquetaDeCampo } from "@/lib/labels/etiqueta-de-campo";
 
 export interface RespuestaDelAsistente {
@@ -162,13 +163,25 @@ async function resumenDelCaso(tenantId: string, userId: string, detalle: Detalle
 
 export async function responderPregunta(
   ctx: RoleContext,
-  pregunta: string
+  pregunta: string,
+  locale: Locale = "es-AR"
 ): Promise<RespuestaDelAsistente> {
   const tenantId = ctx.userRow.tenant_id;
   const tenantCtx: TenantContext = { tenantId };
 
   const presupuesto = await checkBudget(tenantId, ctx.user.id);
-  if (presupuesto.exceeded) throw new AppError("AI_BUDGET_EXCEEDED", presupuesto.reason);
+  if (presupuesto.exceeded) {
+    // La caja sólo muestra el mensaje de la IA pausada a propósito (`frenada`), en el idioma de la cuenta; con
+    // los demás topes dice «demasiadas preguntas». El `reason` del mensual trae el gasto de TODOS los
+    // inquilinos («$84.12 / $200») y el 429 le llega a quien preguntó, así que va un texto sin cifras.
+    if (iaFrenadaAProposito(presupuesto.motivo)) {
+      throw new AppError("AI_BUDGET_EXCEEDED", getT(locale)("configuracion.capAyudaFrenada"), { frenada: true });
+    }
+    throw new AppError(
+      "AI_BUDGET_EXCEEDED",
+      presupuesto.motivo === "mensual" ? t("asistente.presupuestoMensual") : presupuesto.reason
+    );
+  }
 
   const intencion = await clasificarIntencion(tenantId, ctx.user.id, pregunta);
 

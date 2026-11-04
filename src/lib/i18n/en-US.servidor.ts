@@ -60,10 +60,12 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "tardio.aviso.caso": "Case: {caso}",
   "tardio.aviso.abrir": "Open: {link}",
   "presupuesto.aviso.asunto": "ClaimMix stopped analysing claims: AI budget exhausted",
-  "presupuesto.aviso.cuerpo": "Since {hora}, claims arriving by email, WhatsApp and the web form are left unanalysed {plazo}. Reason: {motivo}. Those already received stay in the inbox as escalated: re-analyse them by hand once the cap lifts.",
+  "presupuesto.aviso.asuntoFrenada": "ClaimMix stopped analysing claims: AI is paused on purpose",
+  "presupuesto.aviso.cuerpo": "Since {hora}, claims arriving by email, WhatsApp and the web form are left unanalysed {plazo}. Reason: {motivo}. Those already received stay in the inbox as escalated: re-analyse them by hand when the AI is back.",
   "presupuesto.aviso.motivo.anonimo": "the daily quota for channels without a user",
   "presupuesto.aviso.motivo.inquilino": "the insurer's daily quota",
   "presupuesto.aviso.motivo.mensual": "the project's monthly budget",
+  "presupuesto.aviso.motivo.frenada": "the AI is paused on purpose: the project's monthly cap is set to 0",
   "presupuesto.aviso.motivo.prueba_vencida": "the space's trial has ended",
   "presupuesto.aviso.motivo.suspendido": "the space is suspended",
   "presupuesto.aviso.motivo.prueba_diaria": "the trial's daily call quota",
@@ -73,6 +75,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "presupuesto.aviso.plazo.anonimo": "until tomorrow",
   "presupuesto.aviso.plazo.inquilino": "until tomorrow",
   "presupuesto.aviso.plazo.mensual": "until next month starts or someone raises the cap",
+  "presupuesto.aviso.plazo.frenada": "until the ClaimMix team turns the AI on",
   "presupuesto.aviso.plazo.prueba_vencida": "until the space moves to a plan",
   "presupuesto.aviso.plazo.suspendido": "until the space is reactivated",
   "presupuesto.aviso.plazo.prueba_diaria": "until tomorrow",
@@ -106,6 +109,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "configuracion.umbralAyuda": "(set via the CONFIDENCE_THRESHOLD variable)",
   "configuracion.capMensual": "Monthly AI cap",
   "configuracion.capAyuda": "(set in the deployment plan)",
+  "configuracion.capAyudaFrenada": "The AI is paused on purpose in this project. Ask the ClaimMix team to turn it on.",
   "configuracion.iaFrenada": "AI paused (cap set to 0)",
   "configuracion.soloAdmins": "Only administrators can change the AI thresholds.",
   "configuracion.miClave": "My AI key",
@@ -215,6 +219,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "agente.estado.activo": "Agent active",
   "agente.estado.modo_prueba": "Test mode",
   "agente.estado.sin_presupuesto": "Out of budget",
+  "agente.estado.ia_frenada": "AI paused",
   "agente.estado.procesando": "{n} in progress",
 
   // ── Los nombres comerciales de los planes ──────────────────────────
@@ -427,6 +432,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
 
   // ── Asistente — natural-language questions about the tenant's cases ────
   "asistente.subtitulo": "Ask about the tenant's cases, in natural language.",
+  "asistente.presupuestoMensual": "This month's AI budget has run out. Try again when next month starts.",
 
   // ── Help — how the interface works, same text in the demo and the app ──
   // B6, B21, B23: cobertura, monto y presupuesto del taller. Sólo para el equipo.
@@ -857,6 +863,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "alta.avisoTope.intro": "These ClaimMix caps reached an alert threshold:",
   "alta.avisoTope.linea80": "- {nombre}: {usado} of {tope}. Past 80%.",
   "alta.avisoTope.linea100": "- {nombre}: {usado} of {tope}. Cap reached. {llena}",
+  "operador.iaFrenada": "Client AI is paused on purpose: MONTHLY_BUDGET_USD is set to 0. To turn it on, set that variable to a value above 0 and redeploy.",
   "alta.avisoTope.cierre": "To raise a cap, change its variable in the environment. The alert is sent only once per threshold and month.",
   "alta.avisoTope.presupuesto.nombre": "AI spend this month (USD)",
   "alta.avisoTope.presupuesto.llena": "AI stays stopped until next month starts or MONTHLY_BUDGET_USD is raised.",
@@ -1040,11 +1047,11 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "altas.activar.cuota": "Monthly fee (US$)",
   "altas.activar.incluidas": "Included units",
   "altas.activar.excedente": "Price per extra unit (US$)",
-  "altas.activar.ayudaPlan": "Pick the plan they bought. Its fee, units and extra-unit price come from the catalog below.",
-  "altas.activar.ayudaCuota": "What the client pays per month, in dollars. Empty = the chosen plan's fee. 0 = no fee.",
-  "altas.activar.ayudaIncluidas": "Units the fee covers each month. A claim uses {whatsapp} by WhatsApp, {whatsapp_propia} by WhatsApp on its own WABA, {email} by email and {web} by the web. Empty = the chosen plan's units. 0 = none.",
-  "altas.activar.ayudaExcedente": "What is charged for each unit above the included ones, in dollars. Empty = the chosen plan's price. 0 = not charged.",
-  "altas.activar.ayuda": "Empty fields take the plan's value. A 0 is not empty: it is saved as is. Decimals use a dot, with no thousands separator. Guided pilot: half the fee for 60 days. Then activate again at the full fee.",
+  "altas.activar.ayudaPlan": "The one the client bought. Its values are in the catalog below.",
+  "altas.activar.ayudaCuota": "Per month, in dollars. Empty = the plan's fee. 0 = no fee.",
+  "altas.activar.ayudaIncluidas": "Units the fee covers each month. A claim uses {whatsapp} by WhatsApp, {whatsapp_propia} by WhatsApp on its own WABA, {email} by email and {web} by the web. Empty = the plan's units. 0 = none.",
+  "altas.activar.ayudaExcedente": "For each unit above the included ones, in dollars. Empty = the plan's price. 0 = not charged.",
+  "altas.activar.ayuda": "Pick the plan. Empty fee, units and extra-unit price take the catalog value. Type a value only if a different one was agreed: a 0 is saved as is. Decimals use a dot, with no thousands separator. Guided pilot: half the fee for 60 days. Then activate again at the full fee.",
   "altas.activar.catalogo": "Plan catalog",
   "altas.activar.boton": "Activate",
   "altas.r.ok": "Done.",
@@ -1504,6 +1511,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "audit.case.exported_to_core": "Core system JSON exported",
   "audit.tenant.work_settings_updated": "Team work settings changed (assignment, deadlines, plan or score)",
   "audit.ai.budget_exceeded": "Not analysed: AI budget exhausted",
+  "audit.ai.ia_pausada": "Not analysed: the AI is paused on purpose",
   "audit.ai.budget_alerted": "Specialists notified: AI budget exhausted",
   "audit.training.example_approved": "Approved as a reference example",
   "audit.training.example_rejected": "Rejected as a reference example",

@@ -18,6 +18,7 @@ const TENANT_ID = "budget-test-0000-0000-000000000002";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 async function correr(presupuesto: Record<string, unknown>, casoMovido = false) {
@@ -106,6 +107,43 @@ describe("runEmailExtractionWorker — presupuesto agotado", () => {
       payload: { new_status: "escalado", reason: "budget_exceeded", error_code: "AI_BUDGET_EXCEEDED" },
     });
     expect(escalados[0][0].payload).not.toHaveProperty("status_not_applied");
+  });
+
+  // El historial lo lee el analista del inquilino: el `reason` del chequeo trae el gasto de todo el proyecto.
+  describe("con el tope mensual en 0 (la IA pausada a propósito)", () => {
+    const PRESUPUESTO = { exceeded: true, motivo: "mensual", reason: "Presupuesto mensual de IA agotado ($84.12 / $0)." };
+
+    it("el historial dice «ia_pausada», sin el gasto del proyecto, y el caso se escala igual", async () => {
+      vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+      const { espiaDeAuditoria, espiaDeUpdate } = await correr(PRESUPUESTO);
+
+      const excedidos = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.budget_exceeded");
+      expect(excedidos[0][0].payload).toEqual({ reason: "ia_pausada" });
+      const escalados = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.extracted");
+      expect(escalados[0][0].payload).toMatchObject({ new_status: "escalado", reason: "ia_pausada" });
+      expect(JSON.stringify(espiaDeAuditoria.mock.calls)).not.toContain("84.12");
+      expect(statusEscrito(espiaDeUpdate)).toBe("escalado");
+    });
+
+    // El tope mensual suma el gasto de todos los inquilinos, con el tope en 0 o con cualquier otro valor.
+    it("con un tope mayor que 0 el historial dice «budget_exceeded», sin el gasto del proyecto", async () => {
+      vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+      const { espiaDeAuditoria } = await correr(PRESUPUESTO);
+
+      const excedidos = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.budget_exceeded");
+      expect(excedidos[0][0].payload).toEqual({ reason: "budget_exceeded" });
+      const escalados = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.extracted");
+      expect(escalados[0][0].payload).toMatchObject({ reason: "budget_exceeded" });
+      expect(JSON.stringify(espiaDeAuditoria.mock.calls)).not.toContain("84.12");
+    });
+
+    it("el tope en 0 con otro motivo (el del inquilino) no es la pausa a propósito", async () => {
+      vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+      const { espiaDeAuditoria } = await correr({ exceeded: true, motivo: "inquilino", reason: "tope del inquilino" });
+
+      const excedidos = espiaDeAuditoria.mock.calls.filter((c) => c[0].event_type === "ai.budget_exceeded");
+      expect(excedidos[0][0].payload).toEqual({ reason: "tope del inquilino" });
+    });
   });
 
   it("si otra mano ya movió el caso, el ai.extracted avisa que el estado no se aplicó", async () => {

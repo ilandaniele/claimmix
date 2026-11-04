@@ -96,7 +96,13 @@ vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: mockRateLimit,
 }));
 
+vi.mock("@/lib/i18n/locale", () => ({
+  resolveAccountLocale: vi.fn(async (cuenta?: string | null) => (cuenta === "en-US" ? "en-US" : "es-AR")),
+}));
+
 import { POST } from "@/app/api/cases/[id]/re-analyze/route";
+import { enUSServidor } from "@/lib/i18n/en-US.servidor";
+import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 
 const CASE_ID = "123e4567-e89b-12d3-a456-426614174001";
 const TENANT_ID = "10000000-0000-0000-0000-000000000001";
@@ -174,6 +180,7 @@ describe("POST /api/cases/:id/re-analyze", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("returns 202, resets the case, and schedules the intake agent", async () => {
@@ -547,6 +554,62 @@ describe("POST /api/cases/:id/re-analyze", () => {
     });
     expect(mockAfter).not.toHaveBeenCalled();
   });
+
+  // La pantalla muestra este mensaje tal cual: con la IA pausada a propósito no puede decir «agotado».
+  it("con el tope mensual en 0 el 429 dice que la IA está pausada y cómo se prende, en el idioma de la cuenta", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "mensual", reason: "Presupuesto mensual agotado ($84.12 / $0)." });
+
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: CASE_ID }) });
+
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      error: {
+        code: "AI_BUDGET_EXCEEDED",
+        message: esARServidor["configuracion.capAyudaFrenada"],
+        details: { frenada: true },
+      },
+    });
+
+    mockRequireRole.mockResolvedValue({
+      db: mockDb,
+      user: { id: USER_ID },
+      userRow: { id: USER_ID, tenant_id: TENANT_ID, role: "admin", locale: "en-US" },
+    });
+    const enIngles = await POST(makeRequest(), { params: Promise.resolve({ id: CASE_ID }) });
+    await expect(enIngles.json()).resolves.toMatchObject({
+      error: { message: enUSServidor["configuracion.capAyudaFrenada"], details: { frenada: true } },
+    });
+    expect(mockAfter).not.toHaveBeenCalled();
+  });
+
+  it("con un tope mayor que 0 el 429 sigue diciendo que el presupuesto se agotó", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "mensual", reason: "Presupuesto mensual agotado ($84.12 / $200)." });
+
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: CASE_ID }) });
+
+    const { error } = await res.json();
+    expect(error).toMatchObject({ code: "AI_BUDGET_EXCEEDED", message: "Presupuesto de IA agotado para este mes." });
+    expect(error).not.toHaveProperty("details");
+  });
+
+  // Sólo la pausa a propósito la explica el servidor: un cupo diario o una prueba vencida no son «de este mes»,
+  // y la pantalla los cuenta con su texto traducido en vez de este mensaje.
+  it.each(["persona", "inquilino", "prueba_diaria", "prueba_vencida", "suspendido", "sin_dato"])(
+    "el 429 por «%s» no se marca como pausa, ni siquiera con el tope en 0",
+    async (motivo) => {
+      vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+      mockCheckBudget.mockResolvedValue({ exceeded: true, motivo, reason: "Cupo agotado (5 / 5)." });
+
+      const res = await POST(makeRequest(), { params: Promise.resolve({ id: CASE_ID }) });
+
+      expect(res.status).toBe(429);
+      const { error } = await res.json();
+      expect(error).not.toHaveProperty("details");
+      expect(error.message).not.toBe(esARServidor["configuracion.capAyudaFrenada"]);
+    }
+  );
 
   // ── E3: un analyst re-analiza sólo un caso suyo o sin asignar ──────────────
 

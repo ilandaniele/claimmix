@@ -24,6 +24,7 @@ import { TomarElControlDialog } from "./components/TomarElControlDialog";
 import { ToastContainer, useToast } from "@/app/(app)/bandeja/components/Toast";
 import { ClaseDelTardio } from "@/app/(app)/bandeja/components/ClaseDelTardio";
 import { useT } from "@/lib/i18n/LocaleContext";
+import { mensajeDeLaIaFrenada } from "@/lib/ui/mensaje-del-tope";
 import type { ClaveDelCliente } from "@/lib/i18n";
 import type { CaseStatus } from "@/lib/schemas/cases";
 import type { EstadoDeAcciones } from "@/server/cases/acciones";
@@ -103,7 +104,9 @@ export function CaseDetailClient({
         addToast(t(clave), tipo);
         router.refresh();
       } else {
-        addToast(t(errores[res.status] ?? "error.generic"), "error");
+        // Con la IA pausada a propósito el servidor explica cómo se prende; cualquier otro 429 sigue con su texto.
+        const frenada = res.status === 429 ? await mensajeDeLaIaFrenada(res) : null;
+        addToast(frenada ?? t(errores[res.status] ?? "error.generic"), "error");
       }
     } catch {
       addToast(t("error.generic"), "error");

@@ -24,6 +24,7 @@ import { firstRow } from "@/lib/db/helpers";
 import { auditLog, cases, extractedFields, missingDocs } from "@/lib/db/schema";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
+import { motivoSinGastoDelProyecto } from "@/server/ai/tope-del-inquilino";
 import type {
   CaseRow,
   ExtractedFieldRow,
@@ -245,7 +246,7 @@ export async function fetchAuditLog(
             : null;
         // Sólo texto no vacío: un `reason: null` en el payload no es «Motivo:
         // null» en la pantalla, es que no hay motivo.
-        return typeof r === "string" && r.trim() !== "" ? r : null;
+        return typeof r === "string" && r.trim() !== "" ? motivoSinGastoDelProyecto(r) : null;
       })(),
     }));
   } catch (err) {

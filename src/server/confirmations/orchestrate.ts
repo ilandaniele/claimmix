@@ -1138,7 +1138,7 @@ export async function orchestratePostExtraction(
   // la conversación entera en cada vuelta— alcanza para que un «gracias»
   // parezca noticia.
   const aprendimosAlgo =
-    plan && askOnHold && !agentIsWaiting && !derivaSola
+    plan && askOnHold && !agentIsWaiting && !derivaSola && !somethingArrived
       ? await factsLearnedSinceWeLastSpoke(caseId, tenantId, hablamos)
       : false;
 

@@ -341,8 +341,12 @@ describe("CajaDelAsistente", () => {
     expect(screen.getByText("Respuesta 6")).toBeInTheDocument();
   });
 
-  it("un 429 muestra el aviso de demasiadas preguntas", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 429 }));
+  function respuesta429(code: string, message: string, details?: { frenada: boolean }) {
+    return new Response(JSON.stringify({ error: { code, message, details } }), { status: 429 });
+  }
+
+  it("un 429 del cupo por hora muestra el aviso de demasiadas preguntas", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuesta429("RATE_LIMITED", "Demasiadas solicitudes.")));
     const user = userEvent.setup();
 
     render(<CajaDelAsistente />);
@@ -351,5 +355,45 @@ describe("CajaDelAsistente", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Demasiadas preguntas seguidas. Esperá un momento y volvé a intentar."
     );
+  });
+
+  it("un 429 sin cuerpo legible también muestra el aviso de demasiadas preguntas", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 429 }));
+    const user = userEvent.setup();
+
+    render(<CajaDelAsistente />);
+    await user.click(screen.getByText("¿Cuántos casos hubo este mes?"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Demasiadas preguntas seguidas.");
+  });
+
+  // Con la IA pausada a propósito, «esperá un momento y volvé a intentar» manda a reintentar algo
+  // que no se levanta solo: el aviso es el que manda el servidor, que dice cómo se prende.
+  it("un 429 de la IA pausada muestra el mensaje del servidor, no «demasiadas preguntas»", async () => {
+    const mensaje = "La IA está pausada a propósito en este proyecto. Pedile al equipo de ClaimMix que la active.";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuesta429("AI_BUDGET_EXCEEDED", mensaje, { frenada: true })));
+    const user = userEvent.setup();
+
+    render(<CajaDelAsistente />);
+    await user.click(screen.getByText("¿Cuántos casos hubo este mes?"));
+
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent(mensaje);
+    expect(aviso).not.toHaveTextContent("Demasiadas preguntas");
+  });
+
+  // El `message` de un tope diario o del mes es prosa interna con cifras («5.000.000 / 5.000.000», «tenant»):
+  // no llega a la pantalla, que sigue con su texto traducido.
+  it("un 429 por otro tope de IA no muestra el texto interno del servidor", async () => {
+    const interno = "Presupuesto diario de tokens agotado para el tenant (5.000.000 / 5.000.000).";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respuesta429("AI_BUDGET_EXCEEDED", interno)));
+    const user = userEvent.setup();
+
+    render(<CajaDelAsistente />);
+    await user.click(screen.getByText("¿Cuántos casos hubo este mes?"));
+
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent("Demasiadas preguntas seguidas.");
+    expect(aviso).not.toHaveTextContent("tenant");
   });
 });

@@ -23,11 +23,14 @@ import { cases } from "@/lib/db/schema";
 import { CaseStatusSchema, type CaseStatus } from "@/lib/schemas/cases";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
+import { errorDelTope } from "@/server/ai/tope-del-inquilino";
 import { ESTADOS_QUE_NO_SE_REABREN_A_MANO } from "@/core/case/fsm";
 import { reservaViva } from "@/core/case/reserva-de-extraccion";
 import { writeAuditLog } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { getT } from "@/lib/i18n";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { errorCode } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
@@ -185,7 +188,7 @@ export async function POST(
   // ── Budget check ──────────────────────────────────────────────────────────────
   const budgetResult = await checkBudget(userRow.tenant_id, userRow.id);
   if (budgetResult.exceeded) {
-    return err(new AppError("AI_BUDGET_EXCEEDED", "Presupuesto de IA agotado para este mes."));
+    return err(errorDelTope(budgetResult, getT(await resolveAccountLocale(userRow.locale))));
   }
 
   // ── Reset case to procesando ──────────────────────────────────────────────────

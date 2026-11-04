@@ -3,12 +3,13 @@ import "server-only";
 import Link from "next/link";
 
 import { getT, type Locale } from "@/lib/i18n";
-import { leerEstadoDelAgente } from "@/server/agente/estado";
+import { leerEstadoDelAgente, type EstadoDelAgente as Estado } from "@/server/agente/estado";
 
-const COLOR: Record<"activo" | "modo_prueba" | "sin_presupuesto", string> = {
+const COLOR: Record<Estado["estado"], string> = {
   activo: "bg-emerald-500",
   modo_prueba: "bg-amber-500",
   sin_presupuesto: "bg-red-500",
+  ia_frenada: "bg-slate-400",
 };
 
 /**

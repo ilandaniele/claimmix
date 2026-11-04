@@ -90,6 +90,8 @@ const CAMPO =
   "rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900";
 const BOTON =
   "rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800";
+/** El título de un formulario del panel: se distingue de las etiquetas de sus campos (`text-xs font-medium`). */
+const LEYENDA = "text-sm font-semibold text-slate-900 dark:text-slate-100";
 const BOTON_PELIGRO =
   "rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40";
 
@@ -520,59 +522,61 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
         </div>
 
         {numero?.estado === "pedido" && !(fila.waba && WABA_VIVA.has(fila.waba.estado)) && (
-          <form action={conectar} className="mt-3 space-y-2">
-            <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{t("altas.conectar.titulo")}</p>
-            <p className="text-xs text-slate-500">{t("altas.conectar.ayuda")}</p>
-            <input type="hidden" name="numero_id" value={numero.id} />
-            <div className="flex flex-wrap gap-3">
-              <Campo
-                id={`${idDelForm}-conectar-phone`}
-                etiqueta={t("altas.numero.phoneNumberId")}
-                ayuda={t("altas.conectar.ayudaPhoneNumberId")}
-                control={(propios) => (
-                  <input
-                    {...propios}
-                    name="phone_number_id"
-                    required
-                    inputMode="numeric"
-                    pattern={ID_DE_META.source}
-                    className={CAMPO}
-                  />
-                )}
-              />
-              <Campo
-                id={`${idDelForm}-conectar-waba`}
-                etiqueta={t("altas.numero.waba")}
-                ayuda={t("altas.conectar.ayudaWaba")}
-                control={(propios) => (
-                  <input
-                    {...propios}
-                    name="waba_id"
-                    required
-                    inputMode="numeric"
-                    pattern={ID_DE_META.source}
-                    className={CAMPO}
-                  />
-                )}
-              />
-            </div>
-            <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
-              <input
-                type="checkbox"
-                name="prueba_de_control"
-                required
-                title={t("altas.conectar.ayudaConfirmo")}
-                aria-describedby={`${idDelForm}-conectar-confirmo-ayuda`}
-                className="mt-0.5"
-              />
-              <span>{t("altas.conectar.confirmo").replace("{correo}", fila.contactEmail ?? "—")}</span>
-            </label>
-            <p id={`${idDelForm}-conectar-confirmo-ayuda`} className="text-xs text-slate-500 dark:text-slate-400">
-              {t("altas.conectar.ayudaConfirmo")}
-            </p>
-            <button type="submit" className={BOTON}>
-              {t("altas.conectar.boton")}
-            </button>
+          <form action={conectar} className="mt-3">
+            <fieldset className="min-w-0 space-y-2">
+              <legend className={LEYENDA}>{t("altas.conectar.titulo")}</legend>
+              <p className="text-xs text-slate-500">{t("altas.conectar.ayuda")}</p>
+              <input type="hidden" name="numero_id" value={numero.id} />
+              <div className="flex flex-wrap gap-3">
+                <Campo
+                  id={`${idDelForm}-conectar-phone`}
+                  etiqueta={t("altas.numero.phoneNumberId")}
+                  ayuda={t("altas.conectar.ayudaPhoneNumberId")}
+                  control={(propios) => (
+                    <input
+                      {...propios}
+                      name="phone_number_id"
+                      required
+                      inputMode="numeric"
+                      pattern={ID_DE_META.source}
+                      className={CAMPO}
+                    />
+                  )}
+                />
+                <Campo
+                  id={`${idDelForm}-conectar-waba`}
+                  etiqueta={t("altas.numero.waba")}
+                  ayuda={t("altas.conectar.ayudaWaba")}
+                  control={(propios) => (
+                    <input
+                      {...propios}
+                      name="waba_id"
+                      required
+                      inputMode="numeric"
+                      pattern={ID_DE_META.source}
+                      className={CAMPO}
+                    />
+                  )}
+                />
+              </div>
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  name="prueba_de_control"
+                  required
+                  title={t("altas.conectar.ayudaConfirmo")}
+                  aria-describedby={`${idDelForm}-conectar-confirmo-ayuda`}
+                  className="mt-0.5"
+                />
+                <span>{t("altas.conectar.confirmo").replace("{correo}", fila.contactEmail ?? "—")}</span>
+              </label>
+              <p id={`${idDelForm}-conectar-confirmo-ayuda`} className="text-xs text-slate-500 dark:text-slate-400">
+                {t("altas.conectar.ayudaConfirmo")}
+              </p>
+              <button type="submit" className={BOTON}>
+                {t("altas.conectar.boton")}
+              </button>
+            </fieldset>
           </form>
         )}
 
@@ -596,70 +600,72 @@ function Alta({ fila, locale, t }: { fila: FilaDeAlta; locale: Locale; t: Traduc
         )}
 
         {operable && (
-          <form action={activarElInquilino} className="mt-3 space-y-2">
-            <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{t("altas.activar.titulo")}</p>
-            <input type="hidden" name="tenant_id" value={fila.tenantId} />
-            <div className="flex flex-wrap gap-3">
-              <Campo
-                id={`${idDelForm}-activar-plan`}
-                etiqueta={t("altas.activar.plan")}
-                ayuda={t("altas.activar.ayudaPlan")}
-                control={(propios) => (
-                  <select {...propios} name="plan" defaultValue="operativo" className={CAMPO}>
-                    {PLANES_COMERCIALES.map((plan) => (
-                      <option key={plan} value={plan}>
-                        {nombreDePlan(plan, plan, t)}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              />
-              <Campo
-                id={`${idDelForm}-activar-cuota`}
-                etiqueta={t("altas.activar.cuota")}
-                ayuda={t("altas.activar.ayudaCuota")}
-                control={(propios) => <input {...propios} name="cuota" inputMode="decimal" className={CAMPO} />}
-              />
-              <Campo
-                id={`${idDelForm}-activar-incluidas`}
-                etiqueta={t("altas.activar.incluidas")}
-                ayuda={notaDePesos(t("altas.activar.ayudaIncluidas"), String)}
-                control={(propios) => <input {...propios} name="incluidas" inputMode="numeric" className={CAMPO} />}
-              />
-              <Campo
-                id={`${idDelForm}-activar-excedente`}
-                etiqueta={t("altas.activar.excedente")}
-                ayuda={t("altas.activar.ayudaExcedente")}
-                control={(propios) => <input {...propios} name="excedente" inputMode="decimal" className={CAMPO} />}
-              />
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{t("altas.activar.ayuda")}</p>
-            <details className="text-xs text-slate-600 dark:text-slate-300">
-              <summary className="cursor-pointer font-medium">{t("altas.activar.catalogo")}</summary>
-              <table className="mt-1 w-full text-left tabular-nums">
-                <thead className="text-slate-500 dark:text-slate-400">
-                  <tr>
-                    <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.plan")}</th>
-                    <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.cuota")}</th>
-                    <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.incluidas")}</th>
-                    <th scope="col" className="py-1 font-medium">{t("altas.activar.excedente")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {PLANES_COMERCIALES.map((plan) => (
-                    <tr key={plan} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="py-1 pr-3">{nombreDePlan(plan, plan, t)}</td>
-                      <td className="py-1 pr-3">{usd(PLAN_CATALOG[plan].monthly_fee_usd)}</td>
-                      <td className="py-1 pr-3">{PLAN_CATALOG[plan].included_claims}</td>
-                      <td className="py-1">{usd(PLAN_CATALOG[plan].overage_price_usd)}</td>
+          <form action={activarElInquilino} className="mt-3">
+            <fieldset className="min-w-0 space-y-2">
+              <legend className={LEYENDA}>{t("altas.activar.titulo")}</legend>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{t("altas.activar.ayuda")}</p>
+              <input type="hidden" name="tenant_id" value={fila.tenantId} />
+              <div className="flex flex-wrap gap-3">
+                <Campo
+                  id={`${idDelForm}-activar-plan`}
+                  etiqueta={t("altas.activar.plan")}
+                  ayuda={t("altas.activar.ayudaPlan")}
+                  control={(propios) => (
+                    <select {...propios} name="plan" defaultValue="operativo" className={CAMPO}>
+                      {PLANES_COMERCIALES.map((plan) => (
+                        <option key={plan} value={plan}>
+                          {nombreDePlan(plan, plan, t)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                />
+                <Campo
+                  id={`${idDelForm}-activar-cuota`}
+                  etiqueta={t("altas.activar.cuota")}
+                  ayuda={t("altas.activar.ayudaCuota")}
+                  control={(propios) => <input {...propios} name="cuota" inputMode="decimal" className={CAMPO} />}
+                />
+                <Campo
+                  id={`${idDelForm}-activar-incluidas`}
+                  etiqueta={t("altas.activar.incluidas")}
+                  ayuda={notaDePesos(t("altas.activar.ayudaIncluidas"), String)}
+                  control={(propios) => <input {...propios} name="incluidas" inputMode="numeric" className={CAMPO} />}
+                />
+                <Campo
+                  id={`${idDelForm}-activar-excedente`}
+                  etiqueta={t("altas.activar.excedente")}
+                  ayuda={t("altas.activar.ayudaExcedente")}
+                  control={(propios) => <input {...propios} name="excedente" inputMode="decimal" className={CAMPO} />}
+                />
+              </div>
+              <details className="text-xs text-slate-600 dark:text-slate-300">
+                <summary className="cursor-pointer font-medium">{t("altas.activar.catalogo")}</summary>
+                <table className="mt-1 w-full text-left tabular-nums">
+                  <thead className="text-slate-500 dark:text-slate-400">
+                    <tr>
+                      <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.plan")}</th>
+                      <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.cuota")}</th>
+                      <th scope="col" className="py-1 pr-3 font-medium">{t("altas.activar.incluidas")}</th>
+                      <th scope="col" className="py-1 font-medium">{t("altas.activar.excedente")}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </details>
-            <button type="submit" className={BOTON}>
-              {t("altas.activar.boton")}
-            </button>
+                  </thead>
+                  <tbody>
+                    {PLANES_COMERCIALES.map((plan) => (
+                      <tr key={plan} className="border-t border-slate-100 dark:border-slate-800">
+                        <td className="py-1 pr-3">{nombreDePlan(plan, plan, t)}</td>
+                        <td className="py-1 pr-3">{usd(PLAN_CATALOG[plan].monthly_fee_usd)}</td>
+                        <td className="py-1 pr-3">{PLAN_CATALOG[plan].included_claims}</td>
+                        <td className="py-1">{usd(PLAN_CATALOG[plan].overage_price_usd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+              <button type="submit" className={BOTON}>
+                {t("altas.activar.boton")}
+              </button>
+            </fieldset>
           </form>
         )}
       </td>

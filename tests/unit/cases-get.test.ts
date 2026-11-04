@@ -346,6 +346,24 @@ describe("getCaseDetail — el historial no lleva de más", () => {
     const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
     expect(res!.audit_log[1].reason).toBeNull();
   });
+
+  it("las filas viejas del tope mensual no muestran el gasto del proyecto entero", async () => {
+    setupSelectMock({
+      caseRows: [mockCase],
+      extractedRows: [],
+      missingRows: [],
+      auditRows: [
+        { ...mockAuditEntries[0], event_type: "ai.budget_exceeded", payload: { reason: "Presupuesto mensual de IA agotado ($84.12 / $200)." } },
+        { ...mockAuditEntries[1], event_type: "ai.budget_exceeded", payload: { reason: "Presupuesto mensual de IA de la prueba agotado ($3.10 / $5)." } },
+      ],
+    });
+
+    const res = await getCaseDetail(TENANT_ID, "case-uuid-1");
+    expect(res!.audit_log[0].reason).toBe("budget_exceeded");
+    expect(JSON.stringify(res!.audit_log[0])).not.toContain("84.12");
+    // El de la prueba es del propio inquilino: pasa como está.
+    expect(res!.audit_log[1].reason).toBe("Presupuesto mensual de IA de la prueba agotado ($3.10 / $5).");
+  });
 });
 
 describe("getCaseDetail — el historial no se llena con los cambios del agente", () => {

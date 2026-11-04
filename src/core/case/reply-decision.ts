@@ -105,7 +105,10 @@ export function elPedidoQuedaEnEspera(s: SeñalesDeRespuesta): boolean {
   return (
     (s.yaSePidio || s.elAgenteEspera) &&
     !s.nosPreguntoAlgo &&
-    !s.llegoUnArchivo &&
+    // Un archivo cambia el pedido sólo si el pedido cambió: con la lista
+    // idéntica a la que ya mandamos, repetirla es el hostigamiento de siempre.
+    // Si además otro archivo no entró, el pedido sale con el aviso al pie.
+    !(s.llegoUnArchivo && (!s.yaSePidio || s.unArchivoNoEntro)) &&
     !s.nosContestoElPedido &&
     !s.nosLoDevolvieron
   );
@@ -123,6 +126,11 @@ export function queHacer(s: SeñalesDeRespuesta): QueHacer {
   // Con el pedido en espera, un archivo que no entró se avisa aunque el agente
   // espere: la persona cree que lo mandó y sólo nosotros sabemos que no.
   if (enEspera && s.unArchivoNoEntro) return "avisar-que-no-entro";
+
+  // Llegó un archivo y la lista es la misma que ya mandamos: se acusa recibo
+  // sin repetirla. Gana sobre el juicio del agente —callarse ante un archivo se
+  // lee como que nadie lo miró— pero no sobre `avisar-que-no-entro`.
+  if (enEspera && s.llegoUnArchivo) return "acusar-recibo";
 
   // El pedido está en espera, pero el asegurado contó algo. Un acuse corto:
   // tomamos nota, seguimos esperando lo de antes. Sin la lista — volver a

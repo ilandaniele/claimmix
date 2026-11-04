@@ -118,6 +118,11 @@ export function topeMensualDelProyecto(env: EntornoDeTopes = process.env): numbe
   return topeDecimal("MONTHLY_BUDGET_USD", env);
 }
 
+/** El freno que saltó es el 0 puesto a propósito en el tope mensual, no un tope lleno. */
+export function iaFrenadaAProposito(motivo: string | undefined, env: EntornoDeTopes = process.env): boolean {
+  return motivo === "mensual" && topeMensualDelProyecto(env) === 0;
+}
+
 /**
  * Lo que gastan los canales sin persona —mail, WhatsApp, formulario— no puede
  * quedarse con todo el cupo del inquilino: entran sin autenticar. Sin variable,

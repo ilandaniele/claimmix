@@ -39,7 +39,8 @@ interface AuditTimelineProps {
 function eventLabel(
   eventType: string,
   channel: string | undefined,
-  textos: TextosDelHistorial
+  textos: TextosDelHistorial,
+  reason: string | null
 ): string {
   // El correo por WhatsApp lo llevan las mismas tablas que el correo real, así
   // que el evento es igual — «email.received» — pero para quien lee la
@@ -47,6 +48,9 @@ function eventLabel(
   if (eventType === "email.received" && channel?.startsWith("whatsapp")) {
     return textos["audit.whatsapp.received"];
   }
+
+  // «Se terminó el cupo» sería falso: la IA está frenada a propósito, no gastada.
+  if (eventType === "ai.budget_exceeded" && reason === "ia_pausada") return textos["audit.ai.ia_pausada"];
 
   const i18nKey = `audit.${eventType}` as ClaveDeHistorial;
   if (i18nKey in textos) {
@@ -88,6 +92,7 @@ function motivoLegible(
   if (clave) return t(clave);
 
   if (reason === "budget_exceeded") return textos["audit.ai.budget_exceeded"];
+  if (reason === "ia_pausada") return textos["audit.ai.ia_pausada"];
 
   const propio = MOTIVOS_DEL_CASO[reason];
   if (propio) return t(propio);
@@ -137,42 +142,46 @@ export function AuditTimeline({ events, channel, textos }: AuditTimelineProps) {
       className="relative border-l border-slate-200 ml-2 space-y-4"
       aria-label="Historial de eventos"
     >
-      {events.map((event) => (
-        <li key={event.id} className="ml-4">
-          <span
-            aria-hidden="true"
-            className={`absolute -left-1.5 mt-1 h-3 w-3 rounded-full border border-white ${dotColor(event.event_type)}`}
-          />
-          <div className="flex flex-col gap-0.5">
-            <p className="text-xs font-medium text-slate-700 leading-tight">
-              {eventLabel(event.event_type, channel, textos)}
-            </p>
-            <time
-              dateTime={event.created_at}
-              className="text-xs text-slate-500"
-            >
-              {formatDate(event.created_at, locale)}
-            </time>
-            <Autor event={event} textos={textos} />
-            {/*
-              * El motivo, traducido cuando es un código de rechazo de adjunto.
-              *
-              * Acá se leía «Adjunto rechazado — Motivo: size_exceeded»: el
-              * mismo código interno que el panel de adjuntos ya no muestra, en
-              * la misma pantalla y para la misma persona. Un motivo que no sea
-              * uno de esos códigos sale como está: el historial también guarda
-              * prosa fija del código —«sin respuesta del denunciante»— y
-              * códigos de otras partes —«conflict», «unsafe_run»—.
-              */}
-            {event.reason != null && (
-              <p className="text-xs text-slate-500 mt-0.5">
-                {t("case.detail.auditReason")}:{" "}
-                <span className="font-medium">{motivoLegible(event.reason, t, textos)}</span>
+      {events.map((event) => {
+        const etiqueta = eventLabel(event.event_type, channel, textos, event.reason);
+        const motivo = event.reason != null ? motivoLegible(event.reason, t, textos) : null;
+        return (
+          <li key={event.id} className="ml-4">
+            <span
+              aria-hidden="true"
+              className={`absolute -left-1.5 mt-1 h-3 w-3 rounded-full border border-white ${dotColor(event.event_type)}`}
+            />
+            <div className="flex flex-col gap-0.5">
+              <p className="text-xs font-medium text-slate-700 leading-tight">
+                {etiqueta}
               </p>
-            )}
-          </div>
-        </li>
-      ))}
+              <time
+                dateTime={event.created_at}
+                className="text-xs text-slate-500"
+              >
+                {formatDate(event.created_at, locale)}
+              </time>
+              <Autor event={event} textos={textos} />
+              {/*
+                * El motivo, traducido cuando es un código de rechazo de adjunto.
+                *
+                * Acá se leía «Adjunto rechazado — Motivo: size_exceeded»: el
+                * mismo código interno que el panel de adjuntos ya no muestra, en
+                * la misma pantalla y para la misma persona. Un motivo que no sea
+                * uno de esos códigos sale como está: el historial también guarda
+                * prosa fija del código —«sin respuesta del denunciante»— y
+                * códigos de otras partes —«conflict», «unsafe_run»—.
+                */}
+              {motivo != null && motivo !== etiqueta && (
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {t("case.detail.auditReason")}:{" "}
+                  <span className="font-medium">{motivo}</span>
+                </p>
+              )}
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }

@@ -23,7 +23,7 @@ const DICCIONARIOS: Record<Locale, Record<ClaveDelCliente, string>> = {
 
 type TextosDePagina = Record<ClaveDePagina, string>;
 
-function getT(locale: Locale, textos?: TextosDePagina): (key: ClaveDelCliente | ClaveDePagina) => string {
+export function getT(locale: Locale, textos?: TextosDePagina): (key: ClaveDelCliente | ClaveDePagina) => string {
   const map: Record<string, string> = DICCIONARIOS[locale] ?? esAR;
   const deLaPagina: Record<string, string> = textos ?? {};
   return (key) => deLaPagina[key] ?? map[key] ?? esAR[key as ClaveDelCliente];

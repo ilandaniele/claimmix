@@ -255,7 +255,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="px-6 pb-5 pt-1">
+      <div className="px-4 pb-5 pt-1 sm:px-6">
         {/*
          * El título de la pantalla, que antes no estaba.
          *
@@ -266,7 +266,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
          * «Bandeja» en castellano incluso con la interfaz en inglés, y encima
          * `DashboardClient` repetía este mismo título adentro de la tarjeta.
          */}
-        <h1 className="text-balance text-[26px] font-semibold tracking-tight text-slate-900">
+        <h1 className="text-balance text-[22px] sm:text-[26px] font-semibold tracking-tight text-slate-900">
           {para_responder
             ? t("bandeja.paraResponder")
             : cola
@@ -298,7 +298,7 @@ async function BandejaContent({ searchParams }: BandejaPageProps) {
         * ventana, así que lo que sobre acá abajo es TODO el aire que hay entre
         * el paginador y el borde. Con 24 px la tarjeta se leía pegada al filo.
         */}
-      <div className="flex-1 overflow-hidden px-6 pb-8">
+      <div className="flex-1 overflow-hidden px-4 pb-8 sm:px-6">
         <Card className="flex h-full flex-col overflow-hidden">
           <DashboardClient
             initialData={initialData}

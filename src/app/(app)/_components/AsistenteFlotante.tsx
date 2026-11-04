@@ -109,7 +109,7 @@ function PanelDelAsistente({
       hidden={!abierto}
       inert={!abierto}
       className={cn(
-        "fixed inset-x-0 bottom-0 z-40 max-h-[70vh] flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800 sm:inset-x-auto sm:bottom-24 sm:right-6 sm:w-[400px] sm:rounded-2xl",
+        "fixed inset-x-0 bottom-0 z-40 max-h-[70vh] flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-xl dark:border-slate-700 dark:bg-slate-800 sm:inset-x-auto sm:bottom-24 sm:right-6 sm:w-[400px] sm:rounded-2xl sm:pb-0",
         // `.flex` sólo con el panel abierto: mezclado con el atributo `hidden`
         // (misma especificidad que `[hidden]`), una utilidad de display podría
         // ganarle a `display: none` en la cascada.
@@ -194,12 +194,12 @@ export function AsistenteFlotante() {
           onClick={mostrar}
           aria-label={t("asistente.flotante.mostrar")}
           title={t("asistente.flotante.mostrar")}
-          className="fixed bottom-28 right-0 z-40 inline-flex h-10 w-8 items-center justify-center rounded-l-lg bg-violet-600 text-white shadow-lg transition-colors hover:bg-violet-700 motion-reduce:transition-none"
+          className="fixed bottom-28 right-[env(safe-area-inset-right)] z-40 inline-flex h-10 w-8 items-center justify-center rounded-l-lg bg-violet-600 text-white shadow-lg transition-colors hover:bg-violet-700 motion-reduce:transition-none"
         >
           <Sparkles size={16} />
         </button>
       ) : (
-        <div className="fixed bottom-6 right-6 z-40 flex items-center gap-2">
+        <div className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] right-[max(1.5rem,env(safe-area-inset-right))] z-40 flex items-center gap-2">
           <button
             type="button"
             onClick={minimizar}

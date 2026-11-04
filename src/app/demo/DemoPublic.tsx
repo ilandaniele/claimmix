@@ -3,8 +3,15 @@
 import { useState, useEffect } from "react";
 import type { ExtractedClaim } from "@/lib/schemas/extracted-claim";
 import { anchoDeBarra } from "@/lib/ui/ancho-de-barra";
-import { useT } from "@/lib/i18n/LocaleContext";
+import { getT } from "@/lib/i18n/LocaleContext";
 import type { ClaveDelCliente } from "@/lib/i18n";
+
+/*
+ * La demo es toda en castellano —ejemplos, rótulos y resultado—, y lo que sale del
+ * diccionario también: en inglés quedaría una pantalla mezclada. `/demostracion`
+ * la declara `lang="es-AR"` entera.
+ */
+const t = getT("es-AR");
 
 // ── Example emails ────────────────────────────────────────────────────────────
 
@@ -242,7 +249,6 @@ function FNOLFlow() {
 // ── Result panel ──────────────────────────────────────────────────────────────
 
 function ResultPanel({ result, elapsed }: { result: ExtractedClaim; elapsed: number }) {
-  const t = useT();
   const isClaim = result.is_claim;
   const fields = result.extracted_fields ?? {};
   const fieldEntries = Object.entries(fields).filter(([, v]) => Boolean(v));
@@ -389,7 +395,6 @@ const PASOS_AYUDA: ReadonlyArray<{ titulo: ClaveDelCliente; texto: ClaveDelClien
 ];
 
 function ComoUsar() {
-  const t = useT();
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 mt-8">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">
@@ -525,7 +530,7 @@ export function DemoPublic() {
   return (
     <div>
       {/* Example selector */}
-      <div className="mb-5 flex items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         <span className="text-sm text-slate-500 mr-1">Ejemplos:</span>
         {(Object.keys(EXAMPLES) as ExampleKey[]).map((key) => (
           <button

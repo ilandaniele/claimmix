@@ -15,9 +15,9 @@ interface Props {
 
 function Fila({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-4 py-1.5">
-      <span className="w-44 flex-none text-xs text-slate-500">{etiqueta}</span>
-      <div className="text-sm text-slate-800">{children}</div>
+    <div className="flex flex-col gap-0.5 py-1.5 sm:flex-row sm:items-center sm:gap-4">
+      <span className="flex-none text-xs text-slate-500 sm:w-44">{etiqueta}</span>
+      <div className="min-w-0 break-words text-sm text-slate-800">{children}</div>
     </div>
   );
 }

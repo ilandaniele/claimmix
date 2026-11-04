@@ -11,7 +11,7 @@
  */
 
 import { Suspense } from "react";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { redirect } from "next/navigation";
 
 import { esPlanPro } from "@/core/billing/plan-pro";
@@ -29,9 +29,17 @@ import { getT } from "@/lib/i18n";
 import { LocaleProvider } from "@/lib/i18n/LocaleContext";
 import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { ThemeProvider } from "@/lib/theme/ThemeContext";
+import { leerBarraContraida } from "@/lib/ui/barra";
 
 /** Cada pantalla pone su nombre y el layout le suma la marca: «Bandeja — ClaimMix». */
 export const metadata: Metadata = { title: { template: "%s — ClaimMix", default: "ClaimMix" } };
+
+/*
+ * `cover` deja que la página llegue hasta los bordes del iPhone y que
+ * `env(safe-area-inset-*)` valga algo: sin esto el teléfono pone franjas
+ * vacías en horizontal y los márgenes de abajo no tienen a qué ceder.
+ */
+export const viewport: Viewport = { viewportFit: "cover" };
 
 export default async function AppLayout({
   children,
@@ -84,6 +92,7 @@ export default async function AppLayout({
   const t = getT(locale);
   const fullName: string = userRow?.full_name ?? user?.email ?? t("layout.nombreFallback");
   const esPro = esPlanPro(userRow?.plan);
+  const barraContraida = await leerBarraContraida();
 
   return (
     <LocaleProvider locale={locale}>
@@ -105,7 +114,15 @@ export default async function AppLayout({
 
           Es SC 3.1.2, «Language of Parts»: la parte que cambia lo declara.
         */}
-        <div lang={locale} className="lienzo flex h-screen overflow-hidden">
+        {/*
+          `h-dvh` y no `h-screen`: en el teléfono `100vh` cuenta la barra del
+          navegador aunque esté a la vista, y el pie de la pantalla quedaba
+          tapado. Los márgenes de seguridad del iPhone van en todos los anchos
+          y no sólo debajo de md: un teléfono apaisado mide 844 px o más, entra
+          en el layout de escritorio y ahí la muesca sigue valiendo 47 a 59 px
+          a los costados. Donde no hay muesca valen cero.
+        */}
+        <div lang={locale} className="lienzo flex h-dvh overflow-hidden p-[env(safe-area-inset-top)_env(safe-area-inset-right)_env(safe-area-inset-bottom)_env(safe-area-inset-left)]">
           {/*
            * La primera parada de teclado de todas las pantallas del turno.
            *
@@ -128,10 +145,15 @@ export default async function AppLayout({
            * tiene que existir para el lector de pantalla. Se destapa con
            * `focus:translate-y-0`. `fixed` y no `absolute` porque el
            * contenedor de al lado tiene `overflow-hidden`.
+           *
+           * `fixed` se mide contra la pantalla, no contra el relleno del
+           * lienzo: con `viewportFit: cover` quedaría debajo de la muesca. Por
+           * eso la zona segura va en su posición y también en lo que lo
+           * esconde, o el borde de abajo asomaría.
            */}
           <a
             href="#contenido"
-            className="fixed top-3 left-3 z-50 -translate-y-[200%] rounded-xl bg-violet-600 px-4 py-2 text-[13.5px] font-semibold text-white shadow-lg transition-transform focus:translate-y-0"
+            className="fixed top-[max(0.75rem,env(safe-area-inset-top))] left-[max(0.75rem,env(safe-area-inset-left))] z-50 -translate-y-[calc(200%+env(safe-area-inset-top))] rounded-xl bg-violet-600 px-4 py-2 text-[13.5px] font-semibold text-white shadow-lg transition-transform focus:translate-y-0"
           >
             {t("nav.saltarAlContenido")}
           </a>
@@ -144,6 +166,7 @@ export default async function AppLayout({
             role={role}
             isOperator={isOperator}
             esPro={esPro}
+            contraida={barraContraida}
             estadoDelAgente={
               userRow?.tenant_id ? (
                 <Suspense fallback={null}>

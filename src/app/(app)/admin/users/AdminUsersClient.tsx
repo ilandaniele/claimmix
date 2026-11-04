@@ -633,7 +633,7 @@ export function AdminUsersClient({
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-4 right-4 z-50 rounded-lg bg-slate-800 px-4 py-3 text-sm text-white shadow-lg"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-50 max-w-[calc(100%-2rem)] rounded-lg bg-slate-800 px-4 py-3 text-sm text-white shadow-lg"
         >
           {toast}
         </div>
@@ -651,7 +651,7 @@ export function AdminUsersClient({
 
       {/* Users table */}
       <div className="rounded-lg border border-slate-200 bg-white">
-        <table className="w-full text-sm">
+        <table className="tabla-apilada w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500">
               <th className="px-5 py-3 text-left">{t("usuarios.col.nombre")}</th>
@@ -687,7 +687,7 @@ export function AdminUsersClient({
                     key={user.id}
                     className="border-b border-slate-50 last:border-0 hover:bg-slate-50"
                   >
-                    <td className="px-5 py-3 font-medium text-slate-800">
+                    <td data-entera className="px-5 py-3 font-medium text-slate-800">
                       {user.full_name}
                       {!deBaja && operacion?.ids.includes(user.id) && (
                         <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
@@ -695,10 +695,10 @@ export function AdminUsersClient({
                         </span>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-slate-600">
+                    <td data-entera className="px-5 py-3 text-slate-600 [overflow-wrap:anywhere]">
                       {user.email || "—"}
                     </td>
-                    <td className="px-5 py-3">
+                    <td data-entera className="px-5 py-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <RoleBadge role={user.role} />
                         <select

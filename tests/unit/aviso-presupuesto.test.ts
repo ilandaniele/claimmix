@@ -36,7 +36,7 @@ vi.mock("@/lib/observability/logger", () => ({
   logger: { error: m.logError, warn: vi.fn(), info: m.logInfo },
 }));
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { avisarPresupuestoAgotado } from "@/server/notify/specialist-alert";
 
 /** El limitador de memoria guarda su estado entre tests: un inquilino por test. */
@@ -54,6 +54,10 @@ beforeEach(() => {
   m.cuenta.mockResolvedValue({ email: "siniestros@aseguradora.example.com", refreshToken: "fake-refresh-token" });
   m.enviar.mockResolvedValue({ providerMessageId: "sent-1" });
   m.auditar.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("avisarPresupuestoAgotado", () => {
@@ -236,5 +240,54 @@ describe("avisarPresupuestoAgotado", () => {
     const { payload } = m.auditar.mock.calls[0][0];
     expect(payload.recipients).toBe(2);
     expect(JSON.stringify(payload)).not.toContain("@");
+  });
+});
+
+describe("con el tope mensual en 0", () => {
+  it("el aviso dice que la IA está pausada a propósito y no que se agotó un presupuesto", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+
+    await avisarPresupuestoAgotado({ tenantId: nuevoInquilino(), motivo: "mensual" });
+
+    const correo = m.enviar.mock.calls[0][0];
+    expect(correo.subject).toContain("pausada a propósito");
+    expect(correo.subject).not.toContain("agotado");
+    expect(correo.textBody).toContain("pausada a propósito");
+    expect(correo.textBody).toContain("hasta que el equipo de ClaimMix active la IA");
+    expect(correo.textBody).toContain("cuando la IA vuelva a andar");
+    expect(correo.textBody).not.toMatch(/mes que viene|se levante el tope|suba el tope/);
+    expect(correo.textBody).not.toMatch(/MONTHLY_BUDGET_USD|\{/);
+  });
+
+  it("el registro sigue diciendo `mensual`: el cupo y la auditoría no cambian", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    const tenantId = nuevoInquilino();
+
+    await avisarPresupuestoAgotado({ tenantId, motivo: "mensual" });
+    await avisarPresupuestoAgotado({ tenantId, motivo: "mensual" });
+
+    expect(m.enviar).toHaveBeenCalledTimes(1);
+    expect(m.auditar.mock.calls[0][0].payload).toMatchObject({ motivo: "mensual", delivered: true });
+  });
+
+  it("el mismo corte mensual con un tope mayor que 0 conserva el aviso de siempre", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+
+    await avisarPresupuestoAgotado({ tenantId: nuevoInquilino(), motivo: "mensual" });
+
+    const correo = m.enviar.mock.calls[0][0];
+    expect(correo.subject).toContain("presupuesto de IA agotado");
+    expect(correo.textBody).toContain("el presupuesto mensual del proyecto");
+    expect(correo.textBody).not.toContain("pausada a propósito");
+  });
+
+  it("con el tope en 0, otro motivo no se confunde con la pausa", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+
+    await avisarPresupuestoAgotado({ tenantId: nuevoInquilino(), motivo: "inquilino" });
+
+    const correo = m.enviar.mock.calls[0][0];
+    expect(correo.subject).toContain("presupuesto de IA agotado");
+    expect(correo.textBody).toContain("el cupo diario de la aseguradora");
   });
 });

@@ -18,6 +18,7 @@ const bloqueDelTelefono = css.slice(css.indexOf("@media (width < 48rem) {\n  /* 
 const CASES = leer("src/app/(app)/bandeja/components/CasesTable.tsx");
 const USUARIOS = leer("src/app/(app)/admin/users/AdminUsersClient.tsx");
 const ALTAS = leer("src/app/(app)/admin/altas/page.tsx");
+const TABLERO = leer("src/app/(app)/bandeja/components/Tablero.tsx");
 
 describe("la tabla apilada", () => {
   it("la hoja de estilos la apila por debajo de md: filas flex que se parten y cabecera sólo para lector de pantalla", () => {
@@ -165,5 +166,16 @@ describe("los avisos fijos y la zona segura", () => {
       "fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))]"
     );
     expect(USUARIOS).not.toContain("fixed bottom-4 right-4");
+  });
+});
+
+describe("el tablero se apila en el teléfono", () => {
+  it("las columnas pasan a una pila a todo el ancho: llena y vacía", () => {
+    expect(TABLERO).toContain("max-sm:flex-col");
+    expect(TABLERO.match(/max-sm:w-full/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("la lista de cada columna no scrollea por su cuenta: el scroll es el del tablero", () => {
+    expect(TABLERO).toContain("max-sm:overflow-visible");
   });
 });

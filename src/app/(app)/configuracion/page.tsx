@@ -332,7 +332,7 @@ export default async function ConfiguracionPage({
                 <span className="font-mono text-sm font-medium text-slate-800">
                   {capMensual}
                   <span className="ml-2 text-xs text-slate-500">
-                    {t("configuracion.capAyuda")}
+                    {t(topeMensual === 0 ? "configuracion.capAyudaFrenada" : "configuracion.capAyuda")}
                   </span>
                 </span>
               ) : (

@@ -1081,7 +1081,7 @@ export const esAR = {
   "presupuesto.alerta.moneda_no_comparable": "La moneda no se compara con el rango",
   "presupuesto.alerta.sin_rango": "No hay rango para comparar",
   "lectura.sinLeer.mock": "Sin leer: la IA está en modo de prueba.",
-  "lectura.sinLeer.presupuesto": "Sin leer: se agotó el presupuesto de IA de la cuenta.",
+  "lectura.sinLeer.presupuesto": "Sin leer: la IA está en pausa por ahora.",
   "lectura.sinLeer.cupo": "Sin leer: se llegó al tope de lecturas por hoy.",
   "lectura.sinLeer.archivo": "Sin leer: el archivo no se puede mandar al modelo.",
   "lectura.sinLeer.paginas": "Sin leer: el documento es demasiado largo para leerlo entero.",

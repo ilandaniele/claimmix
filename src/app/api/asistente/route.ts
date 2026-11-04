@@ -95,9 +95,10 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const { pregunta, caseId } = parsed.data;
+    const locale = await resolveAccountLocale(ctx.userRow.locale);
     const respuesta = caseId
-      ? await preguntarSobreCaso(ctx, caseId, pregunta, await resolveAccountLocale(ctx.userRow.locale))
-      : await responderPregunta(ctx, pregunta);
+      ? await preguntarSobreCaso(ctx, caseId, pregunta, locale)
+      : await responderPregunta(ctx, pregunta, locale);
     return ok(respuesta);
   } catch (e) {
     return err(e instanceof AppError ? e : new AppError("INTERNAL_ERROR"));

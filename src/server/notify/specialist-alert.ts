@@ -34,6 +34,7 @@ import { logger } from "@/lib/observability/logger";
 import { t, type Locale, type TranslationKey } from "@/lib/i18n";
 import { liberarCupo, rateLimit, RATE_LIMIT_CONFIGS } from "@/lib/rate-limit/index";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { iaFrenadaAProposito } from "@/lib/topes";
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import type { MotivoDelTope } from "@/server/ai/budget";
 import type { TipoMensajeTardio } from "@/core/case/mensaje-tardio";
@@ -360,9 +361,14 @@ export interface PresupuestoAgotadoInput {
  * inquilino. El cupo se gasta sólo si hay a quién y desde dónde mandar, y se
  * devuelve si el correo no salió: un día sin destinatarios o con Gmail caído no
  * puede dejar sin aviso a las 24 horas siguientes.
+ *
+ * Con el tope mensual en 0 el motivo sigue siendo `mensual` (el cupo y el registro no cambian), pero
+ * el texto dice que la IA está pausada a propósito y no que se agotó un presupuesto.
  */
 export async function avisarPresupuestoAgotado(input: PresupuestoAgotadoInput): Promise<void> {
   const { tenantId, motivo } = input;
+  const frenada = iaFrenadaAProposito(motivo);
+  const variante = frenada ? "frenada" : motivo;
 
   await avisar({
     tenantId,
@@ -374,7 +380,7 @@ export async function avisarPresupuestoAgotado(input: PresupuestoAgotadoInput): 
       config: RATE_LIMIT_CONFIGS.AVISO_PRESUPUESTO_POR_INQUILINO,
     },
     render: (_enlace, locale) => ({
-      subject: t("presupuesto.aviso.asunto", locale),
+      subject: t(frenada ? "presupuesto.aviso.asuntoFrenada" : "presupuesto.aviso.asunto", locale),
       text: t("presupuesto.aviso.cuerpo", locale)
         .replace(
           "{hora}",
@@ -385,8 +391,8 @@ export async function avisarPresupuestoAgotado(input: PresupuestoAgotadoInput): 
             hourCycle: "h23",
           })
         )
-        .replace("{plazo}", t(`presupuesto.aviso.plazo.${motivo}` as TranslationKey, locale))
-        .replace("{motivo}", t(`presupuesto.aviso.motivo.${motivo}` as TranslationKey, locale)),
+        .replace("{plazo}", t(`presupuesto.aviso.plazo.${variante}` as TranslationKey, locale))
+        .replace("{motivo}", t(`presupuesto.aviso.motivo.${variante}` as TranslationKey, locale)),
     }),
   });
 }

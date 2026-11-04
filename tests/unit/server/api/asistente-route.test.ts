@@ -150,6 +150,19 @@ describe("POST /api/asistente con caseId", () => {
     expect(mockPreguntarSobreCaso).not.toHaveBeenCalled();
   });
 
+  // El aviso de la IA pausada lo muestra la caja tal cual: tiene que salir en el idioma de la cuenta.
+  it("le pasa el idioma de la cuenta a responderPregunta", async () => {
+    const ctx = ctxConPlan("profesional");
+    mockEntrar.mockResolvedValue({
+      ctx: { ...ctx, userRow: { ...ctx.userRow, locale: "en-US" } },
+      rl: { allowed: true, remaining: 19, retryAfterSeconds: 0 },
+    });
+
+    await POST(makeRequest({ pregunta: "how many cases today?" }));
+
+    expect(mockResponderPregunta).toHaveBeenCalledWith(expect.anything(), "how many cases today?", "en-US");
+  });
+
   it("400 con un caseId que no es uuid", async () => {
     const res = await POST(makeRequest({ pregunta: "¿qué falta?", caseId: "no-es-uuid" }));
 

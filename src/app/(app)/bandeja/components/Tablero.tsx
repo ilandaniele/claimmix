@@ -47,7 +47,8 @@ interface TableroProps {
  *
  * Una columna sin casos se angosta a una tira con su rótulo de costado: ocupa
  * lo justo para que se vea que está, y el lugar que libera es de las que tienen
- * trabajo.
+ * trabajo. En el teléfono las columnas se apilan a todo el ancho y la vacía es
+ * un renglón con su rótulo y su total.
  */
 export function Tablero({ casos, totales, tiposPropios, paramsActuales }: TableroProps) {
   const { t, locale } = useLocale();
@@ -64,7 +65,7 @@ export function Tablero({ casos, totales, tiposPropios, paramsActuales }: Tabler
   };
 
   return (
-    <div className="scroll-fino flex h-full gap-3 overflow-x-auto px-5 pb-5">
+    <div className="scroll-fino flex h-full gap-3 overflow-x-auto px-5 pb-5 max-sm:flex-col">
       {CLAVES_DE_ESTADO.map((clave) => {
         const casosDeLaColumna = columnas[clave];
 
@@ -75,10 +76,10 @@ export function Tablero({ casos, totales, tiposPropios, paramsActuales }: Tabler
               role="group"
               title={t("tablero.vacio")}
               aria-label={t("tablero.vacio")}
-              className="flex w-10 flex-none flex-col items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 py-3"
+              className="flex w-10 flex-none flex-col items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 py-3 max-sm:w-full max-sm:flex-row-reverse max-sm:justify-between max-sm:px-3 max-sm:py-2"
             >
               <span className="cifra text-[12px] text-slate-500">{totales[clave]}</span>
-              <h3 className="rotulo text-slate-600 [writing-mode:vertical-rl]">
+              <h3 className="rotulo text-slate-600 sm:[writing-mode:vertical-rl]">
                 {t(ETIQUETA_DE_COLUMNA[clave])}
               </h3>
             </div>
@@ -88,7 +89,7 @@ export function Tablero({ casos, totales, tiposPropios, paramsActuales }: Tabler
         return (
           <div
             key={clave}
-            className="flex min-h-0 w-[16.5rem] flex-none flex-col rounded-xl border border-slate-200 bg-slate-50"
+            className="flex min-h-0 w-[16.5rem] flex-none flex-col rounded-xl border border-slate-200 bg-slate-50 max-sm:w-full"
           >
             <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
               <h3 className="rotulo text-slate-600">{t(ETIQUETA_DE_COLUMNA[clave])}</h3>
@@ -97,7 +98,7 @@ export function Tablero({ casos, totales, tiposPropios, paramsActuales }: Tabler
               </span>
             </div>
 
-            <div className="scroll-fino min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+            <div className="scroll-fino min-h-0 flex-1 space-y-2 overflow-y-auto p-2 max-sm:overflow-visible">
               {casosDeLaColumna.map((caso) => {
                 const tipo = nombreDelTipo(caso.claim_type, t, tiposPropios);
                 return (

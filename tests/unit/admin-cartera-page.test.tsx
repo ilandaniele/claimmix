@@ -211,3 +211,29 @@ describe("el costo por denuncia", () => {
     expect(celda("Seguros Fake", COL.costoMedio)).toBe("—");
   });
 });
+
+describe("el tope mensual en 0", () => {
+  it("el operador ve que la IA está pausada a propósito y cómo activarla, en los dos idiomas", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+
+    for (const [locale, textos] of [["es-AR", es], ["en-US", en]] as const) {
+      await pintar([fila()], locale);
+
+      const aviso = screen.getByRole("status");
+      expect(aviso.textContent, locale).toBe(textos["operador.iaFrenada"]);
+      expect(aviso.textContent, locale).toContain("MONTHLY_BUDGET_USD");
+      cleanup();
+    }
+  });
+
+  it("con un tope mayor que 0 o sin variable no hay aviso", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+    await pintar([fila()]);
+    expect(screen.queryByRole("status")).toBeNull();
+    cleanup();
+
+    vi.stubEnv("MONTHLY_BUDGET_USD", "");
+    await pintar([fila()]);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});

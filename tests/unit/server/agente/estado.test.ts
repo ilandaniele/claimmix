@@ -49,6 +49,7 @@ describe("leerEstadoDelAgente", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("MOCK_AI da modo_prueba, y ni mira el presupuesto", async () => {
@@ -68,6 +69,31 @@ describe("leerEstadoDelAgente", () => {
     const estado = await leerEstadoDelAgente(TENANT);
 
     expect(estado).toEqual({ estado: "sin_presupuesto", procesando: 0 });
+  });
+
+  it("el tope mensual en 0 puesto a propósito da ia_frenada, no sin_presupuesto", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    mockModoDeIa.mockReturnValue("gemini");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "mensual", reason: "agotado" });
+    conProcesando(1);
+
+    await expect(leerEstadoDelAgente(TENANT)).resolves.toEqual({ estado: "ia_frenada", procesando: 1 });
+  });
+
+  it("el mismo corte mensual con un tope mayor que 0 sigue siendo sin_presupuesto", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+    mockModoDeIa.mockReturnValue("gemini");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "mensual", reason: "agotado" });
+
+    await expect(leerEstadoDelAgente(TENANT)).resolves.toEqual({ estado: "sin_presupuesto", procesando: 0 });
+  });
+
+  it("con el tope en 0, un corte de otro motivo (el cupo diario) no se disfraza de IA pausada", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    mockModoDeIa.mockReturnValue("gemini");
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo: "inquilino", reason: "agotado" });
+
+    await expect(leerEstadoDelAgente(TENANT)).resolves.toEqual({ estado: "sin_presupuesto", procesando: 0 });
   });
 
   it("ni mock ni presupuesto agotado da activo, con la cuenta de procesando", async () => {

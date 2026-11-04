@@ -589,8 +589,11 @@ describe("POST /api/cases/:id/re-analyze", () => {
 
     const res = await POST(makeRequest(), { params: Promise.resolve({ id: CASE_ID }) });
 
-    const { error } = await res.json();
-    expect(error).toMatchObject({ code: "AI_BUDGET_EXCEEDED", message: "Presupuesto de IA agotado para este mes." });
+    const texto = await res.text();
+    // El gasto del mensual es del proyecto entero, sumado entre inquilinos.
+    expect(texto).not.toContain("84.12");
+    const { error } = JSON.parse(texto);
+    expect(error).toMatchObject({ code: "AI_BUDGET_EXCEEDED", message: esARServidor["asistente.presupuestoMensual"] });
     expect(error).not.toHaveProperty("details");
   });
 

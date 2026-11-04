@@ -21,6 +21,9 @@ import {
   getClientIp,
 } from "@/lib/rate-limit/index";
 import { checkBudget } from "@/server/ai/budget";
+import { errorDelTope, motivoParaElHistorial } from "@/server/ai/tope-del-inquilino";
+import { getT } from "@/lib/i18n";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { logger } from "@/lib/observability/logger";
 
@@ -106,15 +109,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       event_type: AuditEvent.AI_BUDGET_EXCEEDED,
       target_type: null,
       target_id: null,
-      payload: { reason: budgetResult.reason, ruta: "demo-analyze" },
+      payload: { reason: motivoParaElHistorial(budgetResult), ruta: "demo-analyze" },
       ip,
       ua: request.headers.get("user-agent") ?? undefined,
     });
-    return err(
-      new AppError("AI_BUDGET_EXCEEDED", budgetResult.reason, {
-        reason: budgetResult.reason,
-      })
-    );
+    return err(errorDelTope(budgetResult, getT(await resolveAccountLocale(userRow.locale))));
   }
 
   // ── 5. Run extraction (no DB writes) ─────────────────────────────────────────

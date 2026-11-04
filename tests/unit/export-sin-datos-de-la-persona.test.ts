@@ -113,4 +113,25 @@ describe("export de ejemplos de referencia", () => {
     expect(evento.payload.tools[0].tool).toBe("polizas_por_dni");
     expect(evento.payload.question).toBe("¿La patente?");
   });
+
+  // Las filas viejas del tope mensual guardaban el gasto del proyecto entero, sumado entre inquilinos.
+  it.each([
+    ["Presupuesto mensual de IA agotado ($84.12 / $200).", "budget_exceeded"],
+    ["Presupuesto mensual de IA de la prueba agotado ($3.10 / $5).", "Presupuesto mensual de IA de la prueba agotado ($3.10 / $5)."],
+  ])("claim_events exporta el motivo «%s» como «%s»", async (guardado, exportado) => {
+    const original = filas[0].payload;
+    filas[0].payload = { reason: guardado };
+    try {
+      const salida = await buildAgentMemoryConfigExport({
+        tenantId: "t-1",
+        exportedBy: "u-1",
+        exportType: "full",
+        piiMode: "full_admin_only",
+        canExportFullPii: true,
+      });
+      expect(salida.claim_events![0].payload).toEqual({ reason: exportado });
+    } finally {
+      filas[0].payload = original;
+    }
+  });
 });

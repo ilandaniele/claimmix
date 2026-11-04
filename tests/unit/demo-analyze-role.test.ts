@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { AppError } from "@/lib/errors";
+import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 
 const { mockEntrar, mockExtract, mockCheckBudget, mockWriteAuditLog, sesion } = vi.hoisted(() => ({
   mockEntrar: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock("@/lib/audit/log", () => ({
   AuditEvent: { AI_BUDGET_EXCEEDED: "ai.budget_exceeded" },
   writeAuditLog: mockWriteAuditLog,
 }));
+vi.mock("@/lib/i18n/locale", () => ({ resolveAccountLocale: vi.fn(async () => "es-AR") }));
 vi.mock("@/lib/rate-limit/index", () => ({
   getClientIp: () => "127.0.0.1",
   RATE_LIMIT_CONFIGS: { INTAKE_SIMULATE: { limit: 10, windowMs: 60_000 } },
@@ -98,5 +100,26 @@ describe("POST /api/demo/analyze", () => {
       "demo",
       USER_ID
     );
+  });
+
+  it("con el tope mensual agotado, ni el 429 ni el historial llevan el gasto del proyecto", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "200");
+    mockCheckBudget.mockResolvedValue({
+      exceeded: true,
+      motivo: "mensual",
+      reason: "Presupuesto mensual de IA agotado ($84.12 / $200).",
+    });
+
+    const res = await llamar();
+    const cuerpo = await res.text();
+
+    expect(res.status).toBe(429);
+    expect(cuerpo).toContain(esARServidor["asistente.presupuestoMensual"]);
+    expect(cuerpo).not.toContain("84.12");
+    expect(mockExtract).not.toHaveBeenCalled();
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { reason: "budget_exceeded", ruta: "demo-analyze" } })
+    );
+    vi.unstubAllEnvs();
   });
 });

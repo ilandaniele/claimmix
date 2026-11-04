@@ -27,11 +27,14 @@ import { SimulateIntakeSchema } from "@/lib/schemas/intake";
 import { getScenarioById } from "@/server/intake/scenarios";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
+import { errorDelTope, motivoParaElHistorial } from "@/server/ai/tope-del-inquilino";
 import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { remitenteDeEnsayo } from "@/server/intake/remitente-de-ensayo";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { accepted, err } from "@/lib/api/respond";
 import { AppError } from "@/lib/errors";
+import { getT } from "@/lib/i18n";
+import { resolveAccountLocale } from "@/lib/i18n/locale";
 import {
   RATE_LIMIT_CONFIGS,
   type RateLimitResult,
@@ -159,26 +162,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       event_type: AuditEvent.AI_BUDGET_EXCEEDED,
       target_type: null,
       target_id: null,
-      payload: { reason: budgetResult.reason },
+      payload: { reason: motivoParaElHistorial(budgetResult) },
       ip,
       ua: request.headers.get("user-agent") ?? undefined,
     });
-    /*
-     * El mensaje sale del motivo, y no de una suposición.
-     *
-     * Decía «Presupuesto de IA agotado para este mes» pase lo que pase, pero de
-     * los tres topes que mira `checkBudget` sólo uno es mensual: los otros dos
-     * son diarios, por inquilino y por usuario. O sea que dos de cada tres
-     * veces le decía a alguien que esperara al mes siguiente cuando en realidad
-     * al día siguiente podía seguir.
-     *
-     * `reason` ya viene armado con cuál se agotó y cuánto: se usa ése.
-     */
-    return err(
-      new AppError("AI_BUDGET_EXCEEDED", budgetResult.reason, {
-        reason: budgetResult.reason,
-      })
-    );
+    return err(errorDelTope(budgetResult, getT(await resolveAccountLocale(userRow.locale))));
   }
 
   // Opportunistically clear cases stuck in `procesando` from an earlier batch

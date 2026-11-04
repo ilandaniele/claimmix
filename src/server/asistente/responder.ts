@@ -17,8 +17,8 @@ import "server-only";
 
 import { AppError } from "@/lib/errors";
 import type { RoleContext } from "@/lib/auth/require-role";
-import { iaFrenadaAProposito } from "@/lib/topes";
 import { checkBudget, registrarConsumoDelModelo } from "@/server/ai/budget";
+import { errorDelTope } from "@/server/ai/tope-del-inquilino";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { sinCentinelas } from "@/core/ai/sin-centinelas";
 import type { MotivoSinLeer } from "@/core/ai/sin-leer";
@@ -172,15 +172,8 @@ export async function responderPregunta(
   const presupuesto = await checkBudget(tenantId, ctx.user.id);
   if (presupuesto.exceeded) {
     // La caja sólo muestra el mensaje de la IA pausada a propósito (`frenada`), en el idioma de la cuenta; con
-    // los demás topes dice «demasiadas preguntas». El `reason` del mensual trae el gasto de TODOS los
-    // inquilinos («$84.12 / $200») y el 429 le llega a quien preguntó, así que va un texto sin cifras.
-    if (iaFrenadaAProposito(presupuesto.motivo)) {
-      throw new AppError("AI_BUDGET_EXCEEDED", getT(locale)("configuracion.capAyudaFrenada"), { frenada: true });
-    }
-    throw new AppError(
-      "AI_BUDGET_EXCEEDED",
-      presupuesto.motivo === "mensual" ? t("asistente.presupuestoMensual") : presupuesto.reason
-    );
+    // los demás topes dice «demasiadas preguntas».
+    throw errorDelTope(presupuesto, getT(locale));
   }
 
   const intencion = await clasificarIntencion(tenantId, ctx.user.id, pregunta);

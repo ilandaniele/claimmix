@@ -7,6 +7,7 @@ import { firstRow } from "@/lib/db/helpers";
 import * as tables from "@/lib/db/schema";
 import type { UserRole } from "@/lib/auth/require-role";
 import { getDefaultGeminiModel } from "@/server/ai/provider";
+import { motivoSinGastoDelProyecto } from "@/server/ai/tope-del-inquilino";
 import { EMAIL_RE, PHONE_RE } from "@/server/ai/hydrate-fields";
 import {
   ejemploSinDatosDeLaPersona,
@@ -28,6 +29,13 @@ function sinArgumentosDeHerramientas(payload: unknown): unknown {
           ? v
           : "[TACHADO]";
   return { ...payload, tools: payload.tools.map((t) => (isObject(t) ? { ...t, args: tapar(t.args) } : t)) };
+}
+
+/** Las filas viejas del tope mensual guardaban el gasto del proyecto entero, sumado entre inquilinos. */
+function sinGastoDelProyecto(payload: unknown): unknown {
+  return isObject(payload) && typeof payload.reason === "string"
+    ? { ...payload, reason: motivoSinGastoDelProyecto(payload.reason) }
+    : payload;
 }
 
 export const AGENT_EXPORT_TYPES = ["config_only", "memory_only", "full"] as const;
@@ -619,7 +627,7 @@ async function loadFullMetadata(tenantId: string) {
     agent_runs: agentRuns,
     claim_events: claimEvents.map((e) => ({
       ...e,
-      payload: sinArgumentosDeHerramientas(sinDatosDeLaPersona(e.payload, nombresEn(e.payload))),
+      payload: sinGastoDelProyecto(sinArgumentosDeHerramientas(sinDatosDeLaPersona(e.payload, nombresEn(e.payload)))),
     })),
   };
 }

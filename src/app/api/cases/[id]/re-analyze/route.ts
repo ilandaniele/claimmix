@@ -23,6 +23,7 @@ import { cases } from "@/lib/db/schema";
 import { CaseStatusSchema, type CaseStatus } from "@/lib/schemas/cases";
 import { runIntakeAgent } from "@/server/agents/intake-agent";
 import { checkBudget } from "@/server/ai/budget";
+import { errorDelTope } from "@/server/ai/tope-del-inquilino";
 import { ESTADOS_QUE_NO_SE_REABREN_A_MANO } from "@/core/case/fsm";
 import { reservaViva } from "@/core/case/reserva-de-extraccion";
 import { writeAuditLog } from "@/lib/audit/log";
@@ -37,7 +38,6 @@ import {
   getClientIp,
   type RateLimitResult,
 } from "@/lib/rate-limit/index";
-import { iaFrenadaAProposito } from "@/lib/topes";
 
 export const maxDuration = 300;
 
@@ -188,12 +188,7 @@ export async function POST(
   // ── Budget check ──────────────────────────────────────────────────────────────
   const budgetResult = await checkBudget(userRow.tenant_id, userRow.id);
   if (budgetResult.exceeded) {
-    // Con la IA pausada a propósito la pantalla muestra este mensaje —dice cómo se prende—, marcado con `frenada`.
-    if (iaFrenadaAProposito(budgetResult.motivo)) {
-      const t = getT(await resolveAccountLocale(userRow.locale));
-      return err(new AppError("AI_BUDGET_EXCEEDED", t("configuracion.capAyudaFrenada"), { frenada: true }));
-    }
-    return err(new AppError("AI_BUDGET_EXCEEDED", "Presupuesto de IA agotado para este mes."));
+    return err(errorDelTope(budgetResult, getT(await resolveAccountLocale(userRow.locale))));
   }
 
   // ── Reset case to procesando ──────────────────────────────────────────────────

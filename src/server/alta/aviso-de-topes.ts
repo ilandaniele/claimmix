@@ -14,9 +14,8 @@
  * Se mide con la misma cuenta con la que el sistema decide: el gasto es el de `checkBudget` y el
  * catálogo y sus topes son los del alta (`catalogo.ts`), así que el aviso llega antes de que algo se
  * cierre y no contradice a quien se cierra. Una consulta trae las cuatro medidas, y del catálogo sólo
- * se mide lo que tiene tope (con 0 el tope no existe, o la IA está parada a propósito, y avisar sería
- * ruido). Las marcas ya puestas se leen en una sentencia y las de todos los topes avisados se ponen
- * en otra.
+ * se mide lo que tiene tope (con 0 el tope no existe y avisar sería ruido). Las marcas ya puestas se
+ * leen en una sentencia y las de todos los topes avisados se ponen en otra.
  *
  * La marca se pone después del mail, no antes: una puesta antes y huérfana (la corrida murió en el
  * envío, o la base perdió la respuesta del insert) dejaría ese umbral mudo todo el mes, incluso el
@@ -25,7 +24,8 @@
  * global del tipo `topes` acota el resto.
  *
  * Sale por el remitente del sistema, en un solo mail por barrido a cada dirección de `ADMIN_EMAILS`.
- * Con `MONTHLY_BUDGET_USD=0` el mail que sale por otro tope suma una línea que recuerda la pausa.
+ * Con `MONTHLY_BUDGET_USD=0` la IA está parada a propósito: no hay avisos de presupuesto, y el mail que
+ * sale por otro tope suma una línea que recuerda la pausa.
  *
  * El mail lleva números y nombres de tope, nada de nadie. Nunca lanza: va en el barrido de
  * `reap-stuck` y no puede frenar lo demás.

@@ -113,8 +113,11 @@ const llamar = (paso: Paso, ruta: string, cred: Credencial, cuerpo?: Record<stri
   pedirObjeto(paso, ruta, pedido(cred, cuerpo));
 
 /** Un POST que Meta confirma con `success: true`. */
-const confirmada = (paso: Paso, ruta: string, cred: Credencial, cuerpo: Record<string, unknown>) =>
-  confirmar(paso, ruta, pedido(cred, cuerpo));
+const confirmada = (paso: Paso, ruta: string, cred: Credencial, cuerpo: Record<string, unknown>, plazoMs?: number) =>
+  confirmar(paso, ruta, { ...pedido(cred, cuerpo), plazoMs });
+
+/** `register` tarda más que el resto: en prd cortó a los 10 s con el código ya aceptado. */
+export const PLAZO_REGISTRO_MS = 30_000;
 
 /** Un id que va en la URL: sólo dígitos, y nunca el del número de la plataforma. */
 function idDeNumeroValido(id: string): boolean {
@@ -191,7 +194,7 @@ export async function registrarNumero(cred: CredencialDeAlta, phoneNumberId: str
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
   if (pin !== undefined && !CODIGO_DE_SEIS.test(pin)) return SIN_PEDIDO;
   const elegido = pin ?? String(randomInt(0, 1_000_000)).padStart(6, "0");
-  return confirmada("registrar", `${phoneNumberId}/register`, cred, { messaging_product: "whatsapp", pin: elegido });
+  return confirmada("registrar", `${phoneNumberId}/register`, cred, { messaging_product: "whatsapp", pin: elegido }, PLAZO_REGISTRO_MS);
 }
 
 /**

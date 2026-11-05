@@ -19,7 +19,7 @@ import {
  * AC24: No DNI or full policy_number in body.
  * Con `heridos`, el cuerpo abre con la frase de cuidado (`CUIDADO`).
  *
- * Subject: "Tu reclamo fue escalado a un especialista - Caso #{caseId}"
+ * Subject: "Tu reclamo fue derivado a un especialista - Caso #{caseId}"
  *
  * ── Por qué ya no promete 24 horas hábiles ──────────────────────────────────
  *
@@ -61,11 +61,11 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
   text: string;
   cuerpo: string;
 } {
-  const subject = `Tu reclamo fue escalado a un especialista - Caso #${data.caseId}`;
+  const subject = `Tu reclamo fue derivado a un especialista - Caso #${data.caseId}`;
   const urgencyMsg = severityMessage(data.severity);
 
   const derivacion =
-    "Tu reclamo fue escalado a uno de nuestros especialistas, que se va a comunicar con vos a la brevedad.";
+    "Tu reclamo fue derivado a uno de nuestros especialistas, que se va a comunicar con vos a la brevedad.";
 
   const parrafos = [
     ...(data.heridos === true ? [CUIDADO] : []),
@@ -92,7 +92,7 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 <html lang="es">
 <head><meta charset="UTF-8"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: Arial, sans-serif; color: #222; max-width: 600px; margin: 0 auto; padding: 24px;">
-  <h1 style="font-size: 20px; color: #b91c1c;">Tu reclamo fue asignado a un especialista</h1>
+  <h1 style="font-size: 20px; color: #b91c1c;">Tu reclamo fue derivado a un especialista</h1>
   ${prosaHtml}
   ${cromo.map((p) => `<p>${escapeHtml(p)}</p>`).join("\n  ")}
   <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
@@ -100,7 +100,7 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
 </body>
 </html>`;
 
-  const text = `Tu reclamo fue asignado a un especialista\n\n${[redactado ?? cuerpo, ...cromo].join("\n\n")}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
+  const text = `Tu reclamo fue derivado a un especialista\n\n${[redactado ?? cuerpo, ...cromo].join("\n\n")}\n\n---\nCaso de referencia: #${data.caseId}. Este mensaje fue generado automáticamente por el sistema de gestión de siniestros de ClaimMix.`;
 
   return { subject, html, text, cuerpo };
 }

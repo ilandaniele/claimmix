@@ -77,6 +77,8 @@ export interface Pedido {
   prueba?: string;
   /** La respuesta puede ser texto plano en vez de JSON (`oauth/access_token`): se devuelve el texto si no es JSON. */
   puedeSerTexto?: boolean;
+  /** Lo que se espera esta respuesta; sin él, `PLAZO_GRAPH_MS`. */
+  plazoMs?: number;
 }
 
 export type Contestacion = { ok: true; cuerpo: unknown } | { ok: false; falla: Falla };
@@ -135,7 +137,7 @@ export function clienteDeGraph<Paso extends string>(registro: string) {
         method: metodo,
         headers,
         body,
-        signal: AbortSignal.timeout(PLAZO_GRAPH_MS),
+        signal: AbortSignal.timeout(pedido.plazoMs ?? PLAZO_GRAPH_MS),
       });
     } catch {
       return { ok: false, falla: falla(paso, null, null) };

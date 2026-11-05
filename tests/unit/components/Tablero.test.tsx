@@ -134,6 +134,16 @@ describe("Tablero — columna vacía", () => {
     expect(columna.querySelector("a, button, p")).toBeNull();
     expect(screen.queryByText("Sin casos en esta columna.")).not.toBeInTheDocument();
   });
+
+  it("en el teléfono es un renglón: rótulo a la izquierda y total a la derecha, sin texto girado", () => {
+    montar([makeCase({ status: "requiere_especialista" })]);
+    const [columna] = screen.getAllByRole("group", { name: "Sin casos en esta columna." });
+    expect(columna.className).toContain("max-sm:w-full");
+    expect(columna.className).toContain("max-sm:flex-row-reverse");
+    const rotulo = within(columna).getByRole("heading", { level: 3 });
+    expect(rotulo.className).toContain("sm:[writing-mode:vertical-rl]");
+    expect(rotulo.className).not.toMatch(/(^|\s)\[writing-mode:vertical-rl\]/);
+  });
 });
 
 describe('Tablero — "Ver todos"', () => {

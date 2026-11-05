@@ -218,6 +218,42 @@ describe("un tope en 0 no existe", () => {
     expect(h.poner).not.toHaveBeenCalled();
   });
 
+  it("con MONTHLY_BUDGET_USD en 0 y sin otro tope cruzado no sale ningún mail", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    h.medir.mockResolvedValue(medida({ total: 5, bases: 3 }));
+
+    expect(await avisarTopes(AHORA)).toBe(0);
+
+    expect(h.enviar).not.toHaveBeenCalled();
+  });
+
+  it("con MONTHLY_BUDGET_USD en 0 y otro tope lleno, el mail que sale recuerda que la IA está pausada, sin marca propia", async () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    h.medir.mockResolvedValue(medida({ total: 5, bases: 30 }));
+
+    expect(await avisarTopes(AHORA)).toBe(1);
+
+    expect(textoEnviado()).toBe(
+      [
+        "Estos topes de ClaimMix llegaron a un umbral de aviso:",
+        "- Bases de cliente: 30 de 30. Llegó al tope. El alta automática se cierra hasta que se suba ALTA_TOPE_BASES o se borre alguna base.",
+        "",
+        "La IA de los clientes está pausada a propósito: MONTHLY_BUDGET_USD está en 0. Para activarla, poné en esa variable un valor mayor que 0 y redeployá.",
+        "",
+        "Para subir un tope, cambiá su variable en el ambiente. El aviso se manda una sola vez por umbral y por mes.",
+      ].join("\n")
+    );
+    expect(marcasPedidas()).toEqual([[clave("bases", 80), clave("bases", 100)]]);
+  });
+
+  it("con un tope mensual mayor que 0 el mail no lleva esa línea", async () => {
+    h.medir.mockResolvedValue(medida({ bases: 30 }));
+
+    await avisarTopes(AHORA);
+
+    expect(textoEnviado()).not.toContain("pausada a propósito");
+  });
+
   it("con AI_PRUEBAS_MONTHLY_BUDGET_USD en 0 no avisa del pozo de las pruebas", async () => {
     vi.stubEnv("AI_PRUEBAS_MONTHLY_BUDGET_USD", "0");
     h.medir.mockResolvedValue(medida({ pruebas: 5 }));

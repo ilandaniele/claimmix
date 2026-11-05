@@ -24,7 +24,7 @@ import { listTenantSummaries, type TenantSummary } from "@/server/billing/tenant
 import { mesDeCalendario } from "@/core/fecha/mes-calendario";
 import { mesDeParametro } from "@/core/billing/mes-de-parametro";
 import { nombreDePlan } from "@/lib/billing/plan-label";
-import { topeEntero } from "@/lib/topes";
+import { topeEntero, topeMensualDelProyecto } from "@/lib/topes";
 import { tituloDePantalla } from "@/app/(app)/_components/titulo-de-pantalla";
 
 export const dynamic = "force-dynamic";
@@ -111,6 +111,15 @@ export default async function CarteraPage({
           }
         />
       </div>
+
+      {topeMensualDelProyecto() === 0 && (
+        <p
+          role="status"
+          className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          {t("operador.iaFrenada")}
+        </p>
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
         <table className="w-full text-sm">

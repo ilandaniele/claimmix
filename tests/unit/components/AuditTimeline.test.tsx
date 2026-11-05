@@ -165,6 +165,48 @@ describe("AuditTimeline", () => {
     expect(screen.getByText("Llegó un mensaje por WhatsApp")).toBeInTheDocument();
   });
 
+  // Con el tope en 0 la IA no se gastó: está frenada a propósito. Decir «se terminó el cupo» manda a esperar
+  // algo que no vuelve solo, y repetir lo mismo en la fila del motivo es ruido.
+  it("un mensaje sin analizar con la IA pausada no dice «se terminó el cupo» ni repite el motivo", () => {
+    render(
+      <AuditTimeline
+        textos={TEXTOS}
+        events={[{ id: 9, event_type: "ai.budget_exceeded", created_at: "2026-09-01T10:08:00Z", reason: "ia_pausada" }]}
+      />
+    );
+
+    expect(screen.getAllByText("No se analizó: la IA está pausada a propósito")).toHaveLength(1);
+    expect(screen.queryByText(/se terminó el cupo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Motivo/)).not.toBeInTheDocument();
+  });
+
+  // El tope mensual ya no guarda su `reason` con el gasto del proyecto: el código `budget_exceeded` dice lo mismo que la fila.
+  it("un mensaje sin analizar por el tope mensual dice «se terminó el cupo» una sola vez", () => {
+    render(
+      <AuditTimeline
+        textos={TEXTOS}
+        events={[{ id: 11, event_type: "ai.budget_exceeded", created_at: "2026-09-01T10:10:00Z", reason: "budget_exceeded" }]}
+      />
+    );
+
+    expect(screen.getAllByText("No se analizó: se terminó el cupo de IA")).toHaveLength(1);
+    expect(screen.queryByText(/Motivo/)).not.toBeInTheDocument();
+  });
+
+  it("un mensaje sin analizar por el cupo gastado sigue diciendo «se terminó el cupo» y su motivo", () => {
+    render(
+      <AuditTimeline
+        textos={TEXTOS}
+        events={[
+          { id: 10, event_type: "ai.budget_exceeded", created_at: "2026-09-01T10:09:00Z", reason: "Presupuesto diario agotado (9 / 10)." },
+        ]}
+      />
+    );
+
+    expect(screen.getByText("No se analizó: se terminó el cupo de IA")).toBeInTheDocument();
+    expect(screen.getByText("Presupuesto diario agotado (9 / 10).")).toBeInTheDocument();
+  });
+
   it("la severidad alta se lee «Severidad: Alto»", () => {
     render(
       <AuditTimeline
@@ -188,6 +230,7 @@ describe("AuditTimeline", () => {
     ["marcado_relevante", "Lo marcó como relevante una persona"],
     ["clasificador", "Lo descartó el clasificador de IA"],
     ["budget_exceeded", "No se analizó: se terminó el cupo de IA"],
+    ["ia_pausada", "No se analizó: la IA está pausada a propósito"],
     ["devolver_al_agente", "Devolver al agente"],
     // Los salteos del recordatorio (B4) guardan el motivo de `decidirReenvio` tal cual.
     ["plantilla_sin_aprobar", "La plantilla para escribirle después de 24 h todavía no está aprobada por Meta"],

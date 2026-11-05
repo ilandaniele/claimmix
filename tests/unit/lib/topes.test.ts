@@ -3,6 +3,7 @@ import { TOPE_DIARIO_TOKENS } from "@/lib/billing/plans";
 import {
   TOPES_DECIMALES,
   TOPES_ENTEROS,
+  iaFrenadaAProposito,
   readCap,
   topeAnonimo,
   topeDecimal,
@@ -125,6 +126,30 @@ describe("topeDecimal", () => {
     expect(topeMensualDelProyecto({ MONTHLY_BUDGET_USD: "0" })).toBe(0);
     expect(topeMensualDelProyecto({ MONTHLY_BUDGET_USD: "35" })).toBe(35);
     expect(topeMensualDelProyecto({ MONTHLY_BUDGET_USD: "49.5" })).toBe(49.5);
+  });
+});
+
+describe("iaFrenadaAProposito", () => {
+  it("sólo el corte mensual con el tope en 0 es una IA pausada a propósito", () => {
+    expect(iaFrenadaAProposito("mensual", { MONTHLY_BUDGET_USD: "0" })).toBe(true);
+  });
+
+  it("con un tope mayor que 0 o sin variable, el corte mensual es un presupuesto agotado", () => {
+    expect(iaFrenadaAProposito("mensual", { MONTHLY_BUDGET_USD: "35" })).toBe(false);
+    expect(iaFrenadaAProposito("mensual", {})).toBe(false);
+  });
+
+  it("con el tope en 0, los otros motivos y la falta de motivo no cambian", () => {
+    for (const motivo of ["inquilino", "anonimo", "persona", "suspendido", "prueba_vencida", "sin_dato", undefined]) {
+      expect(iaFrenadaAProposito(motivo, { MONTHLY_BUDGET_USD: "0" }), String(motivo)).toBe(false);
+    }
+  });
+
+  it("sin entorno explícito sigue a process.env", () => {
+    vi.stubEnv("MONTHLY_BUDGET_USD", "0");
+    expect(iaFrenadaAProposito("mensual")).toBe(true);
+    vi.stubEnv("MONTHLY_BUDGET_USD", "5");
+    expect(iaFrenadaAProposito("mensual")).toBe(false);
   });
 });
 

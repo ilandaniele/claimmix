@@ -12,11 +12,12 @@ import { ESTADOS_DE_LA_OPCION } from "@/core/case/filtro-de-estado";
 import { enTenant, type TenantContext } from "@/data/scope";
 import { firstRow } from "@/lib/db/helpers";
 import { cases } from "@/lib/db/schema";
+import { iaFrenadaAProposito } from "@/lib/topes";
 import { checkBudget } from "@/server/ai/budget";
 import { modoDeIa } from "@/server/ai/provider";
 
 export interface EstadoDelAgente {
-  estado: "activo" | "modo_prueba" | "sin_presupuesto";
+  estado: "activo" | "modo_prueba" | "sin_presupuesto" | "ia_frenada";
   procesando: number;
 }
 
@@ -40,9 +41,11 @@ export async function leerEstadoDelAgente(
 
     const estado: EstadoDelAgente["estado"] = !presupuesto
       ? "modo_prueba"
-      : presupuesto.exceeded
-        ? "sin_presupuesto"
-        : "activo";
+      : !presupuesto.exceeded
+        ? "activo"
+        : iaFrenadaAProposito(presupuesto.motivo)
+          ? "ia_frenada"
+          : "sin_presupuesto";
 
     return { estado, procesando: firstRow(filas)?.n ?? 0 };
   } catch {

@@ -51,6 +51,10 @@ vi.mock("next/server", async () => {
   };
 });
 
+vi.mock("@/lib/i18n/locale", () => ({
+  resolveAccountLocale: vi.fn(async (cuenta?: string | null) => (cuenta === "en-US" ? "en-US" : "es-AR")),
+}));
+
 vi.mock("@/lib/db", () => {
   return {
     db: {
@@ -106,6 +110,7 @@ vi.mock("@/lib/rate-limit/index", () => ({
 // ── Import route after mocks ──────────────────────────────────────────────────
 
 import { POST } from "@/app/api/intake/simulate/route";
+import { writeAuditLog } from "@/lib/audit/log";
 import { NextRequest } from "next/server";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -124,6 +129,7 @@ const MOCK_USER_ROW = {
   tenant_id: "tenant-001",
   full_name: "Lucía Ramallo",
   role: "analyst",
+  locale: "es-AR",
   created_at: new Date().toISOString(),
 };
 
@@ -360,12 +366,11 @@ describe("POST /api/intake/simulate", () => {
    * custodiada.
    */
   it.each([
-    ["mensual", "Presupuesto mensual de IA agotado ($200.00 / $200)."],
-    ["diario por inquilino", "Presupuesto diario de tokens agotado para el tenant (100.000 / 100.000)."],
-    ["diario por usuario", "Presupuesto diario de tokens agotado para el usuario (20.000 / 20.000)."],
-  ])("429 con el motivo real cuando se agota el cupo %s", async (_c, reason) => {
+    ["inquilino", "Presupuesto diario de tokens agotado para el tenant (100.000 / 100.000)."],
+    ["persona", "Presupuesto diario de tokens agotado para el usuario (20.000 / 20.000)."],
+  ])("429 con el motivo real cuando se agota el cupo diario por %s", async (motivo, reason) => {
     setupAuthMocks();
-    mockCheckBudget.mockResolvedValue({ exceeded: true, reason });
+    mockCheckBudget.mockResolvedValue({ exceeded: true, motivo, reason });
 
     const res = await POST(makeRequest({ scenario_id: "choque-01" }));
 
@@ -374,7 +379,27 @@ describe("POST /api/intake/simulate", () => {
     expect(body.error.code).toBe("AI_BUDGET_EXCEEDED");
     // El mensaje dice cuál se agotó, no una suposición.
     expect(body.error.message).toBe(reason);
-    expect(body.error.details.reason).toBe(reason);
+    expect(body.error).not.toHaveProperty("details");
+  });
+
+  // El gasto del mensual es del proyecto entero, sumado entre inquilinos: ni el 429 ni el historial lo llevan.
+  it("el tope mensual no le muestra a un inquilino el gasto del proyecto", async () => {
+    setupAuthMocks();
+    mockCheckBudget.mockResolvedValue({
+      exceeded: true,
+      motivo: "mensual",
+      reason: "Presupuesto mensual de IA agotado ($84.12 / $200).",
+    });
+
+    const res = await POST(makeRequest({ scenario_id: "choque-01" }));
+
+    expect(res.status).toBe(429);
+    const texto = await res.text();
+    expect(texto).not.toContain("84.12");
+    expect(texto).not.toContain("$200");
+    expect(JSON.parse(texto).error.message).toMatch(/mes/);
+    const fila = vi.mocked(writeAuditLog).mock.calls.find(([e]) => e.event_type === "ai.budget_exceeded");
+    expect(fila?.[0].payload).toEqual({ reason: "budget_exceeded" });
   });
 
   it("un cupo diario no le dice a nadie que espere al mes que viene", async () => {

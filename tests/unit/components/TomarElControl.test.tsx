@@ -7,6 +7,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CaseDetailClient } from "../../../src/app/(app)/casos/[id]/CaseDetailClient";
+import { esARServidor } from "../../../src/lib/i18n/es-AR.servidor";
 import { LocaleProvider } from "../../../src/lib/i18n/LocaleContext";
 import { SIN_ACCIONES } from "../../../src/server/cases/acciones";
 import type { CaseStatus } from "../../../src/lib/schemas/cases";
@@ -151,6 +152,44 @@ describe("Marcar como relevante", () => {
       await screen.findByText("Ese cambio de situación no es válido.");
       unmount();
     }
+  });
+
+  // El 429 del reanálisis es de dos cosas: el cupo por hora y el tope de IA. Con la IA pausada a
+  // propósito, «Demasiados re-análisis. Esperá una hora» manda a esperar algo que no se levanta solo.
+  it("un 429 de la IA pausada muestra el mensaje del servidor, no «demasiados re-análisis»", async () => {
+    const mensaje = esARServidor["configuracion.capAyudaFrenada"];
+    const cuerpo = JSON.stringify({ error: { code: "AI_BUDGET_EXCEEDED", message: mensaje, details: { frenada: true } } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(cuerpo, { status: 429 })));
+    renderDescartado(true);
+
+    fireEvent.click(screen.getByTestId("action-marcar-relevante"));
+
+    await screen.findByText(mensaje);
+    expect(screen.queryByText(/Demasiados re-análisis/)).not.toBeInTheDocument();
+  });
+
+  // El `message` de los otros topes no es la pausa: es el texto fijo del servidor, en castellano y «de este mes»
+  // aunque el tope sea diario. La pantalla sigue con su texto traducido.
+  it("un 429 por otro tope de IA sigue con el texto traducido, no con el del servidor", async () => {
+    const cuerpo = JSON.stringify({ error: { code: "AI_BUDGET_EXCEEDED", message: "Presupuesto de IA agotado para este mes." } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(cuerpo, { status: 429 })));
+    renderDescartado(true);
+
+    fireEvent.click(screen.getByTestId("action-marcar-relevante"));
+
+    await screen.findByText(/Demasiados re-análisis/);
+    expect(screen.queryByText(/agotado para este mes/)).not.toBeInTheDocument();
+  });
+
+  it("un 429 por el cupo por hora sigue diciendo «demasiados re-análisis»", async () => {
+    const cuerpo = JSON.stringify({ error: { code: "RATE_LIMITED", message: "Demasiados re-análisis para este caso." } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(cuerpo, { status: 429 })));
+    renderDescartado(true);
+
+    fireEvent.click(screen.getByTestId("action-marcar-relevante"));
+
+    await screen.findByText(/Demasiados re-análisis/);
+    expect(screen.queryByText(/Demasiados re-análisis para este caso/)).not.toBeInTheDocument();
   });
 });
 

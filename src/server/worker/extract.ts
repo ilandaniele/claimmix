@@ -43,6 +43,7 @@ import {
 import type { CaseInsert, CaseRow } from "@/lib/db/types";
 import { writeAuditLog, AuditEvent } from "@/lib/audit/log";
 import { checkBudget } from "@/server/ai/budget";
+import { motivoParaElHistorial } from "@/server/ai/tope-del-inquilino";
 import { avisarPresupuestoAgotado } from "@/server/notify/specialist-alert";
 import { runEmailClaimAgent } from "@/server/ai/claim-agent";
 import { resolveExtractionEngine } from "@/server/ai/provider";
@@ -893,13 +894,14 @@ export async function runEmailExtractionWorker(
         case_id: caseId,
         reason: budgetResult.reason,
       }, "email_worker.budget_exceeded");
+      const motivoDelHistorial = motivoParaElHistorial(budgetResult);
       await writeAuditLog({
         tenant_id: tenantId,
         actor_id: userId,
         event_type: AuditEvent.AI_BUDGET_EXCEEDED,
         target_type: "case",
         target_id: caseId,
-        payload: { reason: budgetResult.reason },
+        payload: { reason: motivoDelHistorial },
       });
       // El cupo de una persona no frena al canal: sólo los topes que dejan sin
       // analizar a todos le avisan al equipo (uno por día, no uno por mensaje).
@@ -909,7 +911,7 @@ export async function runEmailExtractionWorker(
       // Escalate so a human can re-trigger once budget resets — never leave the case in procesando.
       // Por `escalateCase`, que deja el `ai.extracted` con `new_status`: sin él
       // el historial no sabe que el caso pasó a escalado.
-      await escalateCase(caseId, tenantCtx, userId, "budget_exceeded", "AI_BUDGET_EXCEEDED");
+      await escalateCase(caseId, tenantCtx, userId, motivoDelHistorial === "ia_pausada" ? "ia_pausada" : "budget_exceeded", "AI_BUDGET_EXCEEDED");
       return;
     }
 

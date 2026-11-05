@@ -624,7 +624,7 @@ async function checkPresupuesto(): Promise<Check> {
 
     const gastado = Number(filas[0]?.total ?? 0);
     if (tope === 0) {
-      return degraded("presupuesto", `US$${gastado.toFixed(2)} · IA frenada (MONTHLY_BUDGET_USD=0)`);
+      return degraded("presupuesto", `US$${gastado.toFixed(2)} · IA frenada a propósito (MONTHLY_BUDGET_USD=0): para activarla, poné un tope mayor que 0 y redeployá`);
     }
     const parte = gastado / tope;
     const cuanto = `US$${gastado.toFixed(2)} de US$${tope} (${Math.round(parte * 100)}%)`;

@@ -53,6 +53,7 @@ for (const modulo of [
   vi.doMock(`@/app/(app)/configuracion/${modulo}`, () => ({ [modulo]: () => null }));
 }
 
+import { esARServidor } from "@/lib/i18n/es-AR.servidor";
 import type { PanelSso } from "@/server/sso/panel";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -204,5 +205,33 @@ describe("/configuracion: tope mensual de IA", () => {
     expect(html).toContain("IA frenada (tope en 0)");
     expect(html).not.toContain("USD 0");
     expect(html).not.toContain("USD 200");
+  });
+
+  it("con el tope en 0, el admin lee que la IA está pausada a propósito y a quién pedirle que la active, sin nombres de variable", async () => {
+    conRol("admin");
+    process.env.MONTHLY_BUDGET_USD = "0";
+
+    const html = await pintar();
+
+    expect(html).toContain(esARServidor["configuracion.capAyudaFrenada"]);
+    expect(html).not.toContain(esARServidor["configuracion.capAyuda"]);
+    expect(html).not.toContain("MONTHLY_BUDGET_USD");
+  });
+
+  it("con un tope mayor que 0 el admin sigue leyendo la ayuda de siempre", async () => {
+    conRol("admin");
+    process.env.MONTHLY_BUDGET_USD = "49.5";
+
+    const html = await pintar();
+
+    expect(html).toContain(esARServidor["configuracion.capAyuda"]);
+    expect(html).not.toContain(esARServidor["configuracion.capAyudaFrenada"]);
+  });
+
+  it("el analista, que no ve ayuda en el tope, tampoco ve la de la pausa", async () => {
+    conRol("analyst");
+    process.env.MONTHLY_BUDGET_USD = "0";
+
+    expect(await pintar()).not.toContain(esARServidor["configuracion.capAyudaFrenada"]);
   });
 });

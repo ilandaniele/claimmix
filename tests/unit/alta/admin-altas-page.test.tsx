@@ -682,6 +682,43 @@ describe("el formulario de activar se explica solo", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it.each([
+    ["es-AR", es],
+    ["en-US", en],
+  ] as const)("«Activar plan» es un grupo con nombre, y la ayuda de qué completar va antes de los campos (%s)", async (locale, d) => {
+    await pintar(undefined, locale);
+
+    const grupo = screen.getByRole("group", { name: d["altas.activar.titulo"] });
+    const q = within(grupo);
+    const combo = q.getByRole("combobox", { name: d["altas.activar.plan"] });
+    expect(q.getByLabelText(d["altas.activar.cuota"])).toBeTruthy();
+    expect(q.getByLabelText(d["altas.activar.incluidas"])).toBeTruthy();
+    expect(q.getByLabelText(d["altas.activar.excedente"])).toBeTruthy();
+    expect(q.getByRole("button", { name: d["altas.activar.boton"] })).toBeTruthy();
+
+    const ayuda = q.getByText(d["altas.activar.ayuda"]);
+    expect(ayuda.compareDocumentPosition(combo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("el título del grupo se distingue de la etiqueta de sus campos", async () => {
+    await pintar();
+
+    const titulo = screen.getByRole("group", { name: es["altas.activar.titulo"] }).querySelector("legend") as HTMLElement;
+    const etiqueta = screen.getByText(es["altas.activar.plan"], { selector: "label" });
+    expect(titulo.className).not.toBe(etiqueta.className);
+    expect(titulo.className).toContain("font-semibold");
+  });
+
+  it("con dos filas hay un grupo de activar por fila", async () => {
+    h.listar.mockResolvedValue(
+      panel(alta(), alta({ tenantId: "33333333-3333-4333-8333-333333333333", nombre: "Otra Fake" }))
+    );
+
+    await pintar();
+
+    expect(screen.getAllByRole("group", { name: es["altas.activar.titulo"] })).toHaveLength(2);
+  });
+
   it("no cambia lo que el formulario manda: mismos nombres de campo y el plan sigue en operativo", async () => {
     const { container } = await pintar();
 
@@ -717,6 +754,18 @@ describe("conectar el número se explica solo", () => {
       expect(document.getElementById(id)?.textContent).toBe(ayuda);
       expect(campo.getAttribute("title")).toBe(ayuda);
     }
+  });
+
+  it("«Conectar el número» es un grupo con nombre que junta sus controles", async () => {
+    h.listar.mockResolvedValue(panel(pedido()));
+
+    await pintar();
+
+    const q = within(screen.getByRole("group", { name: es["altas.conectar.titulo"] }));
+    expect(q.getByLabelText(es["altas.numero.phoneNumberId"])).toBeTruthy();
+    expect(q.getByLabelText(es["altas.numero.waba"])).toBeTruthy();
+    expect(q.getByRole("checkbox")).toBeTruthy();
+    expect(q.getByRole("button", { name: es["altas.conectar.boton"] })).toBeTruthy();
   });
 
   it("la casilla de confirmación explica de dónde sale el código", async () => {

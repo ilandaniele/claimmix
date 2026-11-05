@@ -417,12 +417,41 @@ describe("las claves con marcas del lote de decisiones", () => {
     }
   });
   it("los motivos y plazos del aviso de presupuesto existen en los dos idiomas", () => {
-    for (const motivo of ["anonimo", "inquilino", "mensual"] as const) {
+    for (const motivo of ["anonimo", "inquilino", "mensual", "frenada"] as const) {
       for (const clave of [`presupuesto.aviso.motivo.${motivo}`, `presupuesto.aviso.plazo.${motivo}`] as const) {
         expect(esARServidor[clave], clave).toBeTruthy();
         expect(enUSServidor[clave], clave).toBeTruthy();
       }
     }
+  });
+
+  it("la pausa a propósito (tope mensual en 0) tiene sus textos en los dos idiomas, sólo en el servidor y sin sonar a tope lleno", () => {
+    const claves = [
+      "presupuesto.aviso.asuntoFrenada",
+      "presupuesto.aviso.motivo.frenada",
+      "presupuesto.aviso.plazo.frenada",
+      "configuracion.capAyudaFrenada",
+      "agente.estado.ia_frenada",
+      "operador.iaFrenada",
+    ] as const;
+    for (const clave of claves) {
+      expect(esARServidor[clave], clave).toBeTruthy();
+      expect(enUSServidor[clave], clave).toBeTruthy();
+      expect(enUSServidor[clave], clave).not.toBe(esARServidor[clave]);
+      expect(clave in esARCliente, clave).toBe(false);
+      expect(clave in enUSCliente, clave).toBe(false);
+      expect(esARServidor[clave], clave).not.toMatch(/agotó|agotad|alcanzó/i);
+      expect(enUSServidor[clave], clave).not.toMatch(/exhausted|reached the cap|ran out/i);
+    }
+    expect(esARServidor["operador.iaFrenada"]).toContain("MONTHLY_BUDGET_USD");
+    expect(enUSServidor["operador.iaFrenada"]).toContain("MONTHLY_BUDGET_USD");
+    expect(esARServidor["configuracion.capAyudaFrenada"]).not.toContain("MONTHLY_BUDGET_USD");
+    expect(enUSServidor["configuracion.capAyudaFrenada"]).not.toContain("MONTHLY_BUDGET_USD");
+  });
+
+  it("el texto de cliente «Sin leer» por presupuesto no dice que se agotó: la IA puede estar en pausa a propósito", () => {
+    expect(esARCliente["lectura.sinLeer.presupuesto"]).not.toMatch(/agot/i);
+    expect(enUSCliente["lectura.sinLeer.presupuesto"]).not.toMatch(/exhaust|ran out|used up/i);
   });
 
   it("la ayuda del PIN de dos pasos avisa que puede ser de una conexión anterior y dónde se cambia", () => {

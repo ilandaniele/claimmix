@@ -490,7 +490,7 @@ ningún doc lo dice.
 | `ALTA_TOPE_GLOBAL_DIA`, `ALTA_TOPE_BASES`, `ALTA_TOPE_MB` (`src/server/alta/crear-inquilino.ts:52`, `src/server/alta/catalogo.ts:15-22`) | valor | igual (D7) | 5, 30 y 350 en los tres: dev y QA desde el 17/10 (A12) | Vercel; contador de `/admin/altas` |
 | `ALTA_PRUEBA_DIAS` (`diasDePrueba` en `src/lib/billing/plans.ts`), `AI_PILOTO_DAILY_TOKEN_CAP` (`topeDiarioDelPlan`, mismo archivo) | valor | igual | sin cargar en ningún doc (30 días y 500.000 tokens por omisión) | Vercel |
 | `AI_PRUEBA_MONTHLY_USD_POR_INQUILINO`, `AI_PRUEBAS_MONTHLY_BUDGET_USD` (`src/server/ai/budget.ts:464`, `:474`) | valor | igual (D7) | prd 1 y 30 (`docs/PROMOCION.md:733-734`); dev y QA desconocido | Vercel |
-| `MONTHLY_BUDGET_USD` (`src/lib/topes.ts:117`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia frena la IA de los clientes y las dos pantallas dicen «IA frenada» | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
+| `MONTHLY_BUDGET_USD` (`src/lib/topes.ts:117`) | valor | excepción en dev y QA (D7) | prd 50; dev y QA desconocido (200 por omisión). El guardia, `/api/health` y `/configuracion` leen el mismo tope (#461); con 0 el guardia pausa la IA de los clientes a propósito y las pantallas lo dicen así: `/configuracion`, el punto del agente en el sidebar («IA pausada»), el asistente, el aviso de «re-analizar», el historial del caso y el aviso a los especialistas. El operador además lee cómo activarla (poner un valor mayor que 0 y redeployar) en `/admin/cartera`, el mail de topes y `/api/health`; no hay avisos del 80 y el 100 %, porque no hay umbral que cruzar | Vercel; `/api/health` pasa a degraded al 80 % (`route.ts:618`) y con 0 |
 | `AI_TENANT_DAILY_TOKEN_CAP` (`.env.example:159`) | valor | excepción en dev y QA (D7); en esos dos, igual a la variable del repo (`.github/workflows/deploy-checks.yml:383`) | QA 20 M; dev y prd desconocido | Vercel y Settings > Variables del repo |
 | `ALTA_NUMEROS_MAXIMOS_WABA`, `ALTA_TOPE_NUMEROS_DIA` y los cupos de códigos (`.env.example:284-294`) | valor | igual; se sube recién con Veltra verificada | sin cargar (2, 2, 10, 10, 30, 5; los de códigos subieron de 3, 5 y 10 en #548) | Vercel |
 | `ALTA_TOPE_IP_DIA` (`src/server/alta/cupo-por-ip.ts:20`), `ALTA_TOPE_CORREO_POR_IP_DIA`, `ALTA_TOPE_CORREOS_DIA`, `ALTA_TOPE_POR_DESTINATARIO_DIA`, `ALTA_TOPE_INVITACIONES_DIA` (`.env.example:270-275`, 20 por omisión; una prueba invita a lo sumo a 5 por día aunque la variable diga más, `src/server/alta/tope-de-invitaciones.ts`), `ALTA_TOPE_PLANTILLAS_PRUEBA_DIA` (`src/server/whatsapp/cloud-api.ts:783`) | valor | igual | sin cargar (valores por omisión) | Vercel |
@@ -572,7 +572,7 @@ El paso 12 lee los dos espacios.
     `WHATSAPP_PHONE_NUMBER_ID` (ver el paso 6). En cualquier otro caso, Claude lee los logs y
     le dice al dueño qué variable falta. Ojo con el presupuesto: `/api/health` y `/configuracion`
     muestran el tope que corta, el mismo que lee `budget.ts`. Con `MONTHLY_BUDGET_USD` en 0 dicen
-    «IA frenada» y el chequeo queda amarillo: la IA de los clientes está apagada a propósito.
+    «IA frenada» (en `/api/health`, con cómo activarla: un valor mayor que 0 y redeploy) y el chequeo queda amarillo: la IA de los clientes está pausada a propósito, no por un incidente.
   - **Fuentes:** `package.json:23`; `docs/TESTING.md:1068`;
     `src/app/api/health/route.ts:413-416`, `:425`, `:591`, `:610`;
     `src/lib/topes.ts:117`; `src/app/(app)/configuracion/page.tsx:168-169`.
@@ -1400,7 +1400,7 @@ alta. Recomendación: no instalarlo (D14).
   dólares.
 - `/api/health` con `CRON_SECRET`: pasa a degraded al 80 % del presupuesto mensual y a down al
   100 %, y el barrido de Actions lo muestra amarillo o rojo. Con `MONTHLY_BUDGET_USD` en 0
-  dice «IA frenada» y queda en degraded, no en down, para no tumbar el deploy.
+  dice «IA frenada a propósito» y cómo activarla (un valor mayor que 0 y redeploy), y queda en degraded, no en down, para no tumbar el deploy.
 - Fuera de ClaimMix: la consola de Google Cloud (Facturación) para el gasto real de Vertex, la
   consola de Neon para los MB de cada proyecto, el panel de Vercel para el uso, y Actions para
   los minutos.
@@ -1408,7 +1408,7 @@ alta. Recomendación: no instalarlo (D14).
   consola de Google y la anota al lado de cada cuenta de prueba (ítem 8 del plan).
 
 **Topes, en el orden en que cortan.** Prueba vencida; presupuesto mensual del proyecto
-(`MONTHLY_BUDGET_USD`, 200 por omisión, de todos los espacios menos la demo; `.env.example:193`); tope diario por espacio (`AI_TENANT_DAILY_TOKEN_CAP`, 5 M por
+(`MONTHLY_BUDGET_USD`, 200 por omisión, de todos los espacios menos la demo; con 0 la IA queda pausada a propósito; `.env.example:193`); tope diario por espacio (`AI_TENANT_DAILY_TOKEN_CAP`, 5 M por
 omisión); tope de lo anónimo (`AI_ANONIMO_DAILY_TOKEN_CAP`, 60 % del anterior); tope por usuario
 (`AI_USER_DAILY_TOKEN_CAP`, 2 M en el código; `.env.example:184` trae 100000 de ejemplo); y,
 en prueba, el dólar por espacio, el pozo de US$ 30 entre todas las pruebas y los 500.000 tokens

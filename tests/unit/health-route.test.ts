@@ -699,6 +699,16 @@ describe("cuánto queda del presupuesto de IA", () => {
     expect(p.detail).not.toContain("US$200");
   });
 
+  it("con el tope en 0 el detalle dice que es a propósito y cómo activarla, sin sonar a tope lleno", async () => {
+    process.env.MONTHLY_BUDGET_USD = "0";
+    gastadoUsd = 12.5;
+    const p = await leer();
+
+    expect(p.detail).toContain("a propósito");
+    expect(p.detail).toContain("para activarla");
+    expect(p.detail).not.toMatch(/agotad|cerca del tope/);
+  });
+
   it("suma desde la medianoche argentina del primero, la misma que el guardia y el aviso de topes", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-24T15:30:00Z") });
     try {

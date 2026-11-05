@@ -27,6 +27,7 @@ import { useLocale, useT } from "@/lib/i18n/LocaleContext";
 import type { MotivoSinLeer } from "@/core/ai/sin-leer";
 import { formatCaseNumber } from "@/core/case/numero";
 import { formatDate } from "@/lib/utils";
+import { mensajeDeLaIaFrenada } from "@/lib/ui/mensaje-del-tope";
 import { StatusBadge } from "@/app/(app)/bandeja/components/StatusBadge";
 import type { CaseStatus } from "@/lib/schemas/cases";
 
@@ -134,7 +135,7 @@ export function CajaDelAsistente({ textareaRef: textareaRefExterno }: CajaDelAsi
         });
 
         if (res.status === 429) {
-          setError(t("asistente.demasiadas"));
+          setError((await mensajeDeLaIaFrenada(res)) ?? t("asistente.demasiadas"));
           return;
         }
 

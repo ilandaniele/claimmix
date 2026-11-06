@@ -21,6 +21,7 @@ export type AmbitoDeCupo =
   | "alta:correos"
   | "alta:destinatario"
   | "alta:aviso-numero"
+  | "alta:resumen"
   | "alta:acceso-persona"
   | "alta:acceso-espacio"
   | "aviso-tope"

@@ -33,6 +33,7 @@ import { reapStuckProcessingCases } from "@/server/intake/reap-stuck";
 import { closeAbandonedConversations } from "@/server/intake/close-abandoned";
 import { retomarExtraccionesPendientes } from "@/server/intake/retomar-pendientes";
 import { avisarTopes } from "@/server/alta/aviso-de-topes";
+import { resumenDeAltas } from "@/server/alta/aviso-operador";
 import { revisarWabas } from "@/server/alta/waba-salud";
 import { avisarCierres, recordarPendientes } from "@/server/confirmations/recordatorios";
 import { revisarDesvios, type ResultadoDeLaRevision } from "@/server/desvios/revision-nocturna";
@@ -240,6 +241,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Aparte del bloque de la purga: ésta se come el margen, así que se vuelve a medir. El uno por día lo pone su cupo, adentro.
+  let resumenEnviado: boolean | null = null;
+  if (ventanaDiaria(new Date()) && Date.now() < hasta - 60_000) {
+    try {
+      resumenEnviado = await resumenDeAltas();
+    } catch (err) {
+      logger.error({ code: errorCode(err) }, "cron_reap_stuck.resumen_de_altas_fallo");
+      resumenEnviado = false;
+    }
+  }
+
   // Third sweep, same reason: the rate limiter writes a row per key per window
   // and none of them mean anything once the window has passed.
   const { purgeExpiredRateLimits } = await import("@/lib/rate-limit/postgres");
@@ -285,6 +297,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     avisos_de_topes: avisosDeTopes,
     purga,
     retencion,
+    ...(resumenEnviado === null ? {} : { resumen_de_altas: resumenEnviado }),
     rate_limit_rows_purged: purged,
     // Los barridos que no pudieron consultar devuelven cero, como una noche sin nada que hacer:
     // esto los separa, y barrer-trabados.yml se pone rojo. Más las bases que no se pudieron leer.

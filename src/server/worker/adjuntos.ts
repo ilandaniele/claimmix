@@ -56,8 +56,8 @@ export const MAX_BYTES = 8 * 1024 * 1024;
 /** Un plazo agotado puede ser Vertex colgado; dos ya son el archivo. */
 const MAX_PLAZOS_AGOTADOS = 2;
 const ESPERA_TRAS_PLAZO_MS = 60 * 60 * 1000;
-/** Gemini cobra 258 tokens por página de PDF y nada por su texto (medido en Vertex el 28/09). */
-export const TOPE_TOKENS_PDF = MAX_PAGINAS_PDF * 258;
+/** Gemini 3 cobra 560 tokens por página de PDF con la resolución por omisión (2.5 cobraba 258). */
+export const TOPE_TOKENS_PDF = MAX_PAGINAS_PDF * 560;
 export const PLAZO_DE_CONTEO_MS = 8_000;
 
 /** La consulta sola, para ir en el lote del prompt. Ver `cargarLoDelPrompt`. */

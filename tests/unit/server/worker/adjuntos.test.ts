@@ -144,6 +144,17 @@ describe("paraElModelo", () => {
     expect(params).toEqual(['{"descarte":"too_many_pages"}', "caso-1", "hg"]);
   });
 
+  it("con Gemini 3 (560 tokens por página) un PDF de diez páginas va y uno de once no", async () => {
+    const grande = Buffer.from("grande").toString("base64");
+    readAttachment.mockImplementation(async (ruta: string) => Buffer.from(ruta));
+    contarTokens.mockImplementation(async (m: { data: string }) => (m.data === grande ? 11 * 560 : 10 * 560));
+
+    const r = await tres();
+
+    expect(r.hashes).toEqual(["hf", "hc"]);
+    expect(sqlMarcado().params).toEqual(['{"descarte":"too_many_pages"}', "caso-1", "hg"]);
+  });
+
   it("un PDF que el modelo no puede leer queda descartado y no vuelve a contarse", async () => {
     const grande = Buffer.from("grande").toString("base64");
     readAttachment.mockImplementation(async (ruta: string) => Buffer.from(ruta));

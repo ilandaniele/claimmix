@@ -26,6 +26,7 @@ const m = vi.hoisted(() => ({
   purgar: vi.fn(),
   purgaAdjuntos: vi.fn(),
   retencion: vi.fn(),
+  resumen: vi.fn(),
   rateLimit: vi.fn(),
   paraCadaBase: vi.fn(),
   reintentar: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@/server/bases/reintentar", () => ({ reintentarBases: m.reintentar }));
 vi.mock("@/server/bases/espejo", () => ({ espejarTodas: m.espejar }));
 vi.mock("@/server/alta/waba-salud", () => ({ revisarWabas: m.revisarWabas }));
 vi.mock("@/server/alta/aviso-de-topes", () => ({ avisarTopes: m.avisarTopes }));
+vi.mock("@/server/alta/aviso-operador", () => ({ resumenDeAltas: m.resumen }));
 vi.mock("@/lib/rate-limit/index", () => ({
   rateLimit: m.rateLimit,
   RATE_LIMIT_CONFIGS: {
@@ -109,6 +111,7 @@ beforeEach(() => {
   m.retencion.mockImplementation(
     anota("retencion", { modo: "borrar", anios: 5, corte: "2021-09-30T04:10:00.000Z", inquilinos: 1, candidatos: 2, borrados: 2 })
   );
+  m.resumen.mockImplementation(anota("resumen", true));
   m.rateLimit.mockResolvedValue({ allowed: true, remaining: 0, retryAfterSeconds: 0 });
 });
 
@@ -385,6 +388,7 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
 
     expect(m.purgaAdjuntos).not.toHaveBeenCalled();
     expect(m.retencion).not.toHaveBeenCalled();
+    expect(m.resumen).not.toHaveBeenCalled();
     // Y fuera de la ventana no se gasta el cupo del día: lo necesita la llamada de las 04.
     expect(m.rateLimit).not.toHaveBeenCalledWith("purga-y-retencion", expect.anything());
   });
@@ -406,6 +410,8 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
     expect(m.rateLimit).toHaveBeenCalledWith("purga-y-retencion", { limit: 1, windowMs: 86_400_000 });
     expect(m.purgaAdjuntos).toHaveBeenCalledOnce();
     expect(m.retencion).toHaveBeenCalledOnce();
+    // El uno por día del resumen lo pone su cupo, adentro de resumenDeAltas: la ruta lo llama las cinco veces.
+    expect(m.resumen).toHaveBeenCalledTimes(5);
     expect(await respuestas[0].json()).toMatchObject({ purga: { purgados: 2 }, retencion: { borrados: 2 } });
     expect(await respuestas[4].json()).toMatchObject({ purga: null, retencion: null });
   });
@@ -420,6 +426,8 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
     expect(m.purgaAdjuntos).not.toHaveBeenCalled();
     expect(m.retencion).not.toHaveBeenCalled();
     expect(m.purgar).toHaveBeenCalledOnce();
+    // El resumen tiene su propio cupo: no depende del de la purga.
+    expect(m.resumen).toHaveBeenCalledOnce();
     expect(await res.json()).toMatchObject({ purga: null, retencion: null });
   });
 
@@ -448,6 +456,7 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
 
     expect(m.rateLimit).not.toHaveBeenCalledWith("purga-y-retencion", expect.anything());
     expect(m.purgaAdjuntos).not.toHaveBeenCalled();
+    expect(m.resumen).not.toHaveBeenCalled();
   });
 
   it.each(["04:00", "04:10", "04:59"])("a las %s UTC corren las dos", async (hora) => {
@@ -459,7 +468,7 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
     expect(m.retencion).toHaveBeenCalledOnce();
   });
 
-  it("en la ventana corren después de los avisos y la revisión, y antes de la purga del rate limit", async () => {
+  it("en la ventana corren después de los avisos y la revisión, el resumen de altas después de la retención, y todo antes de la purga del rate limit", async () => {
     vi.setSystemTime(EN_VENTANA);
 
     await GET(pedido());
@@ -474,6 +483,7 @@ describe("GET /api/cron/reap-stuck: la purga de adjuntos y la retención (B19)",
       "revisar",
       "purgaAdjuntos",
       "retencion",
+      "resumen",
       "purgar",
     ]);
   });
@@ -728,5 +738,83 @@ describe("GET /api/cron/reap-stuck: la salud de las WABAs propias", () => {
 
     expect(res.status).toBe(401);
     expect(m.revisarWabas).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/cron/reap-stuck: el resumen diario de altas (L4)", () => {
+  it("corre en la ventana, sin argumentos, y su resultado sale en el JSON", async () => {
+    vi.setSystemTime(EN_VENTANA);
+
+    const res = await GET(pedido());
+
+    expect(m.resumen).toHaveBeenCalledOnce();
+    expect(m.resumen).toHaveBeenCalledWith();
+    expect(await res.json()).toMatchObject({ resumen_de_altas: true });
+  });
+
+  it("si el resumen no salió, el JSON lo dice: corrió y no mandó", async () => {
+    vi.setSystemTime(EN_VENTANA);
+    m.resumen.mockImplementation(anota("resumen", false));
+
+    const res = await GET(pedido());
+
+    expect(await res.json()).toMatchObject({ resumen_de_altas: false });
+  });
+
+  it("fuera de las 04 UTC no corre y la clave no aparece", async () => {
+    for (const hora of ["00:00", "03:59", "05:00", "12:00", "23:45"]) {
+      vi.setSystemTime(new Date(`2026-09-30T${hora}:00Z`));
+      const res = await GET(pedido());
+      expect(await res.json()).not.toHaveProperty("resumen_de_altas");
+    }
+
+    expect(m.resumen).not.toHaveBeenCalled();
+  });
+
+  it("si purga y retención se comieron el margen, el resumen no arranca y lo que sigue corre", async () => {
+    vi.setSystemTime(EN_VENTANA);
+    // Queda en las 04:14, todavía en la ventana, pero a menos de un minuto del final de la función.
+    m.retencion.mockImplementation(async () => {
+      vi.setSystemTime(new Date(Date.now() + 250_000));
+      return { modo: "borrar", anios: 5, corte: "x", inquilinos: 1, candidatos: 2, borrados: 2 };
+    });
+
+    const res = await GET(pedido());
+
+    expect(m.resumen).not.toHaveBeenCalled();
+    expect(await res.json()).not.toHaveProperty("resumen_de_altas");
+    expect(m.purgar).toHaveBeenCalledOnce();
+    expect(m.revisarWabas).toHaveBeenCalledOnce();
+  });
+
+  it("si el resumen revienta, la ruta contesta 200, el resto corre y el log no trae el mensaje", async () => {
+    vi.setSystemTime(EN_VENTANA);
+    const { logger } = await import("@/lib/observability/logger");
+    m.resumen.mockRejectedValue(new Error("dato-secreto"));
+
+    const res = await GET(pedido());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, resumen_de_altas: false });
+    expect(m.purgar).toHaveBeenCalledOnce();
+    expect(logger.error).toHaveBeenCalledWith(expect.any(Object), "cron_reap_stuck.resumen_de_altas_fallo");
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("dato-secreto");
+  });
+
+  it("es de todo el proyecto: corre una vez aunque haya varias bases", async () => {
+    vi.setSystemTime(EN_VENTANA);
+    vi.stubEnv("BASE_POR_CLIENTE", "1");
+    m.paraCadaBase.mockImplementation(async (trabajo: Trabajo) => ({
+      resultados: [
+        await trabajo({ base: "a" } as unknown as DbDueno, "tenant-a"),
+        await trabajo({ base: "b" } as unknown as DbDueno, "tenant-b"),
+      ],
+      pendientes: 0,
+      fallas: 0,
+    }));
+
+    await GET(pedido());
+
+    expect(m.resumen).toHaveBeenCalledOnce();
   });
 });

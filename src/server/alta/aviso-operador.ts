@@ -14,11 +14,15 @@
  * queda en revisión, o cuando entra a la WABA, el operador se entera para
  * conectarlo a mano o borrar lo que sobre. Mismo remitente, misma regla: ningún
  * dato de nadie en el mail.
+ *
+ * Y el resumen diario (`resumenDeAltas`): lo que antes había que ir a mirar a /admin/altas.
  */
 
 import "server-only";
 
+import { resolveBaseURL } from "@/lib/auth/base-url";
 import { operatorEmails } from "@/lib/auth/operator-emails";
+import { pruebaVencida } from "@/lib/billing/plans";
 import { getT } from "@/lib/i18n";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
@@ -97,6 +101,107 @@ export async function avisarAlOperador(creadas24h: number, tope: number): Promis
   } catch (e) {
     logger.error({ error: e instanceof Error ? e.name : "UnknownError" }, "alta.aviso_operador_fallo");
   }
+}
+
+/** Las pruebas que vencen en tantos días o menos entran al resumen. */
+export const DIAS_DE_AVISO_DE_PRUEBA = 3;
+
+/**
+ * El resumen diario de altas al operador: sale una vez por día y sólo si hay algo que mirar. Lleva
+ * conteos y el enlace a /admin/altas, nunca nombres, correos ni teléfonos. Dice si salió y nunca lanza.
+ *
+ * Los conteos de revisión y de pruebas salen de las filas más nuevas que trae `listarAltas`, así que
+ * con la lista llena (`FILAS_MAXIMAS`) son una cota inferior y se muestran como «200+», «0+»…: las
+ * pruebas por vencer son de las altas más viejas, las primeras que el tope de filas deja afuera. Un
+ * espacio cuenta como «en revisión o sin número» sólo si está vivo (activo, o en prueba sin vencer) y no
+ * tiene número, o lo tiene pedido y sin conectar con la marca de revisión: la marca es permanente y
+ * `billing_status` no pasa solo de `trial` al vencer la prueba, así que contar lo abandonado haría
+ * salir el resumen todos los días.
+ *
+ * El cupo se toma antes de la consulta del panel y de la recorrida de Graph, que son lo caro: la
+ * ventana del cron deja pasar varias corridas por día y sólo la primera tiene que trabajar. Si no hay
+ * nada que mandar, o el correo no sale, se devuelve.
+ */
+export async function resumenDeAltas(ahora: Date = new Date()): Promise<boolean> {
+  try {
+    const destinatarios = destinatariosDeOperacion();
+    if (destinatarios.length === 0) return false;
+
+    const clave = claveDeCupo("alta:resumen");
+    const cupo = await rateLimit(clave, { limit: 1, windowMs: DIA_MS, fallaCerrada: true });
+    if (!cupo.allowed) {
+      await liberarCupo(clave, DIA_MS, cupo.ventana);
+      return false;
+    }
+
+    let salio = false;
+    try {
+      salio = await armarYMandarElResumen(destinatarios, ahora);
+    } finally {
+      if (!salio) await liberarCupo(clave, DIA_MS, cupo.ventana);
+    }
+    return salio;
+  } catch (e) {
+    logger.error({ error: e instanceof Error ? e.name : "UnknownError" }, "alta.resumen_fallo");
+    return false;
+  }
+}
+
+async function armarYMandarElResumen(destinatarios: string[], ahora: Date): Promise<boolean> {
+  // Diferidos: el panel importa módulos que importan este, y el camino caliente de WhatsApp que
+  // carga este aviso no tiene que arrastrar la base ni Graph.
+  const [{ listarAltas, FILAS_MAXIMAS }, { lugaresDeLaWaba }] = await Promise.all([
+    import("@/server/alta/panel-operador"),
+    import("@/server/alta/lugares-de-la-waba"),
+  ]);
+  const [panel, waba] = await Promise.all([listarAltas(), lugaresDeLaWaba()]);
+  if (panel.migracionPendiente) return false;
+
+  const vivas = panel.altas.filter(
+    (f) =>
+      f.estadoDeFacturacion === "active" ||
+      (f.estadoDeFacturacion === "trial" &&
+        !pruebaVencida({ billing_status: f.estadoDeFacturacion, trial_ends_at: f.pruebaHasta }, ahora))
+  );
+  const revision = vivas.filter(
+    (f) => f.numero === null || (f.numeroEnRevision && f.numero.estado === "pedido")
+  ).length;
+  const pruebas = panel.altas.filter((f) => {
+    if (f.estadoDeFacturacion !== "trial" || !f.pruebaHasta) return false;
+    const falta = Date.parse(f.pruebaHasta) - ahora.getTime();
+    return falta > 0 && falta <= DIAS_DE_AVISO_DE_PRUEBA * DIA_MS;
+  }).length;
+  const wabaLlena = waba !== null && umbralDelTope(waba.usados, waba.tope) !== null;
+  if (panel.creadas24h === 0 && revision === 0 && pruebas === 0 && !wabaLlena) return false;
+
+  // creadas24h es un count exacto; revisión y pruebas salen de la lista, que tiene tope.
+  const listaLlena = panel.altas.length >= FILAS_MAXIMAS;
+  const cifra = (n: number) => (listaLlena ? `${n}+` : String(n));
+  const t = getT("es-AR");
+  const lineas = [
+    t("alta.resumen.altas")
+      .replace("{n}", () => String(panel.creadas24h))
+      .replace("{tope}", () => String(panel.tope)),
+    t("alta.resumen.revision").replace("{n}", () => cifra(revision)),
+    t("alta.resumen.pruebas")
+      .replace("{dias}", () => String(DIAS_DE_AVISO_DE_PRUEBA))
+      .replace("{n}", () => cifra(pruebas)),
+    ...(waba
+      ? [
+          t("alta.resumen.waba")
+            .replace("{usados}", () => String(waba.usados))
+            .replace("{tope}", () => String(waba.tope))
+            .replace("{libres}", () => String(waba.libres)),
+        ]
+      : []),
+  ];
+  const texto = [
+    t("alta.resumen.intro"),
+    ...lineas,
+    "",
+    t("alta.resumen.cierre").replace("{url}", () => `${resolveBaseURL()}/admin/altas`),
+  ].join("\n");
+  return mandarAlOperador(destinatarios, t("alta.resumen.asunto"), texto, "resumen");
 }
 
 /**

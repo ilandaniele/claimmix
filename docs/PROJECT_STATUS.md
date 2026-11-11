@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-11-03. This file is the single source of truth for "where things stand."
+_Last updated: 2026-11-11. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5467,6 +5467,12 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Qué no se decidió.** Si 0 debería querer decir «sin tope» (opción B) sigue abierto y ninguna frase lo cierra. Queda como estaba: `budget.ts`, `computeMargin`, los costos, los valores de `MONTHLY_BUDGET_USD` en Vercel y GitHub, `TOPE_KB` y `errors.ts`. `demo/analyze` e `intake/simulate` contestan y guardan con los mismos `errorDelTope` y `motivoParaElHistorial` (`src/server/ai/tope-del-inquilino.ts`) y `batch-simulate` contesta un texto fijo, así que ninguno devuelve ni guarda el gasto del proyecto entero.
 - **Tests.** `topes.test.ts` (`iaFrenadaAProposito`), `estado.test.ts`, `aviso-presupuesto.test.ts`, `aviso-de-topes.test.ts`, `admin-cartera-page.test.tsx`, `configuracion-sso-pagina.test.tsx`, `health-route.test.ts`, `responder.test.ts`, `asistente-route.test.ts`, `re-analyze-route.test.ts`, `extract-budget.test.ts`, `CajaDelAsistente.test.tsx`, `TomarElControl.test.tsx`, `AuditTimeline.test.tsx`, `i18n.test.ts`, `i18n-bandeja-y-configuracion.test.tsx` y `admin-altas-page.test.tsx`.
 - **Ambientes.** En `qa` por #560 (`fc9f2c84`), en `main` por #561 (`3941251b`) y en `prd` por #562 (`f0d7e475`, árbol `b05a1ab9`, igual al de `main`) el 05/11, con el peso del bundle verde en CI y `pnpm check` completo verde sobre `3941251b` (26 conversaciones sin diferencias, smoke en orden). Falta mirar el tablero en un teléfono real. El dueño decide si se activa la IA (poner `MONTHLY_BUDGET_USD` en un valor mayor que 0 en el ambiente que corresponda y redeployar).
+
+### Promoción del 11/11 a prd (#565, #569, #570)
+
+- **Qué llegó.** #563 (`0535a57a`): el mail de derivación dice «derivado a un especialista», como el WhatsApp. #564 (`13dd56a7`): el `/register` de Graph espera 30 s en vez de 10 s. #566 (`f78ca7e3`): el operador recibe un resumen diario de altas por mail desde el cron `reap-stuck` (`resumenDeAltas` en `src/server/alta/aviso-operador.ts`), y el mail sólo sale si hay algo que mirar. Sin migraciones ni variables nuevas.
+- **Camino.** #565 llevó #563 y #564 de qa a main (`68c5cf7b`) y #569 llevó #566 (`66ad73c0`). #570 llevó main a prd el 11/11 (`84dfa37d`, árbol `9893d08c`, igual al de main y al de qa). `pnpm check` completo verde sobre `66ad73c0` (26 conversaciones sin diferencias, smoke en orden) y PRD · deploy sobre `84dfa37d` verde (run 43080372137: smoke, salud de las bases y paridad).
+- **QA.** El 11/11 se borró `SIGNUP_ALLOWED_EMAILS` de claimmix-qa: con el alta automática prendida la paridad pide que no esté. Rige desde el próximo deploy de QA.
 
 ### 🙋 Waiting on you (not code)
 

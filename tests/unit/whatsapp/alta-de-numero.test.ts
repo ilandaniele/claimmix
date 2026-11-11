@@ -18,6 +18,7 @@ vi.mock("node:crypto", async (importOriginal) => {
 
 import { ID_DE_META } from "@/lib/meta-ids";
 import { logger } from "@/lib/observability/logger";
+import { PLAZO_GRAPH_MS } from "@/server/whatsapp/graph";
 import {
   agregarNumero,
   clasificar,
@@ -28,6 +29,7 @@ import {
   numeroYaRegistrado,
   partirNumero,
   pedirCodigoAMeta,
+  PLAZO_REGISTRO_MS,
   registrarNumero,
   verificarCodigoEnMeta,
   webhookAjenoEs,
@@ -266,6 +268,24 @@ describe("registrarNumero", () => {
 
   it("un 200 sin success:true es «meta»", async () => {
     graphContesta({ success: false });
+    expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "meta", codigo: null });
+  });
+
+  it("espera 30 s a register y 10 s al resto de Graph", async () => {
+    const plazo = vi.spyOn(AbortSignal, "timeout");
+    graphContesta({ success: true, status: "CONNECTED" });
+
+    await registrarNumero(CRED, ID);
+    await numeroYaRegistrado(CRED, ID);
+
+    expect(PLAZO_REGISTRO_MS).toBe(30_000);
+    expect(plazo.mock.calls).toEqual([[PLAZO_REGISTRO_MS], [PLAZO_GRAPH_MS]]);
+  });
+
+  it("si register no contesta en su plazo es «meta», como cualquier caída de Graph", async () => {
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort());
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => Promise.reject(init.signal?.reason)));
+
     expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "meta", codigo: null });
   });
 

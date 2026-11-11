@@ -125,7 +125,7 @@ const DIAS_DE_HISTORIAL = 90;
 /** Tope de la prueba: lo mismo que `ALTA_PRUEBA_DIAS` admite. */
 export const DIAS_MAXIMOS_DE_PRUEBA = 90;
 /** Filas de la pantalla; con el tope de 24 h son semanas de altas. */
-const FILAS_MAXIMAS = 200;
+export const FILAS_MAXIMAS = 200;
 /** Ventana de la demora del alta en el panel. */
 const DIAS_DE_DEMORA = 30;
 

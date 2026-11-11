@@ -37,7 +37,8 @@
  * por dirección el aviso del 100 % podía quedar esperando a las 00:00 UTC con la IA
  * ya cortada. Y el pedido de acceso (`acceso`, de /alta) se acota por espacio, cinco por día,
  * y cada administrador es de un solo espacio: con tres por dirección el cuarto y el quinto
- * pedido de un espacio con un solo administrador no salían y nadie lo sabía. Su cupo global sigue.
+ * pedido de un espacio con un solo administrador no salían y nadie lo sabía. Y el resumen diario de altas
+ * (`resumen`) ya trae el suyo: `alta:resumen`, uno por día. El cupo global de cada uno sigue.
  *
  * Los que corren cierran si el contador no contesta (`fallaCerrada`): un mail que no
  * sale se pide de nuevo, uno que sale de más no se recupera.
@@ -85,8 +86,10 @@ export interface CorreoDelSistema {
  * `acceso` es el pedido de acceso a un espacio (/alta): sale a los administradores del dominio de quien lo pide,
  * con su cupo global propio para que una ráfaga de pedidos no le gaste el de las invitaciones, y sin cupo por
  * dirección: el tope por espacio y día está en `pedir-acceso.ts`.
+ * `resumen` es el resumen diario de altas al operador (cron reap-stuck): cupo global propio y sin cupo por dirección,
+ * porque ya lo acota `alta:resumen`, uno por día, y nadie lo pide sobre una dirección ajena.
  */
-export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador" | "recordatorio" | "topes" | "acceso";
+export type TipoDeCorreo = "alta" | "recuperacion" | "invitacion" | "operador" | "recordatorio" | "topes" | "acceso" | "resumen";
 
 export interface OpcionesDeCorreo {
   tipo: TipoDeCorreo;
@@ -98,7 +101,7 @@ export interface OpcionesDeCorreo {
 const TIPOS_POR_IP: ReadonlySet<TipoDeCorreo> = new Set(["alta", "recuperacion"]);
 
 /** Los tipos que no tienen cupo por dirección: nadie los pide sobre una dirección ajena, o ya los acota otro tope. */
-const TIPOS_SIN_CUPO_POR_DESTINATARIO: ReadonlySet<TipoDeCorreo> = new Set(["topes", "acceso"]);
+const TIPOS_SIN_CUPO_POR_DESTINATARIO: ReadonlySet<TipoDeCorreo> = new Set(["topes", "acceso", "resumen"]);
 
 /**
  * La casilla de la plataforma, o null si falta el correo, el refresh token o el

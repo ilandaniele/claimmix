@@ -709,7 +709,8 @@ valor devuelto pasaría con la durabilidad apagada.
 - El SDK empaqueta `builtin-modules` y emite su import de JSON sin
   `with {type:"json"}`. Node 24 lo rechaza y **todo flujo se cuelga** hasta que
   el test expira, con un error que no menciona ni a Node ni al JSON. Va parchado
-  (`patches/builtin-modules@5.0.0.patch`), con la lista escrita: leerla de
+  (`patches/builtin-modules@5.5.0.patch`; al subir de versión se mueve el
+  parche y se copia la lista nueva), con la lista escrita: leerla de
   `node:module` tampoco sirve, porque el flujo corre en una VM donde eso no está.
 - `.well-known/workflow/` tiene que quedar afuera del matcher de `src/proxy.ts`.
   Si lo intercepta, el síntoma es `detached ArrayBuffer`.

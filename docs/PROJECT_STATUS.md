@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-11-11. This file is the single source of truth for "where things stand."
+_Last updated: 2026-11-16. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5473,6 +5473,14 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Qué llegó.** #563 (`0535a57a`): el mail de derivación dice «derivado a un especialista», como el WhatsApp. #564 (`13dd56a7`): el `/register` de Graph espera 30 s en vez de 10 s. #566 (`f78ca7e3`): el operador recibe un resumen diario de altas por mail desde el cron `reap-stuck` (`resumenDeAltas` en `src/server/alta/aviso-operador.ts`), y el mail sólo sale si hay algo que mirar. Sin migraciones ni variables nuevas.
 - **Camino.** #565 llevó #563 y #564 de qa a main (`68c5cf7b`) y #569 llevó #566 (`66ad73c0`). #570 llevó main a prd el 11/11 (`84dfa37d`, árbol `9893d08c`, igual al de main y al de qa). `pnpm check` completo verde sobre `66ad73c0` (26 conversaciones sin diferencias, smoke en orden) y PRD · deploy sobre `84dfa37d` verde (run 43080372137: smoke, salud de las bases y paridad).
 - **QA.** El 11/11 se borró `SIGNUP_ALLOWED_EMAILS` de claimmix-qa: con el alta automática prendida la paridad pide que no esté. Rige desde el próximo deploy de QA.
+
+### 136024 con el número ya verificado (16/11, rama `whatsapp/codigo-136024`)
+
+- **Qué pasaba.** En el paso 7 de prd el número ya estaba verificado y `request_code` volvía con 136024. Desde #548 eso era «esperar» a secas, y la persona no podía avanzar ni con el número listo.
+- **Arreglo.** En `pedirCodigo` (`src/server/alta/numero-automatico.ts`), si `request_code` falla con 136024 (`YA_VERIFICADO`, exportada por `errores-de-graph.ts`), se lee `code_verification_status` con `codigoYaVerificado`. `VERIFIED` sigue por `registrarYConectar` (cupo `wa:registrar`, `/register`, webhook, «conectado»); cualquier otra cosa, o la lectura caída, devuelve «esperar», sin revisión ni aviso al operador. No hay lectura previa a cada pedido, y 136024 sigue en `ESPERA_DE_META`. Los cupos del código quedan gastados como antes.
+- **Logs.** `whatsapp.alta_numero.graph` suma `subcodigo` y el texto de Meta (`mensaje`, `mensaje_usuario`, `detalles`) tachado por valor y por forma y cortado a 160 puntos de código, sólo en ese cliente (`clienteDeGraph(registro, { recortes: true })`); embedded-signup y app propia siguen sin texto.
+- **Pendiente.** `codigoWaba` (WABA propia) tiene el mismo hueco y queda como «esperar»: se arregla aparte si hace falta. Sin migración ni texto nuevo.
+- **Tests.** `numero-automatico.test.ts`, `numero-prd.test.ts` (136024 con `VERIFIED` y orden de pedidos), `alta-de-numero.test.ts`, `graph.test.ts` (qué se anota y cómo se tacha) y `errores-de-graph.test.ts`.
 
 ### 🙋 Waiting on you (not code)
 

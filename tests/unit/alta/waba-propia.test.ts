@@ -1634,7 +1634,7 @@ describe("codigoWaba", () => {
 
   it.each([
     ["Meta pide esperar (130429)", falla("esperar", 130429)],
-    ["Meta no pudo mandar por ese medio (136024)", falla("esperar", 136024)],
+    ["Meta contesta 136024 (número ya verificado; en este camino no se lee el estado)", falla("esperar", 136024)],
   ])("%s: «esperar», sin anotar una causa, y el cupo queda gastado (cada reintento es otro pedido a Graph)", async (_cual, respuesta) => {
     h.pedirAMeta.mockResolvedValue(respuesta);
 

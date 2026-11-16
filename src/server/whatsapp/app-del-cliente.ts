@@ -20,8 +20,9 @@
  *     en el cuerpo de los POST y en la consulta de los GET (Q24): sin el token no
  *     sirve, y es la forma que Meta documenta. Las llamadas con el app token no lo
  *     llevan: el app token ya es la prueba de conocer el secreto.
- *   - De un error sólo queda `{paso, status, codigo}`. Ni el token, ni el secreto,
- *     ni el cuerpo de lo que Meta contestó se anotan.
+ *   - De un error queda `{paso, status, codigo}` y el `subcodigo` si vino; el texto
+ *     de Meta no se anota (puede traer un token que no viajó en el pedido). Ni el
+ *     token, ni el secreto, ni el cuerpo se anotan.
  *
  * Nada de acá opera sobre la WABA ni sobre el número de la plataforma: los ids
  * que se piden son los del cliente, y los de la plataforma se rechazan.

@@ -7,7 +7,8 @@
  * el orden de los pasos, los topes y qué se devuelve a quien lo pidió:
  *
  *   - `pedirCodigo`: suma el número a la WABA de la plataforma (si no está) y
- *     le pide a Meta que mande el código por SMS o por llamada;
+ *     le pide a Meta que mande el código por SMS o por llamada; si Meta contesta
+ *     136024 con el número ya verificado, lo registra y conecta;
  *   - `verificarCodigo`: se lo entrega a Meta, registra el número y lo deja
  *     'conectado'.
  *
@@ -85,6 +86,7 @@ import {
   verificarCodigoEnMeta,
   type MetodoDeCodigo,
 } from "@/server/whatsapp/alta-de-numero";
+import { YA_VERIFICADO } from "@/server/whatsapp/errores-de-graph";
 import { credencialDelEntorno, idDeLaPlataforma, webhookDelEntorno } from "@/server/whatsapp/numeros";
 import { recorrerLaWaba } from "@/server/whatsapp/verificar-en-meta";
 
@@ -323,11 +325,14 @@ async function sumarALaWaba(
  * antes de cualquier pedido. Desde el recorrido de la WABA (un GET que también
  * cuesta contra los topes de Meta) se quedan gastados, y los de `request_code`
  * también, sea cual sea la respuesta. Con un timeout o una respuesta rara, porque
- * Meta puede haber mandado el SMS o hecho la llamada. Con «esperar» (136024 si se
- * pide por llamada justo después del SMS) o un rechazo, porque el reintento lo
- * provoca la persona y cada uno es otro pedido a Graph: devolverlos dejaría a un
- * espacio golpeando sin más freno que el global de todos. Para repetir están los
- * diez por día.
+ * Meta puede haber mandado el SMS o hecho la llamada. Con «esperar» o un rechazo,
+ * porque el reintento lo provoca la persona y cada uno es otro pedido a Graph:
+ * devolverlos dejaría a un espacio golpeando sin más freno que el global de todos.
+ * Para repetir están los diez por día.
+ *
+ * Con 136024 Meta puede estar diciendo que el número ya está verificado: se lee
+ * `code_verification_status`. Con VERIFIED se registra y conecta, como en
+ * `verificarCodigo`; si no, o si la lectura falla, «esperar» y sin revisión.
  */
 export async function pedirCodigo(quien: QuienPide, metodo: MetodoDeCodigo): Promise<ResultadoDelNumero> {
   if (!numeroAutomatico()) return "revision";
@@ -359,7 +364,10 @@ export async function pedirCodigo(quien: QuienPide, metodo: MetodoDeCodigo): Pro
 
     alTocarGraph();
     const pedido = await pedirCodigoAMeta(entorno.cred, id, metodo, quien.idioma);
-    return pedido.ok ? "codigo_enviado" : deFalla(pedido.falla, tenantId);
+    if (pedido.ok) return "codigo_enviado";
+    if (pedido.codigo !== YA_VERIFICADO) return deFalla(pedido.falla, tenantId);
+    const verificado = await codigoYaVerificado(entorno.cred, id);
+    return verificado.ok && verificado.valor ? await registrarYConectar(quien, id, entorno) : "esperar";
   } catch (e) {
     logger.error({ error: nombreDelError(e) }, "alta.numero_automatico_fallo");
     return "meta";

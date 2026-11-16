@@ -15,8 +15,9 @@
  *     `Authorization`; el `client_secret`, el `code` y el `input_token` van en
  *     el cuerpo de un POST. Una URL con consulta termina en logs de
  *     proxies y en breadcrumbs de Sentry.
- *   - De un error sólo queda `{paso, status, codigo}`. Ni el token, ni el
- *     código, ni el cuerpo de lo que Meta contestó se anotan.
+ *   - De un error queda `{paso, status, codigo}` y el `subcodigo` si vino; el texto
+ *     de Meta no se anota (puede traer un token que no viajó en el pedido). Ni el
+ *     token, ni el código, ni el cuerpo se anotan.
  */
 
 import "server-only";

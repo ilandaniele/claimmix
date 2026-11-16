@@ -46,6 +46,9 @@ const CRED: CredencialDeAlta = { accessToken: "fake-access-token", wabaId: WABA 
 const BASE = "https://graph.facebook.com/v22.0";
 const CON_CUERPO = { Authorization: "Bearer fake-access-token", "Content-Type": "application/json" };
 const SIN_CUERPO = { Authorization: "Bearer fake-access-token" };
+const PRUEBA = "b".repeat(64);
+const CON_PRUEBA: CredencialDeAlta = { ...CRED, prueba: PRUEBA };
+const TACHADO = "[tachado]";
 const WEBHOOK = { url: "https://claimmix.example.com/api/webhooks/whatsapp", verifyToken: "fake-verify-token" };
 
 const respuesta = (cuerpo: unknown, status = 200) =>
@@ -510,7 +513,7 @@ describe("webhookAjenoEs", () => {
 });
 
 describe("lo que no llega al log ni a quien llama", () => {
-  it("de un error de Graph queda el paso, el status y el code, y nada del cuerpo", async () => {
+  it("de un error de Graph queda el paso, el status, el code y el mensaje tachado", async () => {
     graphContesta(
       { error: { message: "PIN 000042 distinto, código 123456, número +5491100000000, token fake-access-token", code: 133005 } },
       400
@@ -520,12 +523,56 @@ describe("lo que no llega al log ni a quien llama", () => {
 
     expect(r).toEqual({ ok: false, falla: "rechazo", codigo: 133005 });
     expect(logger.warn).toHaveBeenCalledTimes(1);
-    expect(logger.warn).toHaveBeenCalledWith({ paso: "registrar", status: 400, codigo: 133005 }, "whatsapp.alta_numero.graph");
+    expect(logger.warn).toHaveBeenCalledWith(
+      { paso: "registrar", status: 400, codigo: 133005, mensaje: "PIN [tachado] distinto, código [tachado], número [tachado], token [tachado]" },
+      "whatsapp.alta_numero.graph"
+    );
 
     const todo = JSON.stringify([...anotado.map((s) => s.mock.calls), r]);
-    for (const secreto of ["000042", "123456", "5491100000000", "fake-access-token", "distinto"]) {
+    for (const secreto of ["000042", "123456", "5491100000000", "fake-access-token"]) {
       expect(todo).not.toContain(secreto);
     }
+    expect(JSON.stringify(r)).not.toContain("distinto");
+  });
+
+  it("de pedir_codigo con 136024 queda el subcódigo y el texto de Meta, sin id, WABA, número, token ni prueba", async () => {
+    graphContesta(
+      {
+        error: {
+          message: `Número ${ID} de la WABA ${WABA} (+5491100000000) ya verificado, token fake-access-token, prueba ${PRUEBA}`,
+          error_user_msg: "El número ya está verificado",
+          error_data: { details: `Verificado ${ID}` },
+          code: 136024,
+          error_subcode: 2388093,
+        },
+      },
+      400
+    );
+
+    const r = await pedirCodigoAMeta(CON_PRUEBA, ID, "SMS", "es-AR");
+
+    expect(r).toEqual({ ok: false, falla: "esperar", codigo: 136024, subcodigo: 2388093 });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [datos, nombre] = (logger.warn as unknown as { mock: { calls: Array<[Record<string, unknown>, string]> } }).mock.calls[0];
+    expect(nombre).toBe("whatsapp.alta_numero.graph");
+    expect(datos).toMatchObject({ paso: "pedir_codigo", status: 400, codigo: 136024, subcodigo: 2388093 });
+    expect(datos.mensaje_usuario).toBe("El número ya está verificado");
+    expect(datos.detalles).toBe(`Verificado ${TACHADO}`);
+
+    const todo = JSON.stringify(anotado.map((s) => s.mock.calls));
+    for (const secreto of [ID, WABA, "5491100000000", "fake-access-token", PRUEBA]) expect(todo).not.toContain(secreto);
+  });
+
+  it("el eco de fijar_webhook (verify_token, override_callback_uri) y de agregar (phone_number) queda tachado", async () => {
+    graphContesta({ error: { message: `verify_token ${WEBHOOK.verifyToken} en ${WEBHOOK.url} rechazado`, code: 100 } }, 400);
+    await fijarWebhookDelNumero(CRED, ID, WEBHOOK);
+
+    graphContesta({ error: { message: "phone_number 92915550000 ya existe", code: 100 } }, 400);
+    await agregarNumero(CRED, { cc: "54", numero: "92915550000" }, "Veltra");
+
+    const todo = JSON.stringify(anotado.map((s) => s.mock.calls));
+    for (const secreto of [WEBHOOK.verifyToken, WEBHOOK.url, "92915550000"]) expect(todo).not.toContain(secreto);
+    expect(todo).toContain(TACHADO);
   });
 
   it("ni el PIN ni el código se anotan cuando todo sale bien o cuando sale mal", async () => {
@@ -553,7 +600,7 @@ describe("clasificar", () => {
     }
   });
 
-  it("136024 es «esperar» porque request_code no mandó nada; 136025 (otro de la familia) sigue siendo un rechazo", () => {
+  it("136024 sigue clasificándose «esperar»; 136025 (otro de la familia) es un rechazo", () => {
     expect(clasificar(400, 136024)).toBe("esperar");
     expect(clasificar(400, 136025)).toBe("rechazo");
   });
@@ -710,8 +757,6 @@ describe("CODIGOS_DE_PAIS", () => {
 });
 
 describe("el appsecret_proof de la app propia (R5)", () => {
-  const PRUEBA = "b".repeat(64);
-  const CON_PRUEBA: CredencialDeAlta = { ...CRED, prueba: PRUEBA };
   const CONSULTA = `appsecret_proof=${PRUEBA}`;
 
   /** Cada llamada de Graph de este módulo, con su URL sin prueba y lo que contesta Graph. */
@@ -769,9 +814,11 @@ describe("el appsecret_proof de la app propia (R5)", () => {
   it("de un error de Graph con subcódigo, vuelve el subcódigo; sin él, la falla queda como siempre (H11)", async () => {
     graphContesta({ error: { code: 190, error_subcode: 463 } }, 401);
     expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "rechazo", codigo: 190, subcodigo: 463 });
+    expect(logger.warn).toHaveBeenLastCalledWith({ paso: "registrar", status: 401, codigo: 190, subcodigo: 463 }, "whatsapp.alta_numero.graph");
 
     graphContesta({ error: { code: 190 } }, 401);
     expect(await registrarNumero(CRED, ID)).toEqual({ ok: false, falla: "rechazo", codigo: 190 });
+    expect(logger.warn).toHaveBeenLastCalledWith({ paso: "registrar", status: 401, codigo: 190 }, "whatsapp.alta_numero.graph");
   });
 
   it("el PIN y el código no viajan en la URL, tampoco con prueba", async () => {

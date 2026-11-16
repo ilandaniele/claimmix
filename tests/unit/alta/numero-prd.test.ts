@@ -104,6 +104,7 @@ const RUTA = {
   agregar: `POST ${WABA}/phone_numbers`,
   pedirCodigo: `POST ${ID}/request_code`,
   verificar: `POST ${ID}/verify_code`,
+  estadoCodigo: `GET ${ID}?fields=code_verification_status`,
   estado: `GET ${ID}?fields=status,platform_type`,
   registrar: `POST ${ID}/register`,
   fijarWebhook: `POST ${ID}`,
@@ -150,6 +151,8 @@ function instalarGraph() {
       case RUTA.verificar:
       case RUTA.registrar:
         return json({ success: true });
+      case RUTA.estadoCodigo:
+        return json({ code_verification_status: "NOT_VERIFIED" });
       case RUTA.estado:
         return json({ status: "PENDING", platform_type: "NOT_APPLICABLE" });
       case RUTA.fijarWebhook:
@@ -436,8 +439,28 @@ describe("cuando request_code no manda el código (a nivel de fetch)", () => {
 
     expect(await pedirCodigo(QUIEN, "VOICE")).toBe("esperar");
 
+    expect(h.orden).toEqual([RUTA.pedirCodigo, RUTA.estadoCodigo]);
     expect(h.aviso).not.toHaveBeenCalled();
     expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it("136024 con el número ya VERIFIED: se registra, se le pone el webhook y queda 'conectado'", async () => {
+    forzadas.set(RUTA.pedirCodigo, json({ error: { code: 136024 } }, 400));
+    forzadas.set(RUTA.estadoCodigo, json({ code_verification_status: "VERIFIED" }));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("conectado");
+
+    expect(h.orden).toEqual([
+      RUTA.pedirCodigo,
+      RUTA.estadoCodigo,
+      RUTA.estado,
+      RUTA.registrar,
+      RUTA.fijarWebhook,
+      RUTA.leerWebhook,
+      "guardar:conectado",
+      "espejar",
+    ]);
+    expect(h.aviso).not.toHaveBeenCalled();
   });
 
   it("un 400 que no es de espera: «revision», avisa al operador y los cupos de código se quedan", async () => {

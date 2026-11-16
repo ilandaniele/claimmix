@@ -72,9 +72,11 @@ export type MotivoDeAlta =
 
 /**
  * Meta pide aflojar con estos códigos, venga el status que venga; `clasificar` (graph.ts) los vuelve «esperar».
- * 136024: `request_code` no pudo mandar por ese medio en ese momento; no salió nada y otro intento más tarde sirve.
+ * 136024: según Meta, `request_code` lo contesta con el número ya verificado, pero no es concluyente (el 02/11 un pedido posterior salió).
+ * `pedirCodigo` lo confirma con `code_verification_status`; en los demás caminos es «esperar».
  */
-export const ESPERA_DE_META: readonly number[] = [4, 80007, 130429, 133016, 136024];
+export const YA_VERIFICADO = 136024;
+export const ESPERA_DE_META: readonly number[] = [4, 80007, 130429, 133016, YA_VERIFICADO];
 /** Para las causas del alta se suman 17 (límite por usuario) y los dos de espera del PIN, que en el camino de la plataforma siguen siendo rechazo. */
 const CODIGOS_DE_ESPERA: ReadonlySet<number> = new Set([...ESPERA_DE_META, 17, 133008, 133009]);
 /** El PIN de verificación en dos pasos no coincide. */

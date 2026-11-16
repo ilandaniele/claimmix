@@ -258,6 +258,12 @@ texto de Graph.
    `language` (`es` o `en`, según la cuenta). Cómo termina:
    - 429 y los códigos 4, 80007, 130429, 133016 y 136024 dan «esperar»: Meta no mandó nada y la
      persona ve que pruebe de nuevo en unos minutos, sin revisión ni aviso al operador;
+   - 136024 en el alta automática se confirma antes: es la respuesta de Meta cuando el número ya
+     está verificado, pero no es concluyente (el 02/11 un pedido posterior salió). Con un solo
+     `GET /{id}?fields=code_verification_status`, hecho sólo tras el 136024: si da `VERIFIED` el
+     alta no espera ningún código y sigue a `/register`, el webhook y «conectado» (gasta un cupo
+     de registro, `wa:registrar`); si da otra cosa, o la lectura falla, queda en «esperar». La
+     WABA propia (`codigoWaba`) sigue tratándolo como «esperar» sin leer el estado;
    - cualquier otro 4xx da revisión y aviso `rechazo`, y un timeout, un 5xx o un 2xx raro dan «meta».
 
    En ningún caso vuelven los cupos del código (ver «Los topes» más abajo).
@@ -351,7 +357,7 @@ El mail dice sólo el motivo; qué espacio fue queda en el log `alta.numero_en_r
 |---|---|---|
 | `sin_lugar` | La WABA llegó a `ALTA_NUMEROS_MAXIMOS_WABA`, o se agotó `ALTA_TOPE_NUMEROS_DIA`. | Mirar WhatsApp Manager y borrar a mano los números sobrantes, o verificar la empresa en Meta y subir el tope. Mientras, conectar el espacio desde `/admin/altas`: ahora fija el webhook propio del número, ya no hace falta ponerlo a mano. |
 | `ya_en_la_waba` | El número ya estaba en la WABA; no se adopta solo. | Ver de quién es. Si es del cliente, conectarlo desde `/admin/altas` (se comprueba contra Meta); si no, aclararlo con quien lo agregó. |
-| `rechazo` | Meta dijo que no (el número está en la app de WhatsApp, nombre rechazado, PIN de otro proveedor, un número mal tipeado o de un país donde WhatsApp Business no opera…). | Leer el `code` en el log `whatsapp.alta_numero.graph` (trae el paso). Si es la app de WhatsApp, el cliente borra esa cuenta; si no, `/admin/altas`. |
+| `rechazo` | Meta dijo que no (el número está en la app de WhatsApp, nombre rechazado, PIN de otro proveedor, un número mal tipeado o de un país donde WhatsApp Business no opera…). | Leer el `code` en el log `whatsapp.alta_numero.graph` (trae el paso, el subcódigo y el mensaje de Meta tachado). Si es la app de WhatsApp, el cliente borra esa cuenta; si no, `/admin/altas`. |
 | `sin_dueno` | Meta tiene el número, pero la base no pudo asignárselo al espacio. | Ver `alta.numero_automatico_no_guardado` (dice el resultado de la función) y conectarlo desde `/admin/altas`. Mientras la fila siga en `pedido`, el webhook descarta lo que entre. |
 | `pais` | El código de país no es válido o no se reconoce, o es un `+54` sin el 9 y diez dígitos; el alta no sigue. | Corregir el número del espacio o conectarlo a mano. |
 | `sin_nombre` | Graph no devolvió el nombre visible del número de la plataforma; no se agregó nada. | Revisar `WHATSAPP_PHONE_NUMBER_ID` y el permiso `whatsapp_business_management` del token. |

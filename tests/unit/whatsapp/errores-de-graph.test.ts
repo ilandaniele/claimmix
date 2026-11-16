@@ -3,12 +3,18 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ESPERA_DE_META, TOKEN_INVALIDO, efectoDeError, motivoDeAlta, sinLaWaba, type PasoDeAlta } from "@/server/whatsapp/errores-de-graph";
+import { ESPERA_DE_META, TOKEN_INVALIDO, YA_VERIFICADO, efectoDeError, motivoDeAlta, sinLaWaba, type PasoDeAlta } from "@/server/whatsapp/errores-de-graph";
 
 describe("efectoDeError", () => {
   it("el código del token muerto es uno solo, exportado: el revisor de tokens, los eventos y la salud lo comparten", () => {
     expect(TOKEN_INVALIDO).toBe(190);
     expect(efectoDeError(TOKEN_INVALIDO)).toBe("token_vencido");
+  });
+
+  it("136024 (número ya verificado) es una constante exportada y está en la lista de espera", () => {
+    expect(YA_VERIFICADO).toBe(136024);
+    expect(ESPERA_DE_META).toContain(YA_VERIFICADO);
+    expect(ESPERA_DE_META).toHaveLength(5);
   });
 
   it("190 es el token que dejó de valer; 131042, el pago que falta", () => {
@@ -132,7 +138,7 @@ describe("motivoDeAlta", () => {
   });
 
   describe("esperar", () => {
-    it.each([4, 17, 80007, 130429, 133016, 133008, 133009, 136024])("%i es cuota o ritmo: esperar, en cualquier paso", (codigo) => {
+    it.each([4, 17, 80007, 130429, 133016, 133008, 133009, 136024])("%i es de espera, en cualquier paso", (codigo) => {
       for (const paso of PASOS) expect(motivoDeAlta(paso, codigo)).toBe("esperar");
     });
 

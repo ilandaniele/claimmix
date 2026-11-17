@@ -204,7 +204,7 @@ también se borra.
 
 #### La sombra: las líneas ◐ y el resumen
 
-Después de cada vuelta, el ensayo imprime una línea `   ◐ sombra: …` por cada corrida nueva del caso en `agent_runs`: lee `confidence_payload->'sombra'` por `case_id` y recuerda los id ya impresos, sin reloj, así que una retoma que deja dos filas imprime las dos. Al final suma todo en una línea de resumen. **Nada de esto cuenta para el veredicto**: no entra a la lista de fallas, ni al JSON de diferencias (`--reporte`), ni al código de salida. Es un instrumento, no una guarda; las guardas son las comprobaciones de arriba.
+Después de cada vuelta, el ensayo imprime una línea `   ◐ sombra: …` por cada corrida nueva del caso en `agent_runs` que tenga sombra: lee `confidence_payload->'sombra'` por `case_id` y recuerda los id ya impresos, sin reloj, así que una retoma que deja dos filas imprime las dos. La extracción anota la sombra sólo si el mensaje es un siniestro y la salida del modelo se pudo leer (`is_claim` distinto de `false` y sin `parse_failed`); una vuelta sin corrida nueva con sombra no imprime nada. Al final suma todo en una línea de resumen, que sale sólo si sumó al menos una corrida. **Nada de esto cuenta para el veredicto**: no entra a la lista de fallas, ni al JSON de diferencias (`--reporte`), ni al código de salida. Es un instrumento, no una guarda; las guardas son las comprobaciones de arriba.
 
 Cada línea junta, separados por « · », los tramos de las decisiones que se anotaron en esa vuelta (`gravedad`, `derivar`, `pedir`, `responder`):
 

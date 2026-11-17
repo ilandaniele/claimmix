@@ -83,6 +83,21 @@ describe("getTenantKpis — el lote con el acumulador de IA", () => {
   });
 });
 
+describe("getTenantKpis — los contadores y el ciclo cruzan la auditoría contra id_txt", () => {
+  it("la posición 0 lleva la cohorte adentro de la valla y compara target_id contra id_txt", async () => {
+    const [contadores, , , ciclo] = await lote();
+    const { sql, params } = contadores;
+
+    expect(sql).toContain(`offset 0) "cases" left join lateral`);
+    expect(sql).toContain(`"audit_log"."target_id" = "cases".id_txt`);
+    // La valla misma lleva `"cases"."id"::text`: la regresión es compararlo contra target_id.
+    expect(sql).not.toMatch(/target_id = "cases"\."id"::text/);
+    expect(sql.match(/"cases"\."created_at" >=/g)).toHaveLength(1);
+    expect(params).toEqual(["case.ready_confirmed", expect.any(String), expect.any(String), "sent"]);
+    expect(ciclo.sql).toContain(`offset 0) "cases"`);
+  });
+});
+
 describe("getTenantKpis — la lectura de IA", () => {
   it("el mes filtra cada suma y el total histórico ninguna, sin WHERE ni HAVING", async () => {
     const { sql, params } = (await lote())[2];

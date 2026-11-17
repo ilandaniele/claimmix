@@ -11,11 +11,35 @@ export function filasDe(resultado: unknown): unknown[] {
     : ((resultado as { rows?: unknown[] } | null)?.rows ?? []);
 }
 
+/** Las filas de un EXPLAIN, una por línea del plan. */
+export function filasDelPlan(resultado: unknown): string[] {
+  return filasDe(resultado).map((r) => String(Object.values(r as Record<string, unknown>)[0]));
+}
+
 /** Las filas de un EXPLAIN, como un solo texto. */
 export function lineasDelPlan(resultado: unknown): string {
-  return filasDe(resultado)
-    .map((r) => Object.values(r as Record<string, unknown>)[0])
-    .join(" ");
+  return filasDelPlan(resultado).join(" ");
+}
+
+/**
+ * Por qué un plan del tablero no entra a `audit_log` por `target_id`, o `null`
+ * si entra. Con Postgres 18.7 bajo RLS, `uuid_out` no es leakproof y comparar
+ * `target_id` contra `cases.id::text` queda de Filter: cada caso recorre el
+ * índice entero. Lo arregla comparar contra `id_txt` (ver `conIdTexto`).
+ *
+ * Mira filas y no el texto unido, porque tiene que distinguir un Filter de un
+ * Index Cond. Un `Recheck Cond` sano re-chequea su propio Index Cond: no cuenta.
+ */
+export function entraPorTargetId(filas: readonly string[]): string | null {
+  if (filas.some((f) => /Hash Join/.test(f))) {
+    return "aplanó un lateral en un Hash Join (falta una valla `offset 0`)";
+  }
+  if (filas.some((f) => /Seq Scan on (?:public\.)?audit_log\b/.test(f))) return "recorre audit_log entera";
+  if (filas.some((f) => /\btarget_id\b/.test(f) && !/^\s*(?:Index|Recheck) Cond:/.test(f))) {
+    return "compara target_id fuera del índice (falta la valla con id_txt)";
+  }
+  if (!filas.some((f) => /Index Cond:.*\btarget_id = /.test(f))) return "no entra a la auditoría por target_id";
+  return null;
 }
 
 /**
@@ -39,5 +63,6 @@ export const INDICES_DEL_TABLERO: Record<string, string> = {
   idx_cases_tenant_created_at: "0010",
   uq_extracted_field: "0001",
   idx_outbound_messages_case_id: "0001",
+  idx_audit_log_target: "0001",
   idx_audit_log_trayecto: "0043",
 };

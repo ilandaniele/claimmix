@@ -842,6 +842,14 @@ jobs:
         # brace-expansion is only patched in >=5.0.8, whose API minimatch@3
         # cannot consume ("expand is not a function"), so there is no version
         # that is both patched and working. It never reaches runtime.
+        #
+        # pnpm.auditConfig.ignoreGhsas skips GHSA-fc5q-39xc-vjpf (picomatch
+        # <= 4.0.7, ReDoS when the attacker controls the glob pattern). No
+        # version is patched, and picomatch only arrives through build and
+        # test tooling: @sentry/nextjs -> @rollup/plugin-commonjs, and the
+        # vite / vitest peers of @sentry/cloudflare and better-auth. Nothing
+        # in src/ builds a glob from user input. Swap the ignore for an
+        # override once a patched picomatch ships.
 
       - name: Licencias (sin GPL, AGPL, LGPL ni SSPL)
         if: ${{ !cancelled() }}

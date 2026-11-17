@@ -848,10 +848,13 @@ export interface CredencialesDePlantilla extends Pick<CredencialesMeta, "accessT
  * no admite el salto que puede traer, por ejemplo, la lista de campos que
  * faltan.
  *
- * Es lo único de WhatsApp que Meta cobra por envío, así que una prueba tiene
- * tope por día (`ALTA_TOPE_PLANTILLAS_PRUEBA_DIA`) y, vencida, ninguna. El
- * cupo se toma ANTES de llamar a Meta y con falla cerrada: si el contador no
- * contesta, la plantilla no sale. Quien ya paga, y la plataforma, no cuentan.
+ * Meta cobra cada plantilla desde la primera, también dentro de la ventana.
+ * Desde el 1/10/2026 cobra además las respuestas libres, a la tarifa de
+ * utility, pero cada número tiene 1.000 por mes sin cargo; las plantillas no,
+ * así que una prueba tiene tope por día (`ALTA_TOPE_PLANTILLAS_PRUEBA_DIA`) y,
+ * vencida, ninguna. El cupo se toma ANTES de llamar a Meta y con falla
+ * cerrada: si el contador no contesta, la plantilla no sale. Quien ya paga, y
+ * la plataforma, no cuentan.
  *
  * Never throws.
  */

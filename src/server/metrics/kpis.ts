@@ -40,7 +40,7 @@ import {
 import { aiUsageMensual, authUsers, cases, outboundMessages, users } from "@/lib/db/schema";
 import { CANALES_REALES, ClaimTypeSchema } from "@/lib/schemas/cases";
 import { completadoConfirmado } from "@/server/cases/listo-confirmado";
-import { consultaDeCiclo, consultaDeCuellos } from "@/server/metrics/trayecto";
+import { conIdTexto, consultaDeCiclo, consultaDeCuellos, ID_TXT } from "@/server/metrics/trayecto";
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
@@ -205,6 +205,61 @@ export function consultaDeAyer(db: ClienteDatos, desde: string, hasta: string) {
 }
 
 /**
+ * Todo lo que sale de los casos del período, agrupado por estado y por tipo en
+ * la misma pasada: la distribución, y sumando los grupos de estado, el total,
+ * los escalados, lo completado y la primera respuesta. `por_tipo` dice de qué
+ * agrupación es cada fila.
+ *
+ * Antes eran cuatro consultas sobre las mismas filas, y antes todavía una fila
+ * por caso —455 en producción— para contarlas en JS.
+ *
+ * `sum` y `count` por separado y la división en JS a propósito: así el
+ * redondeo es exactamente el mismo `Math.round(total / n)` de antes, y el
+ * número que ve la pantalla no se mueve.
+ *
+ * El rango de fechas va ADENTRO de la valla de `conIdTexto` (ahí se calcula
+ * `id_txt`, ver trayecto.ts) y no se repite afuera: `offset 0` impide que un
+ * filtro de afuera baje, y duplicarlo sumaría dos parámetros. Por eso `status`
+ * y `claim_type` van envueltos en `sql`: drizzle no deja `Column` con
+ * `.from(SQL)`.
+ */
+export function consultaDeContadores(db: ClienteDatos, desde: string, hasta: string) {
+  /*
+   * La primera respuesta de VERDAD: el envío más viejo en el canal de
+   * salida, no la apertura del caso. `avg_opening_time_minutes` medía
+   * cuánto tardaba el agente en abrir el caso, que es instantáneo — el
+   * número que importa es cuánto tarda alguien en contestarle al
+   * denunciante.
+   *
+   * Lateral y no subconsulta en el SELECT: la leen dos agregados, y escrita
+   * dos veces Postgres la corría dos veces por caso.
+   */
+  const primera = db
+    .select({ en: sql<string>`min(${outboundMessages.created_at})`.as("en") })
+    .from(outboundMessages)
+    .where(and(eq(outboundMessages.case_id, cases.id), eq(outboundMessages.status, "sent")))
+    .as("primera");
+  return db
+    .select({
+      por_tipo: sql<number>`grouping(${cases.status})::int`,
+      status: sql<CaseStatus | null>`${cases.status}`,
+      claim_type: sql<string | null>`${cases.claim_type}`,
+      n: sql<number>`count(*)::int`,
+      // `is_claim is true` saca de la distribución por tipo a los
+      // `no_relevante`, que traen un `claim_type` del intento previo.
+      reclamos: sql<number>`count(*) filter (where ${cases.is_claim} is true)::int`,
+      // Completado por una persona, o ya enviado al Core — nunca el
+      // `listo` legado, que no dice que alguien lo haya mirado.
+      listo: sql<number>`count(*) filter (where ${completadoConfirmado(ID_TXT)})::int`,
+      respondidos: sql<number>`count(${primera.en})::int`,
+      minutos: sql<number>`coalesce(sum(extract(epoch from (${primera.en} - ${cases.created_at})) / 60), 0)::float8`,
+    })
+    .from(conIdTexto(and(gte(cases.created_at, desde), lt(cases.created_at, hasta))!))
+    .leftJoinLateral(primera, sql`true`)
+    .groupBy(sql`grouping sets ((${cases.status}), (${cases.claim_type}))`);
+}
+
+/**
  * Todo lo que muestra la pantalla, para un inquilino.
  *
  * Las tarjetas, las distribuciones por estado y tipo, el ciclo y los cuellos de
@@ -271,16 +326,7 @@ export async function getTenantKpis(
    */
   ] = await enTenantVarias<
     [
-      Array<{
-        por_tipo: number;
-        status: CaseStatus | null;
-        claim_type: string | null;
-        n: number;
-        reclamos: number;
-        listo: number;
-        respondidos: number;
-        minutos: number;
-      }>,
+      Awaited<ReturnType<typeof consultaDeContadores>>,
       Array<{ assigned_to: string | null; full_name: string | null; n: number }>,
       Array<{
         grupo: number;
@@ -296,54 +342,8 @@ export async function getTenantKpis(
       ...Array<PuntoSerie[] | ResumenDeAyer[]>,
     ]
   >(tenantCtx, (db) => {
-    /*
-     * La primera respuesta de VERDAD: el envío más viejo en el canal de
-     * salida, no la apertura del caso. `avg_opening_time_minutes` medía
-     * cuánto tardaba el agente en abrir el caso, que es instantáneo — el
-     * número que importa es cuánto tarda alguien en contestarle al
-     * denunciante.
-     *
-     * Lateral y no subconsulta en el SELECT: la leen dos agregados, y escrita
-     * dos veces Postgres la corría dos veces por caso.
-     */
-    const primera = db
-      .select({ en: sql<string>`min(${outboundMessages.created_at})`.as("en") })
-      .from(outboundMessages)
-      .where(and(eq(outboundMessages.case_id, cases.id), eq(outboundMessages.status, "sent")))
-      .as("primera");
     return [
-      /*
-       * Todo lo que sale de los casos del período, agrupado por estado y por
-       * tipo en la misma pasada: la distribución, y sumando los grupos de
-       * estado, el total, los escalados, lo completado y la primera respuesta.
-       * `por_tipo` dice de qué agrupación es cada fila.
-       *
-       * Antes eran cuatro consultas sobre las mismas filas, y antes todavía
-       * una fila por caso —455 en producción— para contarlas en JS.
-       *
-       * `sum` y `count` por separado y la división en JS a propósito: así el
-       * redondeo es exactamente el mismo `Math.round(total / n)` de antes, y
-       * el número que ve la pantalla no se mueve.
-       */
-      db
-          .select({
-            por_tipo: sql<number>`grouping(${cases.status})::int`,
-            status: cases.status,
-            claim_type: cases.claim_type,
-            n: sql<number>`count(*)::int`,
-            // `is_claim is true` saca de la distribución por tipo a los
-            // `no_relevante`, que traen un `claim_type` del intento previo.
-            reclamos: sql<number>`count(*) filter (where ${cases.is_claim} is true)::int`,
-            // Completado por una persona, o ya enviado al Core — nunca el
-            // `listo` legado, que no dice que alguien lo haya mirado.
-            listo: sql<number>`count(*) filter (where ${completadoConfirmado})::int`,
-            respondidos: sql<number>`count(${primera.en})::int`,
-            minutos: sql<number>`coalesce(sum(extract(epoch from (${primera.en} - ${cases.created_at})) / 60), 0)::float8`,
-          })
-          .from(cases)
-          .leftJoinLateral(primera, sql`true`)
-          .where(and(gte(cases.created_at, desde), lt(cases.created_at, hasta)))
-          .groupBy(sql`grouping sets ((${cases.status}), (${cases.claim_type}))`),
+      consultaDeContadores(db, desde, hasta),
       /*
        * Los cinco de arriba, contados y ordenados por la base.
        *

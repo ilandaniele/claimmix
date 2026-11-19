@@ -333,6 +333,7 @@ pnpm load --forma resistencia      # sostenida, 3 minutos (--minutos N)
 pnpm load --forma estres           # rampa hasta encontrar el techo
 pnpm load --forma todas            # las cuatro
 pnpm load --reporte carga.json     # escribe carga.json y carga.html
+pnpm load --tope 20000             # cuánto puede tardar UNA consulta antes de cortar (10 s por omisión)
 pnpm load --write                  # + 10 asegurados simultáneos (gasta tokens)
 pnpm load --write --claimants 100  # la tormenta
 ```
@@ -366,12 +367,38 @@ meses y la serie por día. Leen la auditoría con un cruce lateral por caso, que
 rompe si no se usa el índice parcial `idx_audit_log_trayecto`, y por eso están
 en la carga y no sólo en los tests de forma. El uso de IA del tablero sale del
 acumulador mensual `ai_usage_mensual` (0046) y no de `ai_usage`; `pnpm load`
-comprueba que los cuellos entren a la auditoría por `target_id` (sin Hash Join) y
-que el acumulador coincida con `ai_usage`. Si no coincide, o dice «NO SE PUDO
+comprueba que **cuatro consultas del tablero** (cuellos, ciclo, contadores e
+historial) entren a la auditoría por `target_id` y que el acumulador coincida con
+`ai_usage`. Si no coincide, o dice «NO SE PUDO
 COMPROBAR», se recompone volviendo a aplicar la 0046 entera
 (`node scripts/migrate.mjs --env <VAR> --forget 0046 --apply` y después
 `--apply`), nunca corriendo su backfill suelto: sin el `LOCK` ni la transacción
 el acumulador queda vacío si entra una llamada a la IA en el medio.
+
+Esa comprobación de planes corre **antes** de medir, y si una de esas cuatro no
+entra por `target_id` la forma `carga` no se mide: sale roja con «no se midió» y
+los planes a la vista. Cualquier otro rojo de los planes (un índice que falta, un
+EXPLAIN que no se pudo correr) deja la forma en rojo pero se mide igual. La regla
+(`entraPorTargetId`, `scripts/lib/chequeos-de-carga.mts`) pide un `Index Cond` sobre
+`target_id`; no aceptan un `Hash Join`, un `Seq Scan` sobre `audit_log` ni
+`target_id` en un `Filter`, un `Join Filter` o un `Hash Cond`. La causa de fondo:
+con Postgres 18.7 y RLS forzado (`claimmix_app`), `uuid_out` no es leakproof, así
+que `target_id = cases.id::text` no puede ser condición de índice y cada caso
+recorría `idx_audit_log_target` entero (costo de plan de 1,1 a 20 millones). Las
+consultas calculan el id como texto dentro de una subconsulta cercada con
+`offset 0` (`conIdTexto`) y comparan contra `id_txt`, donde `texteq` sí es
+leakproof; el mismo conteo baja a miles.
+
+Cada consulta que mide la forma `carga` lleva además un **tope** (`--tope`, 10 s;
+no rige en estrés ni pico, que buscan a propósito dónde se pone lenta una consulta): una que lo
+pasa no es una muestra lenta sino una regresión, y la corrida se corta con
+«op > N s en <consulta>» y esa forma en rojo, en lugar de medirla 120 veces por
+celda hasta que Actions cancela el job a los 20 minutos sin un número en el
+reporte. Una celda entera tiene además su propio tope de 2 minutos («celda > N s
+en <consulta>»), que corta la regresión de consultas de uno a cuatro segundos que
+el tope por consulta no ve. Con una consulta colgada no se mide ninguna otra
+forma y el proceso sale al terminar. El tope corta la espera, no la consulta:
+sigue en la base hasta que termina.
 
 Que el trigger de `ai_usage` suma de verdad lo prueba, contra un Postgres real, la
 sección 6 de `scripts/prove-data-layer.mts` (`pnpm capa-datos`): un INSERT como

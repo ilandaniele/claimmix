@@ -20,6 +20,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { getTenantKpis } from "@/server/metrics/kpis";
 import { completadoConfirmado } from "@/server/cases/listo-confirmado";
+import { ID_TXT } from "@/server/metrics/trayecto";
 
 const CTX = { tenantId: "10000000-0000-0000-0000-000000000001" };
 const SIN_USO = { calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 };
@@ -28,7 +29,7 @@ beforeEach(() => mockVarias.mockReset());
 
 describe("completadoConfirmado — el SQL que arma", () => {
   const dialecto = new PgDialect();
-  const { sql, params } = dialecto.sqlToQuery(completadoConfirmado);
+  const { sql, params } = dialecto.sqlToQuery(completadoConfirmado(ID_TXT));
 
   it("cuenta enviado_a_core y listo_para_core confirmado, contra la auditoría", () => {
     expect(sql).toContain("enviado_a_core");
@@ -42,6 +43,12 @@ describe("completadoConfirmado — el SQL que arma", () => {
     expect(sql).toContain(`"cases"."status" = 'cerrado' and ("cases"."core_sent_at" is not null or exists`);
     expect(sql).toContain(`"audit_log"."payload"->>'new_status' = 'en_liquidacion'`);
     expect(sql).toContain(`"cases"."status" in ('listo_para_core', 'cerrado') and exists`);
+  });
+
+  it("cruza la auditoría contra el id ya en texto, en las dos comprobaciones", () => {
+    expect(sql.match(/"audit_log"\."target_id" = "cases"\.id_txt/g)).toHaveLength(2);
+    expect(sql).not.toContain(`"cases"."id"::text`);
+    expect(sql).toContain(`"agent_runs"."case_id" = "cases"."id"`);
   });
 
   it("nunca cuenta el listo legado", () => {

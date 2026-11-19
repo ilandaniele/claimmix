@@ -19,10 +19,10 @@ export function ultimaCorrida(caseId: SQL | string): SQL {
 }
 
 /** Existe una confirmación de «listo» posterior a la última corrida del caso. */
-export const listoConfirmado: SQL = sql`exists (
+const listoConfirmado = (idTexto: SQL): SQL => sql`exists (
   select 1 from ${auditLog}
    where ${auditLog.target_type} = 'case'
-     and ${auditLog.target_id} = ${cases.id}::text
+     and ${auditLog.target_id} = ${idTexto}
      and ${auditLog.event_type} = ${AuditEvent.CASE_READY_CONFIRMED}
      and ${auditLog.created_at} > ${ultimaCorrida(sql`${cases.id}`)}
 )`;
@@ -31,10 +31,10 @@ export const listoConfirmado: SQL = sql`exists (
  * Una persona lo pasó a `en_liquidacion`. Se lee de la auditoría y no por
  * `event_type`: si reasignó en el mismo cambio queda como `case.assigned`.
  */
-const pasoPorLiquidacion: SQL = sql`exists (
+const pasoPorLiquidacion = (idTexto: SQL): SQL => sql`exists (
   select 1 from ${auditLog}
    where ${auditLog.target_type} = 'case'
-     and ${auditLog.target_id} = ${cases.id}::text
+     and ${auditLog.target_id} = ${idTexto}
      and ${auditLog.payload}->>'new_status' = 'en_liquidacion'
 )`;
 
@@ -45,5 +45,8 @@ const pasoPorLiquidacion: SQL = sql`exists (
  *
  * Un `cerrado` cuenta si antes se completó: cerrarlo no le quita el mes a la
  * métrica. El cierre por abandono no pasa por ninguno de los tres.
+ *
+ * `idTexto` es el id del caso ya en texto (`id_txt` de `conIdTexto`): comparar
+ * `target_id` contra `cases.id::text` deja la condición fuera del índice bajo RLS.
  */
-export const completadoConfirmado: SQL = sql`(${cases.status} in ('enviado_a_core', 'en_liquidacion', 'pagado', 'rechazado') or (${cases.status} = 'cerrado' and (${cases.core_sent_at} is not null or ${pasoPorLiquidacion})) or (${cases.status} in ('listo_para_core', 'cerrado') and ${listoConfirmado}))`;
+export const completadoConfirmado = (idTexto: SQL): SQL => sql`(${cases.status} in ('enviado_a_core', 'en_liquidacion', 'pagado', 'rechazado') or (${cases.status} = 'cerrado' and (${cases.core_sent_at} is not null or ${pasoPorLiquidacion(idTexto)})) or (${cases.status} in ('listo_para_core', 'cerrado') and ${listoConfirmado(idTexto)}))`;

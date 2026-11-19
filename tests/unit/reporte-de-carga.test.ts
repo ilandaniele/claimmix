@@ -11,14 +11,16 @@
  *     alguien corre la prueba.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { escribirReporte, type Reporte } from "../../scripts/lib/reporte-carga.mjs";
+import { escribirReporte, formaSinMedir, type Reporte } from "../../scripts/lib/reporte-carga.mjs";
 import { findRoutes, routePattern, routeToUrl } from "../../scripts/lib/rutas-api.mjs";
 import {
+  OperacionColgada,
+  conTope,
   fila,
   measure,
   measureFor,
@@ -191,6 +193,169 @@ describe("el núcleo de medición", () => {
     });
     expect(samples).toHaveLength(10);
     expect(vueltas).toBe(13);
+  });
+});
+
+// Una consulta que se cuelga no es una muestra lenta: antes la corrida seguía midiéndola 120 veces por
+// celda hasta que Actions cancelaba el job a los 20 minutos, sin un número en el reporte.
+describe("conTope", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("corta la operación que pasa el tope, con el nombre de la consulta", async () => {
+    vi.useFakeTimers();
+    const colgada = conTope("contadores", 10_000, () => new Promise<void>(() => {}));
+
+    const resultado = colgada();
+    const rechazo = expect(resultado).rejects.toThrow("op > 10 s en contadores");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rechazo;
+    await expect(resultado).rejects.toBeInstanceOf(OperacionColgada);
+  });
+
+  it("no corta antes del tope", async () => {
+    vi.useFakeTimers();
+    const colgada = conTope("x", 10_000, () => new Promise<void>(() => {}));
+    let termino = false;
+    colgada().then(
+      () => (termino = true),
+      () => (termino = true)
+    );
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(termino).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(termino).toBe(true);
+  });
+
+  it("si la operación termina a tiempo resuelve y no deja el temporizador", async () => {
+    vi.useFakeTimers();
+    await expect(conTope("x", 10_000, async () => {})()).resolves.toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // El tope por operación no ve la regresión que da consultas de segundos: cada una pasa por debajo.
+  // Lo que las corta es el de la celda, que cuenta desde que se arma la operación.
+  it("corta la celda que pasa su tope aunque ninguna operación pase el suyo", async () => {
+    const lenta = conTope("ciclo", 10_000, () => new Promise<void>((r) => setTimeout(r, 30)), 50);
+
+    await lenta();
+    await lenta();
+    const error = await lenta().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(OperacionColgada);
+    expect((error as Error).message).toBe("celda > 0.05 s en ciclo");
+  });
+
+  it("sin tope de celda no corta por el tiempo acumulado", async () => {
+    const lenta = conTope("x", 10_000, () => new Promise<void>((r) => setTimeout(r, 5)));
+
+    await lenta();
+    await lenta();
+    await expect(lenta()).resolves.toBeUndefined();
+  });
+
+  it("un error común pasa tal cual y tampoco deja el temporizador", async () => {
+    vi.useFakeTimers();
+    const rota = conTope("x", 10_000, async () => {
+      throw new Error("la base dijo que no");
+    });
+    const error = await rota().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(OperacionColgada);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("una consulta colgada corta la medición", () => {
+  const colgada = () => new OperacionColgada("op > 10 s en x");
+
+  it("measure no sigue con las que quedan: ni una vuelta de más", async () => {
+    let llamadas = 0;
+    await expect(
+      measure(120, 1, async () => {
+        // La primera es el calentamiento; la segunda es la primera muestra.
+        if (++llamadas >= 2) throw colgada();
+      })
+    ).rejects.toBeInstanceOf(OperacionColgada);
+    expect(llamadas).toBe(2);
+  });
+
+  it("measure corta a todos los trabajadores, no sólo al que se colgó", async () => {
+    let llamadas = 0;
+    await expect(
+      measure(120, 5, async () => {
+        llamadas++;
+        // Pasan los cinco del calentamiento y el primer trabajador se cuelga.
+        if (llamadas === 6) throw colgada();
+        await new Promise((r) => setTimeout(r, 1));
+      })
+    ).rejects.toBeInstanceOf(OperacionColgada);
+    expect(llamadas).toBeLessThan(125);
+  });
+
+  it("el calentamiento también corta, y deja de llamar después de la primera vuelta", async () => {
+    let llamadas = 0;
+    await expect(
+      measure(120, 3, async () => {
+        llamadas++;
+        throw colgada();
+      })
+    ).rejects.toBeInstanceOf(OperacionColgada);
+    expect(llamadas).toBe(3);
+  });
+
+  it("el calentamiento sigue tragando un error común: lo cuenta la medición", async () => {
+    let llamadas = 0;
+    const samples = await measure(4, 2, async () => {
+      if (++llamadas <= 2) throw new Error("conexión fría");
+    });
+    expect(samples.filter((s) => s.ok)).toHaveLength(4);
+  });
+
+  it("con el tope puesto, una consulta que nunca vuelve corta la medición y no la deja esperando", async () => {
+    vi.useFakeTimers();
+    try {
+      let llamadas = 0;
+      const op = conTope("contadores", 1_000, async () => {
+        // El calentamiento pasa; todo lo que viene después no vuelve.
+        if (++llamadas > 5) await new Promise<void>(() => {});
+      });
+      const medicion = measure(120, 5, op);
+      const rechazo = expect(medicion).rejects.toThrow("op > 1 s en contadores");
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rechazo;
+      expect(llamadas).toBeLessThan(125);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("formaSinMedir", () => {
+  const BASE = { nombre: "carga", pregunta: "¿Cuánto tarda?", metrica: "el peor p95", umbral: "p95 < 500ms" };
+
+  it("es una forma que falla y dice por qué en lugar de un número", () => {
+    const f = formaSinMedir(BASE, "op > 10 s en contadores · 5 analistas");
+
+    expect(f).toEqual({ ...BASE, medido: "op > 10 s en contadores · 5 analistas", ok: false, filas: [], notas: [] });
+  });
+
+  it("conserva las filas que ya se habían medido", () => {
+    const hecha = fila("listado · 1 analistas", [{ ms: 10, ok: true }]);
+    const f = formaSinMedir(BASE, "no se midió", [hecha]);
+
+    expect(f.ok).toBe(false);
+    expect(f.filas).toEqual([hecha]);
+  });
+
+  it("sale en el reporte como cualquier otra forma", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "carga-"));
+    const f = formaSinMedir(BASE, "op > 10 s en x");
+    const [json, pagina] = escribirReporte(path.join(dir, "colgada.json"), { ...REPORTE, formas: [f] });
+
+    expect((JSON.parse(fs.readFileSync(json!, "utf8")) as Reporte).formas).toEqual([f]);
+    expect(fs.readFileSync(pagina!, "utf8")).toContain("op &gt; 10 s en x");
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 

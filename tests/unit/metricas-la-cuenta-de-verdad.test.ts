@@ -27,7 +27,7 @@ vi.mock("@/data/scope", () => ({
 import { describe, it, expect, expectTypeOf, vi, beforeEach, afterEach } from "vitest";
 import type { SQL } from "drizzle-orm";
 import { PgDialect, QueryBuilder } from "drizzle-orm/pg-core";
-import { consultaDeActividad, getTenantKpis } from "@/server/metrics/kpis";
+import { consultaDeActividad, consultaDeContadores, getTenantKpis } from "@/server/metrics/kpis";
 import { ZONA_ARGENTINA } from "@/core/fecha/dia-argentino";
 import { ClaimTypeSchema } from "@/lib/schemas/cases";
 import type { PuntoSerie } from "@/core/metricas/serie";
@@ -316,6 +316,17 @@ describe("getTenantKpis — la distribución por tipo", () => {
 
     expect(sql).toMatch(/count\(\*\) filter \(where "cases"\."is_claim" is true\)/);
     expect(sql).toContain(`group by grouping sets (("cases"."status"), ("cases"."claim_type"))`);
+  });
+
+  it("el EXPLAIN mira la consulta que corre: el lote usa el builder exportado", async () => {
+    baseCon();
+    await getTenantKpis(CTX);
+
+    const armador = mockVarias.mock.calls[0]![1] as (db: unknown) => { toSQL(): { sql: string; params: unknown[] } }[];
+    const corre = armador(new QueryBuilder() as never)[0]!.toSQL();
+    const [, desde, hasta] = corre.params as string[];
+
+    expect(consultaDeContadores(new QueryBuilder() as never, desde, hasta).toSQL()).toEqual(corre);
   });
 });
 

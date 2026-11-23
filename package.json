@@ -138,6 +138,11 @@
     "patchedDependencies": {
       "builtin-modules@5.5.0": "patches/builtin-modules@5.5.0.patch"
     },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-fc5q-39xc-vjpf"
+      ]
+    },
     "onlyBuiltDependencies": [
       "@swc/core",
       "cbor-extract",

@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-11-16. This file is the single source of truth for "where things stand."
+_Last updated: 2026-11-17. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -4820,8 +4820,9 @@ del move y la regla de a lo sumo una promoción a prd por día están en `docs/P
   webhook de WhatsApp y el push de Gmail de dev apuntan a `claimmix-dev`, y prd tiene su
   propio tópico `gmail-push-prd`.
 - **Falta:** la prueba de punta a punta de un alta con el dueño, 24 h de logs y la
-  verificación del negocio en Meta. R2 de prd quedó el 09/10 (#401) y Turnstile anda en dev y
-  en prd (leído en `/registro` el 16/10).
+  verificación del negocio en Meta.
+- **Hecho después:** R2 de prd anda desde el 09/10 (#401) con su bucket propio,
+  `claimmix-prd-attachments`, y Turnstile anda en dev y en prd (leído en `/registro` el 16/10).
 - **El flag es de ida.** Con clientes vivos no se apaga `BASE_POR_CLIENTE`: la base de
   control no tiene sus datos de negocio. Para frenar se usa `ALTA_AUTOMATICA=0` y se arregla
   hacia adelante.
@@ -4904,6 +4905,11 @@ verificar el negocio. Ahora cada cliente puede traer la suya con el popup de Met
 (Embedded Signup v4) y los mensajes salen de su número, con su token. Todo detrás de
 `ALTA_WABA_PROPIA` (apagada); con ella apagada nada cambia. Receta, avisos y runbook en la
 Parte G de `docs/whatsapp-setup.md`.
+
+- **Estado.** Esta vía y la de la app propia (la sección siguiente) están en `main` por #413
+  y en prd por #414, las dos con su bandera apagada. La 0051 se aplicó el 14/10 en QA, dev,
+  staging y prd. Prenderlas espera a Meta (la lista «WABA propia: lo que queda de Meta» en
+  «Waiting on you») y al abogado.
 
 - **Tiempo de ejecución y panel del operador.** El token del cliente (cifrado con
   `wa:<tenantId>:<wabaId>` como AAD) lo abre `numeros.ts`; la WABA de la plataforma sigue
@@ -5483,6 +5489,15 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Pendiente.** `codigoWaba` (WABA propia) tiene el mismo hueco y queda como «esperar»: se arregla aparte si hace falta. Sin migración ni texto nuevo.
 - **Tests.** `numero-automatico.test.ts`, `numero-prd.test.ts` (136024 con `VERIFIED` y orden de pedidos), `alta-de-numero.test.ts`, `graph.test.ts` (qué se anota y cómo se tacha) y `errores-de-graph.test.ts`.
 
+### «Carga del tablero» colgada: la auditoría se recorría entera (17/11, rama `fix/tablero-rls`)
+
+- **Qué pasaba.** El job «DEV / Carga del tablero» del post-deploy llegaba a los 20 minutos y Actions lo cancelaba, sin un solo número en el reporte. Con Postgres 18.7 en Neon y RLS forzado (`claimmix_app`), `audit_log.target_id = cases.id::text` no puede ser un `Index Cond`: `uuid_out` no es leakproof, así que la condición queda de `Filter` y cada caso recorre el índice entero. Afectaba a las cuatro consultas del tablero que cruzan casos con la auditoría: contadores (`consultaDeContadores`, nueva en `kpis.ts`, la que antes iba inline en `getTenantKpis`), ciclo, cuellos e historial.
+- **Arreglo, sin migración.** La cohorte se arma en una subconsulta cercada con `offset 0` que además calcula `id_txt` (`conIdTexto`, `trayecto.ts`), y la auditoría se compara contra ese texto (`texteq` sí es leakproof). `completadoConfirmado` y `listoConfirmado` reciben el id como parámetro. Los cuellos conservan sus dos vallas. `DEL_CASO` no cambia: sigue en `cases.id::text` para la revisión nocturna y `auditoria-si-quedo`. No cambian los índices, ni la forma del lote de `getTenantKpis` (5/6/7 consultas).
+- **Medido** en DEV como `claimmix_app`, sólo lectura: costo de plan 20,5 M → 57 431 (contadores), 1,98 M → 5 220 (ciclo), 1,13 M → 1 674 (cuellos); tiempo de ejecución de ~1 s a ~40–50 ms, y las filas idénticas columna por columna antes y después (también el historial).
+- **La carga ya no se cuelga.** Los planes se explican antes de medir y si un plan del tablero no entra por `target_id` (`entraPorTargetId`) la forma `carga` sale roja sin medirse. Cada consulta que mide la forma `carga` lleva un tope (`--tope`, 10 s; estrés y pico no, buscan dónde se pone lenta): al pasarlo se corta con «op > N s en …» y esa forma en rojo, y la corrida sigue con las demás. Otro rojo de los planes (un índice que falta) no salta la medición. Sin cambios en el workflow salvo el texto de «Qué significa que esto falle».
+- **Pendiente (otro PR).** Mismo patrón `target_id = cases.id::text` en `findExistingWhatsAppCase` (intake-agent, ~476 ms en frío), `cerradoPorSilencio` (~172 ms), `para-responder.ts`, `caso-partido.ts`, `devolver-al-agente.ts`, `auditoria-si-quedo.ts` y `siniestro-nuevo.ts`: no se tocaron acá.
+- **Tests.** La sección 3b2 de `scripts/prove-data-layer.mts` (`pnpm capa-datos`) ejecuta las cuatro consultas bajo RLS por inquilino y las cruza con conteos aparte. `metricas-trayecto-sql`, `metricas-completitud-confirmada`, `kpis-uso-ia-sql`, `metricas-la-cuenta-de-verdad`, `chequeos-de-carga` (con los EXPLAIN reales en `tests/fixtures/planes-del-tablero/`) y `reporte-de-carga` (tope, corte de la medición, `formaSinMedir`).
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
@@ -5573,9 +5588,9 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
   corren contra Postgres en la sección 7 de `pnpm capa-datos`, en cada corrida
   del CI; no hace falta repetirlos a mano en QA. Pendiente, lo que esa prueba no
   cubre (simula R2 y no enciende ningún modo):
-  - Confirmar la separación de buckets de R2: QA tiene el suyo
-    (`claimmix-qa-attachments`); falta confirmar el de staging contra el de
-    producción.
+  - La separación de buckets de R2 ya está: QA tiene el suyo
+    (`claimmix-qa-attachments`) y prd el suyo (`claimmix-prd-attachments`, desde
+    el 09/10 por #401). Staging no tiene bucket: los e2e del CI suben al de QA.
   - Decidir cuándo pasar `RETENCION_MODO` y `PURGA_ADJUNTOS_MODO` de `apagado` a
     `simular` y después a `borrar`. No se encendieron en ningún ambiente.
   - Verificar la ventana de PITR de Neon en el plan vigente y probar una

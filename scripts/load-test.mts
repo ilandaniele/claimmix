@@ -54,10 +54,13 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as dotenv from "dotenv";
 
+import type { SQL } from "drizzle-orm";
 import type { ClienteDatos } from "@/data/scope";
 
 import { findRoutes, routePattern } from "./lib/rutas-api.mjs";
 import {
+  OperacionColgada,
+  conTope,
   fila,
   measure,
   measureFor,
@@ -70,11 +73,13 @@ import {
 } from "./lib/medir-carga.mjs";
 import {
   INDICES_DEL_TABLERO,
-  lineasDelPlan,
+  entraPorTargetId,
+  filasDelPlan,
   numeroDeLaPrimeraFila,
 } from "./lib/chequeos-de-carga.mjs";
 import {
   escribirReporte,
+  formaSinMedir,
   type Endpoint,
   type Fila,
   type Forma,
@@ -141,9 +146,11 @@ const {
   listCases,
 } = await import("@/server/cases/list");
 const { getCaseDetail } = await import("@/server/cases/get");
-const { getTenantKpis } = await import("@/server/metrics/kpis");
+const { consultaDeContadores, getTenantKpis } = await import("@/server/metrics/kpis");
 const { getHistorialDeMetricas } = await import("@/server/metrics/historial");
-const { consultaDeCuellos } = await import("@/server/metrics/trayecto");
+const { consultaDeCiclo, consultaDeCuellos, consultaDeHistorial } = await import(
+  "@/server/metrics/trayecto"
+);
 const { rangoDelPeriodo } = await import("@/core/metricas/periodo");
 
 /**
@@ -210,6 +217,29 @@ const EMPEORA_MAX = 1.5;
  * decidido contra un umbral de 1,5×.
  */
 const MUESTRAS = numero("muestras", 120, 20, 5_000);
+
+/**
+ * Lo que puede tardar UNA consulta antes de que se corte la corrida.
+ *
+ * Una consulta del tablero tarda decenas de milisegundos; la que pasa de diez
+ * segundos no es una muestra lenta, es una regresión de plan, y seguir midiéndola
+ * 120 veces por celda es lo que dejaba al job colgado hasta que Actions lo
+ * cancelaba a los 20 minutos, sin un solo número en el reporte. Al pasar el tope
+ * la forma falla con el nombre de la consulta y no se mide nada más: la consulta
+ * colgada sigue en la base y falsearía lo que viene.
+ * Sólo rige en la carga: estrés y pico buscan a propósito dónde se pone lenta
+ * una consulta, y cortarlas por lenta les sacaría el techo que vienen a medir.
+ */
+const OP_MAX_MS = numero("tope", 10_000, 1_000, 120_000);
+
+/**
+ * Lo que puede tardar UNA celda entera (las 120 muestras y su repetición).
+ *
+ * El tope por operación no ve la regresión de plan que da consultas de uno a
+ * cuatro segundos: cada una pasa por debajo y la celda sigue 120 veces. Una celda
+ * sana tarda decenas de segundos aun repetida.
+ */
+const CELDA_MAX_MS = 120_000;
 
 /**
  * Cuánto dura la resistencia.
@@ -477,8 +507,8 @@ async function prepararLectura(): Promise<{
       // El tablero de métricas entero, en un solo viaje a la base: los
       // contadores del período; el ciclo (recibido a listo y a cierre) y las
       // estadías por estado, que leen la auditoría con un cruce lateral por caso
-      // y se rompen si el índice parcial de trayecto no se usa (los cuellos lo
-      // cercan con `offset 0`); y el uso de IA, que sale del acumulador mensual
+      // y se rompen si no entran por `target_id` al índice (la cohorte lleva
+      // `id_txt` dentro de una valla `offset 0`, ver `conIdTexto`); y el uso de IA, que sale del acumulador mensual
       // `ai_usage_mensual` y no recorre `ai_usage`, cuyo costo crece con toda la
       // historia. El período es el de todos los días: el mes en curso.
       name: "tablero de métricas (mes)",
@@ -552,6 +582,16 @@ const AVISO_FUNCION =
 
 // ── Forma 1: carga ───────────────────────────────────────────────────────────
 
+/** Una consulta pasó el tope: sigue abierta contra la base, así que no se mide nada más. */
+let consultaColgada = false;
+
+const CARGA = {
+  nombre: "carga",
+  pregunta: "¿Cuánto tarda una consulta del tablero con la mesa llena?",
+  metrica: "el peor p95 entre 1, 5 y 20 analistas simultáneos",
+  umbral: `p95 < ${ms(P95_LECTURA_MS)} y ninguna consulta fallada`,
+};
+
 /**
  * La mesa llena, a una concurrencia realista y sostenida.
  *
@@ -581,13 +621,21 @@ async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
   for (const escenario of escenarios) {
     const cells: string[] = [];
     for (const concurrency of [1, 5, 20]) {
-      const celda = await medirCelda(
-        `${escenario.name} · ${concurrency} analistas`,
-        MUESTRAS,
-        concurrency,
-        escenario.run,
-        P95_LECTURA_MS
-      );
+      let celda: Awaited<ReturnType<typeof medirCelda>>;
+      try {
+        celda = await medirCelda(
+          `${escenario.name} · ${concurrency} analistas`,
+          MUESTRAS,
+          concurrency,
+          conTope(escenario.name, OP_MAX_MS, escenario.run, CELDA_MAX_MS),
+          P95_LECTURA_MS
+        );
+      } catch (e) {
+        if (!(e instanceof OperacionColgada)) throw e;
+        consultaColgada = true;
+        console.log(`\n✗ ${e.message} · ${concurrency} analistas`);
+        return formaSinMedir(CARGA, `${e.message} · ${concurrency} analistas`, filas);
+      }
       filas.push(celda.fila);
       if (celda.repetida) filas.push(celda.repetida);
       // La que decide es la última que se midió.
@@ -618,10 +666,7 @@ async function formaCarga(escenarios: Escenario[]): Promise<Forma> {
   for (const r of repetidas) console.log(`* ${r}`);
 
   return {
-    nombre: "carga",
-    pregunta: "¿Cuánto tarda una consulta del tablero con la mesa llena?",
-    metrica: "el peor p95 entre 1, 5 y 20 analistas simultáneos",
-    umbral: `p95 < ${ms(P95_LECTURA_MS)} y ninguna consulta fallada`,
+    ...CARGA,
     medido:
       `p95 peor caso ${ms(peor)}` +
       (fallaron > 0 ? ` · ${fallaron} consulta(s) fallada(s), sin p95 comparable` : ""),
@@ -882,15 +927,27 @@ async function formaEstres(escenario: Escenario, max: number): Promise<Forma> {
  * índices del listado y este chequeo seguía verde, que es la única razón por la
  * que el trabajo «Carga del tablero» existe en el post-deploy.
  */
-async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
+async function explainPlans(): Promise<{ ok: boolean; cuelga: boolean; notas: string[] }> {
   console.log("\nCómo las resuelve Postgres:\n");
 
   const notas: string[] = [];
   let ok = true;
+  // Un plan que no entra a `audit_log` por `target_id`: es el que cuelga la carga.
+  let cuelga = false;
 
   const { desde, hasta } = rangoDelPeriodo("este_anio", new Date());
 
-  const plans = [
+  interface PlanDelTablero {
+    name: string;
+    exigeIndice: boolean;
+    consulta: (d: ClienteDatos) => { getSQL(): SQL };
+    exige?: (plan: string) => string | null;
+    // Cruza casos con la auditoría: tiene que entrar por `target_id` (`entraPorTargetId`), y si no
+    // entra la carga no se mide (`cuelga`).
+    entraPorTarget?: true;
+  }
+
+  const plans: PlanDelTablero[] = [
     {
       name: "listado",
       // La pantalla que abre todo el mundo, todo el tiempo. Si esta empieza a
@@ -956,18 +1013,37 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
     {
       // Los cuellos cruzan cada caso con su auditoría por un lateral. Sin la
       // valla `offset 0` Postgres lo aplana en un Hash Join sobre todo
-      // `idx_audit_log_trayecto` (bajo RLS `uuid_out` no es leakproof y
-      // `target_id = c.id::text` no baja al índice): 25-45 ms en vez de 0,5.
-      // El año entero es el rango más ancho que pide el tablero.
+      // `idx_audit_log_trayecto`: 25-45 ms en vez de 0,5. Y bajo RLS `uuid_out`
+      // no es leakproof: `target_id = cases.id::text` no baja al índice y cada
+      // caso recorre `idx_audit_log_target` entero. La cohorte calcula `id_txt`
+      // dentro de su propia valla y se compara contra él (`texteq` sí es
+      // leakproof). El año entero es el rango más ancho que pide el tablero.
       name: "cuellos del tablero",
       exigeIndice: false,
       consulta: (d: ClienteDatos) => consultaDeCuellos(d, desde, hasta),
-      exige: (plan: string) =>
-        /Hash Join/.test(plan)
-          ? "aplanó el lateral en un Hash Join (falta la valla `offset 0`)"
-          : /Index Cond: \(+target_id = /.test(plan)
-            ? null
-            : "no entra a la auditoría por target_id",
+      entraPorTarget: true,
+    },
+    {
+      // Las otras tres consultas del tablero que cruzan casos con la
+      // auditoría. Misma regla que los cuellos: la cohorte entra a `audit_log`
+      // por `target_id` con un Index Cond. Con la regresión, cada una costaba
+      // del orden de un millón de unidades de plan en lugar de miles.
+      name: "ciclo del tablero",
+      exigeIndice: false,
+      consulta: (d: ClienteDatos) => consultaDeCiclo(d, desde, hasta),
+      entraPorTarget: true,
+    },
+    {
+      name: "contadores del tablero",
+      exigeIndice: false,
+      consulta: (d: ClienteDatos) => consultaDeContadores(d, desde, hasta),
+      entraPorTarget: true,
+    },
+    {
+      name: "historial del tablero",
+      exigeIndice: false,
+      consulta: (d: ClienteDatos) => consultaDeHistorial(d, desde, hasta),
+      entraPorTarget: true,
     },
   ];
 
@@ -976,7 +1052,8 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
       const [resultado] = await enTenantVarias<[unknown]>(CTX, (d) => [
         d.execute(sql`explain ${plan.consulta(d).getSQL()}`),
       ]);
-      const explained = lineasDelPlan(resultado);
+      const filas = filasDelPlan(resultado);
+      const explained = filas.join(" ");
       // «Seq Scan on cases» y no «Seq Scan» a secas: el plan del listado trae
       // tres subconsultas correlacionadas, y un recorrido barato sobre una
       // tabla chica adentro de una de ellas no es la regresión que se busca.
@@ -984,8 +1061,11 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
       const seq = /Seq Scan on (?:public\.)?cases\b/i.test(explained);
       const idx = explained.match(/Index (?:Only )?Scan(?: Backward)? using (\w+)/i);
       if (seq && plan.exigeIndice) ok = false;
-      const roto = plan.exige?.(explained) ?? null;
-      if (roto) ok = false;
+      const roto = (plan.entraPorTarget ? entraPorTargetId(filas) : plan.exige?.(explained)) ?? null;
+      if (roto) {
+        ok = false;
+        if (plan.entraPorTarget) cuelga = true;
+      }
       const linea =
         `${plan.name}: ` +
         `${seq ? "recorre `cases` entera (Seq Scan)" : idx ? `usa ${idx[1]}` : "plan mixto"}` +
@@ -1021,11 +1101,12 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
    * `extracted_fields` y `outbound_messages` veinticinco veces cada una.
    *
    * Por eso se comprueba la existencia y no el uso. `idx_audit_log_trayecto`
-   * (0043) es el de los cuellos y el ciclo, y ése el plan de arriba SÍ exige que
-   * se use, sea cual sea el tamaño de la auditoría (esta carga sólo corre contra
-   * producción, donde el planificador lo prefiere). Que además se vigile acá es
-   * para el rojo: sin el índice el plan de arriba sólo dice «no entra a la
-   * auditoría por target_id», y esto dice cuál falta.
+   * (0043) es el de los cuellos y el ciclo, y `idx_audit_log_target` (0001) el
+   * de los contadores y el historial: los planes de arriba SÍ exigen que se
+   * entre por `target_id`, sea cual sea el tamaño de la auditoría (esta carga
+   * sólo corre contra producción, donde el planificador lo prefiere). Que
+   * además se vigile acá es para el rojo: sin el índice el plan de arriba sólo
+   * dice «no entra a la auditoría por target_id», y esto dice cuál falta.
    *
    * ── El que se vigilaba no era el que se usa ────────────────────────────
    *
@@ -1042,24 +1123,33 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
    * sentidos.
    */
   const declarados = Object.keys(INDICES_DEL_TABLERO);
-  // sin-inquilino: el catálogo de Postgres no tiene tenant_id.
-  const r = await db.execute(
-    sql.raw(
-      `select indexname from pg_indexes where indexname in (${declarados
-        .map((n) => `'${n}'`)
-        .join(", ")})`
-    )
-  );
-  const hay = new Set(
-    ((r as unknown as { rows: { indexname: string }[] }).rows ?? []).map((x) => x.indexname)
-  );
-  const faltan = declarados.filter((n) => !hay.has(n));
+  // Si falla, no se rechaza: `cuelga` ya puede venir en true de los planes y `main` no lo sabe.
+  let faltan: string[] | null = null;
+  try {
+    // sin-inquilino: el catálogo de Postgres no tiene tenant_id.
+    const r = await db.execute(
+      sql.raw(
+        `select indexname from pg_indexes where indexname in (${declarados
+          .map((n) => `'${n}'`)
+          .join(", ")})`
+      )
+    );
+    const hay = new Set(
+      ((r as unknown as { rows: { indexname: string }[] }).rows ?? []).map((x) => x.indexname)
+    );
+    faltan = declarados.filter((n) => !hay.has(n));
+  } catch (err) {
+    ok = false;
+    const linea = `índices del tablero: NO SE PUDO COMPROBAR (${err instanceof Error ? err.name : "error"}) — no se sabe si faltan`;
+    notas.push(linea);
+    console.log(`\n  ✗ ${linea}`);
+  }
   console.log("");
-  if (faltan.length === 0) {
+  if (faltan?.length === 0) {
     const linea = `los ${declarados.length} índices que el tablero necesita están`;
     notas.push(linea);
     console.log(`  ✓ ${linea}`);
-  } else {
+  } else if (faltan) {
     ok = false;
     const linea = `faltan ${faltan.length} índice(s): ${faltan.join(", ")}`;
     notas.push(linea);
@@ -1070,7 +1160,7 @@ async function explainPlans(): Promise<{ ok: boolean; notas: string[] }> {
     );
   }
 
-  return { ok, notas };
+  return { ok, cuelga, notas };
 }
 
 /**
@@ -1544,10 +1634,25 @@ try {
   // tres: es la pantalla que abre todo el mundo, y repetirlas por escenario
   // multiplica el tiempo contra la base de producción sin cambiar la respuesta.
   for (const forma of corren) {
+    if (consultaColgada) {
+      console.log(`
+No se mide "${forma}": una consulta colgada sigue abierta contra la base.`);
+      break;
+    }
     if (forma === "carga") {
-      const f = await formaCarga(escenarios);
-      const planes = await explainPlans();
+      // Los planes primero, y baratos: si un plan del tablero no entra a la
+      // auditoría por índice, medirlo 360 veces es esperar a que Actions
+      // cancele el job sin un número en el reporte. Cualquier otro rojo de los
+      // planes (un índice que falta, un hipo de Neon) no cuelga nada: se mide igual.
+      const planes = await explainPlans().catch((e: unknown) => {
+        const linea = `planes del tablero: NO SE PUDO EXPLICAR (${e instanceof Error ? e.name : "error"}) — el chequeo de índice no corrió`;
+        console.log(`  ✗ ${linea}`);
+        return { ok: false, cuelga: false, notas: [linea] };
+      });
       const acumulador = await comprobarAcumuladorDeIa();
+      const f = planes.cuelga
+        ? formaSinMedir(CARGA, "no se midió: un plan del tablero no entra a la auditoría por índice")
+        : await formaCarga(escenarios);
       f.ok = f.ok && planes.ok && acumulador.ok;
       f.notas.push(...notasLectura, ...planes.notas, ...acumulador.notas);
       formas.push(f);
@@ -1560,12 +1665,12 @@ try {
     }
   }
 
-  if (doWrite) {
+  if (doWrite && !consultaColgada) {
     await refuseIfMocked();
     const f = await loadWrite(escenarios[0]!);
     if (f) formas.push(f);
     else ok = false;
-  } else {
+  } else if (!doWrite) {
     console.log(
       "\nSin --write no se prueba el camino de entrada, que es donde está el\n" +
         "modelo y donde está el límite de verdad."
@@ -1598,3 +1703,6 @@ console.log("");
 // exitCode, no exit(): llamar a process.exit() con sockets todavía cerrándose
 // revienta Node en Windows con una aserción de libuv.
 process.exitCode = ok ? 0 : 1;
+// Salvo con una consulta colgada: sus sockets siguen abiertos y el proceso no termina hasta que
+// vencen (minutos), que es el job esperando de más.
+if (consultaColgada) process.exit(1);

@@ -38,6 +38,18 @@ export interface Forma {
   notas: string[];
 }
 
+/**
+ * Una forma que no llegó a medirse (una consulta colgada, un plan que no entra
+ * por índice): falla, y `medido` dice por qué en lugar de un número.
+ */
+export function formaSinMedir(
+  base: Pick<Forma, "nombre" | "pregunta" | "metrica" | "umbral">,
+  medido: string,
+  filas: Fila[] = []
+): Forma {
+  return { ...base, medido, ok: false, filas, notas: [] };
+}
+
 /** Una ruta que la prueba nombra, y si sigue existiendo en `src/app/api`. */
 export interface Endpoint {
   metodo: string;

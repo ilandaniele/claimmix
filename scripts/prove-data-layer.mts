@@ -29,7 +29,19 @@ import { Pool, neonConfig } from "@neondatabase/serverless";
 import { enTenant, enTenantVarias, type TenantContext } from "@/data/scope";
 import { tables } from "@/lib/db";
 import { eq, sql } from "drizzle-orm";
-import { consultaDeActividad } from "@/server/metrics/kpis";
+import { consultaDeActividad, consultaDeContadores } from "@/server/metrics/kpis";
+import {
+  CON_ESTADO,
+  DEL_CASO,
+  HACIA,
+  INTERVENCION,
+  SE_APLICO,
+  consultaDeCiclo,
+  consultaDeCuellos,
+  consultaDeHistorial,
+} from "@/server/metrics/trayecto";
+import { completadoConfirmado } from "@/server/cases/listo-confirmado";
+import { CANALES_REALES_SQL } from "@/lib/db/canales-reales";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
 import type { PuntoSerie } from "@/core/metricas/serie";
 import { proveedorDeSso } from "@/core/sso";
@@ -298,6 +310,87 @@ if (descuadres.length) {
     `${enJs.size} día(s) iguales a los casos contados en JS, ${deNoche} de ellos ` +
       "entre las 21 y las 24"
   );
+}
+
+// ── 3b2. Las consultas del tablero que cruzan casos con la auditoría ───────
+//
+// Contadores, ciclo, historial y cuellos arman la cohorte en una subconsulta con
+// valla `offset 0` que calcula `id_txt` (`conIdTexto`, trayecto.ts) para que la
+// auditoría entre por `target_id` bajo RLS. Los tests de forma sólo comparan
+// strings, y una lista de columnas mal puesta da 42703 recién al ejecutar. Acá
+// se ejecutan como `claimmix_app` para los dos primeros inquilinos con datos, y
+// lo que cruza con la auditoría (completado confirmado, con listo, sin
+// intervención) se compara contra un conteo escrito aparte sobre `cases`, con la
+// forma vieja (`target_id = cases.id::text`): si `id_txt` dejara de correlacionar
+// daría 0, y si la valla perdiera filas o sacara el filtro de inquilino no
+// cuadraría. Los cuellos no tienen un conteo equivalente: sólo se comprueba que
+// ejecuten.
+console.log("\n▸ Las consultas del tablero, con la valla de id_txt");
+const DESDE_TABLERO = "1970-01-01T00:00:00Z";
+const HASTA_TABLERO = "2100-01-01T00:00:00Z";
+const enElRango = sql`${tables.cases.created_at} >= ${DESDE_TABLERO} and ${tables.cases.created_at} < ${HASTA_TABLERO}`;
+const reclamosEnElRango = sql`${enElRango} and ${tables.cases.channel} in (${CANALES_REALES_SQL}) and ${tables.cases.is_claim} is true`;
+const ID_VIEJO = sql`${tables.cases.id}::text`;
+const LISTO_VIEJO = sql`(select min(a.created_at) from ${tables.auditLog} a
+  where ${DEL_CASO} and a.event_type in (${CON_ESTADO}) and ${SE_APLICO} and ${HACIA} = 'listo_para_core')`;
+for (const t of conDatos.slice(0, 2)) {
+  const cuenta = (db: Parameters<Parameters<typeof enTenantVarias>[1]>[0], donde: ReturnType<typeof sql>) =>
+    db.select({ n: sql<number>`count(*)::int` }).from(tables.cases).where(donde);
+  const [contadores, ciclo, historial, cuellos, todos, completadosTodos, reclamos, conListo, completados, sinIntervencion] =
+    await enTenantVarias<
+      [
+        { por_tipo: number; n: number; listo: number }[],
+        { reclamos: number; con_listo: number; sin_intervencion: number }[],
+        { reclamos: number; con_listo: number; completados: number }[],
+        { estancias: number }[],
+        { n: number }[],
+        { n: number }[],
+        { n: number }[],
+        { n: number }[],
+        { n: number }[],
+        { n: number }[],
+      ]
+    >(ctxDe(t), (db) => [
+      consultaDeContadores(db, DESDE_TABLERO, HASTA_TABLERO),
+      consultaDeCiclo(db, DESDE_TABLERO, HASTA_TABLERO),
+      consultaDeHistorial(db, DESDE_TABLERO, HASTA_TABLERO),
+      consultaDeCuellos(db, DESDE_TABLERO, HASTA_TABLERO),
+      cuenta(db, enElRango),
+      cuenta(db, sql`${enElRango} and ${completadoConfirmado(ID_VIEJO)}`),
+      cuenta(db, reclamosEnElRango),
+      cuenta(db, sql`${reclamosEnElRango} and ${LISTO_VIEJO} is not null`),
+      cuenta(db, sql`${reclamosEnElRango} and ${completadoConfirmado(ID_VIEJO)}`),
+      cuenta(
+        db,
+        sql`${reclamosEnElRango} and ${LISTO_VIEJO} is not null
+          and not exists (select 1 from ${tables.auditLog} a
+                           where ${DEL_CASO} and a.event_type in (${INTERVENCION})
+                             and a.actor_id is not null and a.created_at <= ${LISTO_VIEJO})`
+      ),
+    ]);
+  const suma = (filas: Record<string, number>[], campo: string) => filas.reduce((acc, f) => acc + (f[campo] ?? 0), 0);
+  const deLosEstados = contadores.filter((f) => f.por_tipo === 0);
+  const cuentas: [string, number, number][] = [
+    ["contadores: casos por estado", suma(deLosEstados, "n"), todos[0]?.n ?? -1],
+    ["contadores: completado confirmado", suma(deLosEstados, "listo"), completadosTodos[0]?.n ?? -1],
+    ["ciclo: reclamos de la cohorte", ciclo[0]?.reclamos ?? -1, reclamos[0]?.n ?? -1],
+    ["ciclo: con listo_para_core", ciclo[0]?.con_listo ?? -1, conListo[0]?.n ?? -1],
+    ["ciclo: sin intervención", ciclo[0]?.sin_intervencion ?? -1, sinIntervencion[0]?.n ?? -1],
+    ["historial: reclamos de la cohorte", suma(historial, "reclamos"), reclamos[0]?.n ?? -1],
+    ["historial: con listo_para_core", suma(historial, "con_listo"), conListo[0]?.n ?? -1],
+    ["historial: completados", suma(historial, "completados"), completados[0]?.n ?? -1],
+  ];
+  const mal3 = cuentas.filter(([, vistas, esperadas]) => vistas !== esperadas);
+  if (mal3.length > 0) {
+    for (const [que, vistas, esperadas] of mal3) mal(`"${t.name}", ${que}: ${vistas} y deberían ser ${esperadas}`);
+    problemas.push("una consulta del tablero con la valla de id_txt no cuenta lo que hay en la base");
+  } else {
+    bien(
+      `"${t.name}": contadores, ciclo y historial cuadran con la base y los cuellos ejecutan ` +
+        `(${todos[0]?.n} caso(s), ${reclamos[0]?.n} reclamo(s), ${conListo[0]?.n} con listo_para_core, ` +
+        `${sinIntervencion[0]?.n} sin intervención, ${completados[0]?.n} completado(s), ${cuellos.length} estado(s) con estadías)`
+    );
+  }
 }
 
 // ── 3c. El asistente: contar y buscar, sin cruzar de inquilino ─────────────

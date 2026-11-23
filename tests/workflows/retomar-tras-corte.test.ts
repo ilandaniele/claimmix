@@ -16,7 +16,10 @@ import { getWorkflowRef, waitForSleep } from "@workflow/vitest";
 
 describe("el flujo de la retoma tras un corte", () => {
   it("arranca y queda esperando antes de retomar", async () => {
-    const run = await start(getWorkflowRef("retomarTrasCorte"), [
+    // Con la ruta y no sólo el nombre: el compilador de `@workflow/vitest`
+    // recorre todo el árbol sin opción para excluir carpetas, y también compila
+    // las copias de los worktrees de `.claude/worktrees`.
+    const run = await start(getWorkflowRef("src/workflows/retomar-tras-corte.ts#retomarTrasCorte"), [
       { caseId: "caso-1", tenantId: "00000000-0000-0000-0000-000000000001" },
     ]);
 

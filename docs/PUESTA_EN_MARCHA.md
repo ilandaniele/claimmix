@@ -1728,6 +1728,10 @@ parte G y la parte H.
   - **Salió bien si:** `/api/health` de dev, pedido con el `CRON_SECRET` de dev, muestra
     `ALTA_WABA_PROPIA` en `true` entre las banderas; `/conectar-whatsapp` de dev ofrece la
     ventana de Meta, y el `pnpm check` queda verde.
+  - **Estado (23/11):** las tres variables están cargadas en dev, `/api/health` muestra
+    `ALTA_WABA_PROPIA` en `true`, y el Post-deploy de dev y el `pnpm check` completo quedaron
+    en verde. QA y prd siguen en 0. Falta ver que `/conectar-whatsapp` de dev ofrezca la
+    ventana de Meta: la página pide iniciar sesión, y eso lo hace el dueño.
   - **Si falla:** si la ventana de Meta no se ofrece, falta una de las tres credenciales. Si el
     `pnpm check` queda rojo, seguir `docs/TESTING.md`.
   - **Fuentes:** `docs/whatsapp-setup.md:485-486`, `:508-517`; `.env.example:296-308`;

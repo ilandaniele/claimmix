@@ -491,8 +491,8 @@ registro, a un resultado ni al navegador.
    En los dominios permitidos del SDK y en las URI de redirección válidas, cargar
    `https://claimmix.vercel.app` (prd) y `https://claimmix-dev.vercel.app` (dev). Después,
    en Configuraciones, crear una con «Create configuration» (no la plantilla de 60 días):
-   Embedded Signup v4 con Cloud API y token **que no vence**. Sin `featureType`: la
-   coexistencia no entra. El `config_id` que sale es `META_ES_CONFIG_ID`.
+   Embedded Signup con Cloud API y token **que no vence**; sale en v4 sola, sin elegir. Sin
+   `featureType`: la coexistencia no entra. El `config_id` que sale es `META_ES_CONFIG_ID`.
 6. Suscribir en el webhook de la app los campos `account_update` y
    `phone_number_name_update` (además de `messages`, que ya está).
 7. Aplicar la 0051 (`neon/migrations/0051_waba_propia.sql`) **a mano**, con el dueño de la

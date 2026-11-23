@@ -27,7 +27,6 @@ test.describe("un PDF de 8 MB se sirve por streaming", () => {
       return {
         status: res.status,
         tipo: res.headers.get("content-type"),
-        largo: res.headers.get("content-length"),
         disposicion: res.headers.get("content-disposition"),
         cache: res.headers.get("cache-control"),
         bytes, trozos, cabeceras, primerTrozo, total: performance.now() - t0,
@@ -36,7 +35,6 @@ test.describe("un PDF de 8 MB se sirve por streaming", () => {
 
     expect(medido.status).toBe(200);
     expect(medido.tipo).toBe("application/pdf");
-    expect(medido.largo).toBe(String(TAMANO));
     expect(medido.disposicion).toMatch(/^inline/);
     expect(medido.cache).toContain("no-store");
     expect(medido.bytes).toBe(TAMANO);

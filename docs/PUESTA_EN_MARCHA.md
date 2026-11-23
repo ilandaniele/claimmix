@@ -1744,9 +1744,11 @@ parte G y la parte H.
   - **Qué hacer:** crear en Meta un portfolio de negocio de prueba nuevo (la WABA de Veltra se
     rechaza) y usar un chip libre, que no esté en ninguna cuenta de WhatsApp. Nunca el número
     de producción de la plataforma ni un número personal. Que el portfolio tenga una sola WABA.
-    Conectar desde la ventana de Meta y terminarla antes de 10 minutos desde que se toca
-    conectar: pasado ese plazo la conexión vuelve vencida y hay que empezar de nuevo. Para no
-    pasarse, crear el portfolio antes y tener el chip a mano para el SMS. El
+    Conectar desde la ventana de Meta y terminarla antes de 30 minutos desde que se toca
+    «Continuar» (no «Conectar con Facebook»): pasado ese plazo la conexión vuelve vencida y hay
+    que empezar de nuevo. Si pasaron más de 20 minutos desde «Continuar», «Conectar con Facebook»
+    pide un inicio nuevo y hay que tocarlo otra vez. Para no pasarse, crear el portfolio antes
+    y tener el chip a mano para el SMS. El
     borrado y «Desvincular la WABA» dan de baja la WABA los dos, así que el borrado se prueba
     en una segunda conexión: conectar otra vez (si la plataforma no deja reconectar la misma
     WABA, con otro portfolio de prueba y otro chip) y pedir desde Facebook que la app borre los

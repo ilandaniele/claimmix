@@ -1636,7 +1636,7 @@ parte G y la parte H.
     mandarlo de nuevo. Mientras la revisión está abierta, no tocar la configuración básica
     (T5).
   - **Fuentes:** `docs/whatsapp-setup.md:468-469`.
-- [ ] **T4. Embedded Signup: el login y la configuración.**
+- [x] **T4. Embedded Signup: el login y la configuración.** 23/11.
   - **Quién:** [Dueño] hace (a) y (b), y le pasa a [Claude] el dato de (c).
   - **Dónde:** panel de la app > Facebook Login for Business > Configuración, para (a), y
     Facebook Login for Business > Configuraciones, para (b). Guías de Meta:
@@ -1658,15 +1658,22 @@ parte G y la parte H.
       en las URI de redirección válidas, cargar `https://claimmix.vercel.app` (prd) y
       `https://claimmix-dev.vercel.app` (dev).
     - (b) Crear una configuración nueva con «Create configuration», no la plantilla de 60
-      días: Embedded Signup versión 4, producto WhatsApp Cloud API y token del usuario del
-      sistema que no vence. Nada de coexistencia: el código no manda `featureType`. Elegir v4
-      aunque la pantalla ofrezca v5 (salió el 20/10): el código está escrito para v4, y las
-      versiones 2 y 3 dejaron de andar el 15/10. El token de cada cliente lo canjea la
-      plataforma al conectar: no tocar «Generar token» en el usuario del sistema de Veltra.
+      días: WhatsApp Embedded Signup, sólo el producto WhatsApp Cloud API, token del usuario
+      del sistema que no vence («Token will never expire»), el activo WhatsApp accounts y los
+      permisos `whatsapp_business_management` y `whatsapp_business_messaging`. Nada de
+      coexistencia: el código no manda `featureType`. La pantalla no deja elegir la versión:
+      al elegir los productos la configuración queda en v4, y la versión la decide la página
+      con `extras.version` en `FB.login`. El código no lo manda, así que Meta sirve v4, que es
+      para la que está escrito. v5 (salió el 20/10) cambia lo que devuelve la ventana y
+      necesita código nuevo. El token de cada cliente lo canjea la plataforma al conectar: no
+      tocar «Generar token» en el usuario del sistema de Veltra.
     - (c) Copiar el `config_id` de la configuración y pasárselo a Claude por el chat: no es
       secreto. Es `META_ES_CONFIG_ID`, y Claude lo carga en T7.
-  - **Salió bien si:** la configuración figura con la versión 4, la Cloud API y el token sin
-    vencimiento, y Claude tiene el `config_id`.
+  - **Salió bien si:** la configuración tiene la Cloud API y el token sin vencimiento, y Claude
+    tiene el `config_id`. Para ver la versión: panel de la app > WhatsApp > Embedded Signup
+    Builder > «Check a launch config», con el `config_id` y `{"setup":{}}`, resuelve a v4.
+  - **Estado (23/11):** hecho. La configuración se llama «ClaimMix ES v4». En (a) faltaban
+    Embedded Browser OAuth Login y Login with the JavaScript SDK; los otros cuatro ya estaban.
   - **Si falla:** si la pantalla sólo ofrece un token de 60 días, parar y avisarle a Claude: el
     código da por hecho que el token no vence. Los errores de la ventana de Meta están en
     https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/errors/.
@@ -1732,7 +1739,10 @@ parte G y la parte H.
     `/admin/altas` de dev.
   - **Qué hacer:** crear en Meta un portfolio de negocio de prueba nuevo (la WABA de Veltra se
     rechaza) y usar un chip libre, que no esté en ninguna cuenta de WhatsApp. Nunca el número
-    de producción de la plataforma ni un número personal. Conectar desde la ventana de Meta. El
+    de producción de la plataforma ni un número personal. Que el portfolio tenga una sola WABA.
+    Conectar desde la ventana de Meta y terminarla antes de 10 minutos desde que se toca
+    conectar: pasado ese plazo la conexión vuelve vencida y hay que empezar de nuevo. Para no
+    pasarse, crear el portfolio antes y tener el chip a mano para el SMS. El
     borrado y «Desvincular la WABA» dan de baja la WABA los dos, así que el borrado se prueba
     en una segunda conexión: conectar otra vez (si la plataforma no deja reconectar la misma
     WABA, con otro portfolio de prueba y otro chip) y pedir desde Facebook que la app borre los
@@ -1753,7 +1763,10 @@ parte G y la parte H.
     pedidos de borrado se atienden a mano, como dice «Si un cliente pide que se borren sus
     datos» (`docs/whatsapp-setup.md:586`). Si conectar falla sólo para quien no tiene un rol
     en la app, falta el acceso avanzado de T3: Meta devuelve el error 200 con las cuentas de
-    otros. Los demás errores de la ventana de Meta, en el link de errores de T4.
+    otros. Si falla el canje del código o el token sale inválido, avisarle a Claude: el
+    código lee del `debug_token` de Meta los permisos con sus WABA y que el token no venza, y
+    esa respuesta recién se ve con una conexión real. Los demás errores de la ventana de Meta,
+    en el link de errores de T4.
   - **Fuentes:** `docs/whatsapp-setup.md:485-500`, `:597-613`;
     `src/app/conectar-whatsapp/meta-sdk.ts:184-197`; `src/app/api/meta/borrado/route.ts`;
     `src/server/alta/panel-operador.ts:921-961`.

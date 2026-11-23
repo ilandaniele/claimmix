@@ -28,7 +28,7 @@ const CABECERAS_QUE_QUEDAN = new Set([
   "x-vercel-id",
 ]);
 const CLAVE_SECRETA = /cookie|authorization|token|secret|password|api[_-]?key|session/i;
-const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+export const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 const PATENTE_NUMERICA_RE = /\b\d{3}[-.]?\d{3}[-.]?\d{3}\b/g; // la que ya tenía el config
 
 const RUTA_DE_APP_RE = /(\/api\/webhooks\/whatsapp\/app\/)[^/?#\s"']+/g;

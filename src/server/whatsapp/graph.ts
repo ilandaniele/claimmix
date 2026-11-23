@@ -8,14 +8,18 @@
  *   - El token viaja sólo en `Authorization`; los secretos y los datos, en el cuerpo.
  *   - El `appsecret_proof` (un HMAC del token, no el secreto) va en el cuerpo de los
  *     POST y en la consulta de los GET y los DELETE, que no tienen cuerpo (Q24).
- *   - De un error sólo queda `{paso, status, codigo}`. Ni el token, ni la prueba, ni
- *     el cuerpo de lo que Meta contestó se anotan.
+ *   - De un error queda `{paso, status, codigo}` y el `subcodigo` si Graph lo mandó.
+ *     Sólo el cliente del alta del número suma recortes de hasta 160 caracteres de
+ *     message, error_user_msg y error_data.details, tachados antes de cortar: lo que
+ *     viajó en el pedido, mails, corridas de seis o más dígitos y tiras con forma de
+ *     token. Ni el token, ni la prueba, ni el resto del cuerpo se anotan.
  *   - La ruta es un nodo, a lo sumo un borde y a lo sumo una consulta, y cada segmento
  *     va codificado: nada que llegue como ruta cambia el host ni sale de la versión.
  */
 
 import "server-only";
 import { logger } from "@/lib/observability/logger";
+import { EMAIL_RE } from "@/lib/observability/sentry-scrub";
 import { urlDeGraph } from "@/server/whatsapp/cloud-api";
 import { ESPERA_DE_META } from "@/server/whatsapp/errores-de-graph";
 
@@ -95,14 +99,82 @@ export function rutaDeGraph(ruta: string): string | null {
   return consulta === undefined ? camino : `${camino}?${consulta}`;
 }
 
-/** `registro` es el nombre con que se anotan las fallas del cliente: el único dato que cambia entre los tres. */
-export function clienteDeGraph<Paso extends string>(registro: string) {
-  function anotar(paso: Paso, status: number | null, codigo: number | null): void {
-    logger.warn({ paso, status, codigo }, registro);
+const TOPE_DEL_RECORTE = 160;
+/** Un campo más largo no se anota: acota el costo de tachar sin cortar antes. */
+const TOPE_DEL_CRUDO = 2000;
+const LARGO_MINIMO_DEL_SECRETO = 4;
+/** Valores fijos del pedido que no son secretos: tacharlos rompería el mensaje. */
+const CLAVES_SIN_SECRETO: ReadonlySet<string> = new Set(["messaging_product", "code_method", "language"]);
+/** Lo que se tacha por forma aunque no haya viajado en el pedido; los dígitos al final, para no partir un token que los lleve. */
+const FORMAS_A_TACHAR: readonly RegExp[] = [
+  EMAIL_RE,
+  /EAA[A-Za-z0-9]{10,}/g,
+  /[A-Za-z0-9_-]{32,}/g,
+  /\+?\d(?:[\s().-]?\d){5,}/g,
+];
+const TACHADO = "[tachado]";
+
+function hojasDeTexto(v: unknown, salida: Set<string>): void {
+  if (typeof v === "string") {
+    if (v.length >= LARGO_MINIMO_DEL_SECRETO) salida.add(v);
+    return;
+  }
+  const o = objeto(v);
+  if (o) for (const [clave, hijo] of Object.entries(o)) if (!CLAVES_SIN_SECRETO.has(clave)) hojasDeTexto(hijo, salida);
+}
+
+/** Lo que viajó en el pedido, del más largo al más corto para que uno no deje la cola de otro. */
+function secretosDelPedido(camino: string, pedido: Pedido): string[] {
+  const valores = new Set<string>();
+  const sumar = (v: string | undefined) => hojasDeTexto(v, valores);
+  const token = pedido.autorizacion?.replace(/^Bearer\s+/i, "");
+  if (token) {
+    sumar(token);
+    token.split("|").forEach(sumar);
+  }
+  sumar(pedido.prueba);
+  const [ruta, consulta] = camino.split("?");
+  sumar(ruta.split("/")[0]);
+  if (consulta) for (const [clave, valor] of new URLSearchParams(consulta)) if (clave !== "fields") sumar(valor);
+  hojasDeTexto(pedido.json, valores);
+  hojasDeTexto(pedido.formulario, valores);
+  return [...valores].sort((a, b) => b.length - a.length);
+}
+
+/** El texto con que Meta explica un error: tachado por valor y por forma, y recién después cortado. */
+function recortesDeMeta(cuerpo: unknown, camino: string, pedido: Pedido): Record<string, string> {
+  const error = objeto(objeto(cuerpo)?.error);
+  if (!error) return {};
+  const crudos = { mensaje: error.message, mensaje_usuario: error.error_user_msg, detalles: objeto(error.error_data)?.details };
+  const secretos = secretosDelPedido(camino, pedido);
+  const salida: Record<string, string> = {};
+  for (const [clave, crudo] of Object.entries(crudos)) {
+    if (typeof crudo !== "string" || !crudo.trim() || crudo.length > TOPE_DEL_CRUDO) continue;
+    let t = secretos.reduce((acc, s) => acc.split(s).join(TACHADO), crudo);
+    for (const forma of FORMAS_A_TACHAR) t = t.replace(forma, TACHADO);
+    salida[clave] = Array.from(t).slice(0, TOPE_DEL_RECORTE).join("");
+  }
+  return salida;
+}
+
+/**
+ * `registro` es el nombre con que se anotan las fallas del cliente. Con `recortes`
+ * se anota también el texto tachado de Meta: sólo donde el pedido lleva todo lo que
+ * Meta podría repetir.
+ */
+export function clienteDeGraph<Paso extends string>(registro: string, opciones: { recortes?: boolean } = {}) {
+  function anotar(
+    paso: Paso,
+    status: number | null,
+    codigo: number | null,
+    subcodigo: number | null = null,
+    recortes: Record<string, string> = {},
+  ): void {
+    logger.warn({ paso, status, codigo, ...(subcodigo === null ? {} : { subcodigo }), ...recortes }, registro);
   }
 
   function falla(paso: Paso, status: number | null, codigo: number | null, subcodigo: number | null = null): Falla {
-    anotar(paso, status, codigo);
+    anotar(paso, status, codigo, subcodigo);
     return armarFalla(status, codigo, subcodigo);
   }
 
@@ -156,7 +228,8 @@ export function clienteDeGraph<Paso extends string>(registro: string) {
     }
     if (!res.ok) {
       const { codigo, subcodigo } = errorDeGraph(cuerpo);
-      return { ok: false, falla: falla(paso, res.status, codigo, subcodigo) };
+      anotar(paso, res.status, codigo, subcodigo, opciones.recortes ? recortesDeMeta(cuerpo, camino, pedido) : {});
+      return { ok: false, falla: armarFalla(res.status, codigo, subcodigo) };
     }
     return { ok: true, cuerpo };
   }

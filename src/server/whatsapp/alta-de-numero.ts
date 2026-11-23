@@ -11,9 +11,11 @@
  *   - `meta`: Meta no contestó o contestó algo que no se entiende; no se interpreta;
  *   - `rechazo`: Meta dijo que no (o el pedido ni salió, por un id con forma rara).
  *
- * Lo que Graph dice no sale crudo: de un error queda el `code` numérico y nada
- * más. Ni el token, ni el PIN, ni el código de seis dígitos, ni el número, ni el
- * cuerpo de la respuesta se anotan.
+ * Lo que Graph dice no sale crudo: de un error queda el `code`, el `subcode` si
+ * vino y hasta 160 caracteres del texto de Meta (message, error_user_msg,
+ * error_data.details) tachados antes de cortar (ver `graph.ts`). Ni el token, ni la
+ * prueba, ni el PIN, ni el código de seis dígitos, ni el número, ni los ids, ni
+ * mails, ni el resto del cuerpo se anotan.
  *
  * Nada de acá toca el número de la plataforma ni borra números de la WABA: las
  * funciones que reciben un id lo rechazan si es el de `idDeLaPlataforma()`, y no
@@ -98,7 +100,7 @@ type Paso =
   | "fijar_webhook"
   | "leer_webhook";
 
-const { respuestaRara, pedirObjeto, confirmada: confirmar } = clienteDeGraph<Paso>("whatsapp.alta_numero.graph");
+const { respuestaRara, pedirObjeto, confirmada: confirmar } = clienteDeGraph<Paso>("whatsapp.alta_numero.graph", { recortes: true });
 
 type Credencial = Pick<CredencialDeAlta, "accessToken" | "prueba">;
 
@@ -161,7 +163,7 @@ export async function verificarCodigoEnMeta(cred: CredencialDeAlta, phoneNumberI
   return confirmada("verificar", `${phoneNumberId}/verify_code`, cred, { code: codigo });
 }
 
-/** ¿Meta ya tiene verificado el código del número? Para cuando `verify_code` rechaza un código que ya se aceptó. */
+/** ¿Meta ya tiene verificado el código del número? Para cuando `verify_code` rechaza un código que ya se aceptó, o `request_code` contesta 136024. */
 export async function codigoYaVerificado(cred: CredencialDeAlta, phoneNumberId: string): Promise<RespuestaDeAlta<boolean>> {
   if (!idDeNumeroValido(phoneNumberId)) return SIN_PEDIDO;
   const r = await llamar("estado_codigo", `${phoneNumberId}?fields=code_verification_status`, cred);

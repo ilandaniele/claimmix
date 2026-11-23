@@ -30,6 +30,10 @@ import {
 const DESDE = "2026-09-01T03:00:00.000Z";
 const HASTA = "2026-10-01T03:00:00.000Z";
 
+// La cohorte, con `id_txt`, cercada con `offset 0` y con el alias "cases" que esperan los `${cases.x}`.
+const VALLA =
+  /from \(select "cases"\.\*, "cases"\."id"::text as id_txt from "cases" where [\s\S]*?"is_claim" is true offset 0\) "cases"/;
+
 const armar = (consulta: (db: never, d: string, h: string) => { toSQL(): { sql: string; params: unknown[] } }) =>
   consulta(new QueryBuilder() as never, DESDE, HASTA).toSQL();
 
@@ -64,10 +68,17 @@ describe("consultaDeCiclo", () => {
     expect(params).toEqual(["case.ready_confirmed", DESDE, HASTA]);
   });
 
-  it("cruza la auditoría con el caso comparando el id como texto y el inquilino", () => {
-    expect(sql).toContain(`a.target_id = "cases"."id"::text`);
+  it("cruza la auditoría con el caso comparando el id ya en texto y el inquilino", () => {
+    expect(sql).toContain(`a.target_id = "cases".id_txt`);
+    expect(sql).not.toMatch(/target_id = "cases"\."id"::text/);
     expect(sql).toContain(`a.tenant_id = "cases"."tenant_id"`);
     expect(sql).toContain(`a.target_type = 'case'`);
+  });
+
+  it("la cohorte va adentro de la valla, una sola vez", () => {
+    expect(sql).toMatch(VALLA);
+    expect(sql.match(/"cases"\."is_claim" is true/g)).toHaveLength(1);
+    expect(sql).toContain(`"agent_runs"."case_id" = "cases"."id"`);
   });
 
   it("mide sólo reclamos de canales reales, sin simulaciones", () => {
@@ -117,6 +128,14 @@ describe("consultaDeHistorial", () => {
     expect(sql).toContain("count(*) filter (where x.completado)");
     expect(sql).toContain("x.status in ('escalado', 'requiere_especialista')");
     expect(sql).toContain("x.status in ('cerrado', 'pagado', 'rechazado')");
+  });
+
+  it("evalúa el completado contra id_txt, dentro de la valla", () => {
+    expect(sql.match(/"audit_log"\."target_id" = "cases"\.id_txt/g)).toHaveLength(2);
+    expect(sql).not.toMatch(/target_id = "cases"\."id"::text/);
+    expect(sql).toMatch(VALLA);
+    expect(params.filter((p) => p === DESDE)).toHaveLength(1);
+    expect(params.filter((p) => p === HASTA)).toHaveLength(1);
   });
 
   it("trae los mismos agregados que el ciclo: la pantalla y el CSV cuentan igual", () => {
@@ -172,18 +191,31 @@ describe("consultaDeCuellos", () => {
     expect(params).toEqual([DESDE, HASTA]);
   });
 
-  it("mantiene el lateral parametrizado: `offset 0` justo antes de cerrarlo", () => {
-    // Sin la valla Postgres lo aplana en un Hash Join sobre todo idx_audit_log_trayecto
-    // (uuid_out no es leakproof y bajo RLS no se empuja al índice): 25-45 ms en vez de 0,5.
+  it("mantiene las dos vallas: la del lateral y la de la cohorte que calcula id_txt", () => {
+    // Sin la del lateral Postgres lo aplana en un Hash Join sobre todo idx_audit_log_trayecto
+    // (25-45 ms en vez de 0,5). Sin la de `c`, `id_txt` se pliega a `id::text` y bajo RLS
+    // (uuid_out no es leakproof) la condición vuelve a quedar de Filter.
     expect(sql).toMatch(/is not null\s+offset 0\s*\)\s*e\b/);
-    expect(sql.match(/offset 0/g)).toHaveLength(1);
+    expect(sql).toMatch(/"is_claim" is true offset 0\) c\b/);
+    expect(sql).toContain('"cases"."id"::text as id_txt');
+    expect(sql).toContain("a.target_id = c.id_txt");
+    expect(sql.match(/offset 0/g)).toHaveLength(2);
   });
 
-  it("la valla no se contagia a las otras consultas ni a los fragmentos compartidos", () => {
-    expect(armar(consultaDeCiclo).sql).not.toMatch(/offset/);
-    expect(armar(consultaDeHistorial).sql).not.toMatch(/offset/);
+  it("la valla no se contagia: ciclo e historial llevan una sola, y los fragmentos compartidos ninguna", () => {
+    for (const consulta of [consultaDeCiclo, consultaDeHistorial]) {
+      const { sql: texto } = armar(consulta);
+      expect(texto.match(/offset/g)).toHaveLength(1);
+      expect(texto).toMatch(/offset 0\) "cases"/);
+    }
     for (const f of [CON_ESTADO, HACIA, SE_APLICO, NO_ES_INTERMEDIO, DEL_CASO]) {
       expect(new PgDialect().sqlToQuery(plantilla`${f}`).sql).not.toMatch(/offset/);
     }
+  });
+
+  it("DEL_CASO no cambia: es el contrato con la revisión nocturna y con auditoria-si-quedo", () => {
+    expect(new PgDialect().sqlToQuery(plantilla`${DEL_CASO}`).sql).toBe(
+      `a.target_type = 'case' and a.target_id = "cases"."id"::text and a.tenant_id = "cases"."tenant_id"`
+    );
   });
 });

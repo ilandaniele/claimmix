@@ -84,6 +84,44 @@ export function razon(n: number): string {
   return Number.isFinite(n) ? `${n.toFixed(2)}×` : "sin línea de base";
 }
 
+/** Una operación pasó del tope: no es una muestra lenta, es una consulta colgada y se corta la medición. */
+export class OperacionColgada extends Error {
+  override name = "OperacionColgada";
+}
+
+/**
+ * `op` con un tope de `ms` por operación y, si se pasa `celdaMs`, otro para todas
+ * las que corran desde que se la arma: armala una vez por celda. `Promise.race`
+ * no cancela la consulta (neon-http no tiene señal): sigue en la base, pero la
+ * medición ya no la espera.
+ *
+ * El tope por operación sólo corta lo que se cuelga. Una regresión de plan que
+ * da operaciones de uno a cuatro segundos pasa por debajo, y multiplicada por las
+ * muestras de la celda sigue agotando el job: ese corte es el de la celda.
+ */
+export function conTope(
+  etiqueta: string,
+  ms: number,
+  op: () => Promise<void>,
+  celdaMs = Number.POSITIVE_INFINITY
+): () => Promise<void> {
+  const inicio = performance.now();
+  return async () => {
+    if (performance.now() - inicio > celdaMs) {
+      throw new OperacionColgada(`celda > ${celdaMs / 1000} s en ${etiqueta}`);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tope = new Promise<never>((_, rechazar) => {
+      timer = setTimeout(() => rechazar(new OperacionColgada(`op > ${ms / 1000} s en ${etiqueta}`)), ms);
+    });
+    try {
+      await Promise.race([op(), tope]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
 /**
  * Corre `total` operaciones con a lo sumo `concurrency` en vuelo, cronometrando
  * cada una.
@@ -101,15 +139,20 @@ export async function measure(
   const samples: Sample[] = [];
   const obreros = Math.min(concurrency, total);
   let next = 0;
+  let parar = false;
 
   async function worker(): Promise<void> {
     for (;;) {
-      if (next++ >= total) return;
+      if (parar || next++ >= total) return;
       const started = performance.now();
       try {
         await op();
         samples.push({ ms: performance.now() - started, ok: true, t: started });
-      } catch {
+      } catch (e) {
+        if (e instanceof OperacionColgada) {
+          parar = true;
+          throw e;
+        }
         samples.push({ ms: performance.now() - started, ok: false, t: started });
       }
     }
@@ -139,8 +182,10 @@ async function calentar(n: number, op: () => Promise<void>): Promise<void> {
     Array.from({ length: n }, async () => {
       try {
         await op();
-      } catch {
+      } catch (e) {
         // Un error acá lo vuelve a encontrar la medición, y ahí sí se cuenta.
+        // Una consulta colgada no: seguir cuesta el tope de cada operación que queda.
+        if (e instanceof OperacionColgada) throw e;
       }
     })
   );

@@ -1180,6 +1180,14 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     revisión; los pedidos quedan gastados con cualquier respuesta de Meta. Siguiente: con #548 en
     prd, pedir el código una vez más; si no llega, verificar el número desde WhatsApp Manager y
     después 000000 y «Conectar».
+  - **Estado (16/11):** pendiente. Meta contesta 136024 a `request_code` cuando el número ya
+    está verificado, y la pantalla decía «esperar» para siempre. Ahora, tras un 136024, el alta
+    lee `code_verification_status`: con `VERIFIED` registra el número, fija el webhook y queda
+    «conectado» sin que la persona escriba código (si Meta no lo tiene registrado, `/register`
+    le pone un PIN nuevo al azar); si no, o si la lectura falla, sigue en «esperar». Los
+    logs `whatsapp.alta_numero.graph` traen además el subcódigo y el mensaje de Meta tachado.
+    Siguiente: con el cambio en prd, volver a pedir el código; si el número ya está verificado,
+    entra solo.
 - [ ] **8. El número en WhatsApp Manager.**
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > WhatsApp Manager, la WABA de Veltra.

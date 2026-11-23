@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-11-03. This file is the single source of truth for "where things stand."
+_Last updated: 2026-11-17. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5467,6 +5467,29 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Qué no se decidió.** Si 0 debería querer decir «sin tope» (opción B) sigue abierto y ninguna frase lo cierra. Queda como estaba: `budget.ts`, `computeMargin`, los costos, los valores de `MONTHLY_BUDGET_USD` en Vercel y GitHub, `TOPE_KB` y `errors.ts`. `demo/analyze` e `intake/simulate` contestan y guardan con los mismos `errorDelTope` y `motivoParaElHistorial` (`src/server/ai/tope-del-inquilino.ts`) y `batch-simulate` contesta un texto fijo, así que ninguno devuelve ni guarda el gasto del proyecto entero.
 - **Tests.** `topes.test.ts` (`iaFrenadaAProposito`), `estado.test.ts`, `aviso-presupuesto.test.ts`, `aviso-de-topes.test.ts`, `admin-cartera-page.test.tsx`, `configuracion-sso-pagina.test.tsx`, `health-route.test.ts`, `responder.test.ts`, `asistente-route.test.ts`, `re-analyze-route.test.ts`, `extract-budget.test.ts`, `CajaDelAsistente.test.tsx`, `TomarElControl.test.tsx`, `AuditTimeline.test.tsx`, `i18n.test.ts`, `i18n-bandeja-y-configuracion.test.tsx` y `admin-altas-page.test.tsx`.
 - **Ambientes.** En `qa` por #560 (`fc9f2c84`), en `main` por #561 (`3941251b`) y en `prd` por #562 (`f0d7e475`, árbol `b05a1ab9`, igual al de `main`) el 05/11, con el peso del bundle verde en CI y `pnpm check` completo verde sobre `3941251b` (26 conversaciones sin diferencias, smoke en orden). Falta mirar el tablero en un teléfono real. El dueño decide si se activa la IA (poner `MONTHLY_BUDGET_USD` en un valor mayor que 0 en el ambiente que corresponda y redeployar).
+
+### Promoción del 11/11 a prd (#565, #569, #570)
+
+- **Qué llegó.** #563 (`0535a57a`): el mail de derivación dice «derivado a un especialista», como el WhatsApp. #564 (`13dd56a7`): el `/register` de Graph espera 30 s en vez de 10 s. #566 (`f78ca7e3`): el operador recibe un resumen diario de altas por mail desde el cron `reap-stuck` (`resumenDeAltas` en `src/server/alta/aviso-operador.ts`), y el mail sólo sale si hay algo que mirar. Sin migraciones ni variables nuevas.
+- **Camino.** #565 llevó #563 y #564 de qa a main (`68c5cf7b`) y #569 llevó #566 (`66ad73c0`). #570 llevó main a prd el 11/11 (`84dfa37d`, árbol `9893d08c`, igual al de main y al de qa). `pnpm check` completo verde sobre `66ad73c0` (26 conversaciones sin diferencias, smoke en orden) y PRD · deploy sobre `84dfa37d` verde (run 43080372137: smoke, salud de las bases y paridad).
+- **QA.** El 11/11 se borró `SIGNUP_ALLOWED_EMAILS` de claimmix-qa: con el alta automática prendida la paridad pide que no esté. Rige desde el próximo deploy de QA.
+
+### 136024 con el número ya verificado (16/11, rama `whatsapp/codigo-136024`)
+
+- **Qué pasaba.** En el paso 7 de prd el número ya estaba verificado y `request_code` volvía con 136024. Desde #548 eso era «esperar» a secas, y la persona no podía avanzar ni con el número listo.
+- **Arreglo.** En `pedirCodigo` (`src/server/alta/numero-automatico.ts`), si `request_code` falla con 136024 (`YA_VERIFICADO`, exportada por `errores-de-graph.ts`), se lee `code_verification_status` con `codigoYaVerificado`. `VERIFIED` sigue por `registrarYConectar` (cupo `wa:registrar`, `/register`, webhook, «conectado»); cualquier otra cosa, o la lectura caída, devuelve «esperar», sin revisión ni aviso al operador. No hay lectura previa a cada pedido, y 136024 sigue en `ESPERA_DE_META`. Los cupos del código quedan gastados como antes.
+- **Logs.** `whatsapp.alta_numero.graph` suma `subcodigo` y el texto de Meta (`mensaje`, `mensaje_usuario`, `detalles`) tachado por valor y por forma y cortado a 160 puntos de código, sólo en ese cliente (`clienteDeGraph(registro, { recortes: true })`); embedded-signup y app propia siguen sin texto.
+- **Pendiente.** `codigoWaba` (WABA propia) tiene el mismo hueco y queda como «esperar»: se arregla aparte si hace falta. Sin migración ni texto nuevo.
+- **Tests.** `numero-automatico.test.ts`, `numero-prd.test.ts` (136024 con `VERIFIED` y orden de pedidos), `alta-de-numero.test.ts`, `graph.test.ts` (qué se anota y cómo se tacha) y `errores-de-graph.test.ts`.
+
+### «Carga del tablero» colgada: la auditoría se recorría entera (17/11, rama `fix/tablero-rls`)
+
+- **Qué pasaba.** El job «DEV / Carga del tablero» del post-deploy llegaba a los 20 minutos y Actions lo cancelaba, sin un solo número en el reporte. Con Postgres 18.7 en Neon y RLS forzado (`claimmix_app`), `audit_log.target_id = cases.id::text` no puede ser un `Index Cond`: `uuid_out` no es leakproof, así que la condición queda de `Filter` y cada caso recorre el índice entero. Afectaba a las cuatro consultas del tablero que cruzan casos con la auditoría: contadores (`consultaDeContadores`, nueva en `kpis.ts`, la que antes iba inline en `getTenantKpis`), ciclo, cuellos e historial.
+- **Arreglo, sin migración.** La cohorte se arma en una subconsulta cercada con `offset 0` que además calcula `id_txt` (`conIdTexto`, `trayecto.ts`), y la auditoría se compara contra ese texto (`texteq` sí es leakproof). `completadoConfirmado` y `listoConfirmado` reciben el id como parámetro. Los cuellos conservan sus dos vallas. `DEL_CASO` no cambia: sigue en `cases.id::text` para la revisión nocturna y `auditoria-si-quedo`. No cambian los índices, ni la forma del lote de `getTenantKpis` (5/6/7 consultas).
+- **Medido** en DEV como `claimmix_app`, sólo lectura: costo de plan 20,5 M → 57 431 (contadores), 1,98 M → 5 220 (ciclo), 1,13 M → 1 674 (cuellos); tiempo de ejecución de ~1 s a ~40–50 ms, y las filas idénticas columna por columna antes y después (también el historial).
+- **La carga ya no se cuelga.** Los planes se explican antes de medir y si un plan del tablero no entra por `target_id` (`entraPorTargetId`) la forma `carga` sale roja sin medirse. Cada consulta que mide la forma `carga` lleva un tope (`--tope`, 10 s; estrés y pico no, buscan dónde se pone lenta): al pasarlo se corta con «op > N s en …» y esa forma en rojo, y la corrida sigue con las demás. Otro rojo de los planes (un índice que falta) no salta la medición. Sin cambios en el workflow salvo el texto de «Qué significa que esto falle».
+- **Pendiente (otro PR).** Mismo patrón `target_id = cases.id::text` en `findExistingWhatsAppCase` (intake-agent, ~476 ms en frío), `cerradoPorSilencio` (~172 ms), `para-responder.ts`, `caso-partido.ts`, `devolver-al-agente.ts`, `auditoria-si-quedo.ts` y `siniestro-nuevo.ts`: no se tocaron acá.
+- **Tests.** La sección 3b2 de `scripts/prove-data-layer.mts` (`pnpm capa-datos`) ejecuta las cuatro consultas bajo RLS por inquilino y las cruza con conteos aparte. `metricas-trayecto-sql`, `metricas-completitud-confirmada`, `kpis-uso-ia-sql`, `metricas-la-cuenta-de-verdad`, `chequeos-de-carga` (con los EXPLAIN reales en `tests/fixtures/planes-del-tablero/`) y `reporte-de-carga` (tope, corte de la medición, `formaSinMedir`).
 
 ### 🙋 Waiting on you (not code)
 

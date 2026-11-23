@@ -433,11 +433,13 @@ describe("pedirCodigo: sumar el número a la WABA", () => {
 
   it("agrega y guarda, y request_code contesta «esperar»: ningún cupo vuelve, ni los del código ni los del alta", async () => {
     h.pedirAMeta.mockResolvedValue(falla("esperar", 136024));
+    h.yaVerificado.mockResolvedValue(ok(false));
 
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
 
     expect(h.agregar).toHaveBeenCalledTimes(1);
     expect(h.ejecutadas).toHaveLength(1);
+    expect(h.registrar).not.toHaveBeenCalled();
     expect(h.liberarCupo).not.toHaveBeenCalled();
   });
 
@@ -764,17 +766,15 @@ describe("pedirCodigo: fila con el número ya agregado", () => {
     expect(clavesLiberadas()).toHaveLength(3);
   });
 
-  it.each([[130429], [136024]])(
-    "request_code «esperar» (%i): esperar, sin aviso al operador, y los cupos de código se quedan (cada reintento es otro pedido a Graph)",
-    async (codigo) => {
-      h.pedirAMeta.mockResolvedValue(falla("esperar", codigo));
+  it("request_code «esperar» (130429): esperar, sin leer el estado del código, sin aviso al operador, y los cupos de código se quedan (cada reintento es otro pedido a Graph)", async () => {
+    h.pedirAMeta.mockResolvedValue(falla("esperar", 130429));
 
-      expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
 
-      expect(h.liberarCupo).not.toHaveBeenCalled();
-      expect(h.aviso).not.toHaveBeenCalled();
-    }
-  );
+    expect(h.yaVerificado).not.toHaveBeenCalled();
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+    expect(h.aviso).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["rechazo", falla("rechazo", 100)],
@@ -1248,6 +1248,124 @@ describe("un número del otro ambiente", () => {
     process.env.NUMEROS_DE_DEV = "5490000000001, 5490000000021";
 
     expect(await pedirCodigo(QUIEN, "SMS")).toBe("codigo_enviado");
+  });
+});
+
+describe("pedirCodigo: request_code contesta 136024", () => {
+  beforeEach(() => {
+    h.leer.mockResolvedValue([fila({ phone_number_id: ID })]);
+    h.pedirAMeta.mockResolvedValue(falla("esperar", 136024));
+  });
+
+  it("el número ya está VERIFIED: se registra y queda conectado, con el cupo de registrar y los de código gastados", async () => {
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("conectado");
+
+    expect(h.yaVerificado).toHaveBeenCalledWith(CRED, ID);
+    expect(h.registrar).toHaveBeenCalledTimes(1);
+    expect(h.registrar).toHaveBeenCalledWith(CRED, ID);
+    expect(h.fijarWebhook).toHaveBeenCalledWith(CRED, ID, WEBHOOK);
+    expect(h.ejecutadas).toHaveLength(1);
+    expect(valoresDe(h.ejecutadas[0])[2]).toBe("conectado");
+    expect(clavesTomadas()).toEqual([`wa:codigo:${TENANT}`, `wa:codigo-ip:${IP}`, "wa:codigos", `wa:registrar:${TENANT}`]);
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+    expect(h.aviso).not.toHaveBeenCalled();
+  });
+
+  it("VERIFIED y Meta ya lo tiene registrado: conectado sin register y sin cupo de registrar", async () => {
+    h.yaRegistrado.mockResolvedValue(ok(true));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("conectado");
+
+    expect(h.registrar).not.toHaveBeenCalled();
+    expect(h.fijarWebhook).toHaveBeenCalledTimes(1);
+    expect(clavesTomadas()).toEqual([`wa:codigo:${TENANT}`, `wa:codigo-ip:${IP}`, "wa:codigos"]);
+    expect(valoresDe(h.ejecutadas[0])[2]).toBe("conectado");
+  });
+
+  it("NOT_VERIFIED: esperar, sin registrar, sin aviso ni revisión, y los cupos de código se quedan", async () => {
+    h.yaVerificado.mockResolvedValue(ok(false));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
+
+    expect(h.yaRegistrado).not.toHaveBeenCalled();
+    expect(h.registrar).not.toHaveBeenCalled();
+    expect(h.fijarWebhook).not.toHaveBeenCalled();
+    expect(h.ejecutadas).toHaveLength(0);
+    expect(h.aviso).not.toHaveBeenCalled();
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["rechazo", falla("rechazo", 100)],
+    ["meta", falla("meta")],
+    ["esperar", falla("esperar", 4)],
+  ] as const)("no poder leer el estado (%s): siempre esperar, sin revisión ni aviso, y los cupos se quedan", async (_cual, respuesta) => {
+    h.yaVerificado.mockResolvedValue(respuesta);
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
+
+    expect(h.registrar).not.toHaveBeenCalled();
+    expect(h.after).not.toHaveBeenCalled();
+    expect(h.aviso).not.toHaveBeenCalled();
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it("la lectura del estado tira: meta, se anota sólo el nombre y los cupos de código se quedan", async () => {
+    h.yaVerificado.mockRejectedValue(new Error(`boom ${TOKEN}`));
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("meta");
+
+    expect(h.error).toHaveBeenCalledWith({ error: "Error" }, "alta.numero_automatico_fallo");
+    expect(JSON.stringify(h.error.mock.calls)).not.toContain(TOKEN);
+    expect(h.registrar).not.toHaveBeenCalled();
+    expect(h.liberarCupo).not.toHaveBeenCalled();
+  });
+
+  it("VERIFIED sin lugar en el cupo de registrar: esperar, y vuelve sólo ese cupo", async () => {
+    contadorRechaza("wa:registrar:");
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("esperar");
+
+    expect(h.registrar).not.toHaveBeenCalled();
+    expect(clavesLiberadas()).toEqual([`wa:registrar:${TENANT}`]);
+  });
+
+  it("VERIFIED y /register rechaza: revision con aviso; si tira: meta; los cupos de código se quedan", async () => {
+    h.registrar.mockResolvedValue(falla("rechazo", 100));
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("revision");
+    expect(h.aviso).toHaveBeenCalledWith("rechazo", TENANT);
+
+    h.registrar.mockRejectedValue(new Error("boom"));
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("meta");
+
+    expect(clavesLiberadas().filter((c) => c.startsWith("wa:codigo"))).toEqual([]);
+  });
+
+  it("sólo se lee el estado después de un 136024: ni con el pedido ok, ni con otro «esperar», ni con un rechazo", async () => {
+    for (const respuesta of [ok(true), falla("esperar", 130429), falla("rechazo", 100)]) {
+      h.pedirAMeta.mockResolvedValue(respuesta);
+      await pedirCodigo(QUIEN, "SMS");
+    }
+
+    expect(h.yaVerificado).not.toHaveBeenCalled();
+  });
+
+  it("fila sin id y VERIFIED: agrega, guarda 'agregado', y conecta con el id recién agregado", async () => {
+    h.leer.mockResolvedValue([fila()]);
+
+    expect(await pedirCodigo(QUIEN, "SMS")).toBe("conectado");
+
+    expect(h.yaVerificado).toHaveBeenCalledWith(CRED, ID);
+    expect(h.registrar).toHaveBeenCalledWith(CRED, ID);
+    expect(h.ejecutadas.map((c) => valoresDe(c)[2])).toEqual(["agregado", "conectado"]);
+    expect(valoresDe(h.ejecutadas[1])[3]).toBe(ID);
+    expect(h.enControl).toHaveBeenCalledTimes(3);
+  });
+
+  it("fila con id y VERIFIED: enControl dos veces (leer y conectar)", async () => {
+    await pedirCodigo(QUIEN, "SMS");
+
+    expect(h.enControl).toHaveBeenCalledTimes(2);
   });
 });
 

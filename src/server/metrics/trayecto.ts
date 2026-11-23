@@ -49,7 +49,24 @@ export const SE_APLICO = sql.raw("(a.payload->>'status_not_applied') is distinct
 export const NO_ES_INTERMEDIO = sql.raw(
   `not (a.event_type = '${EXTRACCION_INTERMEDIA.evento}' and a.payload->>'new_status' = '${EXTRACCION_INTERMEDIA.estado}')`
 );
-export const DEL_CASO = sql`a.target_type = 'case' and a.target_id = ${cases.id}::text and a.tenant_id = ${cases.tenant_id}`;
+const delCaso = (id: SQL): SQL => sql`a.target_type = 'case' and a.target_id = ${id} and a.tenant_id = ${cases.tenant_id}`;
+/** Para quien hace `from cases` sin valla: la revisión nocturna (como dueño) y `auditoria-si-quedo` (bajo RLS, con el mismo Filter; pendiente). */
+export const DEL_CASO = delCaso(sql`${cases.id}::text`);
+
+/*
+ * Postgres 18.7: bajo RLS `audit_log.target_id = cases.id::text` no baja al índice, porque
+ * `uuid_out` no es leakproof y la condición queda de Filter: cada caso recorre el índice entero.
+ * `texteq` sí es leakproof, así que se compara contra `id_txt`, calculado en una subconsulta
+ * sobre filas que ya pasaron RLS.
+ * - `offset 0` impide el pull-up que devolvería el cast a la condición.
+ * - El alias tiene que llamarse "cases" para que resuelvan los `${cases.x}` correlacionados.
+ * - Es `.*` porque Postgres poda las salidas que nadie usa, y una lista a mano da 42703 recién
+ *   en runtime. No se usa `.offset(0)` de drizzle: lo descarta.
+ */
+export const ID_TXT = sql`${cases}.id_txt`;
+export const conIdTexto = (filtro: SQL): SQL =>
+  sql`(select ${cases}.*, ${cases.id}::text as id_txt from ${cases} where ${filtro} offset 0) ${cases}`;
+const DE_LA_COHORTE = delCaso(ID_TXT);
 
 /** Los reclamos que entraron por un canal real en el rango: los simulados no miden nada. */
 const cohorte = (desde: string, hasta: string): SQL =>
@@ -74,22 +91,21 @@ function hechosPorCaso(desde: string, hasta: string): SQL {
            ${cases.created_at} as created_at,
            ${cases.closed_at} as closed_at,
            ${cases.status} as status,
-           ${completadoConfirmado} as completado,
+           ${completadoConfirmado(ID_TXT)} as completado,
            l.t_listo as t_listo,
            (l.t_listo is not null and not exists (
              select 1 from ${auditLog} a
-              where ${DEL_CASO} and a.event_type in (${INTERVENCION})
+              where ${DE_LA_COHORTE} and a.event_type in (${INTERVENCION})
                 and a.actor_id is not null and a.created_at <= l.t_listo
            )) as solo,
            (select count(*) from ${claimMessages} m where m.case_id = ${cases.id} and m.status in ('received', 'sent'))::int
              + (select count(*) from ${outboundMessages} o
                  where o.case_id = ${cases.id} and o.channel = 'whatsapp' and o.status = 'sent')::int as mensajes
-      from ${cases}
+      from ${conIdTexto(cohorte(desde, hasta))}
      cross join lateral (
        select min(a.created_at) as t_listo from ${auditLog} a
-        where ${DEL_CASO} and a.event_type in (${CON_ESTADO}) and ${SE_APLICO} and ${HACIA} = 'listo_para_core'
+        where ${DE_LA_COHORTE} and a.event_type in (${CON_ESTADO}) and ${SE_APLICO} and ${HACIA} = 'listo_para_core'
      ) l
-     where ${cohorte(desde, hasta)}
   ) x`;
 }
 
@@ -149,14 +165,15 @@ export function consultaDeHistorial(db: ClienteDatos, desde: string, hasta: stri
  * empezó) y la que sigue abierta (todavía no terminó).
  */
 export function consultaDeCuellos(db: ClienteDatos, desde: string, hasta: string) {
-  // `offset 0` es una valla: sin ella Postgres aplana el lateral y, como uuid_out no es
-  // leakproof, bajo RLS `target_id = c.id::text` no baja al índice y se lee todo idx_audit_log_trayecto.
+  // Dos vallas `offset 0`, cada una con su porqué. La de `c` calcula `id_txt` sobre filas que ya
+  // pasaron RLS (uuid_out no es leakproof y texteq sí: ver `conIdTexto`). La del lateral evita que
+  // Postgres lo aplane en un Hash Join que lee todo idx_audit_log_trayecto.
   const cambios = sql`(
     select c.id as caso, e.id as evento, e.t as t, e.estado as estado
-      from (select ${cases.id} as id, ${cases.tenant_id} as tenant_id from ${cases} where ${cohorte(desde, hasta)}) c
+      from (select ${cases.id} as id, ${cases.id}::text as id_txt, ${cases.tenant_id} as tenant_id from ${cases} where ${cohorte(desde, hasta)} offset 0) c
      cross join lateral (
        select a.id as id, a.created_at as t, ${HACIA} as estado from ${auditLog} a
-        where a.target_type = 'case' and a.target_id = c.id::text and a.tenant_id = c.tenant_id
+        where a.target_type = 'case' and a.target_id = c.id_txt and a.tenant_id = c.tenant_id
           and a.event_type in (${CON_ESTADO}) and ${SE_APLICO} and ${NO_ES_INTERMEDIO}
           and ${HACIA} is not null
         offset 0

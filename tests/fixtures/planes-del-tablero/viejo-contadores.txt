@@ -1,0 +1,28 @@
+MixedAggregate  (cost=11.21..20527500.62 rows=18 width=49)
+  Hash Key: cases.claim_type
+  Group Key: cases.status
+  ->  Nested Loop Left Join  (cost=11.21..5872.55 rows=521 width=62)
+        ->  Index Scan using idx_cases_tenant_status on cases  (cost=0.16..105.72 rows=521 width=54)
+              Index Cond: (tenant_id = (NULLIF(current_setting('claimmix.tenant_id'::text, true), ''::text))::uuid)
+              Filter: ((created_at >= '2026-01-01 03:00:00+00'::timestamp with time zone) AND (created_at < '2027-01-01 03:00:00+00'::timestamp with time zone))
+        ->  Aggregate  (cost=11.05..11.06 rows=1 width=8)
+              ->  Bitmap Heap Scan on outbound_messages  (cost=4.29..11.05 rows=1 width=8)
+                    Recheck Cond: (case_id = cases.id)
+                    Filter: ((status = 'sent'::text) AND (tenant_id = (NULLIF(current_setting('claimmix.tenant_id'::text, true), ''::text))::uuid))
+                    ->  Bitmap Index Scan on idx_outbound_messages_case_id  (cost=0.00..4.28 rows=2 width=0)
+                          Index Cond: (case_id = cases.id)
+  SubPlan 2
+    ->  Seq Scan on audit_log  (cost=0.00..9967.74 rows=730 width=37)
+          Filter: ((target_type = 'case'::text) AND (tenant_id = (NULLIF(current_setting('claimmix.tenant_id'::text, true), ''::text))::uuid) AND ((payload ->> 'new_status'::text) = 'en_liquidacion'::text))
+  SubPlan 5
+    ->  Bitmap Heap Scan on audit_log audit_log_1  (cost=1858.12..8603.50 rows=1 width=0)
+          Recheck Cond: ((target_type = 'case'::text) AND (event_type = ANY ('{case.status_changed,case.assigned,case.closed,case.ready_confirmed,claim.case_reopened,claim.closed_abandoned,ai.extraction_complete,ai.extracted,core.sync_success,core.sync_failed,case.marked_answered,case.human_reply,case.plan_step,claim.request_resent,claim.field_confirmed,claim.field_rejected,case.re_analyze_triggered,claim.specialist_required,claim.specialist_alerted}'::text[])))
+          Filter: ((event_type = 'case.ready_confirmed'::text) AND (tenant_id = (NULLIF(current_setting('claimmix.tenant_id'::text, true), ''::text))::uuid) AND (created_at > COALESCE((InitPlan 4).col1, '-infinity'::timestamp with time zone)) AND (target_id = (cases.id)::text))
+          InitPlan 4
+            ->  Result  (cost=8.31..8.32 rows=1 width=8)
+                  InitPlan 3
+                    ->  Limit  (cost=0.28..8.31 rows=1 width=8)
+                          ->  Index Scan using idx_agent_runs_case_created on agent_runs  (cost=0.28..8.31 rows=1 width=8)
+                                Index Cond: (case_id = cases.id)
+                                Filter: (tenant_id = (NULLIF(current_setting('claimmix.tenant_id'::text, true), ''::text))::uuid)
+          ->  Bitmap Index Scan on idx_audit_log_trayecto  (cost=0.00..1849.80 rows=33877 width=0)

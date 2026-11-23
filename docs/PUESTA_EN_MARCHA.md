@@ -69,7 +69,7 @@ y `docs/PROJECT_STATUS.md` se corrigieron en este mismo cambio.
 | Pedido | Dónde se resuelve | Estado al 16/10 |
 |---|---|---|
 | 1. Alta automática con número, mail y base propia | prd pasos 2 a 9; altas de dev (pasos 3 a 7) y de QA (pasos 2 a 6) | En curso: falta la primera alta de punta a punta en prd |
-| 2. Cuánto consume | «Cuánto consume» y C1; dev paso 12, QA paso 13, prd paso 14 | El costo por caso se guarda desde la 0054 y `/admin/facturacion` lo muestra (ítem 15, 25/10); falta que el dueño aplique la 0054 a mano |
+| 2. Cuánto consume | «Cuánto consume» y C1; dev paso 12, QA paso 13, prd paso 14 | El costo por caso se guarda desde la 0054 y `/admin/facturacion` lo muestra (ítem 15, 25/10) |
 | 3. prd con base por cliente y dos usuarios | prd pasos 4, 5 y 10 | La base propia anda; el analista se invita después de activar el espacio desde `/admin/altas` (D4, 02/11) |
 | 4. Correr el prompt de nuevo | «Ensayo del prompt» (E1 a E3) | El ensayo corre en dev y QA; prd no ensaya, a propósito |
 | 5. MCP de Meta para WhatsApp | «MCP de WhatsApp (opcional)» y D14 | No hace falta para el alta; queda opcional |
@@ -202,7 +202,7 @@ tarda algo, la guía lo dice así.
     `.github/workflows/deploy-checks.yml:378-383` (D7: el ensayo gasta unos 1,5 M de tokens
     por corrida y el tope de dev y QA tiene que ser igual a la variable del repo);
     `src/app/alta/page.tsx` (D8).
-- [ ] **A2. El nombre de la empresa ficticia.**
+- [x] **A2. El nombre de la empresa ficticia.** 17/10.
   - **Quién:** [Dueño].
   - **Dónde:** el campo «empresa» de `/alta` de prd, el segundo paso del alta («Dar de alta mi empresa»).
   - **Qué hacer:** elegir un nombre inventado, que no se parezca a una aseguradora ni a una
@@ -273,7 +273,9 @@ tarda algo, la guía lo dice así.
     `src/app/api/admin/users/route.ts:131-150` (dominio en prueba), `:152-176`
     (invitación a un operador); `src/app/api/admin/gmail-accounts/callback/route.ts` (`otro_ambiente`,
     `mailbox_taken`); `docs/PROMOCION.md:572-574`.
-- [ ] **A4. Una SIM libre para el número del cliente ficticio de prd.**
+  - **Estado (23/11):** dev hecho el 11/11 y prd el 02/11 (Brimonte tiene administrador,
+    analista y Gmail del agente). Falta QA: las dos casillas de Gonzalo.
+- [x] **A4. Una SIM libre para el número del cliente ficticio de prd.** 05/11.
   - **Quién:** [Dueño].
   - **Dónde:** cualquier operadora argentina.
   - **Qué hacer:** conseguir un móvil argentino que reciba SMS o llamadas. No puede estar en
@@ -285,7 +287,7 @@ tarda algo, la guía lo dice así.
     no de la WABA: ver A5).
   - **Fuentes:** `docs/whatsapp-setup.md:207-215` («Lo que hace la persona»), `:351-357` («El
     PIN de dos pasos»), `:283-299` («El tope de Meta»).
-- [ ] **A5. La verificación del negocio Veltra en Meta.**
+- [x] **A5. La verificación del negocio Veltra en Meta.** 26/10.
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > Centro de seguridad
     (https://www.facebook.com/business/help/216940652189296). Guías de Meta: cómo pedirla
@@ -310,7 +312,8 @@ tarda algo, la guía lo dice así.
   - **Fuentes:** `docs/whatsapp-setup.md:462-463`, `:283`.
   - **Después:** seguir con T2 en
     [Meta: una organización por cliente](#meta-una-organización-por-cliente).
-- [ ] **A6. La pantalla de consentimiento de Google, publicada.**
+  - **Estado (26/10):** hecho. Meta muestra a Veltra verificada.
+- [x] **A6. La pantalla de consentimiento de Google, publicada.** 19/10.
   - **Quién:** [Dueño].
   - **Dónde:** consola de Google Cloud, en los dos proyectos de los clientes OAuth (dev y QA
     comparten uno; prd tiene el suyo, prd paso 1) > APIs y servicios > Pantalla de consentimiento de OAuth.
@@ -322,7 +325,7 @@ tarda algo, la guía lo dice así.
   - **Si falla:** si dice «Testing», Google vence el permiso de cada casilla a los siete días.
     Publicarla.
   - **Fuentes:** `docs/PROJECT_STATUS.md:517-524`; `docs/PROMOCION.md:645-649`, `:806-807`.
-- [ ] **A7. El cliente OAuth de QA y las URI de redirección de los tres hosts.**
+- [x] **A7. El cliente OAuth de QA y las URI de redirección de los tres hosts.** 20/10.
   - **Quién:** [Dueño].
   - **Dónde:** consola de Google Cloud > APIs y servicios > Credenciales.
   - **Qué hacer:** confirmar las URI de la tabla «Las URI de Google, una por host» de
@@ -354,7 +357,7 @@ tarda algo, la guía lo dice así.
   - **Fuentes:** `.env.example:245` (`GMAIL_CLIENT_ID`), `:46-48` (`GOOGLE_CLIENT_ID` y su
     callback); `src/app/api/admin/gmail-accounts/callback`; `src/lib/auth/base-url.ts`;
     `docs/PROMOCION.md:645-649`, `:813-845`.
-- [ ] **A8. El hostname de QA en Turnstile.**
+- [x] **A8. El hostname de QA en Turnstile.** 20/10.
   - **Quién:** [Dueño].
   - **Dónde:** Cloudflare > Turnstile, el widget del alta.
   - **Qué hacer:** agregar `claimmix-qa.vercel.app`.
@@ -373,7 +376,7 @@ tarda algo, la guía lo dice así.
     qué proyecto factura prd (pool `vercel-prd`). Si no se sabe cuál es, [Claude] lo busca
     con el dueño.
   - **Fuentes:** `docs/PROMOCION.md:731`.
-- [ ] **A10. `.env.prd.local` a mano.**
+- [x] **A10. `.env.prd.local` a mano.** 19/10.
   - **Quién:** [Dueño].
   - **Dónde:** la máquina del dueño.
   - **Qué hacer:** tenerlo actualizado. Los scripts de bases de prd que corre [Claude] leen de
@@ -381,7 +384,7 @@ tarda algo, la guía lo dice así.
   - **Salió bien si:** el archivo existe en la carpeta del repo.
   - **Si falla:** los pasos 3, 5 y 16 de prd no se pueden hacer.
   - **Fuentes:** `scripts/lib/entorno-de-bases.mjs:19`.
-- [ ] **A11. Las migraciones, al día en los tres.**
+- [x] **A11. Las migraciones, al día en los tres.** 17/10.
   - **Quién:** [Claude].
   - **Dónde:** GitHub Actions, el último Post-deploy de cada ambiente; `/api/health` de cada
     uno.
@@ -399,7 +402,7 @@ tarda algo, la guía lo dice así.
     `.github/workflows/post-deploy.yml:297` (base de DEV), `:520` (base de QA), `:672-680`
     (PRD); `src/app/api/health/route.ts:20-25`, `:316-319`; `docs/PROMOCION.md:786`
     («Migrar después de un cambio de esquema»).
-- [ ] **A12. El lote de variables, uno por proyecto.**
+- [x] **A12. El lote de variables, uno por proyecto.** 19/10.
   - **Quién:** [Claude] arma la lista, [Dueño] carga los secretos y [Claude] pide el
     redeploy.
   - **Dónde:** Vercel, en cada proyecto (`claimmix`, `claimmix-qa` y `claimmix-prd`) >
@@ -531,7 +534,7 @@ la cuenta de operador:
 
 El paso 12 lee los dos espacios.
 
-- [ ] **1. Configuración (parte del lote de A12).**
+- [x] **1. Configuración (parte del lote de A12).** 19/10.
   - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos que falten.
   - **Dónde:** Vercel, proyecto `claimmix` > Settings > Environment Variables.
   - **Qué hacer:** confirmar que existen con valor, por nombre:
@@ -561,7 +564,7 @@ El paso 12 lee los dos espacios.
     `src/server/alta/numero-automatico-activo.ts:10`; `scripts/sync-vercel-env.mjs:1-10`,
     `:25-33`, `:44-56`; `src/lib/i18n/es-AR.servidor.ts:857`;
     `src/server/notify/remitente-sistema.ts:94-100`.
-- [ ] **2. El deploy y la salud.**
+- [x] **2. El deploy y la salud.** 22/10.
   - **Quién:** [Claude].
   - **Dónde:** la terminal.
   - **Qué hacer:** `pnpm smoke -- --url https://claimmix-dev.vercel.app --expect-commit <SHA>`
@@ -576,7 +579,7 @@ El paso 12 lee los dos espacios.
   - **Fuentes:** `package.json:23`; `docs/TESTING.md:1068`;
     `src/app/api/health/route.ts:413-416`, `:425`, `:591`, `:610`;
     `src/lib/topes.ts:117`; `src/app/(app)/configuracion/page.tsx:168-169`.
-- [ ] **3. Alta.**
+- [x] **3. Alta.** 03/11.
   - **Quién:** [Dueño].
   - **Dónde:** una ventana privada, `https://claimmix-dev.vercel.app/registro`.
   - **Qué hacer:** el alta tiene dos pasos. Paso 1, en `/registro`: el nombre, la casilla de
@@ -616,7 +619,7 @@ El paso 12 lee los dos espacios.
     `src/app/alta/page.tsx`; `src/server/alta/crear-espacio.ts`; `src/server/alta/pasos-hechos.ts`;
     `src/server/alta/cuenta-del-enlace.ts`; `src/lib/auth/registro-permitido.ts:52-53`; `src/server/alta/crear-inquilino.ts:52`,
     `:58`, `:70`; `.env.example:232-233`.
-- [ ] **4. El espacio nuevo en `/admin/altas`.**
+- [x] **4. El espacio nuevo en `/admin/altas`.** 03/11.
   - **Quién:** [Dueño], con la cuenta de operador.
   - **Dónde:** `https://claimmix-dev.vercel.app/admin/altas`: «Altas» en el menú lateral de
     la cuenta de operador (#461), o tipeando la URL.
@@ -629,7 +632,7 @@ El paso 12 lee los dos espacios.
   - **Fuentes:** `src/app/(app)/admin/altas`, `page.tsx:101-105`;
     `src/lib/auth/require-operator.ts:55-67`; `src/lib/auth/roles.ts:58`;
     `src/lib/auth/provision.ts:50-57`.
-- [ ] **5. Base propia: en dev no aplica.**
+- [x] **5. Base propia: en dev no aplica.** 03/11.
   - **Quién:** [Automático].
   - **Dónde:** el alta del paso 3.
   - **Qué hacer:** nada. `BASE_POR_CLIENTE` está en 0 (D2).
@@ -637,7 +640,7 @@ El paso 12 lee los dos espacios.
   - **Si falla:** si pasó, la bandera quedó prendida en dev. Avisar a Claude antes de seguir,
     porque no tiene vuelta.
   - **Fuentes:** `src/app/preparando`; `docs/PROMOCION.md:779-784`.
-- [ ] **6. Número de WhatsApp: el de la plataforma.**
+- [x] **6. Número de WhatsApp: el de la plataforma.** 03/11.
   - **Quién:** [Dueño].
   - **Dónde:** el resultado del paso 2 y la tarjeta de Primeros pasos en `/configuracion`.
   - **Qué hacer:** nada que conectar. dev usa el número de la plataforma, ya conectado, que
@@ -658,7 +661,7 @@ El paso 12 lee los dos espacios.
       regenerarlo.
   - **Fuentes:** `.env.example:372`; `src/app/api/health/route.ts:407-415`, `:424`;
     `docs/whatsapp-setup.md:46-48`.
-- [ ] **7. Gmail: la de Veltra, ya conectada.**
+- [x] **7. Gmail: la de Veltra, ya conectada.** 26/10.
   - **Quién:** [Claude] lo confirma en la base; [Dueño] mira el panel.
   - **Dónde:** `/configuracion` del espacio de la plataforma, con la cuenta de operador.
   - **Qué hacer:** nada que conectar. La Gmail del mail agente de dev (A3, D3) es la de Veltra,
@@ -680,7 +683,7 @@ El paso 12 lee los dos espacios.
   - **Fuentes:** `src/lib/i18n/es-AR.ts:678`; `/api/admin/gmail-accounts/connect`;
     `src/app/api/admin/gmail-accounts/callback/route.ts:84`, `:93`, `:125`;
     `src/lib/security/cifrado.ts:38-39`.
-- [ ] **8. Segundo usuario.**
+- [x] **8. Segundo usuario.** 05/11.
   - **Quién:** [Dueño].
   - **Dónde:** `/admin/users` del espacio de autoalta, «Invitar usuario».
   - **Qué hacer:** la casilla de analista de A3, con rol analista. Antes, el dueño, operador
@@ -715,7 +718,7 @@ El paso 12 lee los dos espacios.
     `src/lib/i18n/es-AR.servidor.ts:397`; `src/server/alta/tope-de-invitaciones.ts:13-20`;
     `src/app/api/admin/users/route.ts:121-129`, `:131-150`, `:152-176`;
     `src/lib/email/reserved.ts:86-98`.
-- [ ] **9. Denuncia por WhatsApp.**
+- [x] **9. Denuncia por WhatsApp.** 03/11.
   - **Quién:** [Dueño].
   - **Dónde:** el celular personal; la bandeja del espacio de la plataforma.
   - **Qué hacer:** un mensaje al número de la plataforma de dev, parecido al primer escenario
@@ -727,7 +730,7 @@ El paso 12 lee los dos espacios.
     pólizas.
   - **Si falla:** si no llega nada, Claude mira el log del webhook.
   - **Fuentes:** `scripts/rehearse-conversations.mts:340`.
-- [ ] **10. Denuncia por mail.**
+- [x] **10. Denuncia por mail.** 03/11.
   - **Quién:** [Dueño].
   - **Dónde:** otra casilla; la bandeja del espacio de la plataforma.
   - **Qué hacer:** un mail a la Gmail de Veltra del paso 7, con un siniestro de ejemplo. Por
@@ -739,7 +742,7 @@ El paso 12 lee los dos espacios.
     UTC. Si a la mañana siguiente no está, [Claude] busca
     `webhooks_gmail.mailbox_not_connected` en los logs.
   - **Fuentes:** `scripts/rehearse-conversations.mts:387-398`; `vercel.json:6-7`.
-- [ ] **11. Lectura del agente.**
+- [x] **11. Lectura del agente.** 03/11.
   - **Quién:** [Dueño].
   - **Dónde:** cada caso, en `/casos/[id]`.
   - **Qué hacer:** leer lo que contestó el agente. Tiene que pedir lo que falta, no prometer
@@ -749,7 +752,7 @@ El paso 12 lee los dos espacios.
     resuelto se puede marcar «Usar como ejemplo de referencia».
   - **Si falla:** anotar lo que sobra o falta, con el número de caso, y seguir el paso E2.
   - **Fuentes:** `src/lib/i18n/es-AR.ts:774`.
-- [ ] **12. Consumo de los dos espacios.**
+- [x] **12. Consumo de los dos espacios.** 03/11.
   - **Quién:** [Dueño].
   - **Dónde:** en el espacio de la plataforma, `/metricas` y `/admin/facturacion`, con la
     cuenta de operador. En el espacio de autoalta, lo mismo. Para todos los espacios,
@@ -762,7 +765,7 @@ El paso 12 lee los dos espacios.
     del proyecto entero (`MONTHLY_BUDGET_USD`), no lo que gastó cada espacio.
   - **Fuentes:** `src/app/(app)/metricas`; `src/app/(app)/admin/facturacion`;
     `src/app/(app)/admin/cartera`; `src/app/(app)/configuracion/page.tsx:168-169`.
-- [ ] **13. El ensayo, después de cada deploy de dev.** Es el paso E1 de «Ensayo del
+- [x] **13. El ensayo, después de cada deploy de dev.** 26/10. Es el paso E1 de «Ensayo del
   prompt».
 
 ## QA: Gonzalo
@@ -774,7 +777,7 @@ de la plataforma (`docs/PROMOCION.md:323-327`). Los pasos 6, 7 y 10 dependen de 
 consolas: eso lo hacen el dueño y Claude. Gonzalo reporta por el canal de D15, con el
 ambiente, la hora, una captura y el número de caso.
 
-- [ ] **1. Configuración (parte del lote de A12).**
+- [x] **1. Configuración (parte del lote de A12).** 05/11.
   - **Quién:** [Claude] mira los nombres; [Dueño] corre el script del remitente y pega el resto
     de los secretos.
   - **Dónde:** Vercel, proyecto `claimmix-qa` > Settings > Environment Variables, entorno
@@ -898,7 +901,7 @@ ambiente, la hora, una captura y el número de caso.
     primero. Si dice «invitación enviada» y el mail no llega, la dirección está en
     `ADMIN_EMAILS` (A3).
   - **Fuentes:** `src/app/api/admin/users/route.ts:131-150`, `:152-176`.
-- [ ] **9. Denuncia por WhatsApp: el transcripto del ensayo.**
+- [x] **9. Denuncia por WhatsApp: el transcripto del ensayo.** 30/10.
   - **Quién:** [Claude] lo copia; [Dueño] se lo manda; [Gonzalo] lo lee.
   - **Dónde:** el paso «Ensayar las conversaciones» del Post-deploy de QA.
   - **Qué hacer:** sin número, se lee el ensayo. El Post-deploy de QA corre las conversaciones
@@ -959,7 +962,7 @@ está prendida, falta la prueba de punta a punta y la primera alta real hace de 
 (D1, b), pero ninguno ocupa ese lugar antes: QA no tiene token, y en dev nadie pide el código
 hasta que esta alta termine y su número se borre (D5), o hasta A5.
 
-- [ ] **1. Configuración (parte del lote de A12).**
+- [x] **1. Configuración (parte del lote de A12).** 19/10.
   - **Quién:** [Claude] mira los nombres; [Dueño] pega los secretos y corre el script del
     remitente. [Claude] corre los comandos de Google Cloud, con el OK del dueño.
   - **Dónde:** Vercel, `claimmix-prd` > Settings > Environment Variables.
@@ -1059,7 +1062,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `scripts/lib/entorno-de-bases.mjs:19`, `:38`; `src/app/api/webhooks/gmail/route.ts:94`,
     `:164`; `.github/workflows/post-deploy.yml:657-669`, `:660`;
     `scripts/smoke-production.mts:254`, `:265-269`.
-- [ ] **2. Requisitos del número por código, antes del alta.**
+- [x] **2. Requisitos del número por código, antes del alta.** 30/10.
   - **Quién:** [Dueño] lo que está en Meta; [Claude] el resto.
   - **Dónde:** Meta Business Suite y Vercel (`claimmix-prd`).
   - **Qué hacer:** un paso cerrado. Si falta un requisito, no se hace el paso 4: el alta pide
@@ -1091,7 +1094,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     el smoke del Post-deploy PRD dio `whatsapp` operativo, TIER_250. El único aviso es
     `gmail: GMAIL_TENANT_ID sin configurar`, esperable en prd (la casilla de la plataforma es
     sólo de dev).
-- [ ] **3. Antes del alta: salud de las bases.**
+- [x] **3. Antes del alta: salud de las bases.** 22/10.
   - **Quién:** [Claude].
   - **Dónde:** la terminal.
   - **Qué hacer:** `GET /api/health?deep=1` con el `CRON_SECRET` de prd. Ese pedido hace una
@@ -1106,7 +1109,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Estado (30/10):** hecho. El paso «Las bases no están desfasadas» del Post-deploy PRD de
     `1d3e9aa7` pidió `health?deep=1` y dio `bases.desfase` en `false`; `purgar-bases.mjs --env
     prd` listó 0 candidatas.
-- [ ] **4. Alta.**
+- [x] **4. Alta.** 30/10.
   - **Quién:** [Cliente ficticio].
   - **Dónde:** una ventana privada, `https://claimmix.vercel.app/registro`.
   - **Qué hacer:** en dos pasos, como el paso 3 de dev. En `/registro`: la Gmail personal del
@@ -1123,7 +1126,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Fuentes:** `src/app/registro/actions.ts`; `src/app/alta/actions.ts`.
   - **Estado (30/10):** hecho. El alta de Brimonte Gestiones salió con la Gmail personal del
     dueño, fuera de `ADMIN_EMAILS` de prd (ahí queda sólo la casilla de Veltra).
-- [ ] **5. Base propia.**
+- [x] **5. Base propia.** 30/10.
   - **Quién:** [Automático]; [Claude] si se traba.
   - **Dónde:** `/preparando`.
   - **Qué hacer:** esperar. La pantalla consulta cada 5 segundos mientras se crea la base
@@ -1145,7 +1148,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     `.github/workflows/barrer-trabados.yml:86`.
   - **Estado (30/10):** hecho. La base `t_<hex>` de la autoalta se creó sola y la pantalla pasó a
     «Primeros pasos» sin reintentos.
-- [ ] **6. El espacio en `/admin/altas`.**
+- [x] **6. El espacio en `/admin/altas`.** 30/10.
   - **Quién:** [Dueño], con la cuenta de operador.
   - **Dónde:** `https://claimmix.vercel.app/admin/altas`.
   - **Qué hacer:** buscar el espacio del cliente ficticio.
@@ -1155,7 +1158,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Estado (30/10):** hecho. Hay que entrar con la cuenta de operador de Veltra, la que está en
     `ADMIN_EMAILS`, parada en el tenant de la casa; con la cuenta del admin del cliente la
     página lleva a `/bandeja`.
-- [ ] **7. Número de WhatsApp.**
+- [x] **7. Número de WhatsApp.** 16/11.
   - **Quién:** [Cliente ficticio]; [Claude] mira los logs.
   - **Dónde:** `/configuracion` (o desde `/preparando`).
   - **Qué hacer:** «Por SMS»; si no llega, «Por llamada». Escribir el código.
@@ -1188,6 +1191,9 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
     logs `whatsapp.alta_numero.graph` traen además el subcódigo y el mensaje de Meta tachado.
     Siguiente: con el cambio en prd, volver a pedir el código; si el número ya está verificado,
     entra solo.
+  - **Estado (16/11, 18:12 UTC):** hecho. El número de Brimonte quedó conectado por el camino
+    manual: se verificó desde WhatsApp Manager y después 000000 y «Conectar». El arreglo del
+    136024 (#572) todavía no estaba en prd.
 - [ ] **8. El número en WhatsApp Manager.**
   - **Quién:** [Dueño].
   - **Dónde:** Meta Business Suite > WhatsApp Manager, la WABA de Veltra.
@@ -1196,7 +1202,10 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Si falla:** si quedó un número sobrante de un intento fallido, borrarlo ahí. ClaimMix
     no borra números, y uno abandonado ocupa el lugar.
   - **Fuentes:** `docs/whatsapp-setup.md:347-348`.
-- [ ] **9. Gmail.**
+  - **Estado (23/11):** pendiente. La WABA de Veltra tiene sólo el número de la plataforma y el
+    de Brimonte, así que no hay sobrantes que borrar. Los dos nombres visibles («ClaimMix») figuran
+    rechazados: el dueño los corrige y los manda de nuevo a revisión.
+- [x] **9. Gmail.** 30/10.
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/configuracion`, «Conectar Gmail».
   - **Qué hacer:** la Gmail del mail agente de prd (A3). Desde el 24/10 es una Gmail propia
@@ -1216,7 +1225,7 @@ hasta que esta alta termine y su número se borre (D5), o hasta A5.
   - **Estado (30/10):** hecho. La casilla propia del agente de prd quedó conectada, activa y sin
     error; no es la de Veltra ni la del login. Las filas de `gmail_accounts` viven en la base
     de control (por `tenant_id`), no en la `t_<hex>` del cliente.
-- [ ] **10. Segundo usuario.**
+- [x] **10. Segundo usuario.** 02/11.
   - **Quién:** [Cliente ficticio].
   - **Dónde:** `/admin/users`, «Invitar usuario».
   - **Qué hacer:** invitar a quien el dueño elija como analista, con una casilla real de otro
@@ -1342,7 +1351,7 @@ Para quien no es el dueño ni Gonzalo y prueba ClaimMix en prd.
 
 El pedido 4: correr el prompt de nuevo cada vez que cambia algo del agente.
 
-- [ ] **E1. El ensayo, después de cada deploy de dev o QA.**
+- [x] **E1. El ensayo, después de cada deploy de dev o QA.** 22/10.
   - **Quién:** [Claude].
   - **Dónde:** la terminal; el Post-deploy de QA ya ensaya solo.
   - **Qué hacer:** `pnpm check` completo después de cada deploy, y `pnpm check --local`
@@ -1353,7 +1362,7 @@ El pedido 4: correr el prompt de nuevo cada vez que cambia algo del agente.
     <escenario>` y `pnpm smoke` como evidencia.
   - **Fuentes:** `package.json:22`, `:23`, `:28`; `scripts/check-everything.mts:43-46`;
     `docs/TESTING.md:186-188`; `docs/PROJECT_STATUS.md:5273`; `AGENTS.md`, «Probar cambios».
-- [ ] **E2. Leer el transcripto.**
+- [x] **E2. Leer el transcripto.** 22/10.
   - **Quién:** [Dueño]; en QA, Gonzalo con el texto del paso 9.
   - **Dónde:** el transcripto que imprime el ensayo.
   - **Qué hacer:** leerlo con los criterios del paso 11 de dev.
@@ -1364,7 +1373,7 @@ El pedido 4: correr el prompt de nuevo cada vez que cambia algo del agente.
     - [Claude] cambia el prompt con un PR a `qa` y `pnpm check`, y el mismo día a main y prd.
       Es el camino que mantiene iguales los tres.
   - **Fuentes:** `src/lib/i18n/es-AR.ts:852`; `docs/PROJECT_STATUS.md:5055-5063`.
-- [ ] **E3. prd no ensaya, a propósito.**
+- [x] **E3. prd no ensaya, a propósito.** 22/10.
   - **Quién:** [Dueño].
   - **Dónde:** prd, pasos 11 a 13.
   - **Qué hacer:** en prd la prueba es la denuncia manual. Después de una promoción que toque
@@ -1379,7 +1388,7 @@ El pedido 5. Un MCP le deja a Claude mandar mensajes de WhatsApp por la misma AP
 operar o probar. **No es lo que hace que ClaimMix reciba denuncias**, y no hace falta para el
 alta. Recomendación: no instalarlo (D14).
 
-- [ ] **M1. Sólo si el dueño lo quiere.**
+- [x] **M1. Sólo si el dueño lo quiere.** 22/10.
   - **Quién:** [Dueño + Claude].
   - **Dónde:** la configuración local de Claude en la máquina del dueño (`.mcp.json`, que el
     repo ignora). **Nunca en el repo.**
@@ -1548,7 +1557,7 @@ antes de mandar T3, para no cambiarla con la revisión abierta. Esta parte es la
 Meta) espera al abogado (T6) y no frena a la vía 1. En `docs/whatsapp-setup.md` las dos son la
 parte G y la parte H.
 
-- [ ] **T1. La verificación del negocio Veltra (A5 hecho).**
+- [x] **T1. La verificación del negocio Veltra (A5 hecho).** 26/10.
   - **Quién:** [Dueño].
   - **Dónde:** A5, en [Antes de empezar](#antes-de-empezar).
   - **Qué hacer:** nada aparte de A5, que ya trae los links de Meta. Meta pide el negocio
@@ -1557,7 +1566,7 @@ parte G y la parte H.
   - **Si falla:** si Meta rechaza la verificación, A5 dice qué hacer. Mientras tanto, T5 y T6
     se pueden adelantar.
   - **Fuentes:** `docs/whatsapp-setup.md:462-463`.
-- [ ] **T2. La app ClaimMix como Tech Provider.**
+- [x] **T2. La app ClaimMix como Tech Provider.** 26/10.
   - **Quién:** [Dueño].
   - **Dónde:** `https://developers.facebook.com/apps` > ClaimMix > Casos de uso > «Personalizar»
     (el lápiz) en WhatsApp > «Tech Provider onboarding» en el menú de la izquierda; la conexión
@@ -1586,7 +1595,7 @@ parte G y la parte H.
     de Tech Provider si la verificación del negocio vence, si la app se desconecta del
     negocio o si restringe la cuenta.
   - **Fuentes:** `docs/whatsapp-setup.md:467`, `:501`.
-- [ ] **T3. La revisión de la app (App Review).**
+- [x] **T3. La revisión de la app (App Review).** 13/11.
   - **Quién:** [Dueño].
   - **Dónde:** panel de la app > Casos de uso > WhatsApp «Personalizar» > Permisos y funciones
     > «+Add to App Review» en cada permiso, después «Become Tech Provider» y «Edit App Review».
@@ -1621,6 +1630,8 @@ parte G y la parte H.
     28/10/2026 con `whatsapp_business_messaging`, `whatsapp_business_management` y
     `public_profile`, que Meta suma sola; queda «Review in progress» y Meta estima hasta 20
     días. T3 se marca cuando llega la aprobación, no al mandarla.
+  - **Estado (13/11):** hecho. Meta aprobó los tres permisos. La app sigue sin publicar
+    («Unpublished»).
   - **Si falla:** Meta devuelve el pedido con el motivo. Corregir el video o la explicación y
     mandarlo de nuevo. Mientras la revisión está abierta, no tocar la configuración básica
     (T5).
@@ -1661,7 +1672,7 @@ parte G y la parte H.
     https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/errors/.
   - **Fuentes:** `docs/whatsapp-setup.md:439`, `:473-476`; `.env.example:308`;
     `src/app/conectar-whatsapp/meta-sdk.ts:184-197`.
-- [ ] **T5. La configuración básica de la app.**
+- [x] **T5. La configuración básica de la app.** 28/10.
   - **Quién:** [Dueño].
   - **Dónde:** panel de la app > Configuración > Básica. Guías de Meta:
     https://developers.facebook.com/documentation/development/create-an-app/app-dashboard/basic-settings
@@ -1887,7 +1898,8 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   es operador en los tres y Gonzalo no lo es en QA.
 - **D9.** Pedir la verificación del negocio en Meta (A5).
 - **D10.** Seguir con el tope de 100 usuarios de Google o pedir la verificación, que puede ser
-  paga. **24/10:** el dueño la está evaluando. `gmail.modify` es un permiso restringido:
+  paga. **Elegido:** (a), quedarse por debajo de 100 usuarios y dejar anotada la verificación.
+  El aviso de usuarios de Google (L6) todavía no está en el código. `gmail.modify` es un permiso restringido:
   pasar el tope pide la verificación de la app y una evaluación de seguridad anual de un
   tercero (CASA).
 - **D11.** Vercel Hobby es de uso no comercial y prd con clientes que pagan choca con eso

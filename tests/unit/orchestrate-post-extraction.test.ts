@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
-import { is, Param } from "drizzle-orm";
+import { is, Param, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   orchestratePostExtraction,
   type ExtractedClaimOutput,
@@ -23,6 +24,7 @@ import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { ParteDeSombra } from "@/core/agente/sombra";
 import type { OpinionDelAgente } from "@/server/ai/deliberate";
 import { ENCABEZADO_TRANSCRIPCION, PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
+import { METADATO_SIN_TEXTO } from "@/core/adjuntos/firma";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -194,6 +196,10 @@ function valoresDe(cond: unknown, acc: unknown[] = []): unknown[] {
   return acc;
 }
 
+const dialecto = new PgDialect();
+/** La condición como la manda drizzle: el texto y sus valores. */
+const enSql = (cond: unknown) => dialecto.sqlToQuery(cond as SQL);
+
 /**
  * Configure the db mock chains for a single test.
  *
@@ -330,7 +336,7 @@ function setupDbMocks({
                 return Promise.resolve(
                   valores.includes("size_exceeded")
                     ? rejectedAttachmentRows
-                    : columnasDe(cond).includes("metadatos")
+                    : enSql(cond).params.includes(METADATO_SIN_TEXTO)
                       ? audioSinTextoRows
                       : newAttachmentRows
                 );
@@ -3297,6 +3303,39 @@ Choqué ayer en la rotonda.`);
 
       const condicion = adjuntosWhereSpy.mock.calls[2][0];
       expect(columnasDe(condicion)).toEqual(expect.arrayContaining(["case_id", "created_at", "metadatos"]));
+      // La misma clave que escribe `transcribir.ts`, comparada con true.
+      const { sql: texto, params } = enSql(condicion);
+      const [, clave, valor] = texto.match(/"metadatos"->>\$(\d+)::text = \$(\d+)/) ?? [];
+      expect(params[Number(clave) - 1]).toBe(METADATO_SIN_TEXTO);
+      expect(params[Number(valor) - 1]).toBe("true");
+    });
+
+    it("también cuenta la nota de voz que sigue sin leer: la corrida que la tome y falle llega después del acuse", async () => {
+      const { adjuntosWhereSpy } = setupDbMocks({
+        lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" }],
+        newAttachmentRows: [{ id: "att-1" }],
+      });
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["parte_amistoso"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+      vi.mocked(deliberate).mockResolvedValue(null as never);
+
+      await orchestratePostExtraction(
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: "gracias" },
+        NO_MATCHES
+      );
+
+      // Un plazo agotado, un 429 o la tercera de una corrida: sin leer, sea audio y no un rechazo.
+      const { sql: texto, params } = enSql(adjuntosWhereSpy.mock.calls[2][0]);
+      expect(texto).toMatch(/\("claim_attachments"\."resumen" is null or [^]*"metadatos"->>/);
+      expect(texto).toMatch(/"rejected_reason" is null/);
+      const [, tipo] = texto.match(/"content_type" ilike \$(\d+)/) ?? [];
+      expect(params[Number(tipo) - 1]).toBe("audio/%");
     });
   });
 

@@ -617,7 +617,7 @@ function explain(problem: string): string {
     return "no dijiste que el número de póliza no coincide. Hay que decirlo y pedirle que escriba el correcto.";
   }
   if (problem === "audio_sin_transcribir") {
-    return `no dijiste que la nota de voz no se pudo escuchar, la diste por anotada o recibida, o no le pediste que lo escriba. No se pudo escuchar: decilo y pedile que nos escriba lo que quería contar o que la mande de nuevo (por ejemplo: «${AUDIO_SIN_TRANSCRIBIR}»).`;
+    return `no dijiste que la nota de voz no se pudo escuchar, la diste por escuchada, anotada o recibida (aunque sea una parte), o no le pediste que lo escriba. No se pudo escuchar: decilo y pedile que nos escriba lo que quería contar o que la mande de nuevo (por ejemplo: «${AUDIO_SIN_TRANSCRIBIR}»).`;
   }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";

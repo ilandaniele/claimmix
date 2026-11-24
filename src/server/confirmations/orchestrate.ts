@@ -28,7 +28,7 @@
  */
 
 import "server-only";
-import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import {
@@ -46,6 +46,7 @@ import {
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
 import { esAudioSinTranscribir } from "@/core/adjuntos/transcripcion";
+import { METADATO_SIN_TEXTO } from "@/core/adjuntos/firma";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
@@ -1272,8 +1273,8 @@ export async function orchestratePostExtraction(
         datosDelPadron,
         escritoPorLaPersona,
         // El acuse sale porque llegó el archivo, no porque se leyó lo que dijo. El marcador
-        // cubre la nota que sigue pendiente; la marca del adjunto, la que ya falló, sea
-        // por mail o con otro mensaje atrás.
+        // cubre la nota del último mensaje; la consulta de adjuntos, la que sigue sin leer
+        // o ya falló, sea por mail o con otro mensaje atrás.
         audioSinTranscribir: audioSinTexto || esAudioSinTranscribir(latestMessageText),
       },
       inReplyToMessageId,
@@ -2581,8 +2582,11 @@ async function archivosDesdeQueHablamos(
             )
           )
           .limit(1),
-        // Una nota de voz que la transcripción dio por leída sin sacarle texto
-        // (`transcribir.ts` la marca): nadie supo qué dijo, llegue por el canal que llegue.
+        // Una nota de voz que nadie leyó, llegue por el canal que llegue: la que
+        // sigue pendiente (un plazo agotado, un 429, la tercera de una corrida, la
+        // descartada) o la que la transcripción dio por leída sin sacarle texto
+        // (`transcribir.ts` la marca). La pendiente se cuenta ya: la corrida que
+        // la tome y falle llega después de este acuse, cuando `desde` la deja afuera.
         db
           .select({ id: claimAttachments.id })
           .from(claimAttachments)
@@ -2590,7 +2594,12 @@ async function archivosDesdeQueHablamos(
             and(
               eq(claimAttachments.case_id, caseId),
               desde,
-              sql`${claimAttachments.metadatos}->>'sinTexto' = ${"true"}`
+              ilike(claimAttachments.content_type, "audio/%"),
+              isNull(claimAttachments.rejected_reason),
+              or(
+                isNull(claimAttachments.resumen),
+                sql`${claimAttachments.metadatos}->>${METADATO_SIN_TEXTO}::text = ${"true"}`
+              )
             )
           )
           .limit(1),

@@ -267,6 +267,9 @@ export interface Metadatos {
   leyendoCarta?: string;
 }
 
+/** La clave de `sinTexto`: la escribe `transcribir.ts` y la lee `orchestrate.ts`. */
+export const METADATO_SIN_TEXTO = "sinTexto" satisfies keyof Metadatos;
+
 export const MAX_PAGINAS_PDF = 10;
 export const MAX_SEGUNDOS_AUDIO = 120;
 /**

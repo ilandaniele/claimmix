@@ -18,7 +18,7 @@ import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { enTenantVarias, type TenantContext } from "@/data/scope";
-import { esAudio, normalizarMime } from "@/core/adjuntos/firma";
+import { esAudio, METADATO_SIN_TEXTO, normalizarMime } from "@/core/adjuntos/firma";
 import { conTranscripcion } from "@/core/adjuntos/transcripcion";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
@@ -36,6 +36,8 @@ const MAX_NOTAS = 2;
 const MAX_TEXTO = 4000;
 const MAX_RESUMEN = 200;
 const SIN_TEXTO = { transcripcion: "", resumen: "" };
+/** Es lo que le dice al orquestador que nadie supo qué contó la nota. */
+const MARCA_SIN_TEXTO = sql`coalesce(${claimAttachments.metadatos}, '{}'::jsonb) || jsonb_build_object(${METADATO_SIN_TEXTO}::text, true)`;
 /**
  * Hablando rápido no se pasa de cuatro palabras por segundo. Con más, el
  * modelo inventó: ante un audio mudo de 2 s escribía denuncias enteras.
@@ -195,7 +197,7 @@ export async function transcribirNotasDeVoz(args: {
         db
           .update(claimAttachments)
           // `util` queda en true aunque no haya texto: el audio llegó y es de la persona.
-          .set({ resumen: h.resumen, util: true })
+          .set({ resumen: h.resumen, util: true, ...(h.transcripcion ? {} : { metadatos: MARCA_SIN_TEXTO }) })
           .where(
             and(
               eq(claimAttachments.case_id, caseId),

@@ -103,6 +103,7 @@ import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 import { CUIDADO, EMERGENCIAS, EMERGENCIAS_DE_LA_POLIZA, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
@@ -807,6 +808,66 @@ describe("whatsappMessenger — tomar nota sin repetir el pedido", () => {
     // los dos, alreadyAskedFor leería mal lo último que dijimos.
     await send("information_received", { caseId: CASE });
     expect(inserted[0]?.template).toBe("wa_information_received");
+  });
+});
+
+/*
+ * nota-de-voz-y-pdf, 24/11: la nota no se pudo escuchar y el acuse dijo «ya
+ * tomamos nota de lo que nos contaste en el audio».
+ */
+describe("whatsappMessenger — el acuse de una nota de voz que no se escuchó", () => {
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+  const MALO = "Lucía, ya tomamos nota de lo que nos contaste en el audio.";
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+  });
+
+  it("el piso pide que lo escriba y no dice que tomó nota", async () => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    await send("information_received", { caseId: CASE, audioSinTranscribir: true });
+
+    expect(sentBody()).toBe(AUDIO_SIN_TRANSCRIBIR);
+    expect(sentBody()).not.toContain("tomamos nota");
+  });
+
+  it("sin la marca, el piso es el de siempre", async () => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+    await send("information_received", { caseId: CASE });
+
+    expect(sentBody()).toContain("tomamos nota");
+    expect(sentBody()).not.toContain(AUDIO_SIN_TRANSCRIBIR);
+  });
+
+  it("con el redactor prendido, el acuse que insiste en «tomamos nota» cae al piso del audio", async () => {
+    delete process.env.AGENT_COMPOSE_REPLIES;
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ message: MALO }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+    });
+
+    await send("information_received", {
+      caseId: CASE,
+      claimantName: "Lucía",
+      audioSinTranscribir: true,
+    });
+
+    expect(callGemini).toHaveBeenCalledTimes(2);
+    expect(sentBody()).toBe(AUDIO_SIN_TRANSCRIBIR);
+  });
+
+  it("con el redactor prendido, un acuse sin la marca sale como lo escribió", async () => {
+    delete process.env.AGENT_COMPOSE_REPLIES;
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ message: MALO }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+    });
+
+    await send("information_received", { caseId: CASE, claimantName: "Lucía" });
+
+    expect(callGemini).toHaveBeenCalledTimes(1);
+    expect(sentBody()).toBe(MALO);
   });
 });
 

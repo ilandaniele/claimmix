@@ -47,7 +47,9 @@ import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
 import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
+import { textoBase } from "@/core/agente/entrenamiento-base";
 
 const mockCallGemini = callGemini as unknown as ReturnType<typeof vi.fn>;
 const mockRunTool = runTool as unknown as ReturnType<typeof vi.fn>;
@@ -244,6 +246,24 @@ describe("prompts del agente — compose", () => {
     );
 
     await expect(texto).toMatchFileSnapshot("./__prompts__/compose-poliza-cambiada-whatsapp.txt");
+  });
+
+  it("acuse de una nota de voz que no se pudo escuchar, por WhatsApp", async () => {
+    const texto = await prompt(
+      AUDIO_SIN_TRANSCRIBIR,
+      base({
+        intent: "acknowledgement",
+        channel: "whatsapp",
+        audioSinTranscribir: true,
+        isFollowUp: true,
+        lastMessage: "[Mensaje de audio adjunto]",
+      })
+    );
+
+    // La regla del canal manda «Gracias, tomamos nota de…» en todo acuse: acá se desactiva a la vista.
+    expect(texto).not.toContain(textoBase("redactar.acuse"));
+    expect(texto).toMatch(/no rige lo de agradecer/);
+    await expect(texto).toMatchFileSnapshot("./__prompts__/compose-audio-sin-transcribir-whatsapp.txt");
   });
 
   it("recordatorio de un pedido, por WhatsApp", async () => {

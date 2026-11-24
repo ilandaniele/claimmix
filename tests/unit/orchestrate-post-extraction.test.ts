@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
-import { is, Param } from "drizzle-orm";
+import { is, Param, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   orchestratePostExtraction,
   type ExtractedClaimOutput,
@@ -22,6 +23,8 @@ import type { AgentMessenger } from "@/server/confirmations/messenger";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { ParteDeSombra } from "@/core/agente/sombra";
 import type { OpinionDelAgente } from "@/server/ai/deliberate";
+import { ENCABEZADO_TRANSCRIPCION, PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
+import { METADATO_SIN_TEXTO } from "@/core/adjuntos/firma";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -193,6 +196,10 @@ function valoresDe(cond: unknown, acc: unknown[] = []): unknown[] {
   return acc;
 }
 
+const dialecto = new PgDialect();
+/** La condición como la manda drizzle: el texto y sus valores. */
+const enSql = (cond: unknown) => dialecto.sqlToQuery(cond as SQL);
+
 /**
  * Configure the db mock chains for a single test.
  *
@@ -220,6 +227,8 @@ function setupDbMocks({
   newAttachmentRows = [] as Array<{ id: string }>,
   /** Rows for the size-rejection query of archivosDesdeQueHablamos: non-empty means a file did not get in. */
   rejectedAttachmentRows = [] as Array<{ id: string }>,
+  /** Rows for the audio-without-text query of archivosDesdeQueHablamos: non-empty means a voice note nobody could read arrived. */
+  audioSinTextoRows = [] as Array<{ id: string }>,
   /**
    * Rows for factsLearnedSinceWeLastSpoke: non-empty means the claimant told
    * us something we did not have when we last wrote to them.
@@ -319,14 +328,19 @@ function setupDbMocks({
           where: (cond: unknown) => {
             adjuntosWhereSpy(cond);
             return {
-              // Dos consultas por vuelta: la de los archivos que entraron y la
-              // de los que pasaron el tope; se distinguen por la condición.
-              limit: () =>
-                Promise.resolve(
-                  valoresDe(cond).includes("size_exceeded")
+              // Tres consultas por vuelta: la de los archivos que entraron, la de los
+              // que pasaron el tope y la de las notas de voz sin texto; se
+              // distinguen por la condición.
+              limit: () => {
+                const valores = valoresDe(cond);
+                return Promise.resolve(
+                  valores.includes("size_exceeded")
                     ? rejectedAttachmentRows
-                    : newAttachmentRows
-                ),
+                    : enSql(cond).params.includes(METADATO_SIN_TEXTO)
+                      ? audioSinTextoRows
+                      : newAttachmentRows
+                );
+              },
             };
           },
         };
@@ -3206,6 +3220,123 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
     const calls = vi.mocked(dispatchOutboundEmail).mock.calls;
     expect(calls.some((c) => c[0].template === "information_received")).toBe(true);
     expect(calls.some((c) => c[0].template === "missing_information_request")).toBe(false);
+  });
+
+  describe("una nota de voz", () => {
+    // El archivo dispara el acuse aunque nadie haya leído lo que dice. Dos señales
+    // distinguen una nota sin transcribir de una leída: el marcador del último
+    // mensaje (WhatsApp, nota pendiente) y la marca que deja `transcribir.ts` en el
+    // adjunto cuando no sacó texto (cualquier canal, con otro mensaje atrás).
+    async function acuseCon(latestMessageText: string, audioSinTextoRows: Array<{ id: string }> = []) {
+      setupDbMocks({
+        lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" }],
+        newAttachmentRows: [{ id: "att-1" }],
+        audioSinTextoRows,
+      });
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["parte_amistoso"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+      vi.mocked(deliberate).mockResolvedValue(null as never);
+
+      await orchestratePostExtraction(
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText },
+        NO_MATCHES
+      );
+
+      return vi
+        .mocked(dispatchOutboundEmail)
+        .mock.calls.find((c) => c[0].template === "information_received");
+    }
+
+    it("sin transcribir: el acuse va marcado", async () => {
+      const acuse = await acuseCon(PLACEHOLDER_AUDIO);
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(true);
+    });
+
+    it("transcripta: el acuse va sin marca", async () => {
+      const acuse = await acuseCon(`${ENCABEZADO_TRANSCRIPCION}
+Choqué ayer en la rotonda.`);
+      expect(acuse).toBeDefined();
+      expect(acuse?.[0].data?.audioSinTranscribir).toBeFalsy();
+    });
+
+    it("por mail, con el cuerpo del mensaje y sin marcador, la marca del adjunto lo prende", async () => {
+      const acuse = await acuseCon("Les mando el audio con lo que pasó.", [{ id: "att-1" }]);
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(true);
+    });
+
+    it("sin texto y con otro mensaje atrás (una foto, un saludo), la marca del adjunto lo prende", async () => {
+      const acuse = await acuseCon("[Imagen adjunta sin texto]", [{ id: "att-1" }]);
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(true);
+    });
+
+    it("el mail con un adjunto cualquiera, sin nota sin texto, sale sin marca", async () => {
+      const acuse = await acuseCon("Les mando la foto del parte.");
+      expect(acuse).toBeDefined();
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(false);
+    });
+
+    it("la consulta mira sólo lo que llegó desde que hablamos y la marca del adjunto", async () => {
+      const { adjuntosWhereSpy } = setupDbMocks({
+        lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" }],
+        newAttachmentRows: [{ id: "att-1" }],
+      });
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["parte_amistoso"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+      vi.mocked(deliberate).mockResolvedValue(null as never);
+
+      await orchestratePostExtraction(
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: "gracias" },
+        NO_MATCHES
+      );
+
+      const condicion = adjuntosWhereSpy.mock.calls[2][0];
+      expect(columnasDe(condicion)).toEqual(expect.arrayContaining(["case_id", "created_at", "metadatos"]));
+      // La misma clave que escribe `transcribir.ts`, comparada con true.
+      const { sql: texto, params } = enSql(condicion);
+      const [, clave, valor] = texto.match(/"metadatos"->>\$(\d+)::text = \$(\d+)/) ?? [];
+      expect(params[Number(clave) - 1]).toBe(METADATO_SIN_TEXTO);
+      expect(params[Number(valor) - 1]).toBe("true");
+    });
+
+    it("también cuenta la nota de voz que sigue sin leer: la corrida que la tome y falle llega después del acuse", async () => {
+      const { adjuntosWhereSpy } = setupDbMocks({
+        lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" }],
+        newAttachmentRows: [{ id: "att-1" }],
+      });
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["parte_amistoso"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+      vi.mocked(deliberate).mockResolvedValue(null as never);
+
+      await orchestratePostExtraction(
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: "gracias" },
+        NO_MATCHES
+      );
+
+      // Un plazo agotado, un 429 o la tercera de una corrida: sin leer, sea audio y no un rechazo.
+      const { sql: texto, params } = enSql(adjuntosWhereSpy.mock.calls[2][0]);
+      expect(texto).toMatch(/\("claim_attachments"\."resumen" is null or [^]*"metadatos"->>/);
+      expect(texto).toMatch(/"rejected_reason" is null/);
+      const [, tipo] = texto.match(/"content_type" ilike \$(\d+)/) ?? [];
+      expect(params[Number(tipo) - 1]).toBe("audio/%");
+    });
   });
 
   it("still asks when a file arrives and the list is not the one we sent", async () => {

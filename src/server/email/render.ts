@@ -178,6 +178,7 @@ export function renderTemplate(
          */
         claimantName: data.claimantName != null ? String(data.claimantName) : null,
         cuerpo: data.cuerpo != null ? String(data.cuerpo) : null,
+        audioSinTranscribir: data.audioSinTranscribir === true,
       });
 
     case "confirmation_received":

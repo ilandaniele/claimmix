@@ -261,9 +261,14 @@ export interface Metadatos {
   plazoAgotado?: { veces: number; en: string };
   /** Por qué no pasó `revisarAdjunto`: se guarda igual, pero no va al modelo. */
   descarte?: string;
+  /** Una nota de voz que la transcripción dio por leída sin sacarle texto (muda, inverosímil o con error). */
+  sinTexto?: true;
   /** Cuándo una corrida tomó la lectura de la carta de este archivo (B24): mientras no venza, otra no la lee. */
   leyendoCarta?: string;
 }
+
+/** La clave de `sinTexto`: la escribe `transcribir.ts` y la lee `orchestrate.ts`. */
+export const METADATO_SIN_TEXTO = "sinTexto" satisfies keyof Metadatos;
 
 export const MAX_PAGINAS_PDF = 10;
 export const MAX_SEGUNDOS_AUDIO = 120;

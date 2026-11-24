@@ -31,6 +31,7 @@ import {
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
@@ -1000,6 +1001,16 @@ describe("renderTemplate — con la prosa ya redactada", () => {
     // Y la póliza sigue enmascarada.
     expect(r.html).toContain("****5678");
     expect(r.html).not.toContain("POL-12345678");
+  });
+
+  it("information_received pasa la marca del audio al piso", () => {
+    const r = renderTemplate("information_received", {
+      caseId: "case-audio-1",
+      audioSinTranscribir: true,
+    });
+
+    expect(r.cuerpo).toContain(AUDIO_SIN_TRANSCRIBIR);
+    expect(r.cuerpo).not.toContain("tomamos nota");
   });
 
   it("information_received tampoco, y sigue siendo un fragmento", () => {

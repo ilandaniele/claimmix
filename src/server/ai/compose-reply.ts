@@ -43,6 +43,7 @@ import {
 } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO, mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR, diceQueNoSeEscucho } from "@/core/mensajes/audio-sin-transcribir";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -128,6 +129,11 @@ export interface ComposeReplyInput {
    * prompt tapa los números de lo que escribió y la guarda rechaza cualquiera.
    */
   polizaCambiada?: boolean;
+  /**
+   * El mensaje era sólo una nota de voz que no se pudo escuchar: el acuse sale
+   * porque llegó el archivo, y no puede decir que se tomó nota de su contenido.
+   */
+  audioSinTranscribir?: boolean;
   /**
    * Alguien se lastimó: la derivación abre con la frase de cuidado.
    *
@@ -233,6 +239,13 @@ const POLIZA_NO_COINCIDE =
   "Decir que el número de póliza que pasó ahora no coincide con el que teníamos para su caso, " +
   `y pedirle que escriba el correcto (por ejemplo: «${POLIZA_CAMBIADA}»).`;
 
+// Con el literal de ejemplo, como POLIZA_NO_COINCIDE: sin él la guarda quema reintentos en paráfrasis.
+const AUDIO_NO_ESCUCHADO =
+  "Decir que no pudimos escuchar su nota de voz y pedirle que nos escriba lo que nos quería contar " +
+  `o que la mande de nuevo (por ejemplo: «${AUDIO_SIN_TRANSCRIBIR}»). NO digas que tomamos nota ni ` +
+  "que recibimos lo que contó: nadie lo pudo escuchar. NO agradezcas. NO repitas la lista de datos. " +
+  "Dos oraciones como mucho.";
+
 function buildPrompt(input: ComposeReplyInput): string {
   const enmascarar = (texto: string): string =>
     paraElPrompt(texto, { polizaCambiada: input.polizaCambiada });
@@ -282,7 +295,7 @@ function buildPrompt(input: ComposeReplyInput): string {
     // el bloque DATOS A PEDIR más abajo. Una lista en el prompt se lee como
     // una lista de cosas para pedir por más que la instrucción diga lo
     // contrario — pasó, y salió el mismo pedido con otras palabras.
-    acknowledgement: textoBase("redactar.acuse"),
+    acknowledgement: input.audioSinTranscribir ? AUDIO_NO_ESCUCHADO : textoBase("redactar.acuse"),
   };
 
   const channelBrief =
@@ -303,7 +316,7 @@ ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}${input.repitePedido ? `\n${textoBase("redactar.recordatorio")}` : ""}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${enmascarar(input.lastMessage).slice(0, 600)}"""` : ""}
 
-${channelBrief}
+${channelBrief}${input.audioSinTranscribir ? "\nEn este mensaje no rige lo de agradecer ni lo de «tomamos nota de…» del acuse de arriba: la nota de voz no se pudo escuchar." : ""}
 
 PROHIBIDO, sin excepción:
 - Prometer cobertura, pagos, montos, plazos, reintegros, grúas o turnos. Nadie evaluó el siniestro todavía.
@@ -511,6 +524,11 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     if (hablaDeLaSalud(trimmed)) return "care_names_health";
   }
 
+  // Lo mismo: el piso dice que no se escuchó, y «tomamos nota» daría por leído lo que nadie leyó.
+  if (input.intent === "acknowledgement" && input.audioSinTranscribir && !diceQueNoSeEscucho(trimmed)) {
+    return "audio_sin_transcribir";
+  }
+
   // Lo mismo: los pisos de toda derivación la dicen, también la del titular ajeno.
   if (deriva && !diceEmergencias(trimmed)) return titularAjeno ? "dropped_emergencias_ajeno" : "dropped_emergencias";
 
@@ -608,6 +626,9 @@ function explain(problem: string): string {
   }
   if (problem === "dropped_poliza") {
     return "no dijiste que el número de póliza no coincide. Hay que decirlo y pedirle que escriba el correcto.";
+  }
+  if (problem === "audio_sin_transcribir") {
+    return `no dijiste que la nota de voz no se pudo escuchar, la diste por escuchada, anotada o recibida (aunque sea una parte), o no le pediste que lo escriba. No se pudo escuchar: decilo y pedile que nos escriba lo que quería contar o que la mande de nuevo (por ejemplo: «${AUDIO_SIN_TRANSCRIBIR}»).`;
   }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";

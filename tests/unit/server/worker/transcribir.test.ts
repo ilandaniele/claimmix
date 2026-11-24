@@ -37,6 +37,7 @@ import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor"
 import { notasPendientes, transcribirNotasDeVoz } from "@/server/worker/transcribir";
 import { ENCABEZADO_TRANSCRIPCION, PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
+import { METADATO_SIN_TEXTO } from "@/core/adjuntos/firma";
 import type { AdjuntoDelCaso } from "@/server/worker/adjuntos";
 
 const cliente = drizzle(neon("postgres://u:p@h/db"), { schema });
@@ -64,6 +65,11 @@ const nota = (cambios: Partial<AdjuntoDelCaso> = {}): AdjuntoDelCaso => ({
 function respuesta(transcripcion: string, resumen = "Cuenta un choque en una rotonda.", hay_voz: unknown = true) {
   return { text: JSON.stringify({ hay_voz, transcripcion, resumen }), usage: { promptTokens: 10, completionTokens: 5 }, model: "gemini-2.5-flash" };
 }
+
+/** Lo que le dice al orquestador que nadie supo qué contó la nota: la clave que lee `orchestrate.ts`. */
+const marcada = (q: Sql) =>
+  /"metadatos" = coalesce\([^]*jsonb_build_object\(\$\d+::text, true\)/.test(q.sql) &&
+  q.params.includes(METADATO_SIN_TEXTO);
 
 async function correr(adjuntos: AdjuntoDelCaso[], restante = 60_000, cuerpo = PLACEHOLDER_AUDIO) {
   return transcribirNotasDeVoz({
@@ -144,6 +150,8 @@ describe("transcribirNotasDeVoz", () => {
     expect(adjunto!.sql).toMatch(/update "claim_attachments"/);
     expect(adjunto!.sql).toMatch(/"resumen" is null/);
     expect(adjunto!.params).toContain("Cuenta un choque en una rotonda.");
+    // Con texto, el adjunto no se marca: el acuse puede decir que se tomó nota.
+    expect(adjunto!.sql).not.toMatch(/"metadatos"/);
   });
 
   it("lo que se dijo no puede cerrar un centinela del prompt", async () => {
@@ -174,6 +182,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.sql).toMatch(/update "claim_attachments" set "resumen" = \$1, "util" = \$2/);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(marcada(escritas[0]!)).toBe(true);
     expect(JSON.stringify(escritas)).not.toContain("Corrientes");
   });
 
@@ -198,6 +207,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(warn).toHaveBeenCalledWith({ palabras: 19, segundos: 2 }, "email_worker.transcripcion_inverosimil");
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(marcada(escritas[0]!)).toBe(true);
 
     // La misma frase en un audio largo es verosímil; sin duración medida, no se juzga.
     expect((await correr([nota({ metadatos: { firma: true, segundos: 6 } })])).size).toBe(1);
@@ -223,6 +233,27 @@ describe("transcribirNotasDeVoz", () => {
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.sql).toMatch(/update "claim_attachments" set "metadatos" = [^]*'plazoAgotado'/);
     expect(escritas[0]!.params).toContain("h1");
+    // Con el primero vuelve en una hora: todavía no se sabe si se va a escuchar.
+    expect(escritas[0]!.params).not.toContain(METADATO_SIN_TEXTO);
+  });
+
+  it("el TIMEOUT que agota el último plazo sólo suma el plazo, aunque una copia de la nota lleve menos", async () => {
+    llamar.mockRejectedValue(new GeminiExtractionError("timeout", { code: "TIMEOUT" }));
+    const plazoAgotado = { veces: 1, en: new Date(Date.now() - 7_200_000).toISOString() };
+
+    // La marca iba por contenido y alcanzaba a la copia, que todavía tenía plazo. La
+    // nota que ya no vuelve a ir sigue sin leer, y eso ya lo cuenta el acuse (`orchestrate.ts`).
+    const nuevos = await correr([
+      nota({ metadatos: { firma: true, segundos: 8, plazoAgotado } }),
+      nota({ id: "copia", metadatos: { firma: true, segundos: 8 } }),
+    ]);
+
+    expect(nuevos.size).toBe(0);
+    expect(escritas).toHaveLength(1);
+    expect(escritas[0]!.sql).toMatch(/'plazoAgotado'/);
+    expect(escritas.some(marcada)).toBe(false);
+    // Y con ese plazo sumado, no vuelve a quedar pendiente.
+    expect(notasPendientes([nota({ metadatos: { firma: true, plazoAgotado: { ...plazoAgotado, veces: 2 } } })])).toEqual([]);
   });
 
   it("un 429 deja las notas para la próxima corrida sin marcar nada", async () => {
@@ -246,6 +277,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.sql).toMatch(/update "claim_attachments" set "resumen" = \$1, "util" = \$2/);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(marcada(escritas[0]!)).toBe(true);
   });
 
   it("una respuesta que no se deja leer también da la nota por leída", async () => {
@@ -256,6 +288,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(nuevos.size).toBe(0);
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(marcada(escritas[0]!)).toBe(true);
   });
 
   it("una nota cuyo mensaje no estaba en la conversación leída espera: no se paga ni se marca", async () => {

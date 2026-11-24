@@ -28,7 +28,7 @@
  */
 
 import "server-only";
-import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import {
@@ -45,6 +45,8 @@ import {
 } from "@/core/agente/sombra";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
+import { esAudioSinTranscribir } from "@/core/adjuntos/transcripcion";
+import { METADATO_SIN_TEXTO } from "@/core/adjuntos/firma";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
@@ -1100,12 +1102,11 @@ export async function orchestratePostExtraction(
   // Una sola lectura de «cuándo hablamos» para las dos preguntas de abajo: no
   // hay ninguna escritura entre ellas. Ver `cuandoHablamosPorUltimaVez`.
   const { hablamos, nosLoDevolvieron, fallo } = await cuandoHablamosPorUltimaVez(caseId, tenantId);
-  const { llegoUnArchivo: somethingArrived, unArchivoNoEntro } = await archivosDesdeQueHablamos(
-    caseId,
-    tenantId,
-    hablamos,
-    fallo
-  );
+  const {
+    llegoUnArchivo: somethingArrived,
+    unArchivoNoEntro,
+    audioSinTexto,
+  } = await archivosDesdeQueHablamos(caseId, tenantId, hablamos, fallo);
 
   // La decisión se toma en el núcleo, que es puro y está probado con siete
   // booleanos: src/core/case/reply-decision.ts. Acá sólo se juntan las señales.
@@ -1271,6 +1272,10 @@ export async function orchestratePostExtraction(
         isFollowUp: true,
         datosDelPadron,
         escritoPorLaPersona,
+        // El acuse sale porque llegó el archivo, no porque se leyó lo que dijo. El marcador
+        // cubre la nota del último mensaje; la consulta de adjuntos, la que sigue sin leer
+        // o ya falló, sea por mail o con otro mensaje atrás.
+        audioSinTranscribir: audioSinTexto || esAudioSinTranscribir(latestMessageText),
       },
       inReplyToMessageId,
     });
@@ -2529,16 +2534,16 @@ async function archivosDesdeQueHablamos(
   tenantId: string,
   hablamos: string | null,
   fallo: boolean
-): Promise<{ llegoUnArchivo: boolean; unArchivoNoEntro: boolean }> {
+): Promise<{ llegoUnArchivo: boolean; unArchivoNoEntro: boolean; audioSinTexto: boolean }> {
   // Sin saber cuándo hablamos, un rechazo viejo ya avisado pasaría por noticia: se calla.
-  if (fallo) return { llegoUnArchivo: false, unArchivoNoEntro: false };
+  if (fallo) return { llegoUnArchivo: false, unArchivoNoEntro: false, audioSinTexto: false };
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   try {
     // Sin `hablamos` no hay filtro de fecha, y `and()` se salta el `undefined`.
     const desde = hablamos ? gt(claimAttachments.created_at, hablamos) : undefined;
 
     type Fila = { id: string };
-    const [aceptados, pesados] = await enTenantVarias<[Fila[], Fila[]]>(
+    const [aceptados, pesados, mudos] = await enTenantVarias<[Fila[], Fila[], Fila[]]>(
       { tenantId },
       (db) => [
         db
@@ -2577,6 +2582,27 @@ async function archivosDesdeQueHablamos(
             )
           )
           .limit(1),
+        // Una nota de voz que nadie leyó, llegue por el canal que llegue: la que
+        // sigue pendiente (un plazo agotado, un 429, la tercera de una corrida, la
+        // descartada) o la que la transcripción dio por leída sin sacarle texto
+        // (`transcribir.ts` la marca). La pendiente se cuenta ya: la corrida que
+        // la tome y falle llega después de este acuse, cuando `desde` la deja afuera.
+        db
+          .select({ id: claimAttachments.id })
+          .from(claimAttachments)
+          .where(
+            and(
+              eq(claimAttachments.case_id, caseId),
+              desde,
+              ilike(claimAttachments.content_type, "audio/%"),
+              isNull(claimAttachments.rejected_reason),
+              or(
+                isNull(claimAttachments.resumen),
+                sql`${claimAttachments.metadatos}->>${METADATO_SIN_TEXTO}::text = ${"true"}`
+              )
+            )
+          )
+          .limit(1),
       ]
     );
     return {
@@ -2584,11 +2610,12 @@ async function archivosDesdeQueHablamos(
       llegoUnArchivo: hablamos !== null && aceptados.length > 0,
       // Sin `hablamos` nunca le dijimos nada: el rechazo es noticia cuando haya sido.
       unArchivoNoEntro: pesados.length > 0,
+      audioSinTexto: mudos.length > 0,
     };
   } catch (err) {
     // Speaking is the safe direction here too.
     logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_for_new_files");
-    return { llegoUnArchivo: false, unArchivoNoEntro: false };
+    return { llegoUnArchivo: false, unArchivoNoEntro: false, audioSinTexto: false };
   }
 }
 

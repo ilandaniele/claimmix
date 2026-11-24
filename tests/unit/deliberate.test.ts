@@ -40,6 +40,7 @@ import { registrarConsumoDelModelo, reservarSiEsPrueba } from "@/server/ai/budge
 import { separarPorRespaldo } from "@/core/case/respaldado-por-busqueda";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
+import { textoBase } from "@/core/agente/entrenamiento-base";
 
 const mockCallGemini = callGemini as unknown as ReturnType<typeof vi.fn>;
 const mockRunTool = runTool as unknown as ReturnType<typeof vi.fn>;
@@ -513,6 +514,42 @@ describe("deliberate — sinCentinelas en knownValues", () => {
     );
 
     expect(mockCallGemini.mock.calls[0][0] as string).toContain("POL-8812-R");
+  });
+});
+
+/**
+ * El criterio 4 de `decidir` reconoce un dato pendiente por la marca que
+ * `buildPrompt` pone en NOS FALTA. Si alguien renombra una de las dos, el texto
+ * apunta a algo que el modelo nunca ve y la regla de los datos primero deja de
+ * aplicarse sin que ningún dorado lo note (no traen una línea «(dato)»).
+ */
+describe("deliberate — la marca de dato que cita el criterio 4", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sale en el dato sin valor y no en el archivo ni en el valor por confirmar", async () => {
+    mockCallGemini.mockResolvedValueOnce({
+      text: JSON.stringify({ intent: "wait", ask_for: [] }),
+      usage: {},
+      model: "gemini-test",
+    });
+
+    await deliberate(
+      situation({
+        outstanding: ["patente_vehiculo", "policy_number", "fotos_danos"],
+        knownValues: { policy_number: "POL-8812-R" },
+      })
+    );
+
+    const prompt = mockCallGemini.mock.calls[0][0] as string;
+    const marca = /marcados "([^"]+)"/.exec(textoBase("decidir.criterios").replace(/\s+/g, " "))?.[1];
+    const linea = (clave: string) => prompt.split("\n").find((l) => l.startsWith(`- ${clave} `)) ?? "";
+
+    expect(marca).toBeDefined();
+    expect(linea("patente_vehiculo")).toContain(marca);
+    expect(linea("policy_number")).not.toContain(marca);
+    expect(linea("fotos_danos")).not.toContain(marca);
   });
 });
 

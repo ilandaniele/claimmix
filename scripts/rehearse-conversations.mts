@@ -572,16 +572,22 @@ const SCENARIOS: Scenario[] = [
     what: "Un mensaje que no aporta nada no merece que se repita el pedido",
     turns: [
       {
-        say: "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114.",
+        say: "Hola, choqué ayer a las 19 contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114, póliza POL-5521-A.",
         // El tipo ya está dicho: pedirlo era el efecto de un bloque del prompt
         // que hacía caer el choque contra un poste en `other`.
         //
         // Y la provincia se pide, no se afirma: «Alem al 500» no dice cuál, y el
         // 30/09 la respuesta decía «Entendemos que fue en CABA» y a la vez la
         // pedía. `avoids` mira eso; no dice «caba» solo porque está en «acabamos».
+        //
+        // Faltan la patente y la provincia, y están pendientes el parte, la
+        // licencia y las fotos: sobran tres lugares de los cinco. El tope es un
+        // máximo, no una meta, así que con un dato pendiente no se rellena con
+        // archivos (criterio 4 de decidir). Si el mensaje no trajera la fecha, la
+        // póliza ni la hora, cinco datos llenarían el tope y esto no distinguiría.
         expect: {
           replies: 1,
-          noAsked: ["claim_type"],
+          noAsked: ["claim_type", "fotos_danos", "licencia_conducir", "parte_amistoso"],
           avoids: ["en CABA", "Capital Federal", "Buenos Aires"],
         },
       },

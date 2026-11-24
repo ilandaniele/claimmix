@@ -158,6 +158,38 @@ describe("las secciones de sombra nombran lo que el código usa", () => {
   });
 });
 
+describe("el criterio 4 de decidir", () => {
+  const criterios = textoBase("decidir.criterios");
+  // Sólo el cuarto: el resto de los criterios tiene sus propios números.
+  const criterio4 = /(?:^| )4\. (.*?) 5\. Si no falta/.exec(criterios.replace(/\s+/g, " "))?.[1] ?? "";
+
+  it("mientras falte un dato (marcado «(dato)»), los datos van antes que archivos o fotos y el máximo es tope, no meta", () => {
+    expect(criterio4).toContain(
+      'falte un dato (en NOS FALTA, los marcados "(dato)"), ese dato entra en la lista antes que cualquier archivo o foto'
+    );
+    expect(criterio4).toContain("los lugares libres van a otros datos");
+    expect(criterio4).toContain("Ese máximo es un tope, no una meta");
+    expect(criterio4).toContain("no completes la lista con archivos ni fotos");
+  });
+
+  it("lo que sólo habría que confirmar no frena los archivos", () => {
+    expect(criterio4).toContain("Lo que sólo habría que confirmar no frena los archivos");
+  });
+
+  it("dice el número del tope una sola vez, para que no derive contra decidir.pedir", () => {
+    expect(criterio4.match(/\b\d+\b/g)).toHaveLength(1);
+    expect(criterio4.match(/\b\d+ cosas\b/g)).toHaveLength(1);
+  });
+
+  it("dice el mismo tope que decidir.pedir", () => {
+    const tope = (texto: string) =>
+      /como máximo (\d+) cosas/i.exec(texto.replace(/\s+/g, " "))?.[1];
+
+    expect(tope(criterio4)).toBeDefined();
+    expect(tope(criterio4)).toBe(tope(textoBase("decidir.pedir")));
+  });
+});
+
 describe("el accesor", () => {
   it("textoBase devuelve el texto de la sección", () => {
     for (const s of ENTRENAMIENTO_BASE) {

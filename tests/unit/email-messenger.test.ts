@@ -62,7 +62,7 @@ import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { renderTemplate, type EmailTemplate } from "@/server/email/render";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
-import { CUIDADO, diceCuidado } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, diceCuidado } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 
@@ -534,7 +534,7 @@ describe("emailMessenger — la derivación con heridos", () => {
   it.each(["critical", "high", undefined])(
     "sin heridos (%s), ni la consigna ni la guarda",
     async (severity) => {
-      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad. ${AVISO_DE_TRASPASO}`;
+      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
       escribe(redactado);
 
       await mandar("specialist_escalation", { caseId: CASE, severity });

@@ -14,7 +14,7 @@ import {
   maskFullName,
   maskPolicyNumber,
 } from "../../src/server/email/render";
-import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
   NO_HACE_FALTA_CONTESTAR,
@@ -452,6 +452,17 @@ describe("renderTemplate — specialist_escalation", () => {
     }
     expect(mencionaElTraspaso(r.cuerpo)).toBe(true);
     expect(pideDatos(r.cuerpo)).toBe(false);
+  });
+
+  // El ensayo mail-grave salió con este piso y no decía a quién llamar si es urgente.
+  it.each([
+    ["critical", false],
+    ["critical", true],
+    ["high", false],
+    ["high", true],
+  ])("el piso dice a quién llamar si es urgente (%s, heridos: %s)", (severity, heridos) => {
+    const r = renderTemplate("specialist_escalation", { caseId: "esc-emerg", severity, heridos });
+    for (const salida of [r.text, r.cuerpo, r.html]) expect(salida).toContain(EMERGENCIAS);
   });
 
   it("tras un pedido de confirmación, dice que no hace falta contestarlo, también redactado", () => {

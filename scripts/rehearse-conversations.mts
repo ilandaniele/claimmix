@@ -408,7 +408,7 @@ const SCENARIOS: Scenario[] = [
         say: "Se prendió fuego el auto en la ruta 3, mi señora está internada con quemaduras. Soy Laura Giménez, póliza POL-9982-C.",
         expect: {
           replies: 1,
-          mentions: ["especialista"],
+          mentions: ["especialista", "emergencias"],
           // The failure this branch exists for: telling someone whose partner
           // is in hospital that we need their DNI and the time of the fire.
           avoids: ["DNI", "necesitamos que nos mandes", "fotos", ...LO_MEDICO],
@@ -926,6 +926,8 @@ const SCENARIOS: Scenario[] = [
         expect: {
           replies: 1,
           status: "requiere_especialista",
+          // El 24/11 el redactor tardó 30 s y el piso del correo no la tenía.
+          mentions: ["emergencias"],
           avoids: LO_MEDICO,
           cuidado: true,
           sinPedido: true,

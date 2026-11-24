@@ -56,7 +56,7 @@ import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { loTomoUnaPersona } from "@/server/cases/devolver-al-agente";
-import { CUIDADO } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
   NO_HACE_FALTA_CONTESTAR,
@@ -175,7 +175,7 @@ const MAX_WHATSAPP_ITEMS = 5;
 const ESCALATION_TEXT =
   "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
   "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
-  "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza. " +
+  `${EMERGENCIAS} ` +
   AVISO_DE_TRASPASO;
 
 /**

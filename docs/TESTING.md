@@ -112,7 +112,9 @@ pedido en el texto, con `pideAlgo` (`scripts/lib/pide-algo.mjs`), más ancho que
 la guarda del redactor para que muerda lo que ella deja pasar, sin contar «no te
 pedimos» ni el ofrecimiento de responder con más información— y `no-menciona`
 con «internad», «quemadur», «recuper», «mejoría» y «esté bien»: la frase no
-repite ni pronostica lo que contó de la salud.
+repite ni pronostica lo que contó de la salud. También `menciona:emergencias`:
+la derivación dice a quién llamar si es urgente (`EMERGENCIAS`, en los dos pisos
+y exigida al redactor por la guarda `dropped_emergencias`).
 
 Toda conversación con `finally` que termina en `listo_para_core` o
 `requiere_especialista` corre `traspaso`: el último mensaje avisa que la carga

@@ -1,7 +1,7 @@
 import { escapeHtml } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
 import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
-import { CUIDADO } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
   NO_HACE_FALTA_CONTESTAR,
@@ -71,6 +71,7 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
     ...(data.heridos === true ? [CUIDADO] : []),
     urgencyMsg,
     derivacion,
+    EMERGENCIAS,
     AVISO_DE_TRASPASO,
   ];
   const cuerpo = parrafos.join("\n\n");

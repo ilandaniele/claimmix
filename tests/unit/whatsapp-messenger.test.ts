@@ -103,7 +103,7 @@ import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
-import { CUIDADO, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
   NO_HACE_FALTA_CONTESTAR,
@@ -1534,6 +1534,7 @@ describe("whatsappMessenger — la derivación con heridos", () => {
     const body = sentBody();
     expect(body.startsWith(CUIDADO)).toBe(true);
     expect(body).toContain("especialista");
+    expect(body).toContain(EMERGENCIAS);
     // Con el predicado del ensayo, más ancho que la guarda: el piso no puede
     // ponerlo en rojo.
     expect(pideAlgo(body.toLowerCase())).toBe(false);
@@ -1546,6 +1547,7 @@ describe("whatsappMessenger — la derivación con heridos", () => {
   it("sin heridos, la derivación también avisa el traspaso", async () => {
     await send("specialist_escalation", { caseId: CASE, severity: "critical" });
 
+    expect(sentBody()).toContain(EMERGENCIAS);
     expect(sentBody()).toContain(AVISO_DE_TRASPASO);
     expect(mencionaElTraspaso(sentBody())).toBe(true);
   });
@@ -1590,7 +1592,7 @@ describe("whatsappMessenger — la derivación con heridos", () => {
 
     // nota-de-voz-y-pdf, 17/10: la derivación del turno 3 volvía a abrir con «Hola, Lucía.».
     it("en una charla que ya venía, la derivación no se escribe como primer mensaje", async () => {
-      redacta(`Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`);
+      redacta(`Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`);
       (hasPriorOutbound as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
 
       await send("specialist_escalation", { caseId: CASE, severity: "critical" });
@@ -1601,7 +1603,7 @@ describe("whatsappMessenger — la derivación con heridos", () => {
     });
 
     it("con heridos, la consigna llega al redactor", async () => {
-      const redactado = `${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+      const redactado = `${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
       redacta(redactado);
 
       await send("specialist_escalation", { caseId: CASE, severity: "critical", heridos: true });
@@ -1613,7 +1615,7 @@ describe("whatsappMessenger — la derivación con heridos", () => {
     // El nombre que escribió la persona viaja en el piso del titular ajeno: un
     // «Lamentamos» ahí no es alguien que se lastimó.
     it("un nombre con «Lamentamos» no la prende en la del titular ajeno", async () => {
-      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
       redacta(redactado);
 
       await send("specialist_escalation", {
@@ -1690,11 +1692,13 @@ describe("whatsappMessenger — después del traspaso", () => {
   });
 
   it("la derivación tras un pedido de confirmación dice que no hace falta contestarlo", async () => {
-    const redactado = `Ya derivamos tu denuncia a un especialista. ${AVISO_DE_TRASPASO}`;
+    const redactado = `Ya derivamos tu denuncia a un especialista. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
     redacta(redactado);
     await send("specialist_escalation", { caseId: CASE, severity: "high", yaPreguntamos: true });
 
     const body = sentBody();
+    // Camino redactado: si la guarda lo rechazara, saldría el piso.
+    expect(body.startsWith(redactado)).toBe(true);
     expect(body).toContain(NO_HACE_FALTA_CONTESTAR);
     expect(body.indexOf(AVISO_DE_TRASPASO)).toBeLessThan(body.indexOf(NO_HACE_FALTA_CONTESTAR));
     expect(pideAlgo(body.toLowerCase())).toBe(false);

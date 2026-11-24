@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-11-17. This file is the single source of truth for "where things stand."
+_Last updated: 2026-11-23. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5497,6 +5497,14 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **La carga ya no se cuelga.** Los planes se explican antes de medir y si un plan del tablero no entra por `target_id` (`entraPorTargetId`) la forma `carga` sale roja sin medirse. Cada consulta que mide la forma `carga` lleva un tope (`--tope`, 10 s; estrés y pico no, buscan dónde se pone lenta): al pasarlo se corta con «op > N s en …» y esa forma en rojo, y la corrida sigue con las demás. Otro rojo de los planes (un índice que falta) no salta la medición. Sin cambios en el workflow salvo el texto de «Qué significa que esto falle».
 - **Pendiente (otro PR).** Mismo patrón `target_id = cases.id::text` en `findExistingWhatsAppCase` (intake-agent, ~476 ms en frío), `cerradoPorSilencio` (~172 ms), `para-responder.ts`, `caso-partido.ts`, `devolver-al-agente.ts`, `auditoria-si-quedo.ts` y `siniestro-nuevo.ts`: no se tocaron acá.
 - **Tests.** La sección 3b2 de `scripts/prove-data-layer.mts` (`pnpm capa-datos`) ejecuta las cuatro consultas bajo RLS por inquilino y las cruza con conteos aparte. `metricas-trayecto-sql`, `metricas-completitud-confirmada`, `kpis-uso-ia-sql`, `metricas-la-cuenta-de-verdad`, `chequeos-de-carga` (con los EXPLAIN reales en `tests/fixtures/planes-del-tablero/`) y `reporte-de-carga` (tope, corte de la medición, `formaSinMedir`).
+
+### Plazo de 30 minutos para conectar la WABA propia (23/11, rama `fix/sello-waba-30min`)
+
+- **Qué pasaba.** En T8, dentro de la ventana de Meta, elegir o crear el portfolio, cargar el número y verificarlo con el SMS no entraba en 10 minutos; al pasarse volvía «vencido» y se perdía el recorrido.
+- **Cambio.** `DURACION_MS` (`actions.ts`) de 10 a 30 minutos: cookie `cm_waba` de 1800 s y `exp` del sello. `FRESCURA_DEL_INICIO_MS` (panel) de 8 a 20, para que un inicio reusado tenga los 10 que lleva el popup. El reloj corre desde «Continuar», no desde «Conectar con Facebook»; por eso «Conectar con Facebook» también pide un inicio nuevo si la apertura tiene más de 20 minutos (antes sólo lo hacía «Reintentar»). No cambian el code de 30 s, `INICIOS_POR_DIA`, `VINCULOS_POR_HORA`, `topePorIp`, los textos ni los resultados.
+- **Seguridad.** El sello sigue atado a tenant, usuario, nonce y `exp`. El un solo uso del nonce es sólo del navegador (conectar borra la cookie, el servidor no guarda nonces gastados): quien retenga sello y cookie puede reenviar conectar hasta `exp`, ahora 30 minutos, y necesita la sesión del mismo usuario y un code de Meta fresco, acotado por `topePorIp` y `VINCULOS_POR_HORA`. Arreglarlo sin migración no es trivial: riesgo aceptado.
+- **Tests.** `waba-actions.test.ts` y `WabaPropiaPanel.test.tsx` (incluye «Conectar con Facebook» con la apertura vencida).
+- **Docs.** T8. Sin migración ni variables.
 
 ### 🙋 Waiting on you (not code)
 

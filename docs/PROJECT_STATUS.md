@@ -5196,7 +5196,7 @@ La política con la que arranca el agente salió de tres archivos de código y p
 4. **El umbral** de arriba (95 %, 100 comparaciones, evaluación completa más dos ensayos y cero `BAJA EL PISO`).
 5. **El costo y el momento de la evaluación completa.** `pnpm sombra:evaluar --todos` son unas 163 extracciones con `gemini-3.8-flash`, el doble con `--sin-sombra`, y no se ven en el tope ni en `/metricas`. Por omisión corre con un límite de 10.
 6. **`extraction.json`.** Si sigue mostrando `confidence_payload.sombra` y `.entrenamiento` a todos los roles. No tienen PII y la ruta ya expone `raw_agent_output`; si no se quiere, se quitan en la ruta con un destructurado.
-7. **«Como máximo 4 cosas»** en el criterio 4 de `deliberate`, contra `MAX_ASK_ITEMS = 5`. Queda byte a byte; corregirlo es un PR a `entrenamiento/base/decidir/01-criterios.md` y cambia el comportamiento.
+7. **«Como máximo 4 cosas»** en el criterio 4 de `deliberate`, contra `MAX_ASK_ITEMS = 5`. Queda byte a byte; corregirlo es un PR a `entrenamiento/base/decidir/01-criterios.md` y cambia el comportamiento. **Decidido el 24/11: 5 en los dos** (rama `fix/tope-pedir-5`, más abajo).
 8. **Las indicaciones en todas las pasadas de `deliberate`** (lo que hace hoy) o sólo en la pasada 0. Con sólo la 0, los turnos con consulta ignoran la regla.
 9. **El texto de las introducciones del bloque**, que ya no dicen «mandan ellas», y si el criterio 6 (póliza vencida, abogados, angustia) se refuerza en la base.
 10. **El alcance de la validación al guardar.** Hoy rechaza etiquetas, enlaces y mails; sumar teléfonos, DNI y patentes da falsos positivos en fechas y en ejemplos de formato.
@@ -5514,6 +5514,13 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Seguridad.** El sello sigue atado a tenant, usuario, nonce y `exp`. El un solo uso del nonce es sólo del navegador (conectar borra la cookie, el servidor no guarda nonces gastados): quien retenga sello y cookie puede reenviar conectar hasta `exp`, ahora 30 minutos, y necesita la sesión del mismo usuario y un code de Meta fresco, acotado por `topePorIp` y `VINCULOS_POR_HORA`. Arreglarlo sin migración no es trivial: riesgo aceptado.
 - **Tests.** `waba-actions.test.ts` y `WabaPropiaPanel.test.tsx` (incluye «Conectar con Facebook» con la apertura vencida).
 - **Docs.** T8. Sin migración ni variables.
+
+### El criterio 4 de `deliberate` dice «como máximo 5» (24/11, rama `fix/tope-pedir-5`)
+
+- **Decisión del dueño.** La decisión 7 de la lista de arriba: el criterio 4 decía «Como máximo 4 cosas» y el código recorta a `MAX_ASK_ITEMS = 5` (`orchestrate.ts`). El dueño eligió 5 en los dos.
+- **Cambio.** Una palabra en `entrenamiento/base/decidir/01-criterios.md`; `pnpm entrenamiento:empaquetar` regenera `entrenamiento-base.generated.ts` (cambia `VERSION_DEL_ENTRENAMIENTO_BASE`). Los dorados `deliberate-pasada-0.txt` y `deliberate-ultima-pasada.txt` cambian en esa línea y en ninguna otra (diff leído). `MAX_ASK_ITEMS` no se toca.
+- **Qué cambia para la gente.** Nada en el tope: lo que sale ya se recortaba a 5. El modelo puede proponer una quinta cosa donde antes se frenaba en 4, y la sombra de `pedir`, que compara contra el código, deja de contar como diferencia lo que sólo era el tope (7 de 11 en la nota de QA de arriba).
+- **Pide un ensayo** antes de mergear, porque es texto del prompt.
 
 ### 🙋 Waiting on you (not code)
 

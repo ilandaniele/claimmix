@@ -261,6 +261,8 @@ export interface Metadatos {
   plazoAgotado?: { veces: number; en: string };
   /** Por qué no pasó `revisarAdjunto`: se guarda igual, pero no va al modelo. */
   descarte?: string;
+  /** Una nota de voz que la transcripción dio por leída sin sacarle texto (muda, inverosímil o con error). */
+  sinTexto?: true;
   /** Cuándo una corrida tomó la lectura de la carta de este archivo (B24): mientras no venza, otra no la lee. */
   leyendoCarta?: string;
 }

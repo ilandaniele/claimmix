@@ -54,6 +54,7 @@ import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO, conArchivoQueNoEntro } from "@/core/mensajes/archivo-que-no-entro";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { loTomoUnaPersona } from "@/server/cases/devolver-al-agente";
 import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
@@ -404,7 +405,9 @@ function renderClosing(data: Record<string, unknown>): string {
  * nombrar—, declarado igual en los dos canales. Un parámetro muerto en dos
  * escritores es cómo el próximo lo «pasa» y no cambia nada.)
  */
-function renderNoted(): string {
+function renderNoted(data: Record<string, unknown>): string {
+  // El acuse salió porque llegó el archivo: si no se pudo escuchar, no se da por anotado.
+  if (data.audioSinTranscribir === true) return AUDIO_SIN_TRANSCRIBIR;
   return (
     "Gracias, tomamos nota de lo que nos contaste. " +
     "Seguimos a la espera de lo que te pedimos antes para poder avanzar."
@@ -442,7 +445,7 @@ function pisoDeWhatsApp(message: AgentMessage): string | null {
     case "data_confirmation_request":
       return renderConflict(message.data);
     case "information_received":
-      return renderNoted();
+      return renderNoted(message.data);
     case "confirmation_received":
       return renderClosing(message.data);
     case "attachment_too_large":
@@ -574,6 +577,7 @@ async function writeReply(
         : undefined,
     titularAjeno: message.data.titularAjeno === true,
     polizaCambiada: message.data.polizaCambiada === true,
+    audioSinTranscribir: message.data.audioSinTranscribir === true,
     heridos: message.data.heridos === true,
     knownValues: (message.data.knownValues ?? undefined) as
       | Record<string, string>

@@ -8,10 +8,43 @@
 
 import { describe, it, expect } from "vitest";
 import { renderInformationReceived } from "@/server/email/templates/information-received";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 
 describe("renderInformationReceived", () => {
+  it("con la nota de voz sin transcribir no dice que tomamos nota y pide que lo escriba", () => {
+    const mail = renderInformationReceived({
+      caseId: CASE,
+      claimantName: "Lucía",
+      audioSinTranscribir: true,
+    });
+
+    // El asunto es lo primero que se lee: tampoco dice «Tomamos nota».
+    expect(mail.subject).not.toMatch(/tomamos nota/i);
+    expect(mail.subject).toContain(`Caso #${CASE}`);
+    for (const parte of [mail.cuerpo, mail.text, mail.html]) {
+      expect(parte).toContain("Lucía, no pudimos escuchar");
+      expect(parte).toContain("escribís");
+      expect(parte.toLowerCase()).not.toContain("tomamos nota");
+      expect(parte).not.toContain("Seguimos a la espera");
+    }
+  });
+
+  it("y sin nombre la oración sigue empezando en mayúscula", () => {
+    const mail = renderInformationReceived({ caseId: CASE, audioSinTranscribir: true });
+    expect(mail.text.startsWith(AUDIO_SIN_TRANSCRIBIR)).toBe(true);
+  });
+
+  it("con la prosa ya redactada, manda esa", () => {
+    const mail = renderInformationReceived({
+      caseId: CASE,
+      audioSinTranscribir: true,
+      cuerpo: "No escuchamos tu audio, ¿nos escribís?",
+    });
+    expect(mail.text).toContain("No escuchamos tu audio");
+  });
+
   it("dice que tomamos nota", () => {
     const mail = renderInformationReceived({ caseId: CASE });
     expect(mail.text.toLowerCase()).toContain("tomamos nota");

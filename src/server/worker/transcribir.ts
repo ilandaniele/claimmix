@@ -195,7 +195,14 @@ export async function transcribirNotasDeVoz(args: {
         db
           .update(claimAttachments)
           // `util` queda en true aunque no haya texto: el audio llegó y es de la persona.
-          .set({ resumen: h.resumen, util: true })
+          // Sin texto se marca: es lo que le dice al orquestador que nadie supo qué contó.
+          .set({
+            resumen: h.resumen,
+            util: true,
+            ...(h.transcripcion
+              ? {}
+              : { metadatos: sql`coalesce(${claimAttachments.metadatos}, '{}'::jsonb) || '{"sinTexto": true}'::jsonb` }),
+          })
           .where(
             and(
               eq(claimAttachments.case_id, caseId),

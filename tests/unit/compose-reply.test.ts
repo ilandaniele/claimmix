@@ -31,6 +31,8 @@ import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
+import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 import { textoBase } from "@/core/agente/entrenamiento-base";
 import { bloqueDeIndicaciones } from "@/core/agente/indicaciones";
@@ -1510,6 +1512,102 @@ describe("composeReply — las indicaciones del equipo", () => {
     const prompt = mockCall.mock.calls[0][0] as string;
     expect(prompt).not.toContain("4455");
     expect(prompt).toContain("no nombres la póliza ***.");
+  });
+});
+
+describe("composeReply — una nota de voz que no se pudo transcribir", () => {
+  /*
+   * nota-de-voz-y-pdf, 24/11, turno 2: la transcripción salió inverosímil, el
+   * mensaje quedó con el marcador y el acuse dijo «ya tomamos nota de lo que
+   * nos contaste en el audio». Nadie leyó ese audio.
+   */
+  const sinTranscribir = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({
+      intent: "acknowledgement",
+      audioSinTranscribir: true,
+      lastMessage: PLACEHOLDER_AUDIO,
+      claimantName: "Lucía",
+      ...over,
+    });
+
+  const BUENO =
+    "Lucía, no pudimos escuchar bien tu nota de voz. ¿Nos escribís lo que nos querías contar?";
+  const MALO = "Lucía, ya tomamos nota de lo que nos contaste en el audio.";
+
+  it("la consigna del acuse dice que no se pudo escuchar y no manda tomar nota", async () => {
+    replies(BUENO);
+
+    await composeReply(sinTranscribir());
+
+    const prompt = mockCall.mock.calls[0][0] as string;
+    expect(prompt).toContain("no pudimos escuchar");
+    expect(prompt).toContain(`«${AUDIO_SIN_TRANSCRIBIR}»`);
+    expect(prompt).not.toContain(textoBase("redactar.acuse"));
+  });
+
+  it("«ya tomamos nota de lo que nos contaste en el audio» no sale: reintento con el motivo y, si insiste, el piso", async () => {
+    responde(MALO, MALO);
+
+    const out = await composeReply(sinTranscribir());
+
+    expect(out).toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("si el reintento lo dice bien, sale ese", async () => {
+    responde(MALO, BUENO);
+
+    const out = await composeReply(sinTranscribir());
+
+    expect(out).toBe(BUENO);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+    expect(mockCall.mock.calls[1][0] as string).toContain("no se pudo escuchar");
+  });
+
+  it.each([
+    "Lucía, recibimos lo que nos contaste en el audio. Cualquier cosa, escribinos.",
+    "Lucía, tu audio quedó registrado. Si querés agregar algo, escribinos.",
+    "Lucía, gracias por la nota de voz, ya la escuchamos. Si querés sumar algo, escribinos.",
+  ])("tampoco sale el que da el audio por recibido o anotado con otras palabras: %s", async (paráfrasis) => {
+    responde(paráfrasis, BUENO);
+
+    expect(await composeReply(sinTranscribir())).toBe(BUENO);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("y la paráfrasis correcta que pide el texto por escrito no gasta un reintento", async () => {
+    replies("Lucía, no pudimos escuchar tu nota de voz. ¿Nos lo podés contar por escrito?");
+
+    await composeReply(sinTranscribir());
+
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("también rechaza el que no le pide que lo escriba", async () => {
+    responde("Lucía, no pudimos escuchar tu audio.", BUENO);
+
+    expect(await composeReply(sinTranscribir())).toBe(BUENO);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("el literal del piso pasa la guarda", async () => {
+    replies(`Lucía, ${AUDIO_SIN_TRANSCRIBIR.charAt(0).toLowerCase()}${AUDIO_SIN_TRANSCRIBIR.slice(1)}`);
+
+    await composeReply(sinTranscribir());
+
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("un audio que sí se transcribió sigue igual", async () => {
+    responde(MALO);
+
+    const out = await composeReply(
+      sinTranscribir({ audioSinTranscribir: undefined, lastMessage: "Choqué ayer en la rotonda." })
+    );
+
+    expect(out).toBe(MALO);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+    expect(mockCall.mock.calls[0][0] as string).toContain(textoBase("redactar.acuse"));
   });
 });
 

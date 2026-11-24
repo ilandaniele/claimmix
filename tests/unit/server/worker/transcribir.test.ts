@@ -65,6 +65,9 @@ function respuesta(transcripcion: string, resumen = "Cuenta un choque en una rot
   return { text: JSON.stringify({ hay_voz, transcripcion, resumen }), usage: { promptTokens: 10, completionTokens: 5 }, model: "gemini-2.5-flash" };
 }
 
+/** Lo que le dice al orquestador que nadie supo qué contó la nota. */
+const MARCA_SIN_TEXTO = /"metadatos" = coalesce\([^]*'\{"sinTexto": true\}'::jsonb/;
+
 async function correr(adjuntos: AdjuntoDelCaso[], restante = 60_000, cuerpo = PLACEHOLDER_AUDIO) {
   return transcribirNotasDeVoz({
     caseId: "caso-1",
@@ -144,6 +147,8 @@ describe("transcribirNotasDeVoz", () => {
     expect(adjunto!.sql).toMatch(/update "claim_attachments"/);
     expect(adjunto!.sql).toMatch(/"resumen" is null/);
     expect(adjunto!.params).toContain("Cuenta un choque en una rotonda.");
+    // Con texto, el adjunto no se marca: el acuse puede decir que se tomó nota.
+    expect(adjunto!.sql).not.toMatch(/sinTexto/);
   });
 
   it("lo que se dijo no puede cerrar un centinela del prompt", async () => {
@@ -174,6 +179,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.sql).toMatch(/update "claim_attachments" set "resumen" = \$1, "util" = \$2/);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(escritas[0]!.sql).toMatch(MARCA_SIN_TEXTO);
     expect(JSON.stringify(escritas)).not.toContain("Corrientes");
   });
 
@@ -198,6 +204,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(warn).toHaveBeenCalledWith({ palabras: 19, segundos: 2 }, "email_worker.transcripcion_inverosimil");
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(escritas[0]!.sql).toMatch(MARCA_SIN_TEXTO);
 
     // La misma frase en un audio largo es verosímil; sin duración medida, no se juzga.
     expect((await correr([nota({ metadatos: { firma: true, segundos: 6 } })])).size).toBe(1);
@@ -246,6 +253,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.sql).toMatch(/update "claim_attachments" set "resumen" = \$1, "util" = \$2/);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(escritas[0]!.sql).toMatch(MARCA_SIN_TEXTO);
   });
 
   it("una respuesta que no se deja leer también da la nota por leída", async () => {
@@ -256,6 +264,7 @@ describe("transcribirNotasDeVoz", () => {
     expect(nuevos.size).toBe(0);
     expect(escritas).toHaveLength(1);
     expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(escritas[0]!.sql).toMatch(MARCA_SIN_TEXTO);
   });
 
   it("una nota cuyo mensaje no estaba en la conversación leída espera: no se paga ni se marca", async () => {

@@ -104,7 +104,7 @@ import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
-import { CUIDADO, EMERGENCIAS, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, EMERGENCIAS_DE_LA_POLIZA, diceCuidado, hablaDeLaSalud } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
   NO_HACE_FALTA_CONTESTAR,
@@ -531,6 +531,7 @@ describe("whatsappMessenger — what it says", () => {
     // En plural, porque son varios.
     expect(body).toMatch(/datos que no coinciden/i);
     expect(body).toMatch(/cuáles son los correctos/i);
+    expect(body).not.toContain(EMERGENCIAS);
   });
 
   it("con uno solo sigue hablando en singular", async () => {
@@ -544,6 +545,7 @@ describe("whatsappMessenger — what it says", () => {
     const body = sentBody();
     expect(body).toMatch(/un dato que no coincide/i);
     expect(body).toMatch(/cuál es el correcto/i);
+    expect(body).not.toContain(EMERGENCIAS);
   });
 
   it("si quien escribe no es el titular, nombra la diferencia y no pregunta", async () => {
@@ -570,6 +572,11 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).not.toContain("14937663");
     expect(body).toContain(AVISO_DE_TRASPASO);
     expect(mencionaElTraspaso(body)).toBe(true);
+    // Dice a quién llamar, antes del traspaso como en la derivación de siempre, y
+    // «de la póliza»: «de tu póliza» se la atribuiría a quien escribe.
+    expect(body).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(body).not.toContain(EMERGENCIAS);
+    expect(body.indexOf(EMERGENCIAS_DE_LA_POLIZA)).toBeLessThan(body.indexOf(AVISO_DE_TRASPASO));
   });
 
   it("sin valores que mostrar, pide los datos por su nombre", async () => {
@@ -596,6 +603,7 @@ describe("whatsappMessenger — what it says", () => {
 
     const body = sentBody();
     expect(body).toContain(AVISO_DE_TRASPASO);
+    expect(body).toContain(EMERGENCIAS_DE_LA_POLIZA);
     expect(body).not.toMatch(/respondé/i);
     expect(pideAlgo(body.toLowerCase())).toBe(false);
   });

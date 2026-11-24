@@ -117,7 +117,11 @@ pedimos» ni el ofrecimiento de responder con más información— y `no-mencion
 con «internad», «quemadur», «recuper», «mejoría» y «esté bien»: la frase no
 repite ni pronostica lo que contó de la salud. También `menciona:emergencias`:
 la derivación dice a quién llamar si es urgente (`EMERGENCIAS`, en los dos pisos
-y exigida al redactor por la guarda `dropped_emergencias`).
+y exigida al redactor por la guarda `dropped_emergencias`). Corre también en
+`mail-que-no-coincide-con-el-padron`: la derivación del titular ajeno la dice en
+los dos pisos (vía `LO_REVISA_UN_ESPECIALISTA`) y la guarda se la exige al
+redactor también para `conflict` con `titularAjeno`. No hay escenario de
+WhatsApp del titular ajeno.
 
 Toda conversación con `finally` que termina en `listo_para_core` o
 `requiere_especialista` corre `traspaso`: el último mensaje avisa que la carga

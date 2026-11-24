@@ -35,6 +35,7 @@ import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
 import {
   CUIDADO,
   EMERGENCIAS,
+  EMERGENCIAS_DE_LA_POLIZA,
   diceCuidado,
   diceEmergencias,
   hablaDeLaSalud,
@@ -224,6 +225,13 @@ const TRASPASO =
   "con esto se cierra la carga de datos por este medio y una persona del equipo le va a " +
   `escribir, puede ser desde otro número o desde otra dirección de correo (por ejemplo: «${AVISO_DE_TRASPASO}»)`;
 
+// Con el literal de ejemplo, como TRASPASO: la guarda dropped_emergencias busca «emergencias» y no una paráfrasis.
+const LINEA_DE_EMERGENCIAS =
+  `si necesita asistencia urgente llame a la línea de emergencias de su póliza (por ejemplo: «${EMERGENCIAS}»)`;
+// La del titular ajeno: «su póliza» se la atribuye, y titular_ajeno_se_lo_atribuye la rechaza.
+const LINEA_DE_EMERGENCIAS_AJENA =
+  `si necesita asistencia urgente llame a la línea de emergencias de la póliza (por ejemplo: «${EMERGENCIAS_DE_LA_POLIZA}»)`;
+
 const DIFERENCIA = "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.";
 
 // Con el literal de ejemplo, como TRASPASO: sin él, el ensayo del 23/11 pidió «¿Nos podrás escribir…?», en futuro.
@@ -267,7 +275,7 @@ function buildPrompt(input: ComposeReplyInput): string {
     escalation:
       "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad " +
       "(decí «un especialista», nunca «él» ni «ella»: no sabemos quién es), " +
-      `y que si necesita asistencia urgente llame a la línea de emergencias de su póliza (por ejemplo: «${EMERGENCIAS}»). ` +
+      `y que ${LINEA_DE_EMERGENCIAS}. ` +
       `NO pidas ningún dato: un especialista se encarga. Avisá también que ${TRASPASO}.`,
     closing: `Avisar que ya tenemos todo lo necesario y que ${TRASPASO}. NO pidas nada.`,
     conflict: input.titularAjeno
@@ -275,7 +283,9 @@ function buildPrompt(input: ComposeReplyInput): string {
         "que los dos valores pueden ser correctos. Señalá la diferencia sin preguntar cuál es el " +
         "correcto y sin decir que la póliza o el vehículo son de quien escribe. Avisá que un " +
         "especialista va a revisar el caso y se va a comunicar (decí «un especialista», nunca " +
-        "«él» ni «ella»). NO preguntes ni pidas nada: el caso ya lo tiene un especialista. " +
+        "«él» ni «ella»). " +
+        `Decile también que ${LINEA_DE_EMERGENCIAS_AJENA}. ` +
+        "NO preguntes ni pidas nada: el caso ya lo tiene un especialista. " +
         `Avisá también que ${TRASPASO}.`
       : diferencia,
     // Es la única intención donde la lista de campos se pasa para que NO se
@@ -489,6 +499,7 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   const titularAjeno = input.intent === "conflict" && input.titularAjeno === true;
   if (titularAjeno && trimmed.includes("?")) return "titular_ajeno_pregunta";
   // Escribió «el auto de mi viejo» y le contestaron «el siniestro de tu auto».
+  // También «la línea de emergencias de tu póliza»: a quien escribe se le dice «de la póliza».
   if (titularAjeno && /\btu\s+(?:auto|veh[ií]culo|coche|camioneta|moto|p[oó]liza)\b/iu.test(trimmed)) {
     return "titular_ajeno_se_lo_atribuye";
   }
@@ -518,8 +529,8 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     return "audio_sin_transcribir";
   }
 
-  // Lo mismo: los dos pisos de la derivación la dicen.
-  if (input.intent === "escalation" && !diceEmergencias(trimmed)) return "dropped_emergencias";
+  // Lo mismo: los pisos de toda derivación la dicen, también la del titular ajeno.
+  if (deriva && !diceEmergencias(trimmed)) return titularAjeno ? "dropped_emergencias_ajeno" : "dropped_emergencias";
 
   // Último, para que cualquier otro rechazo conserve su motivo en el reintento.
   // Sin el aviso, la persona sigue escribiendo por acá y ya no lo lee nadie.
@@ -632,6 +643,9 @@ function explain(problem: string): string {
   }
   if (problem === "dropped_emergencias") {
     return `no dijiste a quién llamar si es urgente. Decí «${EMERGENCIAS}».`;
+  }
+  if (problem === "dropped_emergencias_ajeno") {
+    return `no dijiste a quién llamar si es urgente. Decí «${EMERGENCIAS_DE_LA_POLIZA}».`;
   }
   if (problem === "dropped_handoff") {
     return `te faltó avisar que la carga se cierra acá y que una persona le va a escribir, puede ser desde otro número o correo. Podés decirlo así: «${AVISO_DE_TRASPASO}».`;

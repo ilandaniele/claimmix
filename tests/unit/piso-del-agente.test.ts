@@ -37,7 +37,7 @@ import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
 import { reservarSiEsPrueba } from "@/server/ai/budget";
 import { indicacionesDelEquipo, type ReglaDelEquipo } from "@/core/agente/indicaciones";
-import { CUIDADO, diceCuidado } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, diceCuidado } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO, mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 
@@ -242,8 +242,8 @@ describe("el piso — no prometer cobertura ni montos", () => {
   describe("«Nunca digas especialista» en una derivación con heridos", () => {
     const REGLA = "Nunca digas especialista";
     const CON_CUIDADO = `${CUIDADO} Recibimos tu denuncia y la derivamos a un especialista.`;
-    const SIN_TRASPASO = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia, una persona del equipo se va a comunicar con vos.`;
-    const CON_TRASPASO = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia y una persona del equipo se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+    const SIN_TRASPASO = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia, una persona del equipo se va a comunicar con vos. ${EMERGENCIAS}`;
+    const CON_TRASPASO = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia y una persona del equipo se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
     const derivacion = () =>
       base({ intent: "escalation", heridos: true, fallback: CON_CUIDADO, indicaciones: REGLA });
 

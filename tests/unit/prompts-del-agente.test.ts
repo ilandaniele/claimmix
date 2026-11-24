@@ -45,7 +45,7 @@ import { deliberate, type DeliberationInput } from "@/server/ai/deliberate";
 import { composeReply, type ComposeReplyInput } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
-import { CUIDADO } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 
@@ -216,7 +216,7 @@ describe("prompts del agente — compose", () => {
   it("escalation por email, con una pregunta y heridos", async () => {
     const texto = await prompt(
       `Hola, María. ${CUIDADO} No podemos decirte cuánto tarda, pero un especialista se va a ` +
-        `comunicar con vos. ${AVISO_DE_TRASPASO}`,
+        `comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`,
       base({
         intent: "escalation",
         channel: "email",

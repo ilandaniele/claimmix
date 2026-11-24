@@ -32,7 +32,14 @@ import { EMAIL_RE, ENLACE_RE } from "@/core/text/contacto";
 import { repiteDatoDelPadron, tokensDelPadron } from "@/core/text/dato-del-padron";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
-import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import {
+  CUIDADO,
+  EMERGENCIAS,
+  diceCuidado,
+  diceEmergencias,
+  hablaDeLaSalud,
+  pideDatos,
+} from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO, mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
@@ -245,7 +252,7 @@ function buildPrompt(input: ComposeReplyInput): string {
     escalation:
       "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad " +
       "(decí «un especialista», nunca «él» ni «ella»: no sabemos quién es), " +
-      "y que si necesita asistencia urgente llame a la línea de emergencias de su póliza. " +
+      `y que si necesita asistencia urgente llame a la línea de emergencias de su póliza (por ejemplo: «${EMERGENCIAS}»). ` +
       `NO pidas ningún dato: un especialista se encarga. Avisá también que ${TRASPASO}.`,
     closing: `Avisar que ya tenemos todo lo necesario y que ${TRASPASO}. NO pidas nada.`,
     conflict: input.titularAjeno
@@ -491,6 +498,9 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     if (hablaDeLaSalud(trimmed)) return "care_names_health";
   }
 
+  // Lo mismo: los dos pisos de la derivación la dicen.
+  if (input.intent === "escalation" && !diceEmergencias(trimmed)) return "dropped_emergencias";
+
   // Último, para que cualquier otro rechazo conserve su motivo en el reintento.
   // Sin el aviso, la persona sigue escribiendo por acá y ya no lo lee nadie.
   if ((input.intent === "closing" || deriva) && !mencionaElTraspaso(trimmed)) {
@@ -596,6 +606,9 @@ function explain(problem: string): string {
   }
   if (problem === "care_names_health") {
     return `nombraste las heridas, la internación o la salud de alguien. Alcanza con «${CUIDADO}»: no repitas lo que contó ni digas cómo va a estar nadie.`;
+  }
+  if (problem === "dropped_emergencias") {
+    return `no dijiste a quién llamar si es urgente. Decí «${EMERGENCIAS}».`;
   }
   if (problem === "dropped_handoff") {
     return `te faltó avisar que la carga se cierra acá y que una persona le va a escribir, puede ser desde otro número o correo. Podés decirlo así: «${AVISO_DE_TRASPASO}».`;

@@ -10,6 +10,16 @@
 /** Sin diagnóstico, sin promesa, sin pedido y sin repetir lo que contó. */
 export const CUIDADO = "Lamentamos mucho lo que están pasando.";
 
+/**
+ * Toda derivación la dice. El piso del correo no la tenía, y el ensayo del
+ * 24/11 (mail-grave: el redactor tardó 30 s y salió el piso) le contestó a
+ * quien tenía a su señora internada sin decirle a quién llamar mientras tanto.
+ */
+export const EMERGENCIAS = "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza.";
+
+// «Una emergencia» no dice a quién llamar; el plural es la línea, el número o el servicio, y es lo que busca el ensayo.
+const DICE_EMERGENCIAS = /\bemergencias\b/i;
+
 // «Lamentablemente» no es cuidado: es cómo empieza una mala noticia.
 const DICE_CUIDADO = /\blament(?:amos|o)\b|\bsentimos mucho\b/i;
 const PIDE_DATOS = /necesitamos que nos|envianos|mandanos/i;
@@ -23,6 +33,11 @@ const HABLA_DE_LA_SALUD =
 /** Si el texto trae una frase de cuidado, la nuestra o la del redactor. */
 export function diceCuidado(texto: string): boolean {
   return DICE_CUIDADO.test(texto);
+}
+
+/** Si el texto dice a quién llamar si es urgente, la nuestra o la del redactor. */
+export function diceEmergencias(texto: string): boolean {
+  return DICE_EMERGENCIAS.test(texto);
 }
 
 /** Si el texto le pide algo a la persona: en una derivación se contradice. */

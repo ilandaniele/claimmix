@@ -29,7 +29,7 @@ import { composeReply, type ComposeReplyInput } from "@/server/ai/compose-reply"
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
-import { CUIDADO } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 import { textoBase } from "@/core/agente/entrenamiento-base";
@@ -445,7 +445,7 @@ describe("composeReply — what it refuses to send", () => {
 
   it("does not mistake an ordinary word for a pronoun", async () => {
     replies(
-      `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad. ${AVISO_DE_TRASPASO}`
+      `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`
     );
 
     const out = await composeReply(base({ intent: "escalation" }));
@@ -1135,8 +1135,8 @@ describe("composeReply — no afirma la provincia que está pidiendo", () => {
 describe("composeReply — la derivación con heridos", () => {
   const CON_CUIDADO = `${CUIDADO} Recibimos tu denuncia y la derivamos a un especialista.`;
   const BRIEF = "frase breve de cuidado";
-  const SIN_FRASE = `Hola, Laura. Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
-  const CON_FRASE = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+  const SIN_FRASE = `Hola, Laura. Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+  const CON_FRASE = `Hola, Laura. ${CUIDADO} Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
 
   it("dos intentos sin la frase devuelven el piso", async () => {
     responde(SIN_FRASE, SIN_FRASE);
@@ -1194,12 +1194,12 @@ describe("composeReply — la derivación con heridos", () => {
   });
 
   it.each([
-    ["le pone género", `${CUIDADO} Él se va a comunicar con vos a la brevedad.`, "le pusiste género"],
-    ["pide algo", `${CUIDADO} Derivamos tu denuncia; mandanos las fotos.`, "pediste datos"],
-    ["promete un plazo", `${CUIDADO} Un especialista te llama en 24 horas.`, "prometiste algo"],
+    ["le pone género", `${CUIDADO} Él se va a comunicar con vos a la brevedad. ${EMERGENCIAS}`, "le pusiste género"],
+    ["pide algo", `${CUIDADO} Derivamos tu denuncia; mandanos las fotos. ${EMERGENCIAS}`, "pediste datos"],
+    ["promete un plazo", `${CUIDADO} Un especialista te llama en 24 horas. ${EMERGENCIAS}`, "prometiste algo"],
     [
       "repite lo que contó de la salud",
-      `Hola, Laura. ${CUIDADO} Esperamos que tu señora se recupere pronto de las quemaduras. Ya derivamos tu denuncia a un especialista.`,
+      `Hola, Laura. ${CUIDADO} Esperamos que tu señora se recupere pronto de las quemaduras. Ya derivamos tu denuncia a un especialista. ${EMERGENCIAS}`,
       "nombraste las heridas",
     ],
   ])("con la frase, sigue rechazando lo que %s", async (_, mensaje, motivo) => {
@@ -1247,7 +1247,7 @@ describe("composeReply — el aviso de traspaso", () => {
   });
 
   it("una derivación sin el aviso se corrige en el segundo intento", async () => {
-    const sin = "Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos.";
+    const sin = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS}`;
     const con = `${sin} ${AVISO_DE_TRASPASO}`;
     responde(sin, con);
 
@@ -1274,6 +1274,56 @@ describe("composeReply — el aviso de traspaso", () => {
     const prompt = mockCall.mock.calls[0][0] as string;
     expect(prompt).toContain("se cierra la carga de datos");
     expect(prompt).toContain(AVISO_DE_TRASPASO);
+  });
+});
+
+/*
+ * Toda derivación dice a quién llamar si es urgente: el piso del correo no lo
+ * decía y el redactor podía omitirlo sin que nada lo frenara.
+ */
+describe("composeReply — la línea de emergencias en la derivación", () => {
+  const SIN_EMERGENCIAS = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+  const CON_EMERGENCIAS = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+
+  it("una derivación sin la línea dos veces devuelve el piso", async () => {
+    responde(SIN_EMERGENCIAS, SIN_EMERGENCIAS);
+
+    expect(await composeReply(base({ intent: "escalation" }))).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("a quién llamar si es urgente");
+  });
+
+  it('"es una emergencia" no dice a quién llamar: se rechaza', async () => {
+    const UNA_EMERGENCIA = `Sabemos que es una emergencia. Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+    responde(UNA_EMERGENCIA, UNA_EMERGENCIA);
+
+    expect(await composeReply(base({ intent: "escalation" }))).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("a quién llamar si es urgente");
+  });
+
+  it("el segundo intento con la línea sale", async () => {
+    responde(SIN_EMERGENCIAS, CON_EMERGENCIAS);
+
+    expect(await composeReply(base({ intent: "escalation" }))).toBe(CON_EMERGENCIAS);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+    expect(mockCall.mock.calls[1][0] as string).toContain(`Decí «${EMERGENCIAS}»`);
+  });
+
+  it("el brief la pide con el literal de ejemplo", async () => {
+    responde(CON_EMERGENCIAS);
+
+    await composeReply(base({ intent: "escalation" }));
+
+    expect(mockCall.mock.calls[0][0] as string).toContain(EMERGENCIAS);
+  });
+
+  it("la del titular ajeno, que es un conflict, no la exige", async () => {
+    const mensaje = `Recibimos tu denuncia. Un especialista va a revisar tu caso y se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+    responde(mensaje);
+
+    const out = await composeReply(base({ intent: "conflict", titularAjeno: true }));
+
+    expect(out).toBe(mensaje);
+    expect(mockCall).toHaveBeenCalledTimes(1);
   });
 });
 

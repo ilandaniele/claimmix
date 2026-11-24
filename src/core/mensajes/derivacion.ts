@@ -14,8 +14,13 @@ export const CUIDADO = "Lamentamos mucho lo que están pasando.";
  * Toda derivación la dice. El piso del correo no la tenía, y el ensayo del
  * 24/11 (mail-grave: el redactor tardó 30 s y salió el piso) le contestó a
  * quien tenía a su señora internada sin decirle a quién llamar mientras tanto.
+ * El del mismo día en mail-que-no-coincide-con-el-padron derivó al titular
+ * ajeno sin la línea: «toda» incluye esa derivación, que es un conflicto.
  */
 export const EMERGENCIAS = "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza.";
+
+/** La de quien escribe por la póliza de otro: «tu póliza» se la atribuye, como «tu auto». */
+export const EMERGENCIAS_DE_LA_POLIZA = "Si necesitás asistencia urgente, llamá a la línea de emergencias de la póliza.";
 
 // «Una emergencia» no dice a quién llamar; el plural es la línea, el número o el servicio, y es lo que busca el ensayo.
 const DICE_EMERGENCIAS = /\bemergencias\b/i;

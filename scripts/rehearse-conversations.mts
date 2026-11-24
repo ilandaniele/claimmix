@@ -78,6 +78,7 @@ const { recordarCaso } = await import("@/server/confirmations/recordatorios");
 const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
 const { db } = await import("@/lib/db");
 const { CONTACT_DOC_KEYS } = await import("@/server/cases/documents");
+const { MEDIUM_CONFIDENCE_HIGH } = await import("@/server/cases/gap-analyzer");
 const {
   agentRuns,
   cases,
@@ -329,6 +330,8 @@ interface Scenario {
     docsDeclined?: string[];
     /** Field keys that must have survived to the end with a value. */
     knows?: string[];
+    /** Claves que el caso final tiene que tener guardadas con confianza de dato seguro: lo heredado no baja. */
+    seguros?: string[];
     /** Tipos de indicio que tienen que estar en `cases.fraud_indicators`. */
     indicios?: string[];
     /** Cuántos adjuntos tienen que haber quedado leídos (`resumen` escrito). */
@@ -472,14 +475,14 @@ const SCENARIOS: Scenario[] = [
           replies: 1,
           status: "info_faltante",
           anterior: { status: "requiere_especialista", paraResponder: false },
-          // El nombre pasa del caso de antes (mismo número). Que la póliza NO pase (es otra moto)
+          // El nombre pasa del caso de antes (mismo número). Que la póliza NO pase (es otro vehículo)
           // lo fija prove-data-layer: pedirla o no en el mensaje lo decide el modelo y varía.
           noAsked: ["full_name"],
           avoids: ["6610", "Paulo"],
         },
       },
     ],
-    finally: { status: "info_faltante", knows: ["full_name"] },
+    finally: { status: "info_faltante", knows: ["full_name"], seguros: ["full_name"] },
   },
 
   {
@@ -1922,14 +1925,19 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         }
       }
 
-      if (want.knows?.length) {
+      if (want.knows?.length || want.seguros?.length) {
         const known = await db
-          .select({ key: extractedFields.field_key })
+          .select({ key: extractedFields.field_key, confidence: extractedFields.confidence })
           .from(extractedFields)
           .where(eq(extractedFields.case_id, caseId));
         const keys = new Set(known.map((k) => k.key));
-        for (const key of want.knows) {
+        for (const key of want.knows ?? []) {
           if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`, `perdio-dato:${key}`);
+        }
+        for (const key of want.seguros ?? []) {
+          if (!known.some((k) => k.key === key && Number(k.confidence) >= MEDIUM_CONFIDENCE_HIGH)) {
+            note(scenario.id, 0, `${key} no quedó guardado con confianza alta`, `dato-sin-confianza:${key}`);
+          }
         }
       }
 

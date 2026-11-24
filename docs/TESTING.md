@@ -140,9 +140,12 @@ se lee como `sin_clasificar`. El otro choque, por WhatsApp, abre un caso nuevo
 que contesta el agente (`casoNuevo: true`) y el derivado no cambia: desde ese
 turno el ensayo sigue el caso nuevo y comprueba el anterior con `anterior`. El
 caso nuevo hereda el nombre del mismo número: no lo vuelve a pedir (`noAsked`
-sobre `full_name` y `finally.knows`), ni siquiera cuando el perfil de WhatsApp
-(`remitente`) dice otro nombre que lo escrito, y no cita la póliza del derivado
-(`avoids`). Que la póliza no se herede (es otro vehículo) lo fija `pnpm capa-datos`; el
+sobre `full_name`), ni siquiera cuando el perfil de WhatsApp (`remitente`) dice
+otro nombre que lo escrito, y no cita la póliza del derivado ni el nombre del
+perfil (`avoids` con «6610» y «Paulo»). Que
+lo heredado llegó con su confianza lo comprueba `finally.seguros` (el nombre
+guardado con confianza >= 0.85; `finally.knows` sólo mira que la clave exista, y
+el perfil de WhatsApp la escribiría igual a 0.70). Que la póliza no se herede (es otro vehículo) lo fija `pnpm capa-datos`; el
 ensayo no exige que el mensaje la pida, porque eso lo decide el modelo y varía. Por
 mail no se parte: el hilo es la conversación, y la clase y el aviso al equipo
 quedan como estaban.

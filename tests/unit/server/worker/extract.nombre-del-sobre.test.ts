@@ -88,6 +88,8 @@ describe("el nombre que trae el sobre", () => {
   it("con uno guardado a la misma confianza, sigue como antes", async () => {
     const { campos } = await correr({ full_name: { valor: "Pablo Ortiz", confianza: 0.7 } });
 
-    expect(campos.map((f) => f.field_key)).toContain("full_name");
+    expect(campos).toContainEqual(
+      expect.objectContaining({ field_key: "full_name", field_value: "Paulo Ortiz Gómez", confidence: 0.7, source: "canal" })
+    );
   });
 });

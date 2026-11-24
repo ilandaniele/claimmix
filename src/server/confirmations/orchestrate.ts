@@ -1390,10 +1390,15 @@ async function resolveAnsweredConfirmations(
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   // Una franja del día segura sigue sin ser una hora: la fila queda pendiente.
+  // Lo que viene del sobre (`canal`) no es una respuesta: el nombre guardado
+  // puede subir de confianza sin que la persona haya dicho nada.
   const settled = new Set(
     fields
       .filter(
-        (f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH && !esValorVago(f.field_key, f.field_value)
+        (f) =>
+          f.source !== "canal" &&
+          f.confidence >= MEDIUM_CONFIDENCE_HIGH &&
+          !esValorVago(f.field_key, f.field_value)
       )
       .map((f) => canonicalFieldKey(f.field_key))
   );

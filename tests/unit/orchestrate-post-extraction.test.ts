@@ -19,7 +19,7 @@ import {
 } from "@/server/confirmations/orchestrate";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
-import type { AgentMessenger } from "@/server/confirmations/messenger";
+import { simulatedWhatsappMessenger, type AgentMessenger } from "@/server/confirmations/messenger";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { ParteDeSombra } from "@/core/agente/sombra";
 import type { OpinionDelAgente } from "@/server/ai/deliberate";
@@ -153,6 +153,8 @@ import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contesta
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 import { anotarDerivacionSiEsNueva } from "@/server/confirmations/derivacion-nueva";
+import { renderTemplate } from "@/server/email/render";
+import { labelForField } from "@/lib/labels/claim-fields";
 
 // ── DB mock builder ───────────────────────────────────────────────────────────
 
@@ -223,6 +225,11 @@ function setupDbMocks({
    * it. Empty means we have never asked for anything, so every ask is new.
    */
   lastAskRows = [] as Array<{ asked_keys?: string[] | null; created_at?: string; template?: string }>,
+  /**
+   * Lo último que salió, sea o no un pedido (`cuandoHablamosPorUltimaVez`): por
+   * omisión, lo mismo que `lastAskRows`.
+   */
+  ultimaSalidaRows = undefined as Array<{ created_at?: string; template?: string }> | undefined,
   /** Rows for archivosDesdeQueHablamos: non-empty means a file arrived. */
   newAttachmentRows = [] as Array<{ id: string }>,
   /** Rows for the size-rejection query of archivosDesdeQueHablamos: non-empty means a file did not get in. */
@@ -303,7 +310,9 @@ function setupDbMocks({
       const tableName = getTableName(table);
 
       if (tableName === "outbound_messages") {
-        const soloLaFecha = Object.keys(proj ?? {}).join() === "created_at";
+        // La lectura de «cuándo hablamos» es la única que no pide `asked_keys`.
+        const llaves = Object.keys(proj ?? {});
+        const soloLaFecha = llaves.includes("created_at") && !llaves.includes("asked_keys");
         return {
           where: () => ({
             // hasPriorOutbound: "has anything gone out at all?"
@@ -314,7 +323,7 @@ function setupDbMocks({
               limit: () =>
                 hablamosIlegible && soloLaFecha
                   ? Promise.reject(new Error("connection lost"))
-                  : Promise.resolve(lastAskRows),
+                  : Promise.resolve(soloLaFecha && ultimaSalidaRows ? ultimaSalidaRows : lastAskRows),
             }),
           }),
         };
@@ -2984,6 +2993,22 @@ describe("orchestratePostExtraction — la sombra", () => {
       ]);
       // La decisión real es la del plan: pide las dos.
       expect(enviados[0].data?.missingFields).toEqual(["policy_number", "dni"]);
+    });
+
+    // Tras un «ok» la lista que se achicó sigue siendo el pedido que ya está en pie
+    // (`quedaDeAquelPedido`), aunque el plan eligiera otra: el árbol callaría y la
+    // sombra no puede anotar «pedir», que sería un desacuerdo que no existe.
+    it("tras un «ok» con la lista achicada y otra elegida por el plan, el árbol calla", async () => {
+      setupDbMocks({ lastAskRows: [{ asked_keys: ["policy_number", "dni", "accident_date"] }] });
+      gapsAre(["policy_number", "dni", "hora_siniestro"]);
+      opina(
+        { intent: "ask", askFor: ["hora_siniestro"], rechazo: null },
+        plan({ intent: "ask", askFor: ["hora_siniestro"] })
+      );
+
+      const { anotadas } = await run({ salida: { latestMessageText: "ok" } });
+
+      expect(anotadas[1]).toMatchObject({ responder: { codigo: "callar" } });
     });
 
     it.each([
@@ -6177,6 +6202,188 @@ describe("orchestratePostExtraction — un documento negado no vuelve como duda"
 });
 
 /*
+ * El rojo del ensayo de #593, `mail-completo` [2].
+ *
+ * Pedimos patente y hora. La persona contestó «No completamos ningún parte
+ * amistoso, el otro conductor no quiso»: el parte quedó declinado —no estaba
+ * en la lista— y lo que falta seguía siendo patente y hora. Salía la misma
+ * lista pelada, sin una palabra sobre lo que dijo: la sombra lo marcó como
+ * «agente: callar · código: pedir». Contestar no es silencio, pero repetir la
+ * lista tampoco es contestar: se acusa recibo, sin la lista.
+ */
+describe("orchestratePostExtraction — una negativa que no cambia la lista recibe un acuse, no la lista otra vez", () => {
+  const NEGATIVA = "No completamos ningún parte amistoso, el otro conductor no quiso.";
+  const CLAVES = ["patente_vehiculo", "hora_siniestro"];
+  const PEDIDO_ANTERIOR = [{ asked_keys: CLAVES, created_at: "2026-11-24T10:00:00Z" }];
+  const ROTULOS = [labelForField("patente_vehiculo").label, labelForField("hora_siniestro").label];
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+    vi.mocked(callGemini).mockReset();
+  });
+
+  /** Lo que contesta el reconocedor de negativas, en todas las llamadas: nunca la de verdad. */
+  function reconoce(declined: Array<{ clave: string; cita: string }>) {
+    vi.mocked(callGemini).mockResolvedValue({
+      text: JSON.stringify({ declined }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+      model: "gemini-2.5-flash",
+    });
+  }
+
+  function planDe(intent: "wait" | "ask") {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent,
+      askFor: intent === "ask" ? CLAVES : [],
+      question: null,
+      reasoning: "el pedido no cambió",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+  }
+
+  function faltanPatenteYHora() {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: CLAVES,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  async function correr(texto: string, messenger?: AgentMessenger) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: texto },
+      NO_MATCHES,
+      messenger
+    );
+  }
+
+  it.each([
+    { canal: "correo", porMensajero: false, intent: "wait" },
+    { canal: "correo", porMensajero: false, intent: "ask" },
+    { canal: "WhatsApp", porMensajero: true, intent: "wait" },
+    { canal: "WhatsApp", porMensajero: true, intent: "ask" },
+  ] as const)("por $canal, con el plan en «$intent»: sale el acuse y no la lista", async ({ porMensajero, intent }) => {
+    const { updateSpy } = setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe(intent);
+    const messenger = porMensajero
+      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) }
+      : undefined;
+
+    await correr(NEGATIVA, messenger);
+
+    // El parte quedó declinado y el caso sigue esperando lo de antes.
+    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ declined_at: expect.any(String) }));
+    const estados = updateSpy.mock.calls.map((c) => (c[0] as { status?: string }).status);
+    expect(estados).not.toContain("listo_para_core");
+
+    const salidas = messenger
+      ? messenger.send.mock.calls.map((c) => c[0])
+      : vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0]);
+    expect(salidas.map((m) => m.template)).toEqual(["information_received"]);
+    expect(salidas[0].data.missingFields).toBeUndefined();
+  });
+
+  it("el texto del mail dice que tomamos nota y no trae la patente ni la hora", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe("ask");
+
+    await correr(NEGATIVA);
+
+    const salidas = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0]);
+    expect(salidas).toHaveLength(1);
+    const texto = renderTemplate(salidas[0].template, salidas[0].data).text;
+    expect(texto).toContain("tomamos nota de lo que nos contaste");
+    for (const rotulo of ROTULOS) expect(texto).not.toContain(rotulo);
+  });
+
+  it("el cuerpo de WhatsApp que queda en el libro dice que tomamos nota, sin rótulos ni claves pedidas", async () => {
+    const { insertSpy } = setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe("ask");
+
+    await correr(NEGATIVA, simulatedWhatsappMessenger);
+
+    const filas = insertSpy.mock.calls
+      .flatMap((c) => [c[0]].flat() as Array<{ rendered_body?: string; asked_keys?: string[] | null }>)
+      .filter((f) => typeof f.rendered_body === "string");
+    expect(filas).toHaveLength(1);
+    expect(filas[0].rendered_body).toContain("tomamos nota");
+    for (const rotulo of ROTULOS) expect(filas[0].rendered_body).not.toContain(rotulo);
+    expect(filas[0].asked_keys ?? null).toBeNull();
+  });
+
+  // La sombra sin plan comparaba por subconjunto: una lista que se achicó parecía
+  // «la misma» y el código se anotaba como acusar cuando en verdad pedía.
+  it("la sombra: con la lista achicada por la negativa el código pide, no acusa", async () => {
+    setupDbMocks({
+      lastAskRows: [{ asked_keys: ["parte_amistoso", "patente_vehiculo"], created_at: "2026-11-24T10:00:00Z" }],
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["patente_vehiculo", "hora_siniestro"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    planDe("ask");
+    const anotarSombra = vi.fn<(parte: ParteDeSombra) => void>();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: NEGATIVA },
+      NO_MATCHES,
+      { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) },
+      undefined,
+      anotarSombra
+    );
+
+    const responder = anotarSombra.mock.calls.map((c) => c[0]).find((p) => "responder" in p);
+    expect(responder?.responder?.codigo).toBe("pedir");
+  });
+
+  it("si el mensaje no cerró nada, no se inventa un acuse", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([]);
+    faltanPatenteYHora();
+    planDe("wait");
+
+    await correr("Mañana te paso los datos");
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+});
+
+/*
  * El ensayo `goteo` del 23/09. A «Fue un choque, ayer a la tarde» se le
  * contestó «¿Fue a la tarde, correcto?», y en la vuelta siguiente esa pregunta
  * desapareció sin respuesta y apareció «Más o menos a qué hora fue.».
@@ -6658,6 +6865,8 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
     preguntadas?: string[];
     /** Las claves que pedía el último mensaje que salió. */
     pedidoEnPie?: string[];
+    /** La plantilla, como queda en el libro, de lo último que salió cuando no fue el pedido. */
+    ultimaSalida?: string;
     campos?: ReturnType<typeof campo>[];
     matches?: CustomerMatch[];
     titularAjeno?: boolean;
@@ -6668,6 +6877,7 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
     const spies = setupDbMocks({
       confirmacionesExistentes: opts.existentes,
       lastAskRows: opts.pedidoEnPie ? [{ asked_keys: opts.pedidoEnPie }] : [],
+      ultimaSalidaRows: opts.ultimaSalida ? [{ template: opts.ultimaSalida }] : undefined,
       // El worker escribe la póliza antes de orquestar y la primera gana.
       polizaDelCaso: polizaAnterior ?? opts.leida ?? null,
     });
@@ -6886,7 +7096,9 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
       expect(JSON.stringify(r.pedidos[0].data)).not.toContain("7788");
     });
 
-    it("elegir cuenta como contestar: el pedido que seguía en pie se vuelve a decir", async () => {
+    // Elegir cuenta como contestar, y contestar con la lista sin cambios se acusa,
+    // no se repite (misma regla que la negativa de #593, mail-completo [2]).
+    it("elegir cuenta como contestar: con el pedido en pie sin cambios se acusa recibo, sin la lista", async () => {
       vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
         missingRequiredFields: ["accident_date"],
         fieldsNeedingConfirmation: [],
@@ -6900,6 +7112,37 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
         confianza: 0.95,
         propuestos,
         pedidoEnPie: ["accident_date"],
+      });
+
+      expect(r.enviados.map((m) => m.template)).toEqual(["information_received"]);
+      expect(r.enviados[0].data.missingFields).toBeUndefined();
+    });
+
+    // Entre la lista y la respuesta hubo otro mensaje (la pregunta por la póliza,
+    // un acuse, el aviso de un archivo): otro acuse sin la lista dejaría de nombrar
+    // lo que falta por varios mensajes. WhatsApp guarda los nombres con `wa_`.
+    it.each([
+      "data_confirmation_request",
+      "wa_data_confirmation_request",
+      "information_received",
+      "wa_information_received",
+      "attachment_too_large",
+      "wa_attachment_too_large",
+    ])("elegir después de «%s»: el pedido en pie se vuelve a decir", async (ultimaSalida) => {
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["accident_date"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+
+      const r = await vuelta({
+        texto: "es la 4455",
+        leida: NUEVA,
+        confianza: 0.95,
+        propuestos,
+        pedidoEnPie: ["accident_date"],
+        ultimaSalida,
       });
 
       expect(r.enviados.map((m) => m.template)).toEqual(["missing_information_request"]);

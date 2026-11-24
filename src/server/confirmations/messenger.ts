@@ -410,7 +410,7 @@ function renderNoted(data: Record<string, unknown>): string {
   if (data.audioSinTranscribir === true) return AUDIO_SIN_TRANSCRIBIR;
   return (
     "Gracias, tomamos nota de lo que nos contaste. " +
-    "Seguimos a la espera de lo que te pedimos antes para poder avanzar."
+    "Seguimos a la espera de lo que todavía nos falta para poder avanzar."
   );
 }
 

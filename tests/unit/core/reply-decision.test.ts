@@ -130,9 +130,6 @@ describe("qué rompe la espera", () => {
       "pedir"
     );
     expect(
-      queHacer(con({ yaSePidio: true, llegoUnArchivo: true, nosContestoElPedido: true }))
-    ).toBe("pedir");
-    expect(
       queHacer(con({ yaSePidio: true, llegoUnArchivo: true, nosLoDevolvieron: true }))
     ).toBe("pedir");
   });
@@ -166,10 +163,40 @@ describe("qué rompe la espera", () => {
     ).toBe("pedir");
   });
 
-  it("y gana también sobre la regla de no repetirse", () => {
+  // Ensayo de #593, mail-completo [2]: pedimos patente y hora, la persona
+  // contestó «no completamos ningún parte amistoso» y salió la misma lista
+  // pelada, sin una palabra sobre lo que dijo.
+  it("contestó algo y lo que falta es la misma lista: se acusa recibo, no se repite", () => {
+    const s = con({ yaSePidio: true, nosContestoElPedido: true });
+    expect(elPedidoQuedaEnEspera(s)).toBe(true);
+    expect(queHacer(s)).toBe("acusar-recibo");
+  });
+
+  it("también cuando el agente decidió esperar: contestar no es silencio", () => {
     expect(
-      queHacer(con({ yaSePidio: true, nosContestoElPedido: true }))
+      queHacer(con({ yaSePidio: true, elAgenteEspera: true, nosContestoElPedido: true }))
+    ).toBe("acusar-recibo");
+  });
+
+  it("un archivo y una respuesta con la misma lista: un solo acuse", () => {
+    expect(
+      queHacer(con({ yaSePidio: true, llegoUnArchivo: true, nosContestoElPedido: true }))
+    ).toBe("acusar-recibo");
+  });
+
+  it("contestar con un archivo que no entró: el pedido con el aviso al pie", () => {
+    expect(
+      queHacer(con({ yaSePidio: true, nosContestoElPedido: true, unArchivoNoEntro: true }))
     ).toBe("pedir");
+  });
+
+  it("una pregunta gana sobre el acuse, y un caso grave sigue callado", () => {
+    expect(
+      queHacer(con({ yaSePidio: true, nosContestoElPedido: true, nosPreguntoAlgo: true }))
+    ).toBe("pedir");
+    expect(
+      queHacer(con({ esGrave: true, yaSePidio: true, nosContestoElPedido: true }))
+    ).toBe("callar");
   });
 
   it("contestar no inventa un mensaje cuando no queda nada que pedir", () => {

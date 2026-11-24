@@ -1,6 +1,6 @@
 # ClaimMix — Project Status & Recovery Notes
 
-_Last updated: 2026-11-17. This file is the single source of truth for "where things stand."
+_Last updated: 2026-11-23. This file is the single source of truth for "where things stand."
 Update it at the end of a work session so the next one can recover quickly._
 
 > **TL;DR** — The system runs unattended: email + WhatsApp intake work, extraction goes
@@ -5506,6 +5506,14 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Ensayo.** `noAsked` canoniza la clave. `tardio-siniestro-nuevo` (turno 2) exige que no pida `full_name` y que no cite «6610» ni «Paulo»; que la póliza se siga pidiendo no lo comprueba el ensayo (lo decide el modelo y varía): lo fija `pnpm capa-datos`, que prueba que no se hereda. `devolver-al-agente` (turno 5) prohíbe «podrás». Siguen siendo 26 conversaciones.
 - **El perfil no pisa lo heredado.** En el caso nuevo la primera extracción sólo ve los mensajes movidos; si ahí la persona no repite su nombre, el parser cae al `profile_name` de WhatsApp a 0.70, que pisaba el nombre heredado (de 0.85 a 0.95) y el agente volvía a confirmar el nombre. Ahora el worker (`sinPisarLoGuardado`) cambia, en la corrida, los campos con `source: "canal"` por el valor y la confianza guardados si el caso ya tiene ese campo con más confianza: el upsert no lo pisa y la confirmación no lo duda, así que el nombre del sobre sólo llena huecos, y la corrida sigue llevando el nombre del que sale el saludo (`claimantName`). Cuesta un select más, y sólo cuando el sobre trae nombre. El ensayo `tardio-siniestro-nuevo` manda un `profile_name` distinto de lo escrito (`remitente`, ahora también por WhatsApp) y exige que el mensaje no lo cite. Un campo `canal` no cuenta como respuesta en `resolveAnsweredConfirmations`: el nombre guardado, subido de confianza por esto, no cierra la fila pendiente del nombre ni vuelve como contestado. El final del escenario exige además `seguros: ["full_name"]` (guardado con confianza ≥ 0.85), porque `knows` sólo mira que la clave exista.
 - **Riesgo que queda.** El nombre heredado puede venir del `profile_name` de WhatsApp, que escribe quien tiene el teléfono; es el mismo dato que ya usa el caso viejo, y el tope 0.95 deja que el worker lo corrija con lo que la persona diga.
+
+### Plazo de 30 minutos para conectar la WABA propia (23/11, rama `fix/sello-waba-30min`)
+
+- **Qué pasaba.** En T8, dentro de la ventana de Meta, elegir o crear el portfolio, cargar el número y verificarlo con el SMS no entraba en 10 minutos; al pasarse volvía «vencido» y se perdía el recorrido.
+- **Cambio.** `DURACION_MS` (`actions.ts`) de 10 a 30 minutos: cookie `cm_waba` de 1800 s y `exp` del sello. `FRESCURA_DEL_INICIO_MS` (panel) de 8 a 20, para que un inicio reusado tenga los 10 que lleva el popup. El reloj corre desde «Continuar», no desde «Conectar con Facebook»; por eso «Conectar con Facebook» también pide un inicio nuevo si la apertura tiene más de 20 minutos (antes sólo lo hacía «Reintentar»). No cambian el code de 30 s, `INICIOS_POR_DIA`, `VINCULOS_POR_HORA`, `topePorIp`, los textos ni los resultados.
+- **Seguridad.** El sello sigue atado a tenant, usuario, nonce y `exp`. El un solo uso del nonce es sólo del navegador (conectar borra la cookie, el servidor no guarda nonces gastados): quien retenga sello y cookie puede reenviar conectar hasta `exp`, ahora 30 minutos, y necesita la sesión del mismo usuario y un code de Meta fresco, acotado por `topePorIp` y `VINCULOS_POR_HORA`. Arreglarlo sin migración no es trivial: riesgo aceptado.
+- **Tests.** `waba-actions.test.ts` y `WabaPropiaPanel.test.tsx` (incluye «Conectar con Facebook» con la apertura vencida).
+- **Docs.** T8. Sin migración ni variables.
 
 ### 🙋 Waiting on you (not code)
 

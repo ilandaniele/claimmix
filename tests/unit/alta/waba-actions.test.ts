@@ -12,7 +12,7 @@
  *   - quién pide sale de la sesión y de los headers, nunca del cuerpo;
  *   - lo que llega del navegador (nombre, web, ids, evento, código, PIN) se acota o
  *     se rechaza antes de llegar al flujo;
- *   - el sello de `iniciarWabaPropia` es de esta sesión, vence a los diez minutos, va
+ *   - el sello de `iniciarWabaPropia` es de esta sesión, vence a los treinta minutos, va
  *     atado a la cookie `cm_waba` y se gasta en el primer uso, valga o no;
  *   - una falla inesperada vuelve «meta», sin que el mensaje llegue al registro.
  */
@@ -147,7 +147,7 @@ const ESTADO = {
   primeraRespuesta: false,
   puedeEnviar: null,
 };
-const DIEZ_MINUTOS = 10 * 60_000;
+const TREINTA_MINUTOS = 30 * 60_000;
 const SECRETO = "test-waba-auth-secret-key";
 const QUIEN = { tenantId: TENANT, userId: USUARIO, ip: IP, idioma: "es-AR" };
 const VENTANA = 7;
@@ -467,24 +467,24 @@ describe("iniciarWabaPropia", () => {
     expect(h.iniciar.mock.calls[0][1]).toEqual({ nombre: "Seguros Sur" });
   });
 
-  it("deja la cookie del sello cerrada: sólo HTTP, segura, del mismo sitio, diez minutos", async () => {
+  it("deja la cookie del sello cerrada: sólo HTTP, segura, del mismo sitio, treinta minutos", async () => {
     await iniciar();
 
     expect(h.galletaPuesta).toHaveBeenCalledTimes(1);
     const [nombre, valor, opciones] = h.galletaPuesta.mock.calls[0];
     expect(nombre).toBe("cm_waba");
     expect(valor).toMatch(/^[0-9a-f]{64}$/);
-    expect(opciones).toEqual({ httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: 600 });
+    expect(opciones).toEqual({ httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: 1800 });
   });
 
-  it("el sello es de esta persona, vence en diez minutos y lleva el número al azar de la cookie sin mostrarlo", async () => {
+  it("el sello es de esta persona, vence en treinta minutos y lleva el número al azar de la cookie sin mostrarlo", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-09T12:00:00.000Z"));
 
     const inicio = await iniciar();
 
     const nonce = h.galletas.get("cm_waba")!;
-    expect(abrir("waba-propia", inicio)).toEqual({ t: TENANT, u: USUARIO, n: nonce, exp: Date.now() + DIEZ_MINUTOS });
+    expect(abrir("waba-propia", inicio)).toEqual({ t: TENANT, u: USUARIO, n: nonce, exp: Date.now() + TREINTA_MINUTOS });
     expect(inicio).not.toContain(nonce);
     expect(abrir("otro-uso", inicio)).toBeNull();
   });
@@ -660,16 +660,16 @@ describe("conectarWabaPropia", () => {
     expect(h.vincular).not.toHaveBeenCalled();
   });
 
-  it("pasados los diez minutos el sello vence, y justo antes todavía vale", async () => {
+  it("pasados los treinta minutos el sello vence, y justo antes todavía vale", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-09T12:00:00.000Z"));
     const antes = await iniciar();
-    vi.setSystemTime(Date.now() + DIEZ_MINUTOS - 1);
+    vi.setSystemTime(Date.now() + TREINTA_MINUTOS - 1);
     await conectarWabaPropia({ inicio: antes, ...PEDIDO });
     expect(h.vincular).toHaveBeenCalledTimes(1);
 
     const despues = await iniciar();
-    vi.setSystemTime(Date.now() + DIEZ_MINUTOS + 1);
+    vi.setSystemTime(Date.now() + TREINTA_MINUTOS + 1);
     expect(await conectarWabaPropia({ inicio: despues, ...PEDIDO })).toEqual({ resultado: "vencido" });
 
     expect(h.vincular).toHaveBeenCalledTimes(1);
@@ -679,7 +679,7 @@ describe("conectarWabaPropia", () => {
     ["sin sello", undefined],
     ["un sello que no es texto", 42],
     ["texto cualquiera", "v1.a.b.c"],
-    ["un sello de otro uso", sellar("otro-uso", { t: TENANT, u: USUARIO, n: "x", exp: Date.now() + DIEZ_MINUTOS })],
+    ["un sello de otro uso", sellar("otro-uso", { t: TENANT, u: USUARIO, n: "x", exp: Date.now() + TREINTA_MINUTOS })],
   ])("%s: «vencido»", async (_caso, inicio) => {
     await iniciar();
 

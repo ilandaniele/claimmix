@@ -654,10 +654,11 @@ const SCENARIOS: Scenario[] = [
         //
         // «emergencias»: el ensayo del 24/11 derivó a este titular ajeno sin
         // decirle a quién llamar si es urgente; toda derivación lo dice.
+        // «tu póliza»: la póliza es del padre; la línea es «de la póliza».
         expect: {
           replies: 1,
           mentions: ["R*** P***", "Lucía Paz", "especialista", "emergencias"],
-          avoids: ["Roberto Paz", "¿", "tu auto"],
+          avoids: ["Roberto Paz", "¿", "tu auto", "tu póliza"],
         },
       },
     ],

@@ -9,7 +9,13 @@
 
 import { describe, it, expect } from "vitest";
 
-import { AUDIO_SIN_TRANSCRIBIR, diceQueNoSeEscucho } from "@/core/mensajes/audio-sin-transcribir";
+import {
+  AUDIO_SIN_TRANSCRIBIR,
+  avisaQueNoSeEscucho,
+  conAudioSinTranscribir,
+  daPorAnotadoElAudio,
+  diceQueNoSeEscucho,
+} from "@/core/mensajes/audio-sin-transcribir";
 
 describe("diceQueNoSeEscucho", () => {
   it("acepta el piso", () => {
@@ -104,5 +110,91 @@ describe("diceQueNoSeEscucho", () => {
     "No pudimos escuchar tu nota de voz.",
   ])("rechaza: %s", (texto) => {
     expect(diceQueNoSeEscucho(texto)).toBe(false);
+  });
+});
+
+describe("conAudioSinTranscribir", () => {
+  const TEXTO = "Para seguir necesitamos el número de póliza.";
+  const veces = (s: string) => s.toLowerCase().split("no pudimos escuchar").length - 1;
+
+  it("agrega el aviso tras una línea en blanco, y aplicarlo dos veces da lo mismo", () => {
+    const una = conAudioSinTranscribir(TEXTO, true);
+
+    expect(una).toBe(`${TEXTO}\n\n${AUDIO_SIN_TRANSCRIBIR}`);
+    expect(conAudioSinTranscribir(una, true)).toBe(una);
+  });
+
+  // Textos de pedir como los escribe el piso o el redactor: con «registrada», «anotamos» o «sumamos».
+  const PEDIDOS = [
+    "Hola, Ana. Recibimos tu denuncia y ya quedó registrada.\n\nNecesitamos que nos cuentes:\n\n• Fecha del siniestro\n\nPodés responder por acá mismo.",
+    `${TEXTO} Tu denuncia ya quedó registrada.`,
+    "Gracias, Ana. Anotamos la fecha. Nos falta el lugar: ¿dónde fue?",
+    "Ana, para seguir necesitamos el número de póliza. Lo sumamos a tu denuncia apenas lo tengamos.",
+  ];
+
+  it.each(PEDIDOS)("aplicarlo dos veces da lo mismo con un pedido real, y el aviso queda una vez: %s", (texto) => {
+    const una = conAudioSinTranscribir(texto, true);
+
+    expect(una).toBe(`${texto}\n\n${AUDIO_SIN_TRANSCRIBIR}`);
+    expect(conAudioSinTranscribir(una, true)).toBe(una);
+    expect(veces(una)).toBe(1);
+  });
+
+  it.each([false, undefined, "true", 1])("sin la marca en true (%j), el texto vuelve idéntico", (marca) => {
+    expect(conAudioSinTranscribir(TEXTO, marca)).toBe(TEXTO);
+  });
+
+  it.each([
+    AUDIO_SIN_TRANSCRIBIR,
+    // El piso del mail con nombre lo dice con minúscula: con `includes` se repetiría.
+    "Ana, no pudimos escuchar bien tu nota de voz. ¿Nos escribís lo que nos querías contar, o nos la mandás de nuevo?",
+    "No pudimos escuchar tu audio, ¿nos lo escribís?",
+    // El redactor lo dice a su manera y el pedido trae el vocabulario que rechaza un acuse.
+    "Hola, Ana. Recibimos tu denuncia y ya quedó registrada. No pudimos escuchar bien tu nota de voz: ¿nos escribís lo que querías contar? Además necesitamos: la fecha.",
+    "Gracias, Ana. Anotamos la fecha. No pudimos escuchar tu nota de voz, ¿nos la escribís? Lo sumamos a tu denuncia.",
+    `${AUDIO_SIN_TRANSCRIBIR} Tu denuncia ya quedó registrada.`,
+  ])("no lo agrega si el texto ya lo dice: %s", (texto) => {
+    const salida = conAudioSinTranscribir(texto, true);
+
+    expect(salida).toBe(texto);
+    expect(veces(salida)).toBe(1);
+  });
+});
+
+describe("avisaQueNoSeEscucho", () => {
+  it("es más ancha que diceQueNoSeEscucho: no mira «registrada» ni «sumamos»", () => {
+    const texto = "Ya quedó registrada tu denuncia. No pudimos escuchar tu audio, ¿nos lo escribís? Lo sumamos apenas llegue.";
+
+    expect(diceQueNoSeEscucho(texto)).toBe(false);
+    expect(avisaQueNoSeEscucho(texto)).toBe(true);
+  });
+
+  it.each([
+    "Recibimos tu audio.",
+    "No pudimos escuchar tu audio.",
+    "Escribinos lo que querías contar.",
+    "Para seguir necesitamos el número de póliza.",
+  ])("pide las tres cosas: %s", (texto) => {
+    expect(avisaQueNoSeEscucho(texto)).toBe(false);
+  });
+});
+
+describe("daPorAnotadoElAudio", () => {
+  it.each([
+    "Lucía, tomamos nota de tu audio.",
+    "Ya anotamos tu nota de voz. Necesitamos el número de póliza.",
+    "Tu mensaje de voz quedó registrado.",
+  ])("nombra el audio y lo da por anotado: %s", (texto) => {
+    expect(daPorAnotadoElAudio(texto)).toBe(true);
+  });
+
+  it.each([
+    "Tomamos nota de lo que nos pediste. Necesitamos el número de póliza.",
+    "Ya quedó registrada tu denuncia. Necesitamos el número de póliza.",
+    "No tomamos nota de tu audio.",
+    // Ya avisa con sus palabras: el aviso del pie no se agrega, no hay contradicción.
+    "Ya quedó registrada tu denuncia. No pudimos escuchar tu nota de voz: ¿nos escribís lo que querías contar?",
+  ])("no lo nombra, lo niega o ya avisa que no se escuchó: %s", (texto) => {
+    expect(daPorAnotadoElAudio(texto)).toBe(false);
   });
 });

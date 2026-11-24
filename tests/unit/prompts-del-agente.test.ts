@@ -266,6 +266,24 @@ describe("prompts del agente — compose", () => {
     await expect(texto).toMatchFileSnapshot("./__prompts__/compose-audio-sin-transcribir-whatsapp.txt");
   });
 
+  it("pedido con una nota de voz que no se pudo escuchar: el redactor no la nombra, el aviso va al final", async () => {
+    const texto = await prompt(
+      "Hola, Marta. Necesitamos el número de póliza para seguir con tu caso.",
+      base({
+        intent: "ask",
+        channel: "whatsapp",
+        fields: ["policy_number"],
+        claimantName: "Marta Prueba",
+        isFollowUp: true,
+        audioSinTranscribir: true,
+        lastMessage: "[Mensaje de audio adjunto]",
+      })
+    );
+
+    expect(texto).toContain("El aviso lo agregamos nosotros al final del mensaje.");
+    expect(texto).not.toMatch(/no rige lo de agradecer/);
+  });
+
   it("recordatorio de un pedido, por WhatsApp", async () => {
     const texto = await prompt(
       "Hola, Marta. Te recordamos que necesitamos el número de póliza para seguir con tu caso.",

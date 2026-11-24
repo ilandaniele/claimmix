@@ -1897,3 +1897,116 @@ describe("whatsappMessenger — el archivo que no entró", () => {
     expect(String(inserted[0]?.rendered_body).endsWith(ARCHIVO_QUE_NO_ENTRO)).toBe(true);
   });
 });
+
+/*
+ * Una nota de voz que no se pudo transcribir y un pedido que sale igual: el
+ * aviso va al pie, fuera del redactor, como el del archivo que no entró.
+ */
+describe("whatsappMessenger — el pedido después de una nota de voz que no se escuchó", () => {
+  const redacta = (message: string) =>
+    (callGemini as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify({ message }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+    });
+  const veces = (s: string) => s.split(AUDIO_SIN_TRANSCRIBIR).length - 1;
+  const PEDIDO = { caseId: CASE, missingFields: ["parte_amistoso"] };
+  const PROSA = "Lucía, para seguir con tu reclamo necesitamos el parte amistoso.";
+
+  beforeEach(() => {
+    (callGemini as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("sin modelo en tests"));
+  });
+
+  it("con prosa del redactor, termina con el aviso, la prosa sigue y el aviso va una sola vez", async () => {
+    redacta(PROSA);
+
+    await send("missing_information_request", { ...PEDIDO, audioSinTranscribir: true });
+
+    const body = sentBody();
+    expect(body.startsWith(PROSA)).toBe(true);
+    expect(body.endsWith(AUDIO_SIN_TRANSCRIBIR)).toBe(true);
+    expect(veces(body)).toBe(1);
+  });
+
+  it("con el redactor caído, el piso lleva la lista y el aviso", async () => {
+    await send("missing_information_request", { ...PEDIDO, audioSinTranscribir: true });
+
+    const body = sentBody();
+    expect(body).toContain("•");
+    expect(body.endsWith(AUDIO_SIN_TRANSCRIBIR)).toBe(true);
+    expect(veces(body)).toBe(1);
+  });
+
+  it("con el redactor, un pedido que ya avisa con sus palabras y dice «registrada» no repite el aviso", async () => {
+    const PROPIA =
+      "Hola, Lucía. Recibimos tu denuncia y ya quedó registrada. No pudimos escuchar bien tu nota de voz: ¿nos escribís lo que querías contar? Además necesitamos el parte amistoso.";
+    redacta(PROPIA);
+
+    await send("missing_information_request", { ...PEDIDO, audioSinTranscribir: true });
+
+    expect(sentBody()).toBe(PROPIA);
+  });
+
+  it("el primer pedido sin redactor sigue diciendo que la denuncia quedó registrada, y el aviso va al pie", async () => {
+    await send("missing_information_request", {
+      ...PEDIDO,
+      claimantName: "Lucía Pérez",
+      audioSinTranscribir: true,
+    });
+
+    const body = sentBody();
+    expect(body.startsWith("Hola, Lucía. Recibimos tu denuncia y ya quedó registrada.")).toBe(true);
+    expect(body.endsWith(AUDIO_SIN_TRANSCRIBIR)).toBe(true);
+    expect(veces(body)).toBe(1);
+  });
+
+  it("en el simulado también va al pie: es el camino del ensayo", async () => {
+    await simulatedWhatsappMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO,
+      template: "missing_information_request",
+      data: { ...PEDIDO, audioSinTranscribir: true },
+    });
+
+    expect(String(inserted[0]?.rendered_body).endsWith(AUDIO_SIN_TRANSCRIBIR)).toBe(true);
+  });
+
+  it("con un archivo que no entró y una nota sin escuchar, los dos avisos, cada uno una vez, el del archivo antes", async () => {
+    await send("missing_information_request", {
+      ...PEDIDO,
+      archivoQueNoEntro: true,
+      audioSinTranscribir: true,
+    });
+
+    const body = sentBody();
+    expect(veces(body)).toBe(1);
+    expect(body.split(ARCHIVO_QUE_NO_ENTRO).length - 1).toBe(1);
+    expect(body.indexOf(ARCHIVO_QUE_NO_ENTRO)).toBeLessThan(body.indexOf(AUDIO_SIN_TRANSCRIBIR));
+  });
+
+  it.each([{}, { audioSinTranscribir: false }, { audioSinTranscribir: "true" }])(
+    "el pedido sin la marca (%j) no dice que no se escuchó",
+    async (extra) => {
+      redacta(PROSA);
+
+      await send("missing_information_request", { ...PEDIDO, ...extra });
+
+      expect(sentBody().toLowerCase()).not.toContain("no pudimos escuchar");
+    }
+  );
+
+  it("el acuse que ya dice que no se escuchó, con sus palabras, no repite el aviso", async () => {
+    const previo = process.env.AGENT_COMPOSE_REPLIES;
+    delete process.env.AGENT_COMPOSE_REPLIES;
+    try {
+      const PARAFRASIS = "Lucía, no pudimos escuchar tu audio. ¿Nos lo escribís?";
+      redacta(PARAFRASIS);
+
+      await send("information_received", { caseId: CASE, claimantName: "Lucía", audioSinTranscribir: true });
+
+      expect(sentBody()).toBe(PARAFRASIS);
+    } finally {
+      if (previo !== undefined) process.env.AGENT_COMPOSE_REPLIES = previo;
+    }
+  });
+});

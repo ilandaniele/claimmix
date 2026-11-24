@@ -43,7 +43,7 @@ import {
 } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO, mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
-import { AUDIO_SIN_TRANSCRIBIR, diceQueNoSeEscucho } from "@/core/mensajes/audio-sin-transcribir";
+import { AUDIO_SIN_TRANSCRIBIR, daPorAnotadoElAudio, diceQueNoSeEscucho } from "@/core/mensajes/audio-sin-transcribir";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -316,7 +316,7 @@ ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}${input.repitePedido ? `\n${textoBase("redactar.recordatorio")}` : ""}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${enmascarar(input.lastMessage).slice(0, 600)}"""` : ""}
 
-${channelBrief}${input.audioSinTranscribir ? "\nEn este mensaje no rige lo de agradecer ni lo de «tomamos nota de…» del acuse de arriba: la nota de voz no se pudo escuchar." : ""}
+${channelBrief}${input.audioSinTranscribir ? (input.intent === "acknowledgement" ? "\nEn este mensaje no rige lo de agradecer ni lo de «tomamos nota de…» del acuse de arriba: la nota de voz no se pudo escuchar." : "\nLa nota de voz de la persona no se pudo escuchar: no la nombres ni digas «tomamos nota» de ella. El aviso lo agregamos nosotros al final del mensaje.") : ""}
 
 PROHIBIDO, sin excepción:
 - Prometer cobertura, pagos, montos, plazos, reintegros, grúas o turnos. Nadie evaluó el siniestro todavía.
@@ -528,6 +528,10 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   if (input.intent === "acknowledgement" && input.audioSinTranscribir && !diceQueNoSeEscucho(trimmed)) {
     return "audio_sin_transcribir";
   }
+  // En los demás, el pie fijo ya dice que no se escuchó: «tomamos nota» del audio lo contradice.
+  if (input.intent !== "acknowledgement" && input.audioSinTranscribir && daPorAnotadoElAudio(trimmed)) {
+    return "audio_dado_por_anotado";
+  }
 
   // Lo mismo: los pisos de toda derivación la dicen, también la del titular ajeno.
   if (deriva && !diceEmergencias(trimmed)) return titularAjeno ? "dropped_emergencias_ajeno" : "dropped_emergencias";
@@ -629,6 +633,9 @@ function explain(problem: string): string {
   }
   if (problem === "audio_sin_transcribir") {
     return `no dijiste que la nota de voz no se pudo escuchar, la diste por escuchada, anotada o recibida (aunque sea una parte), o no le pediste que lo escriba. No se pudo escuchar: decilo y pedile que nos escriba lo que quería contar o que la mande de nuevo (por ejemplo: «${AUDIO_SIN_TRANSCRIBIR}»).`;
+  }
+  if (problem === "audio_dado_por_anotado") {
+    return "diste por anotada o recibida la nota de voz, y no se pudo escuchar. No la nombres ni digas «tomamos nota» de ella: el aviso lo agregamos nosotros al final.";
   }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";

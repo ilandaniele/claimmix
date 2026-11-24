@@ -51,6 +51,7 @@ import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { policyTypeDeRamo } from "@/core/case/ramos";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
+import { avisaQueNoSeEscucho } from "@/core/mensajes/audio-sin-transcribir";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/core/adjuntos/firma";
 import { AppError } from "@/lib/errors";
 import { errorCode } from "@/lib/observability/error-code";
@@ -129,7 +130,8 @@ interface TurnDicho {
    *
    * `fixture` es el nombre en `tests/fixtures/`, con extensión. Si no está en
    * disco se manda `reemplazo`, que sí está en el repositorio: ejercita el
-   * guardado, la firma y la llamada al modelo, pero no lo que el archivo dice.
+   * guardado y la firma, pero no lo que el archivo dice. Un audio de reemplazo
+   * es silencio y no llega al modelo.
    */
   adjunto?: { fixture: string; tipo: string; reemplazo?: string };
   /**
@@ -253,9 +255,20 @@ interface TurnDicho {
     sinPedido?: boolean;
     /**
      * Que la nota de voz de este turno haya quedado escrita en el mensaje.
-     * Sólo con una nota de verdad en disco: el reemplazo es mudo.
+     * Sólo con una nota de verdad en disco: el reemplazo es mudo (ver `conElReemplazo`).
      */
     transcribe?: boolean;
+    /**
+     * Lo que se exige además, y sólo, cuando se manda el reemplazo del adjunto en
+     * vez del archivo de verdad: `placeholder.ogg` es silencio digital, que
+     * `esOpusMudo` da por mudo sin llamar al modelo. Con la nota real en disco
+     * se transcribe y esto no corre.
+     *
+     * `avisaDelAudio`: alguna respuesta dice que no se escuchó y pide escribirlo, con la misma
+     * prueba (`avisaQueNoSeEscucho`) con la que el mensajero decide si agrega el pie: «escrib» a
+     * secas rechazaría un «¿nos lo mandás de nuevo?» que el producto da por bueno.
+     */
+    conElReemplazo?: { avisaDelAudio?: boolean; avoids?: string[] };
   };
 }
 
@@ -746,7 +759,8 @@ const SCENARIOS: Scenario[] = [
         // Como lo deja el webhook: un audio sin texto entra con el marcador.
         say: PLACEHOLDER_AUDIO,
         adjunto: { fixture: "nota-de-voz.ogg", tipo: "audio/ogg; codecs=opus", reemplazo: "placeholder.ogg" },
-        expect: { attachments: 1, transcribe: true },
+        // Sin la nota real el audio es mudo: la respuesta no puede darla por anotada y tiene que pedir que la escriba.
+        expect: { attachments: 1, transcribe: true, conElReemplazo: { avisaDelAudio: true, avoids: ["tomamos nota"] } },
       },
       {
         // La constancia dice 15/09/2026: tres días después de lo que contó.
@@ -1744,12 +1758,16 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
 
       const pedidas = new Set(said.flatMap((r) => r.askedKeys).map(canonicalFieldKey));
 
+      const conReemplazo = turn.adjunto !== undefined && archivoDe(turn.adjunto) !== turn.adjunto.fixture;
       for (const phrase of want.mentions ?? []) {
         if (!all.includes(phrase.toLowerCase())) {
           note(scenario.id, i + 1, `no menciona "${phrase}"`, `menciona:${phrase}`);
         }
       }
-      for (const phrase of want.avoids ?? []) {
+      if (conReemplazo && want.conElReemplazo?.avisaDelAudio && !said.some((r) => avisaQueNoSeEscucho(readable(r.body)))) {
+        note(scenario.id, i + 1, "no avisa que la nota de voz no se escuchó ni pide escribirla", "avisa-del-audio");
+      }
+      for (const phrase of [...(want.avoids ?? []), ...(conReemplazo ? (want.conElReemplazo?.avoids ?? []) : [])]) {
         if (all.includes(phrase.toLowerCase())) {
           note(scenario.id, i + 1, `no debería decir "${phrase}"`, `no-menciona:${phrase}`);
         }
@@ -1795,7 +1813,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         }
       }
       if (want.transcribe && turn.adjunto) {
-        if (archivoDe(turn.adjunto) !== turn.adjunto.fixture) {
+        if (conReemplazo) {
           unrehearsed.add(turn.adjunto.fixture);
         } else {
           const [transcripto] = await db

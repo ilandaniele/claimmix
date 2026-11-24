@@ -3337,6 +3337,108 @@ Choqué ayer en la rotonda.`);
       const [, tipo] = texto.match(/"content_type" ilike \$(\d+)/) ?? [];
       expect(params[Number(tipo) - 1]).toBe("audio/%");
     });
+
+    describe("en el camino pedir", () => {
+      // Sin pedido previo el orquestador contesta con la lista de lo que falta, no con el acuse.
+      async function pedidoCon(
+        latestMessageText: string,
+        audioSinTextoRows: Array<{ id: string }> = [],
+        extra: Parameters<typeof setupDbMocks>[0] = {}
+      ) {
+        setupDbMocks({ lastAskRows: [], audioSinTextoRows, ...extra });
+        vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+          missingRequiredFields: ["parte_amistoso"],
+          fieldsNeedingConfirmation: [],
+          isComplete: false,
+          status: "info_faltante",
+        });
+        vi.mocked(deliberate).mockResolvedValue(null as never);
+
+        await orchestratePostExtraction(
+          CASE_ID,
+          TENANT_ID,
+          { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText },
+          NO_MATCHES
+        );
+
+        return vi
+          .mocked(dispatchOutboundEmail)
+          .mock.calls.find((c) => c[0].template === "missing_information_request");
+      }
+
+      it("con una fila de nota sin texto, el pedido va marcado", async () => {
+        const pedido = await pedidoCon("Les mando el audio.", [{ id: "att-1" }]);
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(true);
+      });
+
+      it("con el marcador de la nota pendiente en el último mensaje, también", async () => {
+        const pedido = await pedidoCon(PLACEHOLDER_AUDIO);
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(true);
+      });
+
+      it("con la nota transcripta y sin filas mudas, el pedido va sin marca", async () => {
+        const pedido = await pedidoCon(`${ENCABEZADO_TRANSCRIPCION}
+Choqué ayer en la rotonda.`);
+        expect(pedido).toBeDefined();
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(false);
+      });
+
+      it("con un archivo que no entró, el aviso del archivo gana y el del audio no va", async () => {
+        const pedido = await pedidoCon(PLACEHOLDER_AUDIO, [], { rejectedAttachmentRows: [{ id: "att-2" }] });
+        expect(pedido?.[0].data?.archivoQueNoEntro).toBe(true);
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(false);
+      });
+    });
+
+    // Dicen que la carga por este medio terminó: pedir ahí que escriba o reenvíe se contradice.
+    describe("cuando la corrida termina en el cierre o en la confirmación de un dato", () => {
+      it("la confirmación de recibo no lleva la marca", async () => {
+        setupDbMocks({ outboundMessagesRows: [] });
+
+        await orchestratePostExtraction(
+          CASE_ID,
+          TENANT_ID,
+          { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: PLACEHOLDER_AUDIO },
+          NO_MATCHES
+        );
+
+        const cierre = vi
+          .mocked(dispatchOutboundEmail)
+          .mock.calls.find((c) => c[0].template === "confirmation_received");
+        expect(cierre).toBeDefined();
+        expect(cierre?.[0].data?.audioSinTranscribir).toBeFalsy();
+      });
+
+      it("el pedido de confirmar un dato que no coincide tampoco", async () => {
+        const claim = extractEmailClaimMock({
+          fields: [
+            ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "full_name"),
+            { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+          ],
+        });
+        const conflicto: CustomerMatch = {
+          customerId: "cust-002",
+          matchType: "email",
+          storedValues: {},
+          confidence: 0.75,
+          customerName: "Juan Pérez",
+          conflictsWithExtracted: ["full_name"],
+        };
+
+        await orchestratePostExtraction(
+          CASE_ID,
+          TENANT_ID,
+          { extractedClaim: claim, senderEmail: SENDER_EMAIL, latestMessageText: PLACEHOLDER_AUDIO },
+          [conflicto]
+        );
+
+        const pedido = vi
+          .mocked(dispatchOutboundEmail)
+          .mock.calls.find((c) => c[0].template === "data_confirmation_request");
+        expect(pedido).toBeDefined();
+        expect(pedido?.[0].data?.audioSinTranscribir).toBeFalsy();
+      });
+    });
   });
 
   it("still asks when a file arrives and the list is not the one we sent", async () => {

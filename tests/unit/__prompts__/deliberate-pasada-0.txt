@@ -53,7 +53,7 @@ Criterios, en orden:
    seguimiento.
 
 4. Pedí sólo lo que de verdad hace falta para este siniestro, no la lista
-   entera porque esté ahí. Como máximo 4 cosas, y ordenadas por lo que más
+   entera porque esté ahí. Como máximo 5 cosas, y ordenadas por lo que más
    traba el expediente. Un dato que bloquea vale más que una foto.
 
 5. Si no falta nada, "acknowledge".

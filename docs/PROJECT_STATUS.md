@@ -5196,7 +5196,7 @@ La política con la que arranca el agente salió de tres archivos de código y p
 4. **El umbral** de arriba (95 %, 100 comparaciones, evaluación completa más dos ensayos y cero `BAJA EL PISO`).
 5. **El costo y el momento de la evaluación completa.** `pnpm sombra:evaluar --todos` son unas 163 extracciones con `gemini-3.8-flash`, el doble con `--sin-sombra`, y no se ven en el tope ni en `/metricas`. Por omisión corre con un límite de 10.
 6. **`extraction.json`.** Si sigue mostrando `confidence_payload.sombra` y `.entrenamiento` a todos los roles. No tienen PII y la ruta ya expone `raw_agent_output`; si no se quiere, se quitan en la ruta con un destructurado.
-7. **«Como máximo 4 cosas»** en el criterio 4 de `deliberate`, contra `MAX_ASK_ITEMS = 5`. Queda byte a byte; corregirlo es un PR a `entrenamiento/base/decidir/01-criterios.md` y cambia el comportamiento.
+7. **«Como máximo 4 cosas»** en el criterio 4 de `deliberate`, contra `MAX_ASK_ITEMS = 5`. Queda byte a byte; corregirlo es un PR a `entrenamiento/base/decidir/01-criterios.md` y cambia el comportamiento. **Decidido el 24/11: 5 en los dos** (rama `fix/tope-pedir-5`, más abajo).
 8. **Las indicaciones en todas las pasadas de `deliberate`** (lo que hace hoy) o sólo en la pasada 0. Con sólo la 0, los turnos con consulta ignoran la regla.
 9. **El texto de las introducciones del bloque**, que ya no dicen «mandan ellas», y si el criterio 6 (póliza vencida, abogados, angustia) se refuerza en la base.
 10. **El alcance de la validación al guardar.** Hoy rechaza etiquetas, enlaces y mails; sumar teléfonos, DNI y patentes da falsos positivos en fechas y en ejemplos de formato.
@@ -5521,6 +5521,13 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Cambio.** La línea entra en `LO_REVISA_UN_ESPECIALISTA` (`titular-que-no-coincide.ts`), entre la frase del especialista y `AVISO_DE_TRASPASO` como en `ESCALATION_TEXT`; sólo la usan las ramas del titular ajeno, así que el piso de WhatsApp (`renderConflictoDePadron`) y el del correo (`data-confirmation-request`) la dicen sin tocarlos. En `compose-reply.ts` el brief de `conflict` con `titularAjeno` la pide con el literal (`LINEA_DE_EMERGENCIAS_AJENA`; el brief de `escalation` queda byte por byte igual) y `dropped_emergencias` mira `deriva` (escalation o titular ajeno) en vez de sólo `escalation`. El conflicto que no es ajeno queda igual.
 - **«De la póliza», decisión del dueño (24/11).** A quien escribe por la póliza de otro, «la línea de emergencias de tu póliza» se la atribuye, como «tu auto». La línea del titular ajeno es `EMERGENCIAS_DE_LA_POLIZA` (`derivacion.ts`): «…llamá a la línea de emergencias de la póliza.». Toda otra derivación sigue con `EMERGENCIAS` («de tu póliza»). `titular_ajeno_se_lo_atribuye` rechaza cualquier «tu póliza», sin excepción, y el reintento por la línea faltante en el ajeno (`dropped_emergencias_ajeno`) pide la frase «de la póliza».
 - **Tests.** `compose-reply.test.ts` (sin la línea dos veces devuelve el piso, el reintento con la frase «de la póliza», no choca con `titular_ajeno_pregunta`, el brief pide sólo la del ajeno, el no ajeno sin cambios y «emergencias de tu póliza» rechazada en el ajeno), `template-render.test.ts` y `whatsapp-messenger.test.ts` (los dos pisos con ajeno dicen «de la póliza» y no «de tu póliza», y sin la línea cuando no es ajeno). El ensayo exige «emergencias» en `mail-que-no-coincide-con-el-padron`. Sin migración ni variables; el dorado no cambia.
+
+### El criterio 4 de `deliberate` dice «como máximo 5» (24/11, rama `fix/tope-pedir-5`)
+
+- **Decisión del dueño.** La decisión 7 de la lista de arriba: el criterio 4 decía «Como máximo 4 cosas» y el código recorta a `MAX_ASK_ITEMS = 5` (`orchestrate.ts`). El dueño eligió 5 en los dos.
+- **Cambio.** Una palabra en `entrenamiento/base/decidir/01-criterios.md`; `pnpm entrenamiento:empaquetar` regenera `entrenamiento-base.generated.ts` (cambia `VERSION_DEL_ENTRENAMIENTO_BASE`). Los dorados `deliberate-pasada-0.txt` y `deliberate-ultima-pasada.txt` cambian en esa línea y en ninguna otra (diff leído). `MAX_ASK_ITEMS` no se toca.
+- **Qué cambia para la gente.** Nada en el tope: lo que sale ya se recortaba a 5. El modelo puede proponer una quinta cosa donde antes se frenaba en 4, y la sombra de `pedir`, que compara contra el código, deja de contar como diferencia lo que sólo era el tope (7 de 11 en la nota de QA de arriba).
+- **Pide un ensayo** antes de mergear, porque es texto del prompt.
 
 ### 🙋 Waiting on you (not code)
 

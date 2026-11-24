@@ -97,6 +97,9 @@ el tercero como responsable (`finally.responsabilidad`, que informa `sin_leer`
 si no se escribió opinión). Necesita la migración 0041 aplicada en la base del
 ensayo.
 
+`noAsked` canoniza la clave (`canonicalFieldKey`), así que `policy_number` y
+`numero_poliza` son el mismo dato.
+
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.
 
@@ -137,7 +140,15 @@ y otro choque con otra fecha. A la pregunta el agente no contesta, el caso queda
 misma consulta que el estado: `consulta_estado`. Un mensaje reservado sin clase
 se lee como `sin_clasificar`. El otro choque, por WhatsApp, abre un caso nuevo
 que contesta el agente (`casoNuevo: true`) y el derivado no cambia: desde ese
-turno el ensayo sigue el caso nuevo y comprueba el anterior con `anterior`. Por
+turno el ensayo sigue el caso nuevo y comprueba el anterior con `anterior`. El
+caso nuevo hereda el nombre del mismo número: no lo vuelve a pedir (`noAsked`
+sobre `full_name`), ni siquiera cuando el perfil de WhatsApp (`remitente`) dice
+otro nombre que lo escrito, y no cita la póliza del derivado ni el nombre del
+perfil (`avoids` con «6610» y «Paulo»). Que
+lo heredado llegó con su confianza lo comprueba `finally.seguros` (el nombre
+guardado con confianza >= 0.85; `finally.knows` sólo mira que la clave exista, y
+el perfil de WhatsApp la escribiría igual a 0.70). Que la póliza no se herede (es otro vehículo) lo fija `pnpm capa-datos`; el
+ensayo no exige que el mensaje la pida, porque eso lo decide el modelo y varía. Por
 mail no se parte: el hilo es la conversación, y la clase y el aviso al equipo
 quedan como estaban.
 `mail-tardio-pregunta-como-va` es la misma pregunta por mail, contestando en el
@@ -410,6 +421,13 @@ marcador y una persona descartable, que borra al terminar), así que sólo corre
 en CI contra el ensayo o con `--escribe`, y necesita la 0046 aplicada en esa
 base. Si el trigger falla, `recordUsage` traga el error y los tres topes de
 presupuesto dejan de contar en silencio; esto lo atrapa antes de producción.
+
+Que el caso de un siniestro nuevo hereda la identidad sólo cuando corresponde lo
+prueba la sección 8 de `pnpm capa-datos`, que corre `abrirCasoPorSiniestroNuevo`
+de verdad como `claimmix_app` en dos inquilinos descartables: el mismo número
+hereda `dni` y `full_name` con tope 0.95 y no la póliza, un dato con confianza media o con la confirmación pendiente o rechazada no pasa, con otro número en el
+hilo no hereda nada, y desde otro inquilino no abre ni hereda. Escribe, así que
+sólo corre en CI contra el ensayo o con `--escribe`.
 
 Sobre esa mitad hay **cuatro formas**, y cada una contesta una pregunta
 distinta. Que sean cuatro y no una repetida con otro nombre es el punto: si las

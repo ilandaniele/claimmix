@@ -930,6 +930,37 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
     expect(resolved).toBeUndefined();
   });
 
+  it("un nombre del sobre con confianza alta no cierra la fila pendiente del nombre", async () => {
+    // `sinPisarLoGuardado` deja el nombre guardado, con su confianza, en el
+    // campo del canal. Es un dato del sobre, no algo que la persona haya dicho:
+    // no puede confirmar la fila de conflicto ni contar como respuesta.
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: [],
+      fields: [
+        ...extractEmailClaimMock().fields
+          .filter((f) => f.field_key !== "full_name")
+          .map((f) => ({ ...f, confidence: 0.7 })),
+        { field_key: "full_name", field_value: "Paulo Ortiz Gómez", confidence: 0.9, source: "canal" as const },
+      ],
+    });
+    const { updateSpy } = setupDbMocks({
+      lastAskRows: [{ asked_keys: ["full_name"], created_at: "2026-08-20T18:00:00Z" }],
+      confirmacionesCerradas: [{ campo: "full_name" }],
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const cerrada = updateSpy.mock.calls.find(
+      (c) => (c[0] as { status?: string })?.status === "confirmed"
+    );
+    expect(cerrada).toBeUndefined();
+  });
+
   it("never asks someone to confirm the sentence they wrote", async () => {
     // A real email did this: Campo "Qué pasó", quoting back the claimant's own
     // words. Free text is the one thing that needs no confirming.

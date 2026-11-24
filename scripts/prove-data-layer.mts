@@ -53,6 +53,7 @@ import {
 import { contarCasos, buscarCaso } from "@/server/asistente/herramientas";
 import { deleteCases } from "@/server/cases/delete";
 import { aplicarRetencion } from "@/server/cases/retencion";
+import { abrirCasoPorSiniestroNuevo } from "@/server/cases/siniestro-nuevo";
 import { revisarDesvios } from "@/server/desvios/revision-nocturna";
 import { cambiarEstadoSso, guardarIdp, type CambioDeEstadoSso } from "@/server/sso/config";
 import {
@@ -1166,6 +1167,231 @@ if (!escribe) {
   } finally {
     try {
       if (inquilino) await limpiar([inquilino], [correo, correoAjeno]);
+    } finally {
+      await dueno.end();
+    }
+  }
+}
+
+// ── 8. El siniestro nuevo hereda la identidad, sólo del mismo número y del mismo inquilino ──
+//
+// `abrirCasoPorSiniestroNuevo` abre un caso con un INSERT … SELECT que lee los
+// `extracted_fields` del caso de antes. Con la base simulada sólo se ve la forma
+// del SQL; acá corre de verdad con `claimmix_app`, y se prueba lo que decide
+// quién hereda qué:
+//   · el mismo número hereda el nombre y el DNI, con tope 0.95, y nunca la póliza;
+//   · un dato dudoso (menos de 0.85) o con una confirmación pendiente o rechazada no pasa;
+//   · si en el hilo hay entrantes de otro número, no hereda nada;
+//   · desde otro inquilino no se abre ni se hereda nada.
+//
+// Va en dos inquilinos descartables. La limpieza es por sus ids y nada más, y al
+// arrancar barre lo que dejó, hace más de una hora, una corrida cancelada de esta
+// misma sección. Escribe, así que sólo corre en CI (ensayo) o con `--escribe`
+// contra el ensayo, y nunca contra producción.
+console.log("\n▸ El siniestro nuevo hereda nombre y DNI del mismo número, contra Postgres");
+if (!escribe) {
+  console.log("     (crea dos inquilinos descartables: sólo corre en CI o con --escribe contra el ensayo)");
+} else if (vetoDeEscritura) {
+  mal(`no se escribe: ${vetoDeEscritura}`);
+} else if (aislamientoRoto) {
+  mal("no se escribe: el aislamiento ya falló más arriba");
+} else {
+  const MARCA = "Prueba capa de datos, sección 8 ·";
+  const correosDe = (r: string) => [`capa-datos-8.${r}@example.com`, `capa-datos-8b.${r}@example.com`];
+  const corrida = randomUUID();
+  const r8 = corrida.slice(0, 8);
+  const [correoA, correoB] = correosDe(r8);
+  const dueno = new Pool({ connectionString: process.env.DATABASE_URL?.trim() });
+
+  const limpiar = async (ids: string[]) => {
+    await dueno.query(`DELETE FROM audit_log WHERE tenant_id = ANY($1::uuid[])`, [ids]);
+    await dueno.query(`DELETE FROM tenants WHERE id = ANY($1::uuid[])`, [ids]);
+  };
+  const igual = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
+  // Un error de la base no se imprime crudo: puede traer parámetros.
+  const parte = async (nombre: string, cuerpo: () => Promise<string[]>) => {
+    try {
+      const errores = await cuerpo();
+      if (errores.length === 0) {
+        bien(nombre);
+      } else {
+        for (const e of errores) mal(`${nombre}: ${e}`);
+        problemas.push(`${nombre}: no se comporta en Postgres como se espera`);
+      }
+    } catch (e) {
+      mal(`${nombre}: falló (${codigoDe(e)})`);
+      problemas.push(`${nombre}: falla contra Postgres`);
+    }
+  };
+
+  const creados: string[] = [];
+  try {
+    const viejos = await dueno.query(
+      `SELECT id::text AS id FROM tenants
+        WHERE name LIKE $1 AND contact_email LIKE 'capa-datos-8%.%@example.com'
+          AND created_at < now() - interval '1 hour'`,
+      [`${MARCA} %`]
+    );
+    const sobras = (viejos.rows as Array<{ id: string }>).map((f) => f.id);
+    if (sobras.length > 0) {
+      await limpiar(sobras);
+      console.log(`     (se barrieron ${sobras.length} inquilino(s) descartable(s) de una corrida cortada)`);
+    }
+
+    const nuevoInquilino = async (correo: string, rotulo: string): Promise<string> => {
+      const id = (
+        await dueno.query(`INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING id::text AS id`, [
+          `${MARCA} ${rotulo} ${corrida}`,
+          correo,
+        ])
+      ).rows[0].id as string;
+      creados.push(id);
+      return id;
+    };
+    const A = await nuevoInquilino(correoA, "A");
+    const B = await nuevoInquilino(correoB, "B");
+
+    const NOMBRE = `PRUEBA-NOMBRE-${r8}`;
+    const DNI = `PRUEBA-DNI-${r8}`;
+    const POLIZA = `PRUEBA-POLIZA-${r8}`;
+    let n = 0;
+
+    // Un caso terminado por el agente, con un entrante viejo, una respuesta y el
+    // entrante nuevo que se parte. `desde` es el número del entrante viejo.
+    const sembrar = async (
+      desde: string,
+      dudoso?: { dniConfianza?: number; confirmacion?: "pending" | "rejected" }
+    ) => {
+      const telefono = `5490000${r8}${n++}`;
+      const caso = (
+        await dueno.query(
+          `INSERT INTO cases (tenant_id, status, channel, email_thread_id)
+           VALUES ($1, 'requiere_especialista', 'whatsapp_sim', $2) RETURNING id::text AS id`,
+          [A, telefono]
+        )
+      ).rows[0].id as string;
+      const entrante = async (de: string, hace: string) =>
+        (
+          await dueno.query(
+            `INSERT INTO claim_messages (tenant_id, case_id, direction, provider, from_addr, body_text, status, received_at)
+             VALUES ($1, $2, 'inbound', 'whatsapp_sim', $3, 'prueba de la sección 8', 'received', now() - $4::interval)
+             RETURNING id::text AS id`,
+            [A, caso, de, hace]
+          )
+        ).rows[0].id as string;
+      await entrante(desde === "" ? telefono : desde, "3 hours");
+      await dueno.query(
+        `INSERT INTO outbound_messages (case_id, tenant_id, channel, template, rendered_body, status, created_at)
+         VALUES ($1, $2, 'whatsapp_sim', 'prueba_capa_datos', 'prueba de la sección 8', 'sent', now() - interval '2 hours')`,
+        [caso, A]
+      );
+      const mensaje = await entrante(telefono, "1 hour");
+      await dueno.query(
+        `INSERT INTO extracted_fields (case_id, tenant_id, field_key, field_value, confidence)
+         VALUES ($1, $2, 'full_name', $3, 1.00), ($1, $2, 'dni', $4, $6), ($1, $2, 'policy_number', $5, 0.95)`,
+        [caso, A, NOMBRE, DNI, POLIZA, dudoso?.dniConfianza ?? 0.9]
+      );
+      if (dudoso?.confirmacion) {
+        await dueno.query(
+          `INSERT INTO claim_field_confirmations (tenant_id, case_id, field_name, suggested_value, confidence, status)
+           VALUES ($1, $2, 'dni', $3, 0.90, $4)`,
+          [A, caso, DNI, dudoso.confirmacion]
+        );
+      }
+      return { caso, mensaje };
+    };
+    const camposDe = async (caso: string) =>
+      (
+        await dueno.query(
+          `SELECT field_key AS clave, field_value AS valor, confidence::float8 AS confianza
+             FROM extracted_fields WHERE case_id = $1 ORDER BY field_key`,
+          [caso]
+        )
+      ).rows as Array<{ clave: string; valor: string; confianza: number }>;
+    const casosDe = async (inquilino: string) =>
+      Number((await dueno.query(`SELECT count(*)::int AS n FROM cases WHERE tenant_id = $1`, [inquilino])).rows[0].n);
+
+    await parte("el caso nuevo hereda nombre y DNI del mismo número, sin la póliza", async () => {
+      const errores: string[] = [];
+      const { caso, mensaje } = await sembrar("");
+      const r = await abrirCasoPorSiniestroNuevo({ tenantId: A, caseId: caso, messageId: mensaje });
+      if (r.tipo !== "abierto") return [`no abrió el caso nuevo (${r.tipo})`];
+
+      const nuevo = await camposDe(r.casoNuevo);
+      if (
+        !igual(
+          nuevo.map((f) => [f.clave, f.valor, f.confianza]),
+          [
+            ["dni", DNI, 0.9],
+            ["full_name", NOMBRE, 0.95],
+          ]
+        )
+      )
+        errores.push(
+          `el caso nuevo quedó con ${nuevo.map((f) => `${f.clave}=${f.confianza}`).join(", ") || "nada"} (esperaba dni=0.9 y full_name=0.95, sin policy_number)`
+        );
+
+      const viejo = await camposDe(caso);
+      if (
+        !igual(
+          viejo.map((f) => [f.clave, f.valor, f.confianza]),
+          [
+            ["dni", DNI, 0.9],
+            ["full_name", NOMBRE, 1],
+            ["policy_number", POLIZA, 0.95],
+          ]
+        )
+      )
+        errores.push("el caso de antes cambió: sólo se lee");
+
+      const rastro = await dueno.query(
+        `SELECT count(*)::int AS n FROM audit_log WHERE tenant_id = $1 AND payload::text LIKE $2`,
+        [A, `%PRUEBA-%${r8}%`]
+      );
+      if (rastro.rows[0].n !== 0) errores.push("la auditoría guardó el valor de un dato heredado");
+      return errores;
+    });
+
+    // Lo que el caso de antes dudaba, o un analista rechazó, no pasa como cierto: el nombre sí.
+    for (const [rotulo, dudoso] of [
+      ["un DNI con confianza media", { dniConfianza: 0.7 }],
+      ["un DNI con la confirmación pendiente", { confirmacion: "pending" as const }],
+      ["un DNI que un analista rechazó", { confirmacion: "rejected" as const }],
+    ] as const) {
+      await parte(`no hereda ${rotulo}, y sí el nombre`, async () => {
+        const { caso, mensaje } = await sembrar("", dudoso);
+        const r = await abrirCasoPorSiniestroNuevo({ tenantId: A, caseId: caso, messageId: mensaje });
+        if (r.tipo !== "abierto") return [`no abrió el caso nuevo (${r.tipo})`];
+        const claves = (await camposDe(r.casoNuevo)).map((f) => f.clave);
+        return igual(claves, ["full_name"]) ? [] : [`el caso nuevo quedó con ${claves.join(", ") || "nada"} (esperaba sólo full_name)`];
+      });
+    }
+
+    await parte("con otro número en el hilo no hereda nada", async () => {
+      const { caso, mensaje } = await sembrar(`5491111${r8}`);
+      const r = await abrirCasoPorSiniestroNuevo({ tenantId: A, caseId: caso, messageId: mensaje });
+      if (r.tipo !== "abierto") return [`no abrió el caso nuevo (${r.tipo})`];
+      const nuevo = await camposDe(r.casoNuevo);
+      return nuevo.length === 0 ? [] : [`el caso nuevo heredó ${nuevo.map((f) => f.clave).join(", ")} de otro número`];
+    });
+
+    await parte("desde otro inquilino no abre ni hereda", async () => {
+      const errores: string[] = [];
+      const { caso, mensaje } = await sembrar("");
+      const antes = [await casosDe(A), await casosDe(B)];
+      const r = await abrirCasoPorSiniestroNuevo({ tenantId: B, caseId: caso, messageId: mensaje });
+      if (r.tipo !== "sigue") errores.push(`con el inquilino equivocado dio ${r.tipo} (esperaba sigue)`);
+      if (!igual([await casosDe(A), await casosDe(B)], antes)) errores.push("se abrió un caso nuevo");
+      const ajenos = await dueno.query(`SELECT count(*)::int AS n FROM extracted_fields WHERE tenant_id = $1`, [B]);
+      if (ajenos.rows[0].n !== 0) errores.push("el inquilino equivocado quedó con datos heredados");
+      return errores;
+    });
+  } catch (e) {
+    mal(`la sección 8 no pudo prepararse (${codigoDe(e)})`);
+    problemas.push("la sección 8 no pudo preparar sus inquilinos descartables");
+  } finally {
+    try {
+      if (creados.length > 0) await limpiar(creados);
     } finally {
       await dueno.end();
     }

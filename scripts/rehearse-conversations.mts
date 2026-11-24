@@ -651,9 +651,12 @@ const SCENARIOS: Scenario[] = [
         // nombre de Lucía y el del padre, que son los dos correctos, en un caso
         // que ya tiene un especialista. Dice la diferencia y avisa eso. Tampoco
         // le atribuye el auto: es «el auto de mi viejo».
+        //
+        // «emergencias»: el ensayo del 24/11 derivó a este titular ajeno sin
+        // decirle a quién llamar si es urgente; toda derivación lo dice.
         expect: {
           replies: 1,
-          mentions: ["R*** P***", "Lucía Paz", "especialista"],
+          mentions: ["R*** P***", "Lucía Paz", "especialista", "emergencias"],
           avoids: ["Roberto Paz", "¿", "tu auto"],
         },
       },

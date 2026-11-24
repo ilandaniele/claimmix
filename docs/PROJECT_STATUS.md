@@ -5515,6 +5515,12 @@ Tres arreglos de la devolución del dueño, sin migración ni variables nuevas. 
 - **Tests.** `waba-actions.test.ts` y `WabaPropiaPanel.test.tsx` (incluye «Conectar con Facebook» con la apertura vencida).
 - **Docs.** T8. Sin migración ni variables.
 
+### La línea de emergencias en la derivación del titular ajeno (24/11, rama `fix/emergencias-titular-ajeno`)
+
+- **Qué pasaba.** El ensayo del 24/11 (#588, `mail-que-no-coincide-con-el-padron`) derivó a quien escribe por la póliza de otro con el asunto «Tu reclamo pasa a un especialista» y un único correo que decía «Un especialista va a revisar el caso…» sin la línea de a quién llamar si es urgente. El correo de `specialist_escalation`, que sí la trae desde #588, no sale en esa vuelta (`escalation.claimant_message_skipped`, `already_written_this_round`) y así debe ser: hay un solo mensaje por vuelta.
+- **Cambio.** `EMERGENCIAS` entra en `LO_REVISA_UN_ESPECIALISTA` (`titular-que-no-coincide.ts`), entre la frase del especialista y `AVISO_DE_TRASPASO` como en `ESCALATION_TEXT`; sólo la usan las ramas del titular ajeno, así que el piso de WhatsApp (`renderConflictoDePadron`) y el del correo (`data-confirmation-request`) la dicen sin tocarlos. En `compose-reply.ts` el brief de `conflict` con `titularAjeno` la pide con el literal (`LINEA_DE_EMERGENCIAS`, compartida con el brief de `escalation`, que queda byte por byte igual) y `dropped_emergencias` mira `deriva` (escalation o titular ajeno) en vez de sólo `escalation`. `titular_ajeno_se_lo_atribuye` no cuenta «emergencias de tu póliza» como atribuirse la póliza: sin esa excepción la frase literal se rechazaba. El conflicto que no es ajeno queda igual.
+- **Tests.** `compose-reply.test.ts` (sin la línea dos veces devuelve el piso, el reintento, no choca con `titular_ajeno_pregunta`, el brief, el no ajeno sin cambios y «tu póliza» suelta sigue rechazada), `template-render.test.ts` y `whatsapp-messenger.test.ts` (los dos pisos con ajeno, y sin la línea cuando no es ajeno). El ensayo exige «emergencias» en `mail-que-no-coincide-con-el-padron`. Sin migración ni variables; el dorado no cambia.
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),

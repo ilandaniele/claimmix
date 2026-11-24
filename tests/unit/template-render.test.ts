@@ -904,6 +904,8 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
       expect(cuerpo).toContain(AVISO_DE_TRASPASO);
       expect(cuerpo).toContain(SI_RESPONDES_EL_CORREO);
     }
+    // El ensayo del 24/11 derivó al titular ajeno sin decirle a quién llamar.
+    for (const cuerpo of [result.text, result.html, result.cuerpo]) expect(cuerpo).toContain(EMERGENCIAS);
     expect(result.cuerpo).not.toContain(SI_RESPONDES_EL_CORREO);
   });
 
@@ -920,6 +922,9 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
   it("pidiendo confirmar, no lleva el pie del traspaso", () => {
     const r = renderTemplate("data_confirmation_request", TRES);
     expect(r.text).not.toContain(SI_RESPONDES_EL_CORREO);
+    // No hay derivación: la persona tiene que confirmar, y nada dice a quién llamar.
+    for (const cuerpo of [r.text, r.html, r.cuerpo]) expect(cuerpo).not.toContain(EMERGENCIAS);
+    expect(r.subject).toContain("Confirmar datos");
   });
 
   it("derivado sin valores que mostrar, avisa el traspaso y no pide el dato", () => {
@@ -936,6 +941,7 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
       expect(cuerpo).not.toContain("Respondé este correo");
       expect(cuerpo).not.toContain("Campo:");
     }
+    for (const cuerpo of [r.text, r.html, r.cuerpo]) expect(cuerpo).toContain(EMERGENCIAS);
     expect(r.cuerpo.trim()).not.toMatch(/:$/);
     expect(mencionaElTraspaso(r.cuerpo)).toBe(true);
     expect(pideAlgo(r.cuerpo.toLowerCase())).toBe(false);

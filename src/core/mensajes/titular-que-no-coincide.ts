@@ -11,6 +11,7 @@
  * incumplida en los dos, porque nadie la mira.
  */
 
+import { EMERGENCIAS } from "./derivacion";
 import { AVISO_DE_TRASPASO } from "./traspaso";
 
 /*
@@ -23,8 +24,9 @@ import { AVISO_DE_TRASPASO } from "./traspaso";
  */
 export const NO_COINCIDE_CON_EL_TITULAR =
   "Los datos que nos pasaste no coinciden con los del titular de la póliza:";
+// Es una derivación: dice a quién llamar si es urgente, en el mismo orden que ESCALATION_TEXT.
 export const LO_REVISA_UN_ESPECIALISTA =
-  `Como la póliza está a nombre de otra persona, un especialista va a revisar tu caso y se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+  `Como la póliza está a nombre de otra persona, un especialista va a revisar tu caso y se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
 
 export interface TitularQueNoCoincide {
   /** El titular del padrón, en iniciales: «R*** P***». Nunca el nombre entero. */

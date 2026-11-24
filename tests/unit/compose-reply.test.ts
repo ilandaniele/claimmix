@@ -72,6 +72,8 @@ function responde(...mensajes: string[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks no vacía la cola de mockResolvedValueOnce: lo que sobra de un test lo consume el siguiente.
+  mockCall.mockReset();
   delete process.env.AGENT_COMPOSE_REPLIES;
 });
 
@@ -831,7 +833,7 @@ describe("composeReply — quien escribe no es el titular", () => {
 
   it("toma el que nombra la diferencia y avisa que la revisa un especialista", async () => {
     replies(
-      `${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso y se va a comunicar con vos. ${AVISO_DE_TRASPASO}`
+      `${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso y se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`
     );
 
     expect(await composeReply(ajeno())).not.toBe(FALLBACK);
@@ -846,10 +848,32 @@ describe("composeReply — quien escribe no es el titular", () => {
     expect(mockCall.mock.calls[1][0] as string).toContain("son del titular");
   });
 
-  it("tampoco le pone género al especialista", async () => {
-    replies(`${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso. Él se va a comunicar con vos.`);
+  it("«emergencias de tu póliza» no es atribuírsela, pero «tu póliza» suelta sí", async () => {
+    const CON_LA_LINEA = `${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+    responde(CON_LA_LINEA);
+    expect(await composeReply(ajeno())).toBe(CON_LA_LINEA);
+
+    const ATRIBUYE = `${DICE_LA_DIFERENCIA} Un especialista va a revisar tu póliza. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+    responde(ATRIBUYE, ATRIBUYE);
+    expect(await composeReply(ajeno())).toBe(FALLBACK);
+  });
+
+  it("«emergencias de tu auto» sí se lo atribuye: la excepción es sólo de la póliza", async () => {
+    const AUTO = `${DICE_LA_DIFERENCIA} Un especialista va a revisar el caso. Llamá a la asistencia de emergencias de tu auto. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+    responde(AUTO, AUTO);
 
     expect(await composeReply(ajeno())).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("son del titular");
+  });
+
+  it("tampoco le pone género al especialista", async () => {
+    // Con la línea y el aviso: lo único que falla es el género, y el reintento lo dice.
+    replies(
+      `${DICE_LA_DIFERENCIA} Un especialista va a revisar tu caso. Él se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`
+    );
+
+    expect(await composeReply(ajeno())).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("le pusiste género al especialista");
   });
 
   it("el conflicto de siempre sigue preguntando", async () => {
@@ -1319,14 +1343,51 @@ describe("composeReply — la línea de emergencias en la derivación", () => {
     expect(mockCall.mock.calls[0][0] as string).toContain(EMERGENCIAS);
   });
 
-  it("la del titular ajeno, que es un conflict, no la exige", async () => {
-    const mensaje = `Recibimos tu denuncia. Un especialista va a revisar tu caso y se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
-    responde(mensaje);
+  describe("la del titular ajeno, que es un conflict, también la exige", () => {
+    // Sin «?»: la guarda del titular ajeno corre antes y rechazaría cualquier pregunta.
+    const AJENO_SIN = `Recibimos tu denuncia. Un especialista va a revisar tu caso y se va a comunicar con vos. ${AVISO_DE_TRASPASO}`;
+    const AJENO_CON = `Recibimos tu denuncia. Un especialista va a revisar tu caso y se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+    const ajeno = (titularAjeno: boolean) => base({ intent: "conflict", titularAjeno });
 
-    const out = await composeReply(base({ intent: "conflict", titularAjeno: true }));
+    it("sin la línea dos veces devuelve el piso", async () => {
+      responde(AJENO_SIN, AJENO_SIN);
 
-    expect(out).toBe(mensaje);
-    expect(mockCall).toHaveBeenCalledTimes(1);
+      expect(await composeReply(ajeno(true))).toBe(FALLBACK);
+      expect(mockCall.mock.calls[1][0] as string).toContain("a quién llamar si es urgente");
+    });
+
+    it("el reintento con la línea sale", async () => {
+      responde(AJENO_SIN, AJENO_CON);
+
+      expect(await composeReply(ajeno(true))).toBe(AJENO_CON);
+      expect(mockCall).toHaveBeenCalledTimes(2);
+      expect(mockCall.mock.calls[1][0] as string).toContain(`Decí «${EMERGENCIAS}»`);
+    });
+
+    it("con la línea sale al primer intento: no choca con la guarda de las preguntas", async () => {
+      responde(AJENO_CON);
+
+      expect(EMERGENCIAS).not.toContain("?");
+      expect(await composeReply(ajeno(true))).toBe(AJENO_CON);
+      expect(mockCall).toHaveBeenCalledTimes(1);
+    });
+
+    it("el brief la pide con el literal de ejemplo", async () => {
+      responde(AJENO_CON);
+
+      await composeReply(ajeno(true));
+
+      expect(mockCall.mock.calls[0][0] as string).toContain(EMERGENCIAS);
+    });
+
+    it("el conflicto que no es ajeno no la pide ni la exige", async () => {
+      const mensaje = "Los datos no coinciden con los que teníamos. ¿Cuál es el correcto?";
+      responde(mensaje);
+
+      expect(await composeReply(ajeno(false))).toBe(mensaje);
+      expect(mockCall).toHaveBeenCalledTimes(1);
+      expect(mockCall.mock.calls[0][0] as string).not.toContain(EMERGENCIAS);
+    });
   });
 });
 

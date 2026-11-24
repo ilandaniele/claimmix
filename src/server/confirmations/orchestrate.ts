@@ -1117,7 +1117,8 @@ export async function orchestratePostExtraction(
   // respuesta hubo otro mensaje, y acusar recibo otra vez sin repetirla dejaría de
   // nombrarla por varios mensajes (y saldría el mismo acuse dos veces seguidas).
   // Es una sola condición para el código y para la sombra.
-  const listaFueraDeLoUltimo = nosContestoElPedido && ultimaSinLaLista;
+  // Si no se pudo leer lo último, se manda la lista: callarla de más es peor que repetirla.
+  const listaFueraDeLoUltimo = nosContestoElPedido && (ultimaSinLaLista || fallo);
   const listaVista = askAlreadyMade && !listaFueraDeLoUltimo;
 
   // La decisión se toma en el núcleo, que es puro y está probado con siete

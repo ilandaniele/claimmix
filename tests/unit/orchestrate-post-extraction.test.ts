@@ -6237,10 +6237,10 @@ describe("orchestratePostExtraction — una negativa que no cambia la lista reci
     });
   }
 
-  function planDe(intent: "wait" | "ask") {
+  function planDe(intent: "wait" | "ask", askFor: string[] = CLAVES) {
     vi.mocked(deliberate).mockResolvedValue({
       intent,
-      askFor: intent === "ask" ? CLAVES : [],
+      askFor: intent === "ask" ? askFor : [],
       question: null,
       reasoning: "el pedido no cambió",
       noteForAnalyst: null,
@@ -6366,6 +6366,57 @@ describe("orchestratePostExtraction — una negativa que no cambia la lista reci
 
     const responder = anotarSombra.mock.calls.map((c) => c[0]).find((p) => "responder" in p);
     expect(responder?.responder?.codigo).toBe("pedir");
+  });
+
+  // Lo último fue un acuse sin la lista y el plan sumó otro dato: sin plan, el árbol
+  // volvería a decir la lista en pie, así que la sombra no puede anotar un acuse.
+  it("la sombra: tras un acuse sin la lista y con otra lista elegida por el plan, el código pide", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      ultimaSalidaRows: [{ template: "wa_information_received", created_at: "2026-11-24T11:00:00Z" }],
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [...CLAVES, "dni"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    planDe("ask", [...CLAVES, "dni"]);
+    const anotarSombra = vi.fn<(parte: ParteDeSombra) => void>();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: NEGATIVA },
+      NO_MATCHES,
+      { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) },
+      undefined,
+      anotarSombra
+    );
+
+    const responder = anotarSombra.mock.calls.map((c) => c[0]).find((p) => "responder" in p);
+    expect(responder?.responder?.codigo).toBe("pedir");
+  });
+
+  // Sin saber qué salió último, la dirección segura es mandar la lista: otro acuse
+  // podría ser el segundo seguido sin nombrarla.
+  it("si no se pudo leer lo último que salió, vuelve la lista y no otro acuse", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+      hablamosIlegible: true,
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe("wait");
+
+    await correr(NEGATIVA);
+
+    const salidas = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0]);
+    expect(salidas.map((m) => m.template)).toEqual(["missing_information_request"]);
+    expect([...(salidas[0].data.missingFields as string[])].sort()).toEqual([...CLAVES].sort());
   });
 
   it("si el mensaje no cerró nada, no se inventa un acuse", async () => {

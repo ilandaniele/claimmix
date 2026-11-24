@@ -19,6 +19,16 @@
  * una persona contestó por WhatsApp en las últimas 24 h. Todo eso se decide en
  * el INSERT, después del lock. `assigned_to` no pasa al caso nuevo.
  *
+ * El caso nuevo hereda del de antes el nombre y el DNI, nunca la póliza, que es
+ * otro vehículo. Sólo si todos los entrantes de los dos casos vienen del mismo
+ * número y dentro del mismo inquilino, y con tope 0.95 para que el worker los
+ * corrija. Sólo pasa lo que el caso de antes daba por cierto (desde 0.85 y sin una
+ * confirmación pendiente ni rechazada): el caso nuevo no tiene cómo volver a dudarlo,
+ * porque la confirmación sólo mira los campos de cada corrida. El caso de antes sólo
+ * se lee. `from_addr` se compara tal cual porque el corte es sólo de WhatsApp: si se
+ * abre al mail hay que pelar la dirección
+ * (bareAddress y lower); si no, no hereda nunca, que falla del lado seguro.
+ *
  * Todo va en un lote, una transacción. Lo primero es un lock por caso: dos
  * corridas sobre el mismo mensaje (una reentrega de Meta, el barrido) verían las
  * dos «el mensaje sigue acá» y abrirían dos casos. La segunda espera, y su
@@ -43,6 +53,7 @@ import { errorCode } from "@/lib/observability/error-code";
 import { auditoriaSiExiste } from "@/server/cases/auditoria-si-quedo";
 import { fuePartido } from "@/server/cases/caso-partido";
 import { noLoTomoUnaPersona } from "@/server/cases/devolver-al-agente";
+import { MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
 import { admiteParaResponder, haySinContestar, ultimaRespuesta } from "@/server/cases/para-responder";
 
 export type CorteDeSiniestro =
@@ -157,11 +168,35 @@ export async function abrirCasoPorSiniestroNuevo(o: {
         nuevo
       ),
       db.select({ case_id: claimMessages.case_id }).from(claimMessages).where(eq(claimMessages.id, messageId)),
+      // Va última para no correr el índice de la lectura de arriba, y después de mudar los
+      // mensajes: el predicado de remitente mira los dos casos ya partidos. Tope 0.95 porque
+      // 1.00 es de un analista y el worker no podría corregirlo. La póliza no pasa: es otro vehículo.
+      db.execute(sql`
+        insert into extracted_fields (case_id, tenant_id, field_key, field_value, confidence)
+        select nc.id, nc.tenant_id, f.field_key, f.field_value, least(f.confidence, 0.95)
+        from extracted_fields f
+        join cases nc on nc.id = ${nuevo}::uuid and nc.tenant_id = f.tenant_id
+        join claim_messages p on p.id = ${messageId}::uuid and p.case_id = nc.id and p.from_addr is not null
+        where f.case_id = ${caseId}::uuid
+          and f.field_key in ('full_name', 'dni')
+          and f.confidence >= ${MEDIUM_CONFIDENCE_HIGH}
+          and btrim(f.field_value) <> ''
+          and not exists (select 1 from claim_field_confirmations c
+                          where c.case_id = f.case_id and c.field_name = f.field_key
+                            and c.status in ('pending', 'rejected'))
+          and exists (select 1 from claim_messages v where v.case_id = f.case_id and v.direction = 'inbound')
+          and not exists (select 1 from claim_messages v
+                          where v.case_id in (f.case_id, nc.id) and v.direction = 'inbound'
+                            and v.from_addr is distinct from p.from_addr)
+        on conflict (case_id, field_key) do nothing
+        returning field_key
+      `),
     ]);
 
     if (filasDe(r[1]).length === 1) {
       const movidos = filasDe(r[2]).length;
-      logger.info({ case_id: caseId, caso_nuevo: nuevo, movidos }, "siniestro_nuevo.abierto");
+      const heredados = filasDe(r[9]).length;
+      logger.info({ case_id: caseId, caso_nuevo: nuevo, movidos, heredados }, "siniestro_nuevo.abierto");
       return { tipo: "abierto", casoNuevo: nuevo, movidos };
     }
 

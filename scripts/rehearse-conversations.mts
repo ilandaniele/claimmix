@@ -288,7 +288,8 @@ interface Scenario {
   /** Which door the claim comes in through. Defaults to WhatsApp. */
   channel?: "whatsapp" | "email";
   /**
-   * El nombre visible del sobre, como lo manda un cliente de correo.
+   * El nombre visible del sobre, como lo manda un cliente de correo, o el
+   * nombre de perfil de WhatsApp.
    *
    * Por omisión el ensayo entrega la dirección pelada, y producción entrega
    * `Nombre <dirección>`: eso lo acerca a lo que pasa de verdad, y es la única
@@ -455,7 +456,10 @@ const SCENARIOS: Scenario[] = [
 
   {
     id: "tardio-siniestro-nuevo",
-    what: "Derivado, cuenta otro choque en otra fecha: abre un caso nuevo que contesta el agente; el derivado no cambia (B3)",
+    what: "Derivado, cuenta otro choque en otra fecha: abre un caso nuevo que contesta el agente, con el nombre ya sabido; el derivado no cambia (B3)",
+    // El perfil de WhatsApp dice otra cosa que lo escrito: el caso nuevo no vuelve a leer el nombre
+    // en sus mensajes y el worker lo toma del perfil, que no puede pisar el que ya heredó.
+    remitente: "Paulo Ortiz Gómez",
     turns: [
       {
         say: "Se incendió la moto en la ruta 22, mi hermano está internado con quemaduras. Soy Pablo Ortiz, póliza POL-6610-E.",
@@ -468,10 +472,14 @@ const SCENARIOS: Scenario[] = [
           replies: 1,
           status: "info_faltante",
           anterior: { status: "requiere_especialista", paraResponder: false },
+          // El nombre pasa del caso de antes (mismo número). Que la póliza NO pase (es otra moto)
+          // lo fija prove-data-layer: pedirla o no en el mensaje lo decide el modelo y varía.
+          noAsked: ["full_name"],
+          avoids: ["6610", "Paulo"],
         },
       },
     ],
-    finally: { status: "info_faltante" },
+    finally: { status: "info_faltante", knows: ["full_name"] },
   },
 
   {
@@ -1010,7 +1018,7 @@ const SCENARIOS: Scenario[] = [
           paraResponder: false,
           status: "confirmacion_pendiente",
           mentions: ["coincid"],
-          avoids: ["4455", "4471"],
+          avoids: ["4455", "4471", "podrás"],
         },
       },
       // Elige la anterior escribiéndola: la póliza ya no se vuelve a pedir.
@@ -1224,6 +1232,7 @@ async function deliverWhatsApp(
     providerMessageId: providerMessageIdDe(scenario, i),
     simulated: true,
     media: mediaDelTurno(turn, i),
+    senderName: scenario.remitente ?? null,
   });
   return result.caseId;
 }
@@ -1724,7 +1733,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         );
       }
 
-      const pedidas = new Set(said.flatMap((r) => r.askedKeys));
+      const pedidas = new Set(said.flatMap((r) => r.askedKeys).map(canonicalFieldKey));
 
       for (const phrase of want.mentions ?? []) {
         if (!all.includes(phrase.toLowerCase())) {
@@ -1737,7 +1746,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         }
       }
       for (const key of want.noAsked ?? []) {
-        if (pedidas.has(key)) note(scenario.id, i + 1, `pidió ${key} y no debía`, `pidio:${key}`);
+        if (pedidas.has(canonicalFieldKey(key))) note(scenario.id, i + 1, `pidió ${key} y no debía`, `pidio:${key}`);
       }
       if (want.cuidado && !diceCuidado(all)) {
         note(scenario.id, i + 1, "no abre con una frase de cuidado", "cuidado");

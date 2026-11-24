@@ -34,6 +34,7 @@ import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
 import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO, mencionaElTraspaso } from "@/core/mensajes/traspaso";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -212,9 +213,10 @@ const TRASPASO =
 
 const DIFERENCIA = "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.";
 
+// Con el literal de ejemplo, como TRASPASO: sin él, el ensayo del 23/11 pidió «¿Nos podrás escribir…?», en futuro.
 const POLIZA_NO_COINCIDE =
   "Decir que el número de póliza que pasó ahora no coincide con el que teníamos para su caso, " +
-  "y pedirle que escriba el correcto.";
+  `y pedirle que escriba el correcto (por ejemplo: «${POLIZA_CAMBIADA}»).`;
 
 function buildPrompt(input: ComposeReplyInput): string {
   const enmascarar = (texto: string): string =>

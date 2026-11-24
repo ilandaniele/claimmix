@@ -884,6 +884,7 @@ describe("composeReply — la póliza cambió a mitad de la charla", () => {
     expect(prompt).not.toContain("4455");
     expect(prompt).not.toContain("123");
     expect(prompt).toContain("no coincide con el que teníamos para su caso");
+    expect(prompt).toContain(`«${POLIZA_CAMBIADA}»`);
     expect(prompt).toContain("Escribir cualquier número de póliza, ni el nuevo ni el anterior");
   });
 
@@ -897,6 +898,7 @@ describe("composeReply — la póliza cambió a mitad de la charla", () => {
     expect(prompt).toContain("Señalar la diferencia entre los dos valores");
     expect(prompt).not.toContain("no coincide con el que teníamos para su caso");
     expect(prompt).not.toContain("Escribir cualquier número de póliza");
+    expect(prompt).not.toContain("¿Nos escribís el número correcto?");
   });
 
   it("con conflictos del padrón agrega la póliza a lo de siempre", async () => {
@@ -909,6 +911,7 @@ describe("composeReply — la póliza cambió a mitad de la charla", () => {
     const prompt = mockCall.mock.calls[0][0] as string;
     expect(prompt).toContain("Señalar la diferencia entre los dos valores");
     expect(prompt).toContain("no coincide con el que teníamos para su caso");
+    expect(prompt).toContain(`«${POLIZA_CAMBIADA}»`);
   });
 
   it("un texto bueno pasa al primer intento", async () => {

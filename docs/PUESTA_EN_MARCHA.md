@@ -1338,7 +1338,9 @@ Para quien no es el dueño ni Gonzalo y prueba ClaimMix en prd.
     Esperar al otro día o subir la cifra (D7).
   - `ALTA_TOPE_BASES` (30) y `ALTA_TOPE_MB` (350): suspender los espacios de prueba
     abandonados y, con OK por cada uno, purgar su base, que no se deshace.
-  - 100 usuarios de Google entre dev, QA y prd: pedir la verificación (D10).
+  - 100 usuarios de Google por proyecto (dev y QA uno, prd otro): el resumen diario del operador
+    avisa al llegar a 80 si se cargaron `ALTA_TOPE_USUARIOS_GOOGLE` y `GOOGLE_USUARIOS_PREVIOS`;
+    pasado el tope hay que pedir la verificación (D10, anotada como pendiente).
   - US$ 1 de IA por espacio y US$ 30 entre todas las pruebas: el agente deja de analizar.
     Activar con cuota 0 a quien siga probando, a mano desde `/admin/altas`, o esperar al mes
     siguiente.
@@ -1421,8 +1423,10 @@ alta. Recomendación: no instalarlo (D14).
 - Fuera de ClaimMix: la consola de Google Cloud (Facturación) para el gasto real de Vertex, la
   consola de Neon para los MB de cada proyecto, el panel de Vercel para el uso, y Actions para
   los minutos.
-- Los 100 usuarios de Google: ClaimMix no lleva la cuenta (no existe). El dueño la mira en la
-  consola de Google y la anota al lado de cada cuenta de prueba (ítem 8 del plan).
+- Los 100 usuarios de Google: la cifra real sólo está en la consola de Google. ClaimMix cuenta las
+  casillas de Gmail conectadas del ambiente y les suma `GOOGLE_USUARIOS_PREVIOS` (lo que Google
+  cuenta y el ambiente no ve: el otro ambiente del proyecto, casillas desconectadas, el remitente
+  del sistema), así que la línea del resumen diario es una cota inferior (ítem 8 del plan).
 
 **Topes, en el orden en que cortan.** Prueba vencida; presupuesto mensual del proyecto
 (`MONTHLY_BUDGET_USD`, 200 por omisión, de todos los espacios menos la demo; con 0 la IA queda pausada a propósito; `.env.example:193`); tope diario por espacio (`AI_TENANT_DAILY_TOKEN_CAP`, 5 M por
@@ -1477,7 +1481,7 @@ costo con `gemini-3.8-flash` no está medido; se estima en unas cinco veces el d
 
 - Vercel Hobby: crons a lo sumo diarios, un tope diario de builds compartido por los tres
   proyectos y uso no comercial (`docs/PROMOCION.md:586-589`, `:809-810`).
-- Google OAuth sin verificar: 100 usuarios por proyecto, entre dev, QA y prd.
+- Google OAuth sin verificar: 100 usuarios por proyecto de Google (dev y QA comparten uno, prd tiene el suyo).
 - GitHub Actions: gratis desde que el repo es público; los flujos programados se apagan tras 60
   días sin commits.
 - Neon Free: 500 MB por proyecto (`docs/PROMOCION.md:727-728`); por eso el plan de prd pone
@@ -1501,7 +1505,7 @@ que tenía en la versión anterior de esta guía.
 | 5 | Tiempos del alta en `/admin/altas`: mediana y p95 de 30 días, desde `tenant_bases` (P6) | Ve cuánto tarda la base sin pedir SQL | Nada | `/admin/altas` de prd muestra los dos números. **Hecho en #461** | chico | nada |
 | 6 | `/configuracion` y `/api/health` muestran el tope real de `MONTHLY_BUDGET_USD` (nuevo) | El semáforo y la pantalla dicen la cifra que corta | Ve su tope real | Con `MONTHLY_BUDGET_USD` en 50, las dos muestran 50; con 0, dicen «IA frenada», porque el guardia frena. **Hecho en #461.** Que 0 quiera decir «sin tope» lo decide el dueño | chico | nada |
 | 7 | Aviso por mail al operador al 80 % y al 100 % del presupuesto, del pozo de pruebas, de las bases y de los MB (P3) | Se entera antes del corte | No se queda sin servicio sin aviso | Un tope de prueba bajado a mano en QA dispara el mail. **Hecho en la rama `alta/avisos-topes` (#514)**, sin migración ni variables nuevas: el barrido de `reap-stuck` (`src/server/alta/aviso-de-topes.ts`) manda un solo mail por barrido, con una línea por cada tope que pasó el 80 % o llegó al 100 %, a las direcciones de `ADMIN_EMAILS`, por la casilla remitente y con cupo propio (`topes`), que no cuenta por dirección. Avisa una vez por umbral, tope y mes: la marca es una fila de `rate_limit_counters` que vence al empezar el mes siguiente, lleva el valor del tope, y la del 100 % marca también la del 80 % para que un gasto que baje del 100 al 80 no mande un «80» tarde. La marca se pone después de mandar el mail: si el mail no sale o la corrida muere, el barrido siguiente reintenta, a costa de que dos corridas simultáneas puedan repetirlo una vez. No lleva datos de nadie. El mes es el argentino, el mismo del guardia del gasto (ítem 17): empieza a la medianoche de acá, las 03:00 UTC. Un tope en 0 no avisa. **Aceptado en QA el 01/11:** con `ALTA_TOPE_MB` en 1 y QA redeployado, el barrido de las 23:40 (02:40 UTC del 02/11) dejó `alta.tope_avisado` (tope `mb`, umbral 100), que sale sólo después de mandar el mail; el `gmailsender.could_not_read_back_message_id` de esa corrida dice únicamente que no se leyó de vuelta el id del mail. Mientras estuvo en 1, el job «Alta automática» del Post-deploy de QA quedó rojo porque no se pudo crear el espacio de prueba, como se esperaba; el valor volvió a 350 con otro redeploy el 02/11. Para repetirla: bajar `ALTA_TOPE_MB` a 1 en QA y redeployar QA (Vercel aplica una variable nueva sólo a los deploys nuevos), esperar al barrido (cada 2 h, o disparar `barrer-trabados.yml` a mano contra QA) y ver llegar el mail; después dejar el valor en 350 y redeployar de nuevo, porque mientras esté en 1 el alta de QA queda cerrada. Cada redeploy gasta uno de los builds diarios de Hobby. Como la marca lleva el tope, repetir la prueba con otro valor (2 en vez de 1) avisa de nuevo sin borrar nada; con el mismo valor hay que borrar las filas `aviso-tope:mb:1:80:<AAAA-MM>` y `aviso-tope:mb:1:100:<AAAA-MM>` de `rate_limit_counters` en la base de control de QA | mediano | Decisión: las cifras de `ALTA_TOPE_MB` y `ALTA_TOPE_BASES`, iguales en los tres |
-| 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador recibe un mail al llegar a 80 usuarios y cuando la WABA se llena | mediano | 4 y 7 |
+| 8 | Aviso de los 100 usuarios de Google y de los lugares libres de la WABA (nuevo) | Sabe cuántos lugares quedan antes de que un cliente choque | No queda trabado en Google ni en `sin_lugar` sin que nadie lo sepa | El operador lo ve en el resumen diario al llegar a 80 usuarios y cuando la WABA se llena (la parte de Google, en la rama `alta/aviso-usuarios-google`, va apagada hasta cargar las cifras; el texto espera el OK del dueño) | mediano | 4 y 7 |
 | 9 | Prueba automática del alta en dos pasos (el enlace del correo y el pedido del espacio), de punta a punta, en QA: `pnpm alta:probar` (`scripts/probar-alta.mts`), un guión nuevo. No parte de `pnpm onboard`, que prueba el alta de un inquilino por el operador y no la autoalta (nuevo) | Cada deploy de QA prueba `/registro`, el alta por el enlace del correo y la base (la función de la 0048 y los cupos por red) sin una persona. No prueba Turnstile, Gmail ni el alta con Google: siguen a mano | Menos altas rotas | El job «Alta automática en QA» corre en el Post-deploy de QA y queda rojo si el alta se rompe o QA queda sucia. Si no puede probar (red, tope de QA lleno, otro commit, candado ocupado) sale verde y el resumen del run dice «corrió SIN PODER PROBAR». **Hecho con el merge del lote 1** (`docs/TESTING.md`, capa 11). El lote 2 queda pendiente del dueño | grande | 3 |
 | 10 | `pnpm paridad` y un job en el Post-deploy que compara los tres ambientes (P2) | La regla de iguales se comprueba sola en cada deploy | Nada | El job lista las diferencias contra la tabla de excepciones. **Hecho en la rama `ci/paridad-banderas`**: corre en cada deploy, al lado de los chequeos, sólo avisa (`::warning` y resumen del run) y nunca pone rojo; en el log público salen las claves, no los valores | mediano | 3. Decisión del dueño: si algún día bloquea en vez de avisar |
 | 11 | Una vista de consumo en `/admin/cartera`: IA, pruebas, bases, MB y costo medio por denuncia (P4) | Una sola pantalla en vez de cuatro | Nada | `/admin/cartera` muestra los cinco números por espacio. **Hecho en #484** | mediano | nada |
@@ -1846,7 +1850,9 @@ Y al dueño:
   (`src/server/alta/panel-operador.ts:1224-1229`). Salió bien si `/admin/cartera` lo muestra
   activo.
 - [ ] 5. [Dueño] Contar el cliente contra el tope de 100 usuarios de Google y contra los MB de
-  Neon.
+  Neon. Para Google, cargar en cada ambiente de Vercel `ALTA_TOPE_USUARIOS_GOOGLE=100` y
+  `GOOGLE_USUARIOS_PREVIOS` (lo que muestra la consola de Google menos las casillas de ese
+  ambiente); sin eso el aviso queda apagado.
 
 ## Decisiones pendientes del dueño
 
@@ -1917,8 +1923,10 @@ A1 resume las que traban algo, con su recomendación. Acá va el detalle.
   es operador en los tres y Gonzalo no lo es en QA.
 - **D9.** Pedir la verificación del negocio en Meta (A5).
 - **D10.** Seguir con el tope de 100 usuarios de Google o pedir la verificación, que puede ser
-  paga. **Elegido:** (a), quedarse por debajo de 100 usuarios y dejar anotada la verificación.
-  El aviso de usuarios de Google (L6) todavía no está en el código. `gmail.modify` es un permiso restringido:
+  paga. **Elegido:** (a), quedarse por debajo de 100 usuarios y dejar anotada la verificación,
+  que queda pendiente. El aviso de usuarios de Google (L6) está en el código, en el resumen
+  diario del operador, y va apagado hasta que el dueño cargue `ALTA_TOPE_USUARIOS_GOOGLE` y
+  `GOOGLE_USUARIOS_PREVIOS` en cada ambiente de Vercel. `gmail.modify` es un permiso restringido:
   pasar el tope pide la verificación de la app y una evaluación de seguridad anual de un
   tercero (CASA).
 - **D11.** Vercel Hobby es de uso no comercial y prd con clientes que pagan choca con eso

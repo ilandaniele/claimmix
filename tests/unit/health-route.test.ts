@@ -767,7 +767,7 @@ describe("GET /api/health — banderas", () => {
     expect(body.banderas).not.toBeNull();
     expect(typeof body.banderas).toBe("object");
     expect(Array.isArray(body.banderas)).toBe(false);
-    expect(Object.keys(body.banderas)).toHaveLength(46);
+    expect(Object.keys(body.banderas)).toHaveLength(48);
     expect(body.checks.some((c: { name: string }) => c.name === "banderas")).toBe(false);
 
     const modos = ["vertex", "ai-studio", "apagado", "simular", "borrar", "desconocido"];

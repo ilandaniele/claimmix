@@ -912,6 +912,7 @@ export const enUSServidor: Record<ClaveDelServidor, string> = {
   "alta.resumen.revision": "- Workspaces with the number under review or without a number: {n}.",
   "alta.resumen.pruebas": "- Trials ending in {dias} days or less: {n}.",
   "alta.resumen.waba": "- Platform WABA: {usados} of {tope} numbers, {libres} spots left.",
+  "alta.resumen.google": "- Google users of the OAuth project: {usados} of {tope} (unverified app).",
   "alta.resumen.cierre": "The details are at {url}. The summary goes out once a day and only if there is something to look at.",
   "alta.recordatorio.asunto": "ClaimMix: keep connecting your WhatsApp",
   "alta.recordatorio.paso.P1": "entering the secret and the ID of your Meta app",

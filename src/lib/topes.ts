@@ -44,6 +44,8 @@ export const TOPES_ENTEROS = [
   { nombre: "ALTA_TOPE_INVITACIONES_DIA", omision: 20, min: 1, max: 1000 },
   { nombre: "ALTA_TOPE_WABAS_SEMANA", omision: 10, min: 0, max: 1000 },
   { nombre: "ALTA_TOPE_PLANTILLAS_PRUEBA_DIA", omision: 3, min: 0, max: 1000 },
+  { nombre: "ALTA_TOPE_USUARIOS_GOOGLE", omision: 0, min: 0, max: 1000 },
+  { nombre: "GOOGLE_USUARIOS_PREVIOS", omision: 0, min: 0, max: 1000 },
 ] as const;
 
 export type TopeEntero = (typeof TOPES_ENTEROS)[number]["nombre"];

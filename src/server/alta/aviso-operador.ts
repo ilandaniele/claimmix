@@ -27,6 +27,7 @@ import { getT } from "@/lib/i18n";
 import { logger } from "@/lib/observability/logger";
 import { liberarCupo, rateLimit } from "@/lib/rate-limit";
 import { claveDeCupo } from "@/lib/rate-limit/clave";
+import { topeEntero } from "@/lib/topes";
 import {
   enviarCorreoDelSistema,
   remitenteDelSistema,
@@ -118,6 +119,10 @@ export const DIAS_DE_AVISO_DE_PRUEBA = 3;
  * `billing_status` no pasa solo de `trial` al vencer la prueba, así que contar lo abandonado haría
  * salir el resumen todos los días.
  *
+ * Con `ALTA_TOPE_USUARIOS_GOOGLE` puesto suma una línea con los usuarios de Google del proyecto de OAuth
+ * (las casillas del ambiente más `GOOGLE_USUARIOS_PREVIOS`) contra el tope de 100 de una app sin
+ * verificar: llegar al 80 % es algo que mirar. En 0 o sin poner, no hay consulta ni línea.
+ *
  * El cupo se toma antes de la consulta del panel y de la recorrida de Graph, que son lo caro: la
  * ventana del cron deja pasar varias corridas por día y sólo la primera tiene que trabajar. Si no hay
  * nada que mandar, o el correo no sale, se devuelve.
@@ -154,7 +159,12 @@ async function armarYMandarElResumen(destinatarios: string[], ahora: Date): Prom
     import("@/server/alta/panel-operador"),
     import("@/server/alta/lugares-de-la-waba"),
   ]);
-  const [panel, waba] = await Promise.all([listarAltas(), lugaresDeLaWaba()]);
+  const topeGoogle = topeEntero("ALTA_TOPE_USUARIOS_GOOGLE");
+  const [panel, waba, casillas] = await Promise.all([
+    listarAltas(),
+    lugaresDeLaWaba(),
+    topeGoogle > 0 ? import("@/server/email/gmail/accounts").then((m) => m.casillasConectadas()) : null,
+  ]);
   if (panel.migracionPendiente) return false;
 
   const vivas = panel.altas.filter(
@@ -172,7 +182,9 @@ async function armarYMandarElResumen(destinatarios: string[], ahora: Date): Prom
     return falta > 0 && falta <= DIAS_DE_AVISO_DE_PRUEBA * DIA_MS;
   }).length;
   const wabaLlena = waba !== null && umbralDelTope(waba.usados, waba.tope) !== null;
-  if (panel.creadas24h === 0 && revision === 0 && pruebas === 0 && !wabaLlena) return false;
+  const google = casillas == null ? null : { usados: casillas + topeEntero("GOOGLE_USUARIOS_PREVIOS"), tope: topeGoogle };
+  const googleCerca = google !== null && umbralDelTope(google.usados, google.tope) !== null;
+  if (panel.creadas24h === 0 && revision === 0 && pruebas === 0 && !wabaLlena && !googleCerca) return false;
 
   // creadas24h es un count exacto; revisión y pruebas salen de la lista, que tiene tope.
   const listaLlena = panel.altas.length >= FILAS_MAXIMAS;
@@ -192,6 +204,13 @@ async function armarYMandarElResumen(destinatarios: string[], ahora: Date): Prom
             .replace("{usados}", () => String(waba.usados))
             .replace("{tope}", () => String(waba.tope))
             .replace("{libres}", () => String(waba.libres)),
+        ]
+      : []),
+    ...(google
+      ? [
+          t("alta.resumen.google")
+            .replace("{usados}", () => String(google.usados))
+            .replace("{tope}", () => String(google.tope)),
         ]
       : []),
   ];

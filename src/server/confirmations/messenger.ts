@@ -46,9 +46,11 @@ import { enTenant } from "@/data/scope";
 import { nombreDelError } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import {
+  emergenciasDeLaDerivacion,
   laDiferencia,
   LO_REVISA_UN_ESPECIALISTA,
   NO_COINCIDE_CON_EL_TITULAR,
+  type TitularQueNoCoincide,
 } from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO, conArchivoQueNoEntro } from "@/core/mensajes/archivo-que-no-entro";
@@ -57,7 +59,7 @@ import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
 import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { loTomoUnaPersona } from "@/server/cases/devolver-al-agente";
-import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
+import { CUIDADO } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
   NO_HACE_FALTA_CONTESTAR,
@@ -173,11 +175,21 @@ export const webMessenger: AgentMessenger = {
  */
 const MAX_WHATSAPP_ITEMS = 5;
 
-const ESCALATION_TEXT =
-  "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
-  "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
-  `${EMERGENCIAS} ` +
-  AVISO_DE_TRASPASO;
+function escalationText(emergencias: string): string {
+  return (
+    "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
+    "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
+    `${emergencias} ` +
+    AVISO_DE_TRASPASO
+  );
+}
+
+function titularDe(data: Record<string, unknown>): TitularQueNoCoincide {
+  return {
+    titularIniciales: typeof data.titularIniciales === "string" ? data.titularIniciales : null,
+    claimantName: typeof data.claimantName === "string" ? data.claimantName : null,
+  };
+}
 
 /**
  * El escalado por WhatsApp, con los dos valores cuando el titular no coincide.
@@ -193,12 +205,10 @@ function renderEscalation(data: Record<string, unknown>): string {
   // el piso salió sin saludo, "Lamentamos mucho lo que están pasando" seco.
   const nombre = nombreDePila(data.claimantName);
   const saludo = nombre ? `Hola, ${nombre}. ` : "";
-  const base =
-    data.heridos === true ? `${saludo}${CUIDADO} ${ESCALATION_TEXT}` : `${saludo}${ESCALATION_TEXT}`;
-  const diferencia = laDiferencia({
-    titularIniciales: typeof data.titularIniciales === "string" ? data.titularIniciales : null,
-    claimantName: typeof data.claimantName === "string" ? data.claimantName : null,
-  });
+  const titular = titularDe(data);
+  const texto = escalationText(emergenciasDeLaDerivacion(titular));
+  const base = data.heridos === true ? `${saludo}${CUIDADO} ${texto}` : `${saludo}${texto}`;
+  const diferencia = laDiferencia(titular);
   return diferencia ? `${base}
 
 ${diferencia}` : base;
@@ -575,7 +585,8 @@ async function writeReply(
       message.template === "data_confirmation_request"
         ? conflictosParaElRedactor(message.data)
         : undefined,
-    titularAjeno: message.data.titularAjeno === true,
+    // La derivación que nombra la diferencia también le habla a quien no es el titular: sin la señal el redactor le dice «tu póliza».
+    titularAjeno: message.data.titularAjeno === true || laDiferencia(titularDe(message.data)) !== null,
     polizaCambiada: message.data.polizaCambiada === true,
     audioSinTranscribir: message.data.audioSinTranscribir === true,
     heridos: message.data.heridos === true,

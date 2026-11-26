@@ -17,7 +17,12 @@ import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";/*
  * Así que se acusa recibo y no se repite la lista. Las dos cosas a la vez:
  *
  *   "Gracias, anotamos que fue un choque de ayer a la tarde. Seguimos a la
- *    espera de lo que te pedimos antes para poder avanzar."
+ *    espera de lo que todavía nos falta para poder avanzar."
+ *
+ * «Lo que todavía nos falta» y no «lo que te pedimos antes»: quien contesta
+ * citando un mail viejo —el que pedía el parte amistoso— leía «antes» como ese
+ * pedido, justo el que acababa de negar. Tampoco se nombra «el último pedido»:
+ * a veces fue una pregunta suelta o sólo documentos, no un pedido de datos.
  *
  * Sin la lista, porque se la mandamos hace un momento y volver a ponerla es
  * exactamente lo que la regla evita. Y sin decir que está completo, porque no
@@ -68,7 +73,7 @@ export function renderInformationReceived(data: InformationReceivedData): {
     : [
         `${saludo}${gracias}, tomamos nota de lo que nos contaste.`,
         "",
-        "Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.",
+        "Seguimos a la espera de lo que todavía nos falta para poder avanzar con tu reclamo.",
       ].join("\n");
   const redactado = data.cuerpo?.trim();
 
@@ -79,7 +84,7 @@ export function renderInformationReceived(data: InformationReceivedData): {
     : sinAudio
       ? `<p>${escapeHtml(noSeEscucho)}</p>`
       : `<p>${escapeHtml(`${saludo}${gracias}, tomamos nota de lo que nos contaste.`)}</p>
-    <p>Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.</p>`;
+    <p>Seguimos a la espera de lo que todavía nos falta para poder avanzar con tu reclamo.</p>`;
 
   const html = `
     ${prosaHtml}

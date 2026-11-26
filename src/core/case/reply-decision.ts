@@ -35,7 +35,9 @@
  * escrito en la base— y hasta acá desaparecía como motivo para hablar: si el
  * agente había deliberado «espero», el caso se quedaba mudo justo cuando la
  * persona había hecho su parte. Del otro lado eso es un pedido que nunca se
- * cierra y un caso que muere de abandono dos semanas después.
+ * cierra y un caso que muere de abandono dos semanas después. Tampoco es motivo
+ * para mandar la misma lista: un papel que no estaba en ella se puede negar sin
+ * que cambie lo que falta, y ahí corresponde acusar lo que dijo, no repetirla.
  *
  * **Y un caso que una persona devolvió tampoco espera.** Mientras lo tenía
  * alguien con «Tomar el control», lo que escribió el asegurado quedó sin
@@ -69,9 +71,10 @@ export type SeñalesDeRespuesta = {
   /**
    * ¿El último mensaje cerró algo de lo que le habíamos pedido?
    *
-   * Verdadero sólo cuando un resolutor cerró una fila: un documento que pasó a
-   * declinado, una confirmación pendiente que pasó a confirmada. No es «dijo
-   * algo», es «contestó lo que le preguntamos».
+   * Verdadero cuando el mensaje cerró algún pendiente: un documento que pasó a
+   * declinado —también uno que nombró aunque no estuviera en el último pedido—,
+   * una confirmación contestada, un dato dicho o la elección entre dos valores.
+   * No es «dijo algo», es «contestó lo que le preguntamos».
    */
   readonly nosContestoElPedido: boolean;
   /** ¿Una persona devolvió el caso al agente después de la última vez que hablamos? */
@@ -88,7 +91,9 @@ export type SeñalesDeRespuesta = {
  * Qué hacer con el asegurado.
  *
  *   pedir          mandarle la lista de lo que falta
- *   acusar-recibo  decirle que tomamos nota, sin repetir la lista
+ *   acusar-recibo  decirle que tomamos nota, sin repetir la lista (llegó un archivo,
+ *                  contestó algo o contó algo nuevo, y lo que falta es lo mismo que
+ *                  ya le mandamos)
  *   avisar-que-no-entro  decirle que un archivo no entró por el tamaño, sin repetir la lista
  *   callar         no mandar nada
  */
@@ -105,11 +110,13 @@ export function elPedidoQuedaEnEspera(s: SeñalesDeRespuesta): boolean {
   return (
     (s.yaSePidio || s.elAgenteEspera) &&
     !s.nosPreguntoAlgo &&
-    // Un archivo cambia el pedido sólo si el pedido cambió: con la lista
-    // idéntica a la que ya mandamos, repetirla es el hostigamiento de siempre.
-    // Si además otro archivo no entró, el pedido sale con el aviso al pie.
-    !(s.llegoUnArchivo && (!s.yaSePidio || s.unArchivoNoEntro)) &&
-    !s.nosContestoElPedido &&
+    // Un archivo o una respuesta a lo pedido cambian el pedido sólo si el
+    // pedido cambió: con la lista idéntica a la que ya mandamos, repetirla es
+    // el hostigamiento de siempre y alcanza con acusar recibo (ensayo de #593,
+    // mail-completo [2]: negó un parte que no estaba en la lista y le volvió
+    // la lista pelada). Si además un archivo no entró, el pedido sale con el
+    // aviso al pie.
+    !((s.llegoUnArchivo || s.nosContestoElPedido) && (!s.yaSePidio || s.unArchivoNoEntro)) &&
     !s.nosLoDevolvieron
   );
 }
@@ -127,10 +134,11 @@ export function queHacer(s: SeñalesDeRespuesta): QueHacer {
   // espere: la persona cree que lo mandó y sólo nosotros sabemos que no.
   if (enEspera && s.unArchivoNoEntro) return "avisar-que-no-entro";
 
-  // Llegó un archivo y la lista es la misma que ya mandamos: se acusa recibo
-  // sin repetirla. Gana sobre el juicio del agente —callarse ante un archivo se
-  // lee como que nadie lo miró— pero no sobre `avisar-que-no-entro`.
-  if (enEspera && s.llegoUnArchivo) return "acusar-recibo";
+  // Llegó un archivo, o contestó algo de lo pedido, y la lista es la misma que
+  // ya mandamos: se acusa recibo sin repetirla. Gana sobre el juicio del agente
+  // —callarse ante una respuesta se lee como que nadie la leyó, pero mandarle la
+  // lista idéntica es hostigarla— y no sobre `avisar-que-no-entro`.
+  if (enEspera && (s.llegoUnArchivo || s.nosContestoElPedido)) return "acusar-recibo";
 
   // El pedido está en espera, pero el asegurado contó algo. Un acuse corto:
   // tomamos nota, seguimos esperando lo de antes. Sin la lista — volver a

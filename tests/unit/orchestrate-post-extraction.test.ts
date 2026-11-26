@@ -11,17 +11,20 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
-import { is, Param } from "drizzle-orm";
+import { is, Param, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   orchestratePostExtraction,
   type ExtractedClaimOutput,
 } from "@/server/confirmations/orchestrate";
 import { extractEmailClaimMock } from "@/server/ai/mock-extractor";
 import type { CustomerMatch } from "@/server/matching/customer-matcher";
-import type { AgentMessenger } from "@/server/confirmations/messenger";
+import { simulatedWhatsappMessenger, type AgentMessenger } from "@/server/confirmations/messenger";
 import type { PolizasDelCaso } from "@/core/case/poliza-vigente";
 import type { ParteDeSombra } from "@/core/agente/sombra";
 import type { OpinionDelAgente } from "@/server/ai/deliberate";
+import { ENCABEZADO_TRANSCRIPCION, PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
+import { METADATO_SIN_TEXTO } from "@/core/adjuntos/firma";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -150,6 +153,8 @@ import { yaContestamosElUltimoMensaje } from "@/server/confirmations/ya-contesta
 import { callGemini, GeminiExtractionError } from "@/server/ai/gemini-extractor";
 import { alertSpecialists } from "@/server/notify/specialist-alert";
 import { anotarDerivacionSiEsNueva } from "@/server/confirmations/derivacion-nueva";
+import { renderTemplate } from "@/server/email/render";
+import { labelForField } from "@/lib/labels/claim-fields";
 
 // ── DB mock builder ───────────────────────────────────────────────────────────
 
@@ -193,6 +198,10 @@ function valoresDe(cond: unknown, acc: unknown[] = []): unknown[] {
   return acc;
 }
 
+const dialecto = new PgDialect();
+/** La condición como la manda drizzle: el texto y sus valores. */
+const enSql = (cond: unknown) => dialecto.sqlToQuery(cond as SQL);
+
 /**
  * Configure the db mock chains for a single test.
  *
@@ -216,10 +225,17 @@ function setupDbMocks({
    * it. Empty means we have never asked for anything, so every ask is new.
    */
   lastAskRows = [] as Array<{ asked_keys?: string[] | null; created_at?: string; template?: string }>,
+  /**
+   * Lo último que salió, sea o no un pedido (`cuandoHablamosPorUltimaVez`): por
+   * omisión, lo mismo que `lastAskRows`.
+   */
+  ultimaSalidaRows = undefined as Array<{ created_at?: string; template?: string }> | undefined,
   /** Rows for archivosDesdeQueHablamos: non-empty means a file arrived. */
   newAttachmentRows = [] as Array<{ id: string }>,
   /** Rows for the size-rejection query of archivosDesdeQueHablamos: non-empty means a file did not get in. */
   rejectedAttachmentRows = [] as Array<{ id: string }>,
+  /** Rows for the audio-without-text query of archivosDesdeQueHablamos: non-empty means a voice note nobody could read arrived. */
+  audioSinTextoRows = [] as Array<{ id: string }>,
   /**
    * Rows for factsLearnedSinceWeLastSpoke: non-empty means the claimant told
    * us something we did not have when we last wrote to them.
@@ -294,7 +310,9 @@ function setupDbMocks({
       const tableName = getTableName(table);
 
       if (tableName === "outbound_messages") {
-        const soloLaFecha = Object.keys(proj ?? {}).join() === "created_at";
+        // La lectura de «cuándo hablamos» es la única que no pide `asked_keys`.
+        const llaves = Object.keys(proj ?? {});
+        const soloLaFecha = llaves.includes("created_at") && !llaves.includes("asked_keys");
         return {
           where: () => ({
             // hasPriorOutbound: "has anything gone out at all?"
@@ -305,7 +323,7 @@ function setupDbMocks({
               limit: () =>
                 hablamosIlegible && soloLaFecha
                   ? Promise.reject(new Error("connection lost"))
-                  : Promise.resolve(lastAskRows),
+                  : Promise.resolve(soloLaFecha && ultimaSalidaRows ? ultimaSalidaRows : lastAskRows),
             }),
           }),
         };
@@ -319,14 +337,19 @@ function setupDbMocks({
           where: (cond: unknown) => {
             adjuntosWhereSpy(cond);
             return {
-              // Dos consultas por vuelta: la de los archivos que entraron y la
-              // de los que pasaron el tope; se distinguen por la condición.
-              limit: () =>
-                Promise.resolve(
-                  valoresDe(cond).includes("size_exceeded")
+              // Tres consultas por vuelta: la de los archivos que entraron, la de los
+              // que pasaron el tope y la de las notas de voz sin texto; se
+              // distinguen por la condición.
+              limit: () => {
+                const valores = valoresDe(cond);
+                return Promise.resolve(
+                  valores.includes("size_exceeded")
                     ? rejectedAttachmentRows
-                    : newAttachmentRows
-                ),
+                    : enSql(cond).params.includes(METADATO_SIN_TEXTO)
+                      ? audioSinTextoRows
+                      : newAttachmentRows
+                );
+              },
             };
           },
         };
@@ -928,6 +951,37 @@ describe("orchestratePostExtraction — medium-confidence field (AC7)", () => {
       (c) => (c[0] as { status?: string })?.status === "confirmed"
     );
     expect(resolved).toBeUndefined();
+  });
+
+  it("un nombre del sobre con confianza alta no cierra la fila pendiente del nombre", async () => {
+    // `sinPisarLoGuardado` deja el nombre guardado, con su confianza, en el
+    // campo del canal. Es un dato del sobre, no algo que la persona haya dicho:
+    // no puede confirmar la fila de conflicto ni contar como respuesta.
+    const claim = extractEmailClaimMock({
+      fields_pending_confirmation: [],
+      fields: [
+        ...extractEmailClaimMock().fields
+          .filter((f) => f.field_key !== "full_name")
+          .map((f) => ({ ...f, confidence: 0.7 })),
+        { field_key: "full_name", field_value: "Paulo Ortiz Gómez", confidence: 0.9, source: "canal" as const },
+      ],
+    });
+    const { updateSpy } = setupDbMocks({
+      lastAskRows: [{ asked_keys: ["full_name"], created_at: "2026-08-20T18:00:00Z" }],
+      confirmacionesCerradas: [{ campo: "full_name" }],
+    });
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: claim, senderEmail: SENDER_EMAIL },
+      NO_MATCHES
+    );
+
+    const cerrada = updateSpy.mock.calls.find(
+      (c) => (c[0] as { status?: string })?.status === "confirmed"
+    );
+    expect(cerrada).toBeUndefined();
   });
 
   it("never asks someone to confirm the sentence they wrote", async () => {
@@ -2941,6 +2995,22 @@ describe("orchestratePostExtraction — la sombra", () => {
       expect(enviados[0].data?.missingFields).toEqual(["policy_number", "dni"]);
     });
 
+    // Tras un «ok» la lista que se achicó sigue siendo el pedido que ya está en pie
+    // (`quedaDeAquelPedido`), aunque el plan eligiera otra: el árbol callaría y la
+    // sombra no puede anotar «pedir», que sería un desacuerdo que no existe.
+    it("tras un «ok» con la lista achicada y otra elegida por el plan, el árbol calla", async () => {
+      setupDbMocks({ lastAskRows: [{ asked_keys: ["policy_number", "dni", "accident_date"] }] });
+      gapsAre(["policy_number", "dni", "hora_siniestro"]);
+      opina(
+        { intent: "ask", askFor: ["hora_siniestro"], rechazo: null },
+        plan({ intent: "ask", askFor: ["hora_siniestro"] })
+      );
+
+      const { anotadas } = await run({ salida: { latestMessageText: "ok" } });
+
+      expect(anotadas[1]).toMatchObject({ responder: { codigo: "callar" } });
+    });
+
     it.each([
       ["contestar", "answer", "¿Cuánto tarda esto?", "contestar"],
       ["cerrar", "acknowledge", "Gracias", "cerrar"],
@@ -3175,6 +3245,225 @@ describe("orchestratePostExtraction — a file arriving beats the silence guard"
     const calls = vi.mocked(dispatchOutboundEmail).mock.calls;
     expect(calls.some((c) => c[0].template === "information_received")).toBe(true);
     expect(calls.some((c) => c[0].template === "missing_information_request")).toBe(false);
+  });
+
+  describe("una nota de voz", () => {
+    // El archivo dispara el acuse aunque nadie haya leído lo que dice. Dos señales
+    // distinguen una nota sin transcribir de una leída: el marcador del último
+    // mensaje (WhatsApp, nota pendiente) y la marca que deja `transcribir.ts` en el
+    // adjunto cuando no sacó texto (cualquier canal, con otro mensaje atrás).
+    async function acuseCon(latestMessageText: string, audioSinTextoRows: Array<{ id: string }> = []) {
+      setupDbMocks({
+        lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" }],
+        newAttachmentRows: [{ id: "att-1" }],
+        audioSinTextoRows,
+      });
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["parte_amistoso"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+      vi.mocked(deliberate).mockResolvedValue(null as never);
+
+      await orchestratePostExtraction(
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText },
+        NO_MATCHES
+      );
+
+      return vi
+        .mocked(dispatchOutboundEmail)
+        .mock.calls.find((c) => c[0].template === "information_received");
+    }
+
+    it("sin transcribir: el acuse va marcado", async () => {
+      const acuse = await acuseCon(PLACEHOLDER_AUDIO);
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(true);
+    });
+
+    it("transcripta: el acuse va sin marca", async () => {
+      const acuse = await acuseCon(`${ENCABEZADO_TRANSCRIPCION}
+Choqué ayer en la rotonda.`);
+      expect(acuse).toBeDefined();
+      expect(acuse?.[0].data?.audioSinTranscribir).toBeFalsy();
+    });
+
+    it("por mail, con el cuerpo del mensaje y sin marcador, la marca del adjunto lo prende", async () => {
+      const acuse = await acuseCon("Les mando el audio con lo que pasó.", [{ id: "att-1" }]);
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(true);
+    });
+
+    it("sin texto y con otro mensaje atrás (una foto, un saludo), la marca del adjunto lo prende", async () => {
+      const acuse = await acuseCon("[Imagen adjunta sin texto]", [{ id: "att-1" }]);
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(true);
+    });
+
+    it("el mail con un adjunto cualquiera, sin nota sin texto, sale sin marca", async () => {
+      const acuse = await acuseCon("Les mando la foto del parte.");
+      expect(acuse).toBeDefined();
+      expect(acuse?.[0].data?.audioSinTranscribir).toBe(false);
+    });
+
+    it("la consulta mira sólo lo que llegó desde que hablamos y la marca del adjunto", async () => {
+      const { adjuntosWhereSpy } = setupDbMocks({
+        lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" }],
+        newAttachmentRows: [{ id: "att-1" }],
+      });
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["parte_amistoso"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+      vi.mocked(deliberate).mockResolvedValue(null as never);
+
+      await orchestratePostExtraction(
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: "gracias" },
+        NO_MATCHES
+      );
+
+      const condicion = adjuntosWhereSpy.mock.calls[2][0];
+      expect(columnasDe(condicion)).toEqual(expect.arrayContaining(["case_id", "created_at", "metadatos"]));
+      // La misma clave que escribe `transcribir.ts`, comparada con true.
+      const { sql: texto, params } = enSql(condicion);
+      const [, clave, valor] = texto.match(/"metadatos"->>\$(\d+)::text = \$(\d+)/) ?? [];
+      expect(params[Number(clave) - 1]).toBe(METADATO_SIN_TEXTO);
+      expect(params[Number(valor) - 1]).toBe("true");
+    });
+
+    it("también cuenta la nota de voz que sigue sin leer: la corrida que la tome y falle llega después del acuse", async () => {
+      const { adjuntosWhereSpy } = setupDbMocks({
+        lastAskRows: [{ asked_keys: ["parte_amistoso"], created_at: "2026-08-20T18:00:00Z" }],
+        newAttachmentRows: [{ id: "att-1" }],
+      });
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["parte_amistoso"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+      vi.mocked(deliberate).mockResolvedValue(null as never);
+
+      await orchestratePostExtraction(
+        CASE_ID,
+        TENANT_ID,
+        { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: "gracias" },
+        NO_MATCHES
+      );
+
+      // Un plazo agotado, un 429 o la tercera de una corrida: sin leer, sea audio y no un rechazo.
+      const { sql: texto, params } = enSql(adjuntosWhereSpy.mock.calls[2][0]);
+      expect(texto).toMatch(/\("claim_attachments"\."resumen" is null or [^]*"metadatos"->>/);
+      expect(texto).toMatch(/"rejected_reason" is null/);
+      const [, tipo] = texto.match(/"content_type" ilike \$(\d+)/) ?? [];
+      expect(params[Number(tipo) - 1]).toBe("audio/%");
+    });
+
+    describe("en el camino pedir", () => {
+      // Sin pedido previo el orquestador contesta con la lista de lo que falta, no con el acuse.
+      async function pedidoCon(
+        latestMessageText: string,
+        audioSinTextoRows: Array<{ id: string }> = [],
+        extra: Parameters<typeof setupDbMocks>[0] = {}
+      ) {
+        setupDbMocks({ lastAskRows: [], audioSinTextoRows, ...extra });
+        vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+          missingRequiredFields: ["parte_amistoso"],
+          fieldsNeedingConfirmation: [],
+          isComplete: false,
+          status: "info_faltante",
+        });
+        vi.mocked(deliberate).mockResolvedValue(null as never);
+
+        await orchestratePostExtraction(
+          CASE_ID,
+          TENANT_ID,
+          { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText },
+          NO_MATCHES
+        );
+
+        return vi
+          .mocked(dispatchOutboundEmail)
+          .mock.calls.find((c) => c[0].template === "missing_information_request");
+      }
+
+      it("con una fila de nota sin texto, el pedido va marcado", async () => {
+        const pedido = await pedidoCon("Les mando el audio.", [{ id: "att-1" }]);
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(true);
+      });
+
+      it("con el marcador de la nota pendiente en el último mensaje, también", async () => {
+        const pedido = await pedidoCon(PLACEHOLDER_AUDIO);
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(true);
+      });
+
+      it("con la nota transcripta y sin filas mudas, el pedido va sin marca", async () => {
+        const pedido = await pedidoCon(`${ENCABEZADO_TRANSCRIPCION}
+Choqué ayer en la rotonda.`);
+        expect(pedido).toBeDefined();
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(false);
+      });
+
+      it("con un archivo que no entró, el aviso del archivo gana y el del audio no va", async () => {
+        const pedido = await pedidoCon(PLACEHOLDER_AUDIO, [], { rejectedAttachmentRows: [{ id: "att-2" }] });
+        expect(pedido?.[0].data?.archivoQueNoEntro).toBe(true);
+        expect(pedido?.[0].data?.audioSinTranscribir).toBe(false);
+      });
+    });
+
+    // Dicen que la carga por este medio terminó: pedir ahí que escriba o reenvíe se contradice.
+    describe("cuando la corrida termina en el cierre o en la confirmación de un dato", () => {
+      it("la confirmación de recibo no lleva la marca", async () => {
+        setupDbMocks({ outboundMessagesRows: [] });
+
+        await orchestratePostExtraction(
+          CASE_ID,
+          TENANT_ID,
+          { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: PLACEHOLDER_AUDIO },
+          NO_MATCHES
+        );
+
+        const cierre = vi
+          .mocked(dispatchOutboundEmail)
+          .mock.calls.find((c) => c[0].template === "confirmation_received");
+        expect(cierre).toBeDefined();
+        expect(cierre?.[0].data?.audioSinTranscribir).toBeFalsy();
+      });
+
+      it("el pedido de confirmar un dato que no coincide tampoco", async () => {
+        const claim = extractEmailClaimMock({
+          fields: [
+            ...extractEmailClaimMock().fields.filter((f) => f.field_key !== "full_name"),
+            { field_key: "full_name", field_value: "Pedro García", confidence: 0.92, source: "ai" as const },
+          ],
+        });
+        const conflicto: CustomerMatch = {
+          customerId: "cust-002",
+          matchType: "email",
+          storedValues: {},
+          confidence: 0.75,
+          customerName: "Juan Pérez",
+          conflictsWithExtracted: ["full_name"],
+        };
+
+        await orchestratePostExtraction(
+          CASE_ID,
+          TENANT_ID,
+          { extractedClaim: claim, senderEmail: SENDER_EMAIL, latestMessageText: PLACEHOLDER_AUDIO },
+          [conflicto]
+        );
+
+        const pedido = vi
+          .mocked(dispatchOutboundEmail)
+          .mock.calls.find((c) => c[0].template === "data_confirmation_request");
+        expect(pedido).toBeDefined();
+        expect(pedido?.[0].data?.audioSinTranscribir).toBeFalsy();
+      });
+    });
   });
 
   it("still asks when a file arrives and the list is not the one we sent", async () => {
@@ -6015,6 +6304,239 @@ describe("orchestratePostExtraction — un documento negado no vuelve como duda"
 });
 
 /*
+ * El rojo del ensayo de #593, `mail-completo` [2].
+ *
+ * Pedimos patente y hora. La persona contestó «No completamos ningún parte
+ * amistoso, el otro conductor no quiso»: el parte quedó declinado —no estaba
+ * en la lista— y lo que falta seguía siendo patente y hora. Salía la misma
+ * lista pelada, sin una palabra sobre lo que dijo: la sombra lo marcó como
+ * «agente: callar · código: pedir». Contestar no es silencio, pero repetir la
+ * lista tampoco es contestar: se acusa recibo, sin la lista.
+ */
+describe("orchestratePostExtraction — una negativa que no cambia la lista recibe un acuse, no la lista otra vez", () => {
+  const NEGATIVA = "No completamos ningún parte amistoso, el otro conductor no quiso.";
+  const CLAVES = ["patente_vehiculo", "hora_siniestro"];
+  const PEDIDO_ANTERIOR = [{ asked_keys: CLAVES, created_at: "2026-11-24T10:00:00Z" }];
+  const ROTULOS = [labelForField("patente_vehiculo").label, labelForField("hora_siniestro").label];
+  const previo = process.env.AGENT_COMPOSE_REPLIES;
+
+  beforeEach(() => {
+    process.env.AGENT_COMPOSE_REPLIES = "off";
+  });
+
+  afterEach(() => {
+    if (previo === undefined) delete process.env.AGENT_COMPOSE_REPLIES;
+    else process.env.AGENT_COMPOSE_REPLIES = previo;
+    vi.mocked(callGemini).mockReset();
+  });
+
+  /** Lo que contesta el reconocedor de negativas, en todas las llamadas: nunca la de verdad. */
+  function reconoce(declined: Array<{ clave: string; cita: string }>) {
+    vi.mocked(callGemini).mockResolvedValue({
+      text: JSON.stringify({ declined }),
+      usage: { promptTokens: 0, completionTokens: 0 },
+      model: "gemini-2.5-flash",
+    });
+  }
+
+  function planDe(intent: "wait" | "ask", askFor: string[] = CLAVES) {
+    vi.mocked(deliberate).mockResolvedValue({
+      intent,
+      askFor: intent === "ask" ? askFor : [],
+      question: null,
+      reasoning: "el pedido no cambió",
+      noteForAnalyst: null,
+      resolved: [],
+      toolCalls: [],
+    } as never);
+  }
+
+  function faltanPatenteYHora() {
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: CLAVES,
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+  }
+
+  async function correr(texto: string, messenger?: AgentMessenger) {
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: texto },
+      NO_MATCHES,
+      messenger
+    );
+  }
+
+  it.each([
+    { canal: "correo", porMensajero: false, intent: "wait" },
+    { canal: "correo", porMensajero: false, intent: "ask" },
+    { canal: "WhatsApp", porMensajero: true, intent: "wait" },
+    { canal: "WhatsApp", porMensajero: true, intent: "ask" },
+  ] as const)("por $canal, con el plan en «$intent»: sale el acuse y no la lista", async ({ porMensajero, intent }) => {
+    const { updateSpy } = setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe(intent);
+    const messenger = porMensajero
+      ? { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) }
+      : undefined;
+
+    await correr(NEGATIVA, messenger);
+
+    // El parte quedó declinado y el caso sigue esperando lo de antes.
+    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ declined_at: expect.any(String) }));
+    const estados = updateSpy.mock.calls.map((c) => (c[0] as { status?: string }).status);
+    expect(estados).not.toContain("listo_para_core");
+
+    const salidas = messenger
+      ? messenger.send.mock.calls.map((c) => c[0])
+      : vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0]);
+    expect(salidas.map((m) => m.template)).toEqual(["information_received"]);
+    expect(salidas[0].data.missingFields).toBeUndefined();
+  });
+
+  it("el texto del mail dice que tomamos nota y no trae la patente ni la hora", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe("ask");
+
+    await correr(NEGATIVA);
+
+    const salidas = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0]);
+    expect(salidas).toHaveLength(1);
+    const texto = renderTemplate(salidas[0].template, salidas[0].data).text;
+    expect(texto).toContain("tomamos nota de lo que nos contaste");
+    for (const rotulo of ROTULOS) expect(texto).not.toContain(rotulo);
+  });
+
+  it("el cuerpo de WhatsApp que queda en el libro dice que tomamos nota, sin rótulos ni claves pedidas", async () => {
+    const { insertSpy } = setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe("ask");
+
+    await correr(NEGATIVA, simulatedWhatsappMessenger);
+
+    const filas = insertSpy.mock.calls
+      .flatMap((c) => [c[0]].flat() as Array<{ rendered_body?: string; asked_keys?: string[] | null }>)
+      .filter((f) => typeof f.rendered_body === "string");
+    expect(filas).toHaveLength(1);
+    expect(filas[0].rendered_body).toContain("tomamos nota");
+    for (const rotulo of ROTULOS) expect(filas[0].rendered_body).not.toContain(rotulo);
+    expect(filas[0].asked_keys ?? null).toBeNull();
+  });
+
+  // La sombra sin plan comparaba por subconjunto: una lista que se achicó parecía
+  // «la misma» y el código se anotaba como acusar cuando en verdad pedía.
+  it("la sombra: con la lista achicada por la negativa el código pide, no acusa", async () => {
+    setupDbMocks({
+      lastAskRows: [{ asked_keys: ["parte_amistoso", "patente_vehiculo"], created_at: "2026-11-24T10:00:00Z" }],
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: ["patente_vehiculo", "hora_siniestro"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    planDe("ask");
+    const anotarSombra = vi.fn<(parte: ParteDeSombra) => void>();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: NEGATIVA },
+      NO_MATCHES,
+      { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) },
+      undefined,
+      anotarSombra
+    );
+
+    const responder = anotarSombra.mock.calls.map((c) => c[0]).find((p) => "responder" in p);
+    expect(responder?.responder?.codigo).toBe("pedir");
+  });
+
+  // Lo último fue un acuse sin la lista y el plan sumó otro dato: sin plan, el árbol
+  // volvería a decir la lista en pie, así que la sombra no puede anotar un acuse.
+  it("la sombra: tras un acuse sin la lista y con otra lista elegida por el plan, el código pide", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      ultimaSalidaRows: [{ template: "wa_information_received", created_at: "2026-11-24T11:00:00Z" }],
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+      missingRequiredFields: [...CLAVES, "dni"],
+      fieldsNeedingConfirmation: [],
+      isComplete: false,
+      status: "info_faltante",
+    });
+    planDe("ask", [...CLAVES, "dni"]);
+    const anotarSombra = vi.fn<(parte: ParteDeSombra) => void>();
+
+    await orchestratePostExtraction(
+      CASE_ID,
+      TENANT_ID,
+      { extractedClaim: extractEmailClaimMock(), senderEmail: SENDER_EMAIL, latestMessageText: NEGATIVA },
+      NO_MATCHES,
+      { send: vi.fn<AgentMessenger["send"]>().mockResolvedValue(true) },
+      undefined,
+      anotarSombra
+    );
+
+    const responder = anotarSombra.mock.calls.map((c) => c[0]).find((p) => "responder" in p);
+    expect(responder?.responder?.codigo).toBe("pedir");
+  });
+
+  // Sin saber qué salió último, la dirección segura es mandar la lista: otro acuse
+  // podría ser el segundo seguido sin nombrarla.
+  it("si no se pudo leer lo último que salió, vuelve la lista y no otro acuse", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+      hablamosIlegible: true,
+    });
+    reconoce([{ clave: "parte_amistoso", cita: NEGATIVA }]);
+    faltanPatenteYHora();
+    planDe("wait");
+
+    await correr(NEGATIVA);
+
+    const salidas = vi.mocked(dispatchOutboundEmail).mock.calls.map((c) => c[0]);
+    expect(salidas.map((m) => m.template)).toEqual(["missing_information_request"]);
+    expect([...(salidas[0].data.missingFields as string[])].sort()).toEqual([...CLAVES].sort());
+  });
+
+  it("si el mensaje no cerró nada, no se inventa un acuse", async () => {
+    setupDbMocks({
+      lastAskRows: PEDIDO_ANTERIOR,
+      missingDocsRows: [{ doc_key: "parte_amistoso" }],
+    });
+    reconoce([]);
+    faltanPatenteYHora();
+    planDe("wait");
+
+    await correr("Mañana te paso los datos");
+
+    expect(dispatchOutboundEmail).not.toHaveBeenCalled();
+  });
+});
+
+/*
  * El ensayo `goteo` del 23/09. A «Fue un choque, ayer a la tarde» se le
  * contestó «¿Fue a la tarde, correcto?», y en la vuelta siguiente esa pregunta
  * desapareció sin respuesta y apareció «Más o menos a qué hora fue.».
@@ -6496,6 +7018,8 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
     preguntadas?: string[];
     /** Las claves que pedía el último mensaje que salió. */
     pedidoEnPie?: string[];
+    /** La plantilla, como queda en el libro, de lo último que salió cuando no fue el pedido. */
+    ultimaSalida?: string;
     campos?: ReturnType<typeof campo>[];
     matches?: CustomerMatch[];
     titularAjeno?: boolean;
@@ -6506,6 +7030,7 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
     const spies = setupDbMocks({
       confirmacionesExistentes: opts.existentes,
       lastAskRows: opts.pedidoEnPie ? [{ asked_keys: opts.pedidoEnPie }] : [],
+      ultimaSalidaRows: opts.ultimaSalida ? [{ template: opts.ultimaSalida }] : undefined,
       // El worker escribe la póliza antes de orquestar y la primera gana.
       polizaDelCaso: polizaAnterior ?? opts.leida ?? null,
     });
@@ -6724,7 +7249,9 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
       expect(JSON.stringify(r.pedidos[0].data)).not.toContain("7788");
     });
 
-    it("elegir cuenta como contestar: el pedido que seguía en pie se vuelve a decir", async () => {
+    // Elegir cuenta como contestar, y contestar con la lista sin cambios se acusa,
+    // no se repite (misma regla que la negativa de #593, mail-completo [2]).
+    it("elegir cuenta como contestar: con el pedido en pie sin cambios se acusa recibo, sin la lista", async () => {
       vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
         missingRequiredFields: ["accident_date"],
         fieldsNeedingConfirmation: [],
@@ -6738,6 +7265,37 @@ describe("orchestratePostExtraction — la póliza cambió a mitad de la charla"
         confianza: 0.95,
         propuestos,
         pedidoEnPie: ["accident_date"],
+      });
+
+      expect(r.enviados.map((m) => m.template)).toEqual(["information_received"]);
+      expect(r.enviados[0].data.missingFields).toBeUndefined();
+    });
+
+    // Entre la lista y la respuesta hubo otro mensaje (la pregunta por la póliza,
+    // un acuse, el aviso de un archivo): otro acuse sin la lista dejaría de nombrar
+    // lo que falta por varios mensajes. WhatsApp guarda los nombres con `wa_`.
+    it.each([
+      "data_confirmation_request",
+      "wa_data_confirmation_request",
+      "information_received",
+      "wa_information_received",
+      "attachment_too_large",
+      "wa_attachment_too_large",
+    ])("elegir después de «%s»: el pedido en pie se vuelve a decir", async (ultimaSalida) => {
+      vi.mocked(analyzeEmailClaimGaps).mockResolvedValue({
+        missingRequiredFields: ["accident_date"],
+        fieldsNeedingConfirmation: [],
+        isComplete: false,
+        status: "info_faltante",
+      });
+
+      const r = await vuelta({
+        texto: "es la 4455",
+        leida: NUEVA,
+        confianza: 0.95,
+        propuestos,
+        pedidoEnPie: ["accident_date"],
+        ultimaSalida,
       });
 
       expect(r.enviados.map((m) => m.template)).toEqual(["missing_information_request"]);

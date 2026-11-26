@@ -51,6 +51,7 @@ import { mencionaElTraspaso } from "@/core/mensajes/traspaso";
 import { esPlanPro } from "@/core/billing/plan-pro";
 import { policyTypeDeRamo } from "@/core/case/ramos";
 import { PLACEHOLDER_AUDIO } from "@/core/adjuntos/transcripcion";
+import { avisaQueNoSeEscucho } from "@/core/mensajes/audio-sin-transcribir";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@/core/adjuntos/firma";
 import { AppError } from "@/lib/errors";
 import { errorCode } from "@/lib/observability/error-code";
@@ -78,6 +79,7 @@ const { recordarCaso } = await import("@/server/confirmations/recordatorios");
 const { hablaDeHeridos, respuestaAHeridos } = await import("@/core/case/heridos-supuestos");
 const { db } = await import("@/lib/db");
 const { CONTACT_DOC_KEYS } = await import("@/server/cases/documents");
+const { MEDIUM_CONFIDENCE_HIGH } = await import("@/server/cases/gap-analyzer");
 const {
   agentRuns,
   cases,
@@ -128,7 +130,8 @@ interface TurnDicho {
    *
    * `fixture` es el nombre en `tests/fixtures/`, con extensión. Si no está en
    * disco se manda `reemplazo`, que sí está en el repositorio: ejercita el
-   * guardado, la firma y la llamada al modelo, pero no lo que el archivo dice.
+   * guardado y la firma, pero no lo que el archivo dice. Un audio de reemplazo
+   * es silencio y no llega al modelo.
    */
   adjunto?: { fixture: string; tipo: string; reemplazo?: string };
   /**
@@ -252,9 +255,20 @@ interface TurnDicho {
     sinPedido?: boolean;
     /**
      * Que la nota de voz de este turno haya quedado escrita en el mensaje.
-     * Sólo con una nota de verdad en disco: el reemplazo es mudo.
+     * Sólo con una nota de verdad en disco: el reemplazo es mudo (ver `conElReemplazo`).
      */
     transcribe?: boolean;
+    /**
+     * Lo que se exige además, y sólo, cuando se manda el reemplazo del adjunto en
+     * vez del archivo de verdad: `placeholder.ogg` es silencio digital, que
+     * `esOpusMudo` da por mudo sin llamar al modelo. Con la nota real en disco
+     * se transcribe y esto no corre.
+     *
+     * `avisaDelAudio`: alguna respuesta dice que no se escuchó y pide escribirlo, con la misma
+     * prueba (`avisaQueNoSeEscucho`) con la que el mensajero decide si agrega el pie: «escrib» a
+     * secas rechazaría un «¿nos lo mandás de nuevo?» que el producto da por bueno.
+     */
+    conElReemplazo?: { avisaDelAudio?: boolean; avoids?: string[] };
   };
 }
 
@@ -288,7 +302,8 @@ interface Scenario {
   /** Which door the claim comes in through. Defaults to WhatsApp. */
   channel?: "whatsapp" | "email";
   /**
-   * El nombre visible del sobre, como lo manda un cliente de correo.
+   * El nombre visible del sobre, como lo manda un cliente de correo, o el
+   * nombre de perfil de WhatsApp.
    *
    * Por omisión el ensayo entrega la dirección pelada, y producción entrega
    * `Nombre <dirección>`: eso lo acerca a lo que pasa de verdad, y es la única
@@ -328,6 +343,8 @@ interface Scenario {
     docsDeclined?: string[];
     /** Field keys that must have survived to the end with a value. */
     knows?: string[];
+    /** Claves que el caso final tiene que tener guardadas con confianza de dato seguro: lo heredado no baja. */
+    seguros?: string[];
     /** Tipos de indicio que tienen que estar en `cases.fraud_indicators`. */
     indicios?: string[];
     /** Cuántos adjuntos tienen que haber quedado leídos (`resumen` escrito). */
@@ -408,7 +425,7 @@ const SCENARIOS: Scenario[] = [
         say: "Se prendió fuego el auto en la ruta 3, mi señora está internada con quemaduras. Soy Laura Giménez, póliza POL-9982-C.",
         expect: {
           replies: 1,
-          mentions: ["especialista"],
+          mentions: ["especialista", "emergencias"],
           // The failure this branch exists for: telling someone whose partner
           // is in hospital that we need their DNI and the time of the fire.
           avoids: ["DNI", "necesitamos que nos mandes", "fotos", ...LO_MEDICO],
@@ -455,7 +472,10 @@ const SCENARIOS: Scenario[] = [
 
   {
     id: "tardio-siniestro-nuevo",
-    what: "Derivado, cuenta otro choque en otra fecha: abre un caso nuevo que contesta el agente; el derivado no cambia (B3)",
+    what: "Derivado, cuenta otro choque en otra fecha: abre un caso nuevo que contesta el agente, con el nombre ya sabido; el derivado no cambia (B3)",
+    // El perfil de WhatsApp dice otra cosa que lo escrito: el caso nuevo no vuelve a leer el nombre
+    // en sus mensajes y el worker lo toma del perfil, que no puede pisar el que ya heredó.
+    remitente: "Paulo Ortiz Gómez",
     turns: [
       {
         say: "Se incendió la moto en la ruta 22, mi hermano está internado con quemaduras. Soy Pablo Ortiz, póliza POL-6610-E.",
@@ -468,10 +488,14 @@ const SCENARIOS: Scenario[] = [
           replies: 1,
           status: "info_faltante",
           anterior: { status: "requiere_especialista", paraResponder: false },
+          // El nombre pasa del caso de antes (mismo número). Que la póliza NO pase (es otro vehículo)
+          // lo fija prove-data-layer: pedirla o no en el mensaje lo decide el modelo y varía.
+          noAsked: ["full_name"],
+          avoids: ["6610", "Paulo"],
         },
       },
     ],
-    finally: { status: "info_faltante" },
+    finally: { status: "info_faltante", knows: ["full_name"], seguros: ["full_name"] },
   },
 
   {
@@ -548,16 +572,22 @@ const SCENARIOS: Scenario[] = [
     what: "Un mensaje que no aporta nada no merece que se repita el pedido",
     turns: [
       {
-        say: "Hola, choqué contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114.",
+        say: "Hola, choqué ayer a las 19 contra un poste en Alem al 500. Soy Ana Ruiz, DNI 33.221.114, póliza POL-5521-A.",
         // El tipo ya está dicho: pedirlo era el efecto de un bloque del prompt
         // que hacía caer el choque contra un poste en `other`.
         //
         // Y la provincia se pide, no se afirma: «Alem al 500» no dice cuál, y el
         // 30/09 la respuesta decía «Entendemos que fue en CABA» y a la vez la
         // pedía. `avoids` mira eso; no dice «caba» solo porque está en «acabamos».
+        //
+        // Faltan la patente y la provincia, y están pendientes el parte, la
+        // licencia y las fotos: sobran tres lugares de los cinco. El tope es un
+        // máximo, no una meta, así que con un dato pendiente no se rellena con
+        // archivos (criterio 4 de decidir). Si el mensaje no trajera la fecha, la
+        // póliza ni la hora, cinco datos llenarían el tope y esto no distinguiría.
         expect: {
           replies: 1,
-          noAsked: ["claim_type"],
+          noAsked: ["claim_type", "fotos_danos", "licencia_conducir", "parte_amistoso"],
           avoids: ["en CABA", "Capital Federal", "Buenos Aires"],
         },
       },
@@ -640,10 +670,14 @@ const SCENARIOS: Scenario[] = [
         // nombre de Lucía y el del padre, que son los dos correctos, en un caso
         // que ya tiene un especialista. Dice la diferencia y avisa eso. Tampoco
         // le atribuye el auto: es «el auto de mi viejo».
+        //
+        // «emergencias»: el ensayo del 24/11 derivó a este titular ajeno sin
+        // decirle a quién llamar si es urgente; toda derivación lo dice.
+        // «tu póliza»: la póliza es del padre; la línea es «de la póliza».
         expect: {
           replies: 1,
-          mentions: ["R*** P***", "Lucía Paz", "especialista"],
-          avoids: ["Roberto Paz", "¿", "tu auto"],
+          mentions: ["R*** P***", "Lucía Paz", "especialista", "emergencias"],
+          avoids: ["Roberto Paz", "¿", "tu auto", "tu póliza"],
         },
       },
     ],
@@ -731,7 +765,8 @@ const SCENARIOS: Scenario[] = [
         // Como lo deja el webhook: un audio sin texto entra con el marcador.
         say: PLACEHOLDER_AUDIO,
         adjunto: { fixture: "nota-de-voz.ogg", tipo: "audio/ogg; codecs=opus", reemplazo: "placeholder.ogg" },
-        expect: { attachments: 1, transcribe: true },
+        // Sin la nota real el audio es mudo: la respuesta no puede darla por anotada y tiene que pedir que la escriba.
+        expect: { attachments: 1, transcribe: true, conElReemplazo: { avisaDelAudio: true, avoids: ["tomamos nota"] } },
       },
       {
         // La constancia dice 15/09/2026: tres días después de lo que contó.
@@ -780,7 +815,10 @@ const SCENARIOS: Scenario[] = [
           "> - Parte amistoso de accidente",
           "> - Fotos de los daños",
         ].join("\n"),
-        expect: { replies: 1, noAsked: ["parte_amistoso"] },
+        // La negativa no cambia la lista de T1 (patente y hora): sale un acuse sin repetirla.
+        // `avoids` y no `sinPedido`: `pideAlgo` marcaría un acuse redactado con «¿» o
+        // «mandanos», y no ve una lista dicha sin verbo («nos falta: la patente…»).
+        expect: { replies: 1, noAsked: ["parte_amistoso"], avoids: ["patente", "hora aproximada"] },
       },
     ],
     finally: {
@@ -926,6 +964,8 @@ const SCENARIOS: Scenario[] = [
         expect: {
           replies: 1,
           status: "requiere_especialista",
+          // El 24/11 el redactor tardó 30 s y el piso del correo no la tenía.
+          mentions: ["emergencias"],
           avoids: LO_MEDICO,
           cuidado: true,
           sinPedido: true,
@@ -1010,7 +1050,7 @@ const SCENARIOS: Scenario[] = [
           paraResponder: false,
           status: "confirmacion_pendiente",
           mentions: ["coincid"],
-          avoids: ["4455", "4471"],
+          avoids: ["4455", "4471", "podrás"],
         },
       },
       // Elige la anterior escribiéndola: la póliza ya no se vuelve a pedir.
@@ -1224,6 +1264,7 @@ async function deliverWhatsApp(
     providerMessageId: providerMessageIdDe(scenario, i),
     simulated: true,
     media: mediaDelTurno(turn, i),
+    senderName: scenario.remitente ?? null,
   });
   return result.caseId;
 }
@@ -1724,20 +1765,24 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         );
       }
 
-      const pedidas = new Set(said.flatMap((r) => r.askedKeys));
+      const pedidas = new Set(said.flatMap((r) => r.askedKeys).map(canonicalFieldKey));
 
+      const conReemplazo = turn.adjunto !== undefined && archivoDe(turn.adjunto) !== turn.adjunto.fixture;
       for (const phrase of want.mentions ?? []) {
         if (!all.includes(phrase.toLowerCase())) {
           note(scenario.id, i + 1, `no menciona "${phrase}"`, `menciona:${phrase}`);
         }
       }
-      for (const phrase of want.avoids ?? []) {
+      if (conReemplazo && want.conElReemplazo?.avisaDelAudio && !said.some((r) => avisaQueNoSeEscucho(readable(r.body)))) {
+        note(scenario.id, i + 1, "no avisa que la nota de voz no se escuchó ni pide escribirla", "avisa-del-audio");
+      }
+      for (const phrase of [...(want.avoids ?? []), ...(conReemplazo ? (want.conElReemplazo?.avoids ?? []) : [])]) {
         if (all.includes(phrase.toLowerCase())) {
           note(scenario.id, i + 1, `no debería decir "${phrase}"`, `no-menciona:${phrase}`);
         }
       }
       for (const key of want.noAsked ?? []) {
-        if (pedidas.has(key)) note(scenario.id, i + 1, `pidió ${key} y no debía`, `pidio:${key}`);
+        if (pedidas.has(canonicalFieldKey(key))) note(scenario.id, i + 1, `pidió ${key} y no debía`, `pidio:${key}`);
       }
       if (want.cuidado && !diceCuidado(all)) {
         note(scenario.id, i + 1, "no abre con una frase de cuidado", "cuidado");
@@ -1777,7 +1822,7 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         }
       }
       if (want.transcribe && turn.adjunto) {
-        if (archivoDe(turn.adjunto) !== turn.adjunto.fixture) {
+        if (conReemplazo) {
           unrehearsed.add(turn.adjunto.fixture);
         } else {
           const [transcripto] = await db
@@ -1913,14 +1958,19 @@ async function runScenario(scenario: Scenario, actor: PatchActor | null): Promis
         }
       }
 
-      if (want.knows?.length) {
+      if (want.knows?.length || want.seguros?.length) {
         const known = await db
-          .select({ key: extractedFields.field_key })
+          .select({ key: extractedFields.field_key, confidence: extractedFields.confidence })
           .from(extractedFields)
           .where(eq(extractedFields.case_id, caseId));
         const keys = new Set(known.map((k) => k.key));
-        for (const key of want.knows) {
+        for (const key of want.knows ?? []) {
           if (!keys.has(key)) note(scenario.id, 0, `perdió el dato ${key}`, `perdio-dato:${key}`);
+        }
+        for (const key of want.seguros ?? []) {
+          if (!known.some((k) => k.key === key && Number(k.confidence) >= MEDIUM_CONFIDENCE_HIGH)) {
+            note(scenario.id, 0, `${key} no quedó guardado con confianza alta`, `dato-sin-confianza:${key}`);
+          }
         }
       }
 

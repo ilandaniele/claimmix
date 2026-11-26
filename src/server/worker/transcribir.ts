@@ -18,7 +18,7 @@ import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { enTenantVarias, type TenantContext } from "@/data/scope";
-import { esAudio, normalizarMime } from "@/core/adjuntos/firma";
+import { esAudio, esOpusMudo, METADATO_SIN_TEXTO, normalizarMime } from "@/core/adjuntos/firma";
 import { conTranscripcion } from "@/core/adjuntos/transcripcion";
 import { PLAZO_DEL_MODELO_MS } from "@/core/ai/plazo-del-modelo";
 import { esResumenSeguro } from "@/core/ai/resumen-seguro";
@@ -36,12 +36,26 @@ const MAX_NOTAS = 2;
 const MAX_TEXTO = 4000;
 const MAX_RESUMEN = 200;
 const SIN_TEXTO = { transcripcion: "", resumen: "" };
+/** Es lo que le dice al orquestador que nadie supo qué contó la nota. */
+const MARCA_SIN_TEXTO = sql`coalesce(${claimAttachments.metadatos}, '{}'::jsonb) || jsonb_build_object(${METADATO_SIN_TEXTO}::text, true)`;
 /**
  * Hablando rápido no se pasa de cuatro palabras por segundo. Con más, el
  * modelo inventó: ante un audio mudo de 2 s escribía denuncias enteras.
  */
 const PALABRAS_POR_SEGUNDO = 4;
 const PALABRAS_DE_GRACIA = 4;
+
+// Anotaciones de ruido en lugar de lo dicho: «[inaudible]», «(ruido)», «<música>», «{silencio}», «*risas*»,
+// con o sin el cierre, porque el modelo a veces se olvida de cerrarlas.
+const ANOTACION = /\[[^\]]*\]?|\([^)]*\)?|<[^>]*>?|\{[^}]*\}?|\*[^*]*\*?/g;
+// La misma anotación sin signos: «Inaudible.», «— silencio —», «Música de fondo».
+const SOLO_RUIDO = /^(?:(?:inaudible|ininteligible|silencio|ruido|m[uú]sica|sin voz|sin audio)(?: de fondo)?(?: |$))+$/iu;
+
+/** Que lo que escribió el modelo no tiene nada que haya dicho una persona. */
+function esSoloRuido(transcripcion: string): boolean {
+  const palabras = transcripcion.replace(ANOTACION, " ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return palabras === "" || SOLO_RUIDO.test(palabras);
+}
 
 /** Los nombres que Vertex entiende para el mismo formato. */
 const MIME_DEL_MODELO: Record<string, string> = {
@@ -90,6 +104,8 @@ function leer(texto: string | null, segundos: number | undefined): { transcripci
     // relleno, y llegaba al extractor como si lo hubiera dicho la persona.
     if (crudo.hay_voz !== true) return SIN_TEXTO;
     const transcripcion = typeof crudo.transcripcion === "string" ? crudo.transcripcion : "";
+    // Con hay_voz en true, «[inaudible]» o «Inaudible.» daban por transcripta una nota que nadie entendió.
+    if (esSoloRuido(transcripcion)) return SIN_TEXTO;
     const palabras = transcripcion.split(/\s+/).filter(Boolean).length;
     if (segundos !== undefined && palabras > segundos * PALABRAS_POR_SEGUNDO + PALABRAS_DE_GRACIA) {
       logger.warn({ palabras, segundos }, "email_worker.transcripcion_inverosimil");
@@ -140,6 +156,12 @@ export async function transcribirNotasDeVoz(args: {
     if (restanteMs() < PLAZO_DEL_MODELO_MS) break;
     const bytes = await readAttachment(nota.storage_path!);
     if (!bytes) continue;
+    // Un silencio digital no tiene qué transcribir, y al modelo le gusta rellenarlo: ni se le manda ni se paga.
+    if (esOpusMudo(bytes)) {
+      logger.info({ case_id: caseId }, "email_worker.nota_muda");
+      hechas.push({ nota, ...SIN_TEXTO });
+      continue;
+    }
     const mime = normalizarMime(nota.content_type);
     try {
       const { text, usage, model } = await callGemini(SISTEMA, PEDIDO, undefined, undefined, [
@@ -195,7 +217,7 @@ export async function transcribirNotasDeVoz(args: {
         db
           .update(claimAttachments)
           // `util` queda en true aunque no haya texto: el audio llegó y es de la persona.
-          .set({ resumen: h.resumen, util: true })
+          .set({ resumen: h.resumen, util: true, ...(h.transcripcion ? {} : { metadatos: MARCA_SIN_TEXTO }) })
           .where(
             and(
               eq(claimAttachments.case_id, caseId),

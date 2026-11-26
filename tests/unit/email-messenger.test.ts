@@ -62,9 +62,10 @@ import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { renderTemplate, type EmailTemplate } from "@/server/email/render";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
-import { CUIDADO, diceCuidado } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, EMERGENCIAS_DE_LA_POLIZA, diceCuidado } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 
 const CASE = "11111111-1111-1111-1111-111111111111";
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -534,7 +535,7 @@ describe("emailMessenger — la derivación con heridos", () => {
   it.each(["critical", "high", undefined])(
     "sin heridos (%s), ni la consigna ni la guarda",
     async (severity) => {
-      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad. ${AVISO_DE_TRASPASO}`;
+      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
       escribe(redactado);
 
       await mandar("specialist_escalation", { caseId: CASE, severity });
@@ -543,8 +544,68 @@ describe("emailMessenger — la derivación con heridos", () => {
       expect(String(modelo.mock.calls[0][0])).not.toContain("frase breve de cuidado");
       expect(modelo).toHaveBeenCalledTimes(1);
       expect(cuerpoEnviado()).toContain(redactado);
+      expect(compose.mock.calls[0][0].titularAjeno).toBe(false);
     }
   );
+});
+
+// Al lado de «La póliza figura a nombre de R*** P***», «de tu póliza» se la atribuye a quien escribe.
+describe("emailMessenger — la derivación con la póliza de otro", () => {
+  const AJENA = {
+    caseId: CASE,
+    severity: "high",
+    titularIniciales: "R*** P***",
+    claimantName: "Lucía Paz",
+  };
+  const PROSA = "Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad.";
+
+  it("con el redactor caído, el mail dice «de la póliza» y nombra los dos", async () => {
+    modelo.mockRejectedValue(new Error("sin modelo"));
+
+    await mandar("specialist_escalation", AJENA);
+
+    expect(cuerpoEnviado()).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(cuerpoEnviado()).toContain("R*** P***");
+    expect(cuerpoEnviado()).toContain("Lucía Paz");
+    expect(cuerpoEnviado()).not.toContain(EMERGENCIAS);
+  });
+
+  it("el redactor la recibe como titular ajeno y no deja pasar «de tu póliza»", async () => {
+    escribe(`${PROSA} ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`);
+
+    await mandar("specialist_escalation", AJENA);
+
+    expect(compose.mock.calls[0][0].titularAjeno).toBe(true);
+    expect(String(modelo.mock.calls[0][0])).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(modelo).toHaveBeenCalledTimes(2);
+    expect(cuerpoEnviado()).not.toContain(EMERGENCIAS);
+    expect(cuerpoEnviado()).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(cuerpoEnviado()).toContain("R*** P***");
+  });
+
+  it.each([
+    ["sin el nombre", { claimantName: null }],
+    ["con el nombre en blanco", { claimantName: "  " }],
+  ])("con las iniciales y %s, el redactor no recibe la señal de titular ajeno", async (_, extra) => {
+    escribe(`${PROSA} ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`);
+
+    await mandar("specialist_escalation", { ...AJENA, ...extra });
+
+    expect(compose.mock.calls[0][0].titularAjeno).toBe(false);
+    expect(String(modelo.mock.calls[0][0])).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(modelo).toHaveBeenCalledTimes(1);
+    expect(cuerpoEnviado()).toContain(EMERGENCIAS);
+  });
+
+  it("con «de la póliza» la prosa sale en el primer intento", async () => {
+    escribe(`${PROSA} ${EMERGENCIAS_DE_LA_POLIZA} ${AVISO_DE_TRASPASO}`);
+
+    await mandar("specialist_escalation", AJENA);
+
+    expect(modelo).toHaveBeenCalledTimes(1);
+    expect(cuerpoEnviado()).toContain(PROSA);
+    expect(cuerpoEnviado()).toContain("La póliza figura a nombre de R*** P***");
+  });
 });
 
 /**
@@ -732,5 +793,81 @@ describe("emailMessenger — el archivo que no entró", () => {
     expect(cuerpoEnviado().indexOf(SI_NO_FUISTE_VOS)).toBeGreaterThan(
       cuerpoEnviado().indexOf("10 MB")
     );
+  });
+});
+
+/*
+ * Una nota de voz que no se pudo transcribir: el pedido por mail lleva el aviso
+ * al pie, y el acuse, que ya lo dice, no lo repite.
+ */
+describe("emailMessenger — la nota de voz que no se escuchó", () => {
+  const PROSA = "Ilan, para seguir con tu reclamo necesitamos el número de póliza. Contanos y avanzamos.";
+  const veces = (s: string) => s.toLowerCase().split("no pudimos escuchar").length - 1;
+
+  it("el pedido redactado lleva el aviso después de la prosa, una sola vez", async () => {
+    escribe(PROSA);
+
+    await mandar("missing_information_request", { ...PEDIDO, audioSinTranscribir: true });
+
+    const cuerpo = cuerpoEnviado();
+    expect(cuerpo).toContain("necesitamos el número de póliza");
+    expect(cuerpo.indexOf(AUDIO_SIN_TRANSCRIBIR)).toBeGreaterThan(cuerpo.indexOf("necesitamos el número de póliza"));
+    expect(veces(cuerpo)).toBe(1);
+  });
+
+  it("con el redactor caído, sale el piso de la plantilla más el aviso", async () => {
+    modelo.mockRejectedValue(new Error("sin modelo"));
+
+    await mandar("missing_information_request", { ...PEDIDO, audioSinTranscribir: true });
+
+    expect(cuerpoEnviado()).toContain("Número de póliza");
+    expect(cuerpoEnviado()).toContain(AUDIO_SIN_TRANSCRIBIR);
+    expect(veces(cuerpoEnviado())).toBe(1);
+  });
+
+  it("el pedido que ya avisa con sus palabras y dice «registrada» no repite el aviso", async () => {
+    escribe(
+      "Ilan, ya quedó registrada tu denuncia. No pudimos escuchar bien tu nota de voz: ¿nos escribís lo que querías contar? Además necesitamos el número de póliza."
+    );
+
+    await mandar("missing_information_request", { ...PEDIDO, audioSinTranscribir: true });
+
+    expect(veces(cuerpoEnviado())).toBe(1);
+    expect(cuerpoEnviado()).not.toContain(AUDIO_SIN_TRANSCRIBIR);
+  });
+
+  it("sin la marca, el pedido no lo lleva", async () => {
+    escribe(PROSA);
+
+    await mandar("missing_information_request", PEDIDO);
+
+    expect(veces(cuerpoEnviado())).toBe(0);
+  });
+
+  it("el acuse con el redactor caído sale de la plantilla, y el piso con nombre no repite la frase", async () => {
+    modelo.mockRejectedValue(new Error("sin modelo"));
+    const data = { caseId: CASE, claimantName: "Ana", audioSinTranscribir: true };
+
+    await mandar("information_received", data);
+
+    // Byte por byte la plantilla: sin `cuerpo`, el acuse no cambia de aspecto.
+    expect(cuerpoEnviado()).toBe(renderTemplate("information_received", data).html);
+    expect(veces(cuerpoEnviado())).toBe(1);
+  });
+
+  it("en el primer mail del formulario web, «Si no fuiste vos» sigue último también con el aviso", async () => {
+    escribe(PROSA);
+
+    await webMessenger.send({
+      caseId: CASE,
+      tenantId: TENANT,
+      to: TO_RESERVADA,
+      template: "missing_information_request",
+      data: { ...PEDIDO, audioSinTranscribir: true },
+    });
+
+    const cuerpo = cuerpoEnviado();
+    expect(cuerpo).toContain(AUDIO_SIN_TRANSCRIBIR);
+    expect(cuerpo.indexOf(SI_NO_FUISTE_VOS)).toBeGreaterThan(cuerpo.indexOf(AUDIO_SIN_TRANSCRIBIR));
   });
 });

@@ -45,9 +45,11 @@ import { deliberate, type DeliberationInput } from "@/server/ai/deliberate";
 import { composeReply, type ComposeReplyInput } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { runTool } from "@/server/ai/agent-tools";
-import { CUIDADO } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS } from "@/core/mensajes/derivacion";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
+import { textoBase } from "@/core/agente/entrenamiento-base";
 
 const mockCallGemini = callGemini as unknown as ReturnType<typeof vi.fn>;
 const mockRunTool = runTool as unknown as ReturnType<typeof vi.fn>;
@@ -216,7 +218,7 @@ describe("prompts del agente — compose", () => {
   it("escalation por email, con una pregunta y heridos", async () => {
     const texto = await prompt(
       `Hola, María. ${CUIDADO} No podemos decirte cuánto tarda, pero un especialista se va a ` +
-        `comunicar con vos. ${AVISO_DE_TRASPASO}`,
+        `comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`,
       base({
         intent: "escalation",
         channel: "email",
@@ -244,6 +246,42 @@ describe("prompts del agente — compose", () => {
     );
 
     await expect(texto).toMatchFileSnapshot("./__prompts__/compose-poliza-cambiada-whatsapp.txt");
+  });
+
+  it("acuse de una nota de voz que no se pudo escuchar, por WhatsApp", async () => {
+    const texto = await prompt(
+      AUDIO_SIN_TRANSCRIBIR,
+      base({
+        intent: "acknowledgement",
+        channel: "whatsapp",
+        audioSinTranscribir: true,
+        isFollowUp: true,
+        lastMessage: "[Mensaje de audio adjunto]",
+      })
+    );
+
+    // La regla del canal manda «Gracias, tomamos nota de…» en todo acuse: acá se desactiva a la vista.
+    expect(texto).not.toContain(textoBase("redactar.acuse"));
+    expect(texto).toMatch(/no rige lo de agradecer/);
+    await expect(texto).toMatchFileSnapshot("./__prompts__/compose-audio-sin-transcribir-whatsapp.txt");
+  });
+
+  it("pedido con una nota de voz que no se pudo escuchar: el redactor no la nombra, el aviso va al final", async () => {
+    const texto = await prompt(
+      "Hola, Marta. Necesitamos el número de póliza para seguir con tu caso.",
+      base({
+        intent: "ask",
+        channel: "whatsapp",
+        fields: ["policy_number"],
+        claimantName: "Marta Prueba",
+        isFollowUp: true,
+        audioSinTranscribir: true,
+        lastMessage: "[Mensaje de audio adjunto]",
+      })
+    );
+
+    expect(texto).toContain("El aviso lo agregamos nosotros al final del mensaje.");
+    expect(texto).not.toMatch(/no rige lo de agradecer/);
   });
 
   it("recordatorio de un pedido, por WhatsApp", async () => {

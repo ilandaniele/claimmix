@@ -571,6 +571,26 @@ describe("analyzeEmailClaimGaps — what the case already holds", () => {
     expect(result.status).toBe("listo_para_core");
   });
 
+  it("el nombre y el DNI guardados no se vuelven a pedir; la póliza sí (el caso nuevo de un siniestro nuevo)", async () => {
+    // Lo que hereda un caso abierto desde uno derivado: nombre y DNI a 0.95, sin póliza.
+    setupDbMocks(
+      [],
+      [],
+      STORED.filter((f) => ["full_name", "dni_asegurado"].includes(f.field_key))
+    );
+
+    const result = await analyzeEmailClaimGaps(
+      CASE_ID,
+      [{ field_key: "claim_type", field_value: "choque", confidence: 0.86, source: "ai" }],
+      TENANT_ID
+    );
+
+    expect(result.missingRequiredFields).toContain("policy_number");
+    expect(result.missingRequiredFields).not.toContain("full_name");
+    expect(result.missingRequiredFields).not.toContain("dni");
+    expect(result.fieldsNeedingConfirmation.map((f) => f.fieldName)).not.toContain("full_name");
+  });
+
   it("still reports a field neither the case nor the run has", async () => {
     setupDbMocks([], [], STORED.filter((f) => f.field_key !== "dni_asegurado"));
 

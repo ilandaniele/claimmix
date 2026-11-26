@@ -14,7 +14,14 @@ import {
   maskFullName,
   maskPolicyNumber,
 } from "../../src/server/email/render";
-import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import {
+  CUIDADO,
+  EMERGENCIAS,
+  EMERGENCIAS_DE_LA_POLIZA,
+  diceCuidado,
+  hablaDeLaSalud,
+  pideDatos,
+} from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
   NO_HACE_FALTA_CONTESTAR,
@@ -24,6 +31,7 @@ import {
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO } from "@/core/mensajes/archivo-que-no-entro";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
 import { pideAlgo } from "../../scripts/lib/pide-algo.mjs";
 
 // ── PII masking unit tests ────────────────────────────────────────────────────
@@ -454,6 +462,17 @@ describe("renderTemplate — specialist_escalation", () => {
     expect(pideDatos(r.cuerpo)).toBe(false);
   });
 
+  // El ensayo mail-grave salió con este piso y no decía a quién llamar si es urgente.
+  it.each([
+    ["critical", false],
+    ["critical", true],
+    ["high", false],
+    ["high", true],
+  ])("el piso dice a quién llamar si es urgente (%s, heridos: %s)", (severity, heridos) => {
+    const r = renderTemplate("specialist_escalation", { caseId: "esc-emerg", severity, heridos });
+    for (const salida of [r.text, r.cuerpo, r.html]) expect(salida).toContain(EMERGENCIAS);
+  });
+
   it("tras un pedido de confirmación, dice que no hace falta contestarlo, también redactado", () => {
     for (const cuerpo of [undefined, `Derivamos tu caso a un especialista. ${AVISO_DE_TRASPASO}`]) {
       const r = renderTemplate("specialist_escalation", { caseId: "esc-6", yaPreguntamos: true, cuerpo });
@@ -626,6 +645,34 @@ describe("specialist_escalation — el titular que no coincide", () => {
     });
     expect(r.html).not.toContain("R*** P***");
     expect(r.text).not.toContain("R*** P***");
+  });
+
+  // Al lado de «La póliza figura a nombre de R*** P***», «de tu póliza» se la atribuye a quien escribe.
+  it("con la diferencia, la línea de emergencias es la de la póliza", () => {
+    const r = derivacionDeTitular();
+    for (const salida of [r.text, r.html, r.cuerpo]) {
+      expect(salida).toContain(EMERGENCIAS_DE_LA_POLIZA);
+      expect(salida).not.toContain(EMERGENCIAS);
+    }
+  });
+
+  it("también con heridos", () => {
+    const r = derivacionDeTitular({ severity: "critical", heridos: true });
+    expect(r.cuerpo.split(CUIDADO).length - 1).toBe(1);
+    expect(r.cuerpo).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(r.cuerpo).not.toContain(EMERGENCIAS);
+  });
+
+  it.each([
+    ["sin las iniciales", { titularIniciales: null }],
+    ["sin el nombre", { claimantName: null }],
+    ["con el nombre en blanco", { claimantName: "  " }],
+  ])("%s sigue «de tu póliza»", (_, extra) => {
+    const r = derivacionDeTitular(extra);
+    for (const salida of [r.text, r.html, r.cuerpo]) {
+      expect(salida).toContain(EMERGENCIAS);
+      expect(salida).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+    }
   });
 });
 
@@ -893,6 +940,12 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
       expect(cuerpo).toContain(AVISO_DE_TRASPASO);
       expect(cuerpo).toContain(SI_RESPONDES_EL_CORREO);
     }
+    // El ensayo del 24/11 derivó al titular ajeno sin decirle a quién llamar. Es
+    // «de la póliza»: «de tu póliza» se la atribuiría a quien escribe.
+    for (const cuerpo of [result.text, result.html, result.cuerpo]) {
+      expect(cuerpo).toContain(EMERGENCIAS_DE_LA_POLIZA);
+      expect(cuerpo).not.toContain(EMERGENCIAS);
+    }
     expect(result.cuerpo).not.toContain(SI_RESPONDES_EL_CORREO);
   });
 
@@ -909,6 +962,12 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
   it("pidiendo confirmar, no lleva el pie del traspaso", () => {
     const r = renderTemplate("data_confirmation_request", TRES);
     expect(r.text).not.toContain(SI_RESPONDES_EL_CORREO);
+    // No hay derivación: la persona tiene que confirmar, y nada dice a quién llamar.
+    for (const cuerpo of [r.text, r.html, r.cuerpo]) {
+      expect(cuerpo).not.toContain(EMERGENCIAS);
+      expect(cuerpo).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+    }
+    expect(r.subject).toContain("Confirmar datos");
   });
 
   it("derivado sin valores que mostrar, avisa el traspaso y no pide el dato", () => {
@@ -925,6 +984,7 @@ describe("renderTemplate — data_confirmation_request con varios datos", () => 
       expect(cuerpo).not.toContain("Respondé este correo");
       expect(cuerpo).not.toContain("Campo:");
     }
+    for (const cuerpo of [r.text, r.html, r.cuerpo]) expect(cuerpo).toContain(EMERGENCIAS_DE_LA_POLIZA);
     expect(r.cuerpo.trim()).not.toMatch(/:$/);
     expect(mencionaElTraspaso(r.cuerpo)).toBe(true);
     expect(pideAlgo(r.cuerpo.toLowerCase())).toBe(false);
@@ -969,6 +1029,16 @@ describe("renderTemplate — con la prosa ya redactada", () => {
     // Y la póliza sigue enmascarada.
     expect(r.html).toContain("****5678");
     expect(r.html).not.toContain("POL-12345678");
+  });
+
+  it("information_received pasa la marca del audio al piso", () => {
+    const r = renderTemplate("information_received", {
+      caseId: "case-audio-1",
+      audioSinTranscribir: true,
+    });
+
+    expect(r.cuerpo).toContain(AUDIO_SIN_TRANSCRIBIR);
+    expect(r.cuerpo).not.toContain("tomamos nota");
   });
 
   it("information_received tampoco, y sigue siendo un fragmento", () => {

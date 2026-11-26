@@ -1,6 +1,7 @@
 
 import { escapeHtml } from "@/server/email/render";
-import { textoAHtml } from "@/core/email/html";/**
+import { textoAHtml } from "@/core/email/html";
+import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";/**
  * Email template: information_received
  *
  * El mensaje corto que va cuando la persona contó algo nuevo y lo que falta
@@ -16,7 +17,12 @@ import { textoAHtml } from "@/core/email/html";/**
  * Así que se acusa recibo y no se repite la lista. Las dos cosas a la vez:
  *
  *   "Gracias, anotamos que fue un choque de ayer a la tarde. Seguimos a la
- *    espera de lo que te pedimos antes para poder avanzar."
+ *    espera de lo que todavía nos falta para poder avanzar."
+ *
+ * «Lo que todavía nos falta» y no «lo que te pedimos antes»: quien contesta
+ * citando un mail viejo —el que pedía el parte amistoso— leía «antes» como ese
+ * pedido, justo el que acababa de negar. Tampoco se nombra «el último pedido»:
+ * a veces fue una pregunta suelta o sólo documentos, no un pedido de datos.
  *
  * Sin la lista, porque se la mandamos hace un momento y volver a ponerla es
  * exactamente lo que la regla evita. Y sin decir que está completo, porque no
@@ -35,6 +41,11 @@ export interface InformationReceivedData {
   claimantName?: string | null;
   /** La prosa ya redactada. Reemplaza el cuerpo y nada más. */
   cuerpo?: string | null;
+  /**
+   * El mensaje era sólo una nota de voz que no se pudo escuchar: el acuse no dice
+   * que se tomó nota de lo que contó, y pide que lo escriba.
+   */
+  audioSinTranscribir?: boolean;
 }
 
 export function renderInformationReceived(data: InformationReceivedData): {
@@ -43,7 +54,9 @@ export function renderInformationReceived(data: InformationReceivedData): {
   text: string;
   cuerpo: string;
 } {
-  const subject = `Tomamos nota - Caso #${data.caseId}`;
+  const sinAudio = data.audioSinTranscribir === true;
+  // Sólo es el asunto cuando no hay mensaje al que contestar (`replySubject`), pero es lo primero que se lee.
+  const subject = `${sinAudio ? "No pudimos escuchar tu nota de voz" : "Tomamos nota"} - Caso #${data.caseId}`;
 
   // El nombre delante y la mayúscula en la misma expresión: sin nombre la
   // oración empieza igual de entera.
@@ -51,19 +64,27 @@ export function renderInformationReceived(data: InformationReceivedData): {
   const saludo = nombre ? `${nombre}, ` : "";
   const gracias = nombre ? "gracias" : "Gracias";
 
-  const cuerpo = [
-    `${saludo}${gracias}, tomamos nota de lo que nos contaste.`,
-    "",
-    "Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.",
-  ].join("\n");
+  const noSeEscucho = nombre
+    ? `${nombre}, ${AUDIO_SIN_TRANSCRIBIR.charAt(0).toLowerCase()}${AUDIO_SIN_TRANSCRIBIR.slice(1)}`
+    : AUDIO_SIN_TRANSCRIBIR;
+
+  const cuerpo = sinAudio
+    ? noSeEscucho
+    : [
+        `${saludo}${gracias}, tomamos nota de lo que nos contaste.`,
+        "",
+        "Seguimos a la espera de lo que todavía nos falta para poder avanzar con tu reclamo.",
+      ].join("\n");
   const redactado = data.cuerpo?.trim();
 
   // Sigue siendo un FRAGMENTO de `<p>`, sin DOCTYPE: convertirlo en documento
   // entero cambiaría lo que Gmail recibe hoy en esta rama sin que nadie lo pida.
   const prosaHtml = redactado
     ? textoAHtml(redactado)
-    : `<p>${escapeHtml(`${saludo}${gracias}, tomamos nota de lo que nos contaste.`)}</p>
-    <p>Seguimos a la espera de lo que te pedimos antes para poder avanzar con tu reclamo.</p>`;
+    : sinAudio
+      ? `<p>${escapeHtml(noSeEscucho)}</p>`
+      : `<p>${escapeHtml(`${saludo}${gracias}, tomamos nota de lo que nos contaste.`)}</p>
+    <p>Seguimos a la espera de lo que todavía nos falta para poder avanzar con tu reclamo.</p>`;
 
   const html = `
     ${prosaHtml}

@@ -46,14 +46,17 @@ import { enTenant } from "@/data/scope";
 import { nombreDelError } from "@/lib/observability/error-code";
 import { logger } from "@/lib/observability/logger";
 import {
+  emergenciasDeLaDerivacion,
   laDiferencia,
   LO_REVISA_UN_ESPECIALISTA,
   NO_COINCIDE_CON_EL_TITULAR,
+  type TitularQueNoCoincide,
 } from "@/core/mensajes/titular-que-no-coincide";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO, conArchivoQueNoEntro } from "@/core/mensajes/archivo-que-no-entro";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR, conAudioSinTranscribir } from "@/core/mensajes/audio-sin-transcribir";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { loTomoUnaPersona } from "@/server/cases/devolver-al-agente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
@@ -128,6 +131,13 @@ export const emailMessenger: AgentMessenger = {
       cuerpo = conArchivoQueNoEntro(cuerpo ?? piso, true);
     }
 
+    // Se asigna sólo si cambió: con el redactor caído el acuse sigue saliendo de la plantilla.
+    if (piso !== null) {
+      const texto = cuerpo ?? piso;
+      const conAviso = conAudioSinTranscribir(texto, message.data.audioSinTranscribir);
+      if (conAviso !== texto) cuerpo = conAviso;
+    }
+
     // El primer mail a una dirección que escribió alguien en un formulario: la frase va siempre.
     if (piso !== null && message.data.origenWeb === true && message.data.isFollowUp !== true) {
       cuerpo = [cuerpo ?? piso, SI_NO_FUISTE_VOS].join("\n\n");
@@ -172,11 +182,21 @@ export const webMessenger: AgentMessenger = {
  */
 const MAX_WHATSAPP_ITEMS = 5;
 
-const ESCALATION_TEXT =
-  "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
-  "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
-  "Si necesitás asistencia urgente, llamá a la línea de emergencias de tu póliza. " +
-  AVISO_DE_TRASPASO;
+function escalationText(emergencias: string): string {
+  return (
+    "Recibimos tu denuncia y ya quedó registrada. Por las características de lo que nos contás, " +
+    "la derivamos a un especialista que se va a comunicar con vos a la brevedad. " +
+    `${emergencias} ` +
+    AVISO_DE_TRASPASO
+  );
+}
+
+function titularDe(data: Record<string, unknown>): TitularQueNoCoincide {
+  return {
+    titularIniciales: typeof data.titularIniciales === "string" ? data.titularIniciales : null,
+    claimantName: typeof data.claimantName === "string" ? data.claimantName : null,
+  };
+}
 
 /**
  * El escalado por WhatsApp, con los dos valores cuando el titular no coincide.
@@ -192,12 +212,10 @@ function renderEscalation(data: Record<string, unknown>): string {
   // el piso salió sin saludo, "Lamentamos mucho lo que están pasando" seco.
   const nombre = nombreDePila(data.claimantName);
   const saludo = nombre ? `Hola, ${nombre}. ` : "";
-  const base =
-    data.heridos === true ? `${saludo}${CUIDADO} ${ESCALATION_TEXT}` : `${saludo}${ESCALATION_TEXT}`;
-  const diferencia = laDiferencia({
-    titularIniciales: typeof data.titularIniciales === "string" ? data.titularIniciales : null,
-    claimantName: typeof data.claimantName === "string" ? data.claimantName : null,
-  });
+  const titular = titularDe(data);
+  const texto = escalationText(emergenciasDeLaDerivacion(titular));
+  const base = data.heridos === true ? `${saludo}${CUIDADO} ${texto}` : `${saludo}${texto}`;
+  const diferencia = laDiferencia(titular);
   return diferencia ? `${base}
 
 ${diferencia}` : base;
@@ -404,10 +422,12 @@ function renderClosing(data: Record<string, unknown>): string {
  * nombrar—, declarado igual en los dos canales. Un parámetro muerto en dos
  * escritores es cómo el próximo lo «pasa» y no cambia nada.)
  */
-function renderNoted(): string {
+function renderNoted(data: Record<string, unknown>): string {
+  // El acuse salió porque llegó el archivo: si no se pudo escuchar, no se da por anotado.
+  if (data.audioSinTranscribir === true) return AUDIO_SIN_TRANSCRIBIR;
   return (
     "Gracias, tomamos nota de lo que nos contaste. " +
-    "Seguimos a la espera de lo que te pedimos antes para poder avanzar."
+    "Seguimos a la espera de lo que todavía nos falta para poder avanzar."
   );
 }
 
@@ -442,7 +462,7 @@ function pisoDeWhatsApp(message: AgentMessage): string | null {
     case "data_confirmation_request":
       return renderConflict(message.data);
     case "information_received":
-      return renderNoted();
+      return renderNoted(message.data);
     case "confirmation_received":
       return renderClosing(message.data);
     case "attachment_too_large":
@@ -572,8 +592,10 @@ async function writeReply(
       message.template === "data_confirmation_request"
         ? conflictosParaElRedactor(message.data)
         : undefined,
-    titularAjeno: message.data.titularAjeno === true,
+    // La derivación que nombra la diferencia también le habla a quien no es el titular: sin la señal el redactor le dice «tu póliza».
+    titularAjeno: message.data.titularAjeno === true || laDiferencia(titularDe(message.data)) !== null,
     polizaCambiada: message.data.polizaCambiada === true,
+    audioSinTranscribir: message.data.audioSinTranscribir === true,
     heridos: message.data.heridos === true,
     knownValues: (message.data.knownValues ?? undefined) as
       | Record<string, string>
@@ -604,7 +626,10 @@ async function writeReply(
  * modelo se acuerde de decirlo.
  */
 function conPie(message: AgentMessage, texto: string): string {
-  const base = conArchivoQueNoEntro(texto, message.data.archivoQueNoEntro);
+  const base = conAudioSinTranscribir(
+    conArchivoQueNoEntro(texto, message.data.archivoQueNoEntro),
+    message.data.audioSinTranscribir
+  );
   const traspaso =
     message.template === "confirmation_received" ||
     message.template === "specialist_escalation" ||

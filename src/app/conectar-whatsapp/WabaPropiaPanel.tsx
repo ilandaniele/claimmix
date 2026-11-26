@@ -46,8 +46,9 @@ import { despuesDe, reintentoDe, type EstadoDeVista, type Aviso } from "./vista"
  */
 export const SIGUE_EN = "/configuracion?primeros=1";
 export const WHATSAPP_MANAGER = "https://business.facebook.com/wa/manage/home/";
-/** El sello del inicio vale 10 minutos: pasados estos, abrir el popup otra vez pide uno nuevo. */
-const FRESCURA_DEL_INICIO_MS = 8 * 60_000;
+/** El sello del inicio vale 30 minutos (`DURACION_MS` en actions.ts): «Reintentar» lo reusa sólo si le quedan los 10 que lleva el popup de Meta; si no, pide uno nuevo. */
+const FRESCURA_DEL_INICIO_MS = 20 * 60_000;
+const sinFrescura = (en: number) => Date.now() - en >= FRESCURA_DEL_INICIO_MS;
 /** El código del SMS y el PIN del segundo factor son de seis dígitos; el servidor lo vuelve a mirar. */
 export const DE_SEIS = /^\d{6}$/;
 
@@ -210,10 +211,13 @@ function Panel({ locale, nombre: nombreDelEspacio, numeroTipeado, inicial, conec
     }
   }
 
-  /** Va dentro del clic: nada de `await` antes de `FB.login`, o el navegador bloquea el popup. */
+  /**
+   * Va dentro del clic: nada de `await` antes de `FB.login`, o el navegador bloquea el popup.
+   * El reloj del sello corre desde «Continuar»: con una apertura sin los 10 minutos que lleva el popup, pide otra.
+   */
   function abrirPopup() {
     const a = apertura.current;
-    if (!sdk.current || !a) return void preparar();
+    if (!sdk.current || !a || sinFrescura(a.en)) return void preparar();
     setEstado({ vista: "esperando", aviso: null, paso: null, numeroMeta: null });
     void abrirRegistro({ fb: sdk.current, configId: a.configId, setup: a.setup }).then((salida) => terminarPopup(salida, a.inicio));
   }
@@ -253,9 +257,7 @@ function Panel({ locale, nombre: nombreDelEspacio, numeroTipeado, inicial, conec
     const como = estado.vista === "cancelada" ? "popup" : estado.aviso ? reintentoDe(estado.aviso) : null;
     if (como === "servidor") return void correr(reintentarWabaPropia);
     if (como !== "popup") return;
-    const a = apertura.current;
-    if (sdk.current && a && Date.now() - a.en < FRESCURA_DEL_INICIO_MS) return abrirPopup();
-    void preparar();
+    abrirPopup();
   }
 
   const textoDe = (aviso: Aviso) => t(`waba.r.${aviso}`);

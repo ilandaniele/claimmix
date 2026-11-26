@@ -91,11 +91,23 @@ test.describe("Simulate → polling flow (AC4)", () => {
       // crea un caso y que ese caso aparece solo en la tabla, sin recargar.
       // Eso ya quedo comprobado en el paso 8; aca se comprueba que la fila
       // nueva es la de arriba y que llego a un estado real del flujo.
-      const firstRow = tableBody.locator("tr").first();
-      await expect(firstRow).toContainText(
-        /procesando|listo|recibido|info faltante|requiere especialista/i,
-        { timeout: 5_000 }
+      //
+      // El estado se busca en los dos idiomas: la-interfaz-en-ingles pasa la
+      // cuenta compartida a en-US mientras corre, y con workers en paralelo
+      // esta tabla puede salir en inglés.
+      const estados = [
+        "status.procesando",
+        "status.listo",
+        "status.recibido",
+        "status.info_faltante",
+        "status.requiere_especialista",
+      ] as const;
+      const estadoValido = new RegExp(
+        estados.map((clave) => enCualquierIdioma(clave).source).join("|"),
+        "i"
       );
+      const firstRow = tableBody.locator("tr").first();
+      await expect(firstRow).toContainText(estadoValido, { timeout: 5_000 });
     }
   );
 

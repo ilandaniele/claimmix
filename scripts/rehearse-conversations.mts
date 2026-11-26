@@ -801,7 +801,10 @@ const SCENARIOS: Scenario[] = [
           "> - Parte amistoso de accidente",
           "> - Fotos de los daños",
         ].join("\n"),
-        expect: { replies: 1, noAsked: ["parte_amistoso"] },
+        // La negativa no cambia la lista de T1 (patente y hora): sale un acuse sin repetirla.
+        // `avoids` y no `sinPedido`: `pideAlgo` marcaría un acuse redactado con «¿» o
+        // «mandanos», y no ve una lista dicha sin verbo («nos falta: la patente…»).
+        expect: { replies: 1, noAsked: ["parte_amistoso"], avoids: ["patente", "hora aproximada"] },
       },
     ],
     finally: {

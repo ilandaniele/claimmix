@@ -1764,6 +1764,56 @@ describe("composeReply — una nota de voz que no se pudo transcribir", () => {
   });
 });
 
+describe("composeReply — el pedido con una nota de voz que no se pudo escuchar", () => {
+  // El pie fijo dice que no se escuchó: un «tomamos nota» del audio en la prosa se contradice.
+  const pedido = (over: Partial<Parameters<typeof composeReply>[0]> = {}) =>
+    base({
+      intent: "ask",
+      fields: ["policy_number"],
+      audioSinTranscribir: true,
+      lastMessage: PLACEHOLDER_AUDIO,
+      claimantName: "Lucía",
+      ...over,
+    });
+  const LIMPIO = "Lucía, para seguir con tu reclamo necesitamos el número de póliza.";
+
+  it.each([
+    "Lucía, tomamos nota de tu audio. Para seguir necesitamos el número de póliza.",
+    "Lucía, ya anotamos tu nota de voz. Para seguir necesitamos el número de póliza.",
+  ])("el que da el audio por anotado no sale: reintento con el motivo y, si insiste, el piso: %s", async (malo) => {
+    responde(malo, malo);
+
+    expect(await composeReply(pedido())).toBe(FALLBACK);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+    expect(mockCall.mock.calls[1][0] as string).toContain("tomamos nota");
+  });
+
+  it("si el reintento no lo nombra, sale ese", async () => {
+    responde("Lucía, tomamos nota de tu audio. Necesitamos el número de póliza.", LIMPIO);
+
+    expect(await composeReply(pedido())).toBe(LIMPIO);
+    expect(mockCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("el que avisa con sus palabras y dice «registrada» no gasta un reintento", async () => {
+    replies(
+      "Lucía, ya quedó registrada tu denuncia. No pudimos escuchar tu nota de voz: ¿nos escribís lo que querías contar? Necesitamos el número de póliza."
+    );
+
+    await composeReply(pedido());
+
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin la marca, «tomamos nota» de un audio que sí se leyó sale", async () => {
+    const texto = "Lucía, tomamos nota de tu audio. Para seguir necesitamos el número de póliza.";
+    responde(texto);
+
+    expect(await composeReply(pedido({ audioSinTranscribir: undefined }))).toBe(texto);
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("composeReply — el consumo se anota contra el caso", () => {
   it("cada intento, también el reintento tras una guarda rechazada, lleva el caso", async () => {
     const CASO = "22222222-2222-2222-2222-222222222222";

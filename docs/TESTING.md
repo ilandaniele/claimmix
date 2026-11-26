@@ -256,7 +256,7 @@ Viven en la máquina de quien corre el ensayo, en `tests/fixtures/`:
 | `danos.jpg` | Un solo auto visto de afuera con daño moderado (abolladuras, una luz rota), sin techo hundido, fuego ni personas, sin patente ni caras legibles, JPEG sin GPS. La de referencia es «2007 Chevrolet HHR involved in crash» de Wikimedia Commons (CC0) | Que lo reconozca como las fotos de los daños. Con una foto de destrucción total, Gemini 3.8 califica el choque como grave y `choque-completo` deriva |
 | `licencia.jpg` | Una licencia de conducir | El caso difícil: dos documentos de papel pendientes, tiene que elegir el correcto |
 | `irrelevante.jpg` | Cualquier foto que no sea un documento | El caso negativo: no tiene que cerrar ningún pedido |
-| `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo |
+| `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo que no llega al modelo |
 
 Dos sí están en el repositorio porque no son de nadie: `placeholder.ogg` (dos
 segundos de silencio en Opus, hecho con ffmpeg) y `sintetico-constancia.pdf`
@@ -265,6 +265,24 @@ y una fecha tres días después de la que cuenta la persona). Con ellas
 `nota-de-voz-y-pdf` prueba siempre que los dos archivos se guardan y se leen
 (`leidos`), y que la fecha que no coincide queda como indicio para el analista
 (`indicios`) sin que la respuesta lo mencione.
+
+**El reemplazo es un silencio digital y no llega al modelo.**
+`placeholder.ogg` tiene 101 paquetes de audio, 99 idénticos (-91 dB): en Opus el
+silencio digital repite el paquete byte por byte. `esOpusMudo`
+(`src/core/adjuntos/firma.ts`) lo reconoce y `transcribir.ts` da esa nota por
+leída sin texto sin llamar a Vertex. Una nota real que no se entiende (ruido,
+una voz lejana) sí va al modelo, y ahí la defensa es `leer()`, que descarta lo
+que no tiene letras ni dígitos o es sólo una anotación de ruido («Inaudible.»). Con el reemplazo, el turno 2 de
+`nota-de-voz-y-pdf` exige la clave `conElReemplazo`: que alguna respuesta avise
+que no se pudo escuchar el audio y pida que lo escriban (`avisaDelAudio`, el
+mismo criterio `avisaQueNoSeEscucho` que usa el producto para no repetir el
+aviso) y que no diga «tomamos nota» (`avoids`). Con la nota real en disco se
+transcribe y esa clave no corre.
+
+Costo de esto: sin `nota-de-voz.ogg` el ensayo (QA después del deploy, CI) ya no
+ejercita la llamada real de audio a Vertex, porque el reemplazo se resuelve
+antes. Qué es silencio lo verifica `firma.test.ts`, que lee el `placeholder.ogg`
+del repositorio y exige que `esOpusMudo` lo dé por mudo.
 
 Sin ellas la suite corre igual, avisa cuáles faltan, y no da por probado lo que
 no probó. El caso negativo sí se verifica siempre: una imagen que no

@@ -56,7 +56,7 @@ import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { ARCHIVO_QUE_NO_ENTRO, conArchivoQueNoEntro } from "@/core/mensajes/archivo-que-no-entro";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
-import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
+import { AUDIO_SIN_TRANSCRIBIR, conAudioSinTranscribir } from "@/core/mensajes/audio-sin-transcribir";
 import { hasPriorOutbound } from "@/server/confirmations/envio-previo";
 import { loTomoUnaPersona } from "@/server/cases/devolver-al-agente";
 import { CUIDADO } from "@/core/mensajes/derivacion";
@@ -129,6 +129,13 @@ export const emailMessenger: AgentMessenger = {
     // Fuera del redactor: no depende de que el modelo se acuerde de decirlo.
     if (piso !== null && message.data.archivoQueNoEntro === true) {
       cuerpo = conArchivoQueNoEntro(cuerpo ?? piso, true);
+    }
+
+    // Se asigna sólo si cambió: con el redactor caído el acuse sigue saliendo de la plantilla.
+    if (piso !== null) {
+      const texto = cuerpo ?? piso;
+      const conAviso = conAudioSinTranscribir(texto, message.data.audioSinTranscribir);
+      if (conAviso !== texto) cuerpo = conAviso;
     }
 
     // El primer mail a una dirección que escribió alguien en un formulario: la frase va siempre.
@@ -619,7 +626,10 @@ async function writeReply(
  * modelo se acuerde de decirlo.
  */
 function conPie(message: AgentMessage, texto: string): string {
-  const base = conArchivoQueNoEntro(texto, message.data.archivoQueNoEntro);
+  const base = conAudioSinTranscribir(
+    conArchivoQueNoEntro(texto, message.data.archivoQueNoEntro),
+    message.data.audioSinTranscribir
+  );
   const traspaso =
     message.template === "confirmation_received" ||
     message.template === "specialist_escalation" ||

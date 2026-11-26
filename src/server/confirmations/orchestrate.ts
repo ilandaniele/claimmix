@@ -1110,6 +1110,12 @@ export async function orchestratePostExtraction(
     unArchivoNoEntro,
     audioSinTexto,
   } = await archivosDesdeQueHablamos(caseId, tenantId, hablamos, fallo);
+  // El marcador cubre la nota del último mensaje; la consulta de adjuntos, la que sigue sin leer
+  // o ya falló, sea por mail o con otro mensaje atrás. Si además un archivo no entró, ese aviso
+  // gana: decir las dos cosas juntas, que no lo recibimos y que se oía mal, confunde. Sólo el
+  // pedido y el acuse lo llevan: el cierre y el conflicto con traspaso dicen que la carga por
+  // este medio terminó, y pedir ahí que escriba o reenvíe se contradice.
+  const audioSinTranscribir = !unArchivoNoEntro && (audioSinTexto || esAudioSinTranscribir(latestMessageText));
 
   // La lista que la persona no vio en lo último que le dijimos no cuenta como
   // «ya se la mandamos» cuando lo que cerró contesta esa otra cosa —la póliza que
@@ -1218,6 +1224,7 @@ export async function orchestratePostExtraction(
         escritoPorLaPersona,
         // Va al pie, fuera del redactor: no depende de que el modelo se acuerde.
         archivoQueNoEntro: unArchivoNoEntro,
+        audioSinTranscribir,
         // Fourth message in, the reply still opened with "gracias por
         // contactarnos". Thanking someone for getting in touch three rounds
         // after they did is the tell that nobody is really reading.
@@ -1293,10 +1300,8 @@ export async function orchestratePostExtraction(
         isFollowUp: true,
         datosDelPadron,
         escritoPorLaPersona,
-        // El acuse sale porque llegó el archivo, no porque se leyó lo que dijo. El marcador
-        // cubre la nota del último mensaje; la consulta de adjuntos, la que sigue sin leer
-        // o ya falló, sea por mail o con otro mensaje atrás.
-        audioSinTranscribir: audioSinTexto || esAudioSinTranscribir(latestMessageText),
+        // El acuse sale porque llegó el archivo, no porque se leyó lo que dijo.
+        audioSinTranscribir,
       },
       inReplyToMessageId,
     });

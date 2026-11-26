@@ -46,12 +46,38 @@ const DICE_QUE_LO_ANOTO = new RegExp(
   "iu"
 );
 
+function avisaDelAudio(texto: string): boolean {
+  return NOMBRA_EL_AUDIO.test(texto) && DICE_QUE_NO_SE_ESCUCHO.test(texto) && PIDE_ESCRIBIRLO.test(texto);
+}
+
+/**
+ * Que el texto ya avisa del audio: lo nombra, dice que no se escuchó y pide escribirlo o reenviarlo.
+ * No es `diceQueNoSeEscucho`, que además rechaza «registrada», «anotamos» o «sumamos» en cualquier
+ * parte: eso mide la calidad de un acuse, y acá haría repetir el aviso en un pedido con esas
+ * palabras. Tampoco `includes`: el piso del mail con nombre lo dice con minúscula («Ana, no
+ * pudimos…») y el redactor lo parafrasea.
+ */
+export function avisaQueNoSeEscucho(texto: string): boolean {
+  return texto.includes(AUDIO_SIN_TRANSCRIBIR) || avisaDelAudio(texto);
+}
+
+/** Nombra el audio y lo da por anotado sin avisar de que no se escuchó: el aviso que se le agrega al pie lo contradice. */
+export function daPorAnotadoElAudio(texto: string): boolean {
+  return NOMBRA_EL_AUDIO.test(texto) && DICE_QUE_LO_ANOTO.test(texto) && !avisaDelAudio(texto);
+}
+
+/** El texto con el aviso al pie cuando la nota no se pudo transcribir, y una sola vez aunque se aplique dos. */
+export function conAudioSinTranscribir(texto: string, sinTranscribir: unknown): string {
+  if (sinTranscribir !== true || avisaQueNoSeEscucho(texto)) return texto;
+  return `${texto}
+
+${AUDIO_SIN_TRANSCRIBIR}`;
+}
+
 /** Dice que no se escuchó el audio y pide escribirlo o mandarlo de nuevo, sin darlo por escuchado ni anotado, ni en parte. */
 export function diceQueNoSeEscucho(texto: string): boolean {
   return (
-    NOMBRA_EL_AUDIO.test(texto) &&
-    DICE_QUE_NO_SE_ESCUCHO.test(texto) &&
-    PIDE_ESCRIBIRLO.test(texto) &&
+    avisaDelAudio(texto) &&
     !NO_SE_ESCUCHO_UNA_PARTE.test(texto) &&
     !DICE_QUE_SE_ESCUCHO.test(texto) &&
     !DICE_QUE_LO_ANOTO.test(texto)

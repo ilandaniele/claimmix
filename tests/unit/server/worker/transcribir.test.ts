@@ -29,6 +29,8 @@ vi.mock("@/server/ai/gemini-extractor", async (importOriginal) => ({
   callGemini: vi.fn(),
 }));
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
@@ -314,5 +316,62 @@ describe("transcribirNotasDeVoz", () => {
 
     expect(llamar).not.toHaveBeenCalled();
     expect(nuevos.size).toBe(0);
+  });
+});
+
+describe("transcribirNotasDeVoz — una nota que nadie entiende no pasa por transcripta", () => {
+  it("un silencio digital ni llega al modelo ni se paga, y queda marcada sin texto", async () => {
+    readAttachment.mockResolvedValue(readFileSync(resolve(__dirname, "../../../fixtures/placeholder.ogg")));
+
+    const nuevos = await correr([nota()]);
+
+    expect(llamar).not.toHaveBeenCalled();
+    expect(registrarConsumoDelModelo).not.toHaveBeenCalled();
+    expect(nuevos.size).toBe(0);
+    expect(escritas).toHaveLength(1);
+    expect(escritas[0]!.params.slice(0, 2)).toEqual(["", true]);
+    expect(marcada(escritas[0]!)).toBe(true);
+    expect(escritas.some((q) => /"claim_messages"/.test(q.sql))).toBe(false);
+  });
+
+  it.each([
+    "[inaudible]",
+    "(ruido de fondo)",
+    "...",
+    "*silencio*",
+    "[música] (inaudible)",
+    "   ",
+    "Inaudible.",
+    "<inaudible>",
+    "{ruido}",
+    "— silencio —",
+    "[inaudible",
+    "Música de fondo.",
+  ])(
+    "con hay_voz en true pero la transcripción es %j, queda sin texto",
+    async (vacia) => {
+      llamar.mockResolvedValue(respuesta(vacia, "", true));
+
+      const nuevos = await correr([nota({ metadatos: { firma: true, segundos: 3 } })]);
+
+      expect(nuevos.size).toBe(0);
+      expect(marcada(escritas[0]!)).toBe(true);
+    }
+  );
+
+  it.each([
+    ["Sí.", 1],
+    ["El lunes a la tarde.", 2],
+    ["No.", 1],
+    ["[ruido] Choqué ayer", 3],
+    ["Ruido en la calle, no se puede pasar.", 3],
+    ["No, silencio no hubo.", 2],
+  ])("la nota corta y real %j sigue transcripta", async (dicho, segundos) => {
+    llamar.mockResolvedValue(respuesta(dicho, "Responde una pregunta."));
+
+    const nuevos = await correr([nota({ metadatos: { firma: true, segundos } })]);
+
+    expect(nuevos.get("msg-1")).toContain(dicho);
+    expect(escritas.some(marcada)).toBe(false);
   });
 });

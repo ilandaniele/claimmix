@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import {
   duracionSeg,
   esAudio,
+  esOpusMudo,
   firmaCoincide,
   MAX_BYTES_AUDIO,
   normalizarMime,
@@ -214,5 +217,68 @@ describe("revisarAdjunto", () => {
 
   it("un WAV se mide por sus bytes, sin tope de peso aparte", () => {
     expect(revisarAdjunto(wav(100), "audio/wav")).toEqual({ ok: true, metadatos: { firma: true, segundos: 100 } });
+  });
+});
+
+const cabeceraDePagina = (segmentos: number[]) =>
+  con(ascii("OggS"), new Array(22).fill(0), [segmentos.length], segmentos);
+
+/** Ogg Opus armado a mano: OpusHead, OpusTags y los paquetes de audio en páginas de 50. */
+function opus(...audio: Uint8Array[]): Uint8Array {
+  const pagina = (paquetes: Uint8Array[]) =>
+    con(cabeceraDePagina(paquetes.map((p) => p.length)), ...paquetes);
+  const paginas = [pagina([ascii("OpusHead")]), pagina([ascii("OpusTags")])];
+  for (let i = 0; i < audio.length; i += 50) paginas.push(pagina(audio.slice(i, i + 50)));
+  return con(...paginas);
+}
+const paquete = (n: number) => new Uint8Array(40).fill(n);
+
+describe("esOpusMudo", () => {
+  const mudo = opus(...Array.from({ length: 100 }, () => paquete(7)));
+
+  it("el placeholder de los ensayos es un silencio digital", () => {
+    expect(esOpusMudo(readFileSync(resolve(__dirname, "../fixtures/placeholder.ogg")))).toBe(true);
+  });
+
+  it("cien paquetes iguales son un silencio; con un par de paquetes distintos, también", () => {
+    expect(esOpusMudo(mudo)).toBe(true);
+    expect(esOpusMudo(opus(paquete(1), paquete(2), ...Array.from({ length: 98 }, () => paquete(7))))).toBe(true);
+  });
+
+  it("con diez paquetes distintos hay algo grabado", () => {
+    const voz = [...Array.from({ length: 10 }, (_, i) => paquete(i + 1)), ...Array.from({ length: 90 }, () => paquete(7))];
+    expect(esOpusMudo(opus(...voz))).toBe(false);
+  });
+
+  it("una nota corta no se juzga: con menos de veinte paquetes decide el modelo", () => {
+    expect(esOpusMudo(opus(...Array.from({ length: 19 }, () => paquete(7))))).toBe(false);
+  });
+
+  it("lo que no es un Ogg Opus entero no es mudo", () => {
+    expect(esOpusMudo(ascii("basura que no es un audio"))).toBe(false);
+    expect(esOpusMudo(new Uint8Array())).toBe(false);
+    expect(esOpusMudo(mudo.subarray(0, mudo.length - 10))).toBe(false);
+    expect(esOpusMudo(con(ascii("OggS"), new Array(30).fill(0)))).toBe(false);
+  });
+
+  describe("con OpusHead y el recorrido de páginas roto", () => {
+    it("una tabla de segmentos que se pasa del archivo", () => {
+      const roto = con(mudo, ascii("OggS"), new Array(22).fill(0), [200], [5, 5]);
+      expect(esOpusMudo(roto)).toBe(false);
+    });
+
+    it("un segmento que declara más bytes de los que hay", () => {
+      expect(esOpusMudo(con(mudo, cabeceraDePagina([40]), new Uint8Array(10)))).toBe(false);
+    });
+
+    it("un paquete que sigue en una página que no está", () => {
+      expect(esOpusMudo(con(mudo, cabeceraDePagina([255]), new Uint8Array(255)))).toBe(false);
+    });
+
+    it("una página sin la magia", () => {
+      const roto = Uint8Array.from(mudo);
+      roto.set(ascii("XXXX"), new TextDecoder("latin1").decode(roto).lastIndexOf("OggS"));
+      expect(esOpusMudo(roto)).toBe(false);
+    });
   });
 });

@@ -922,6 +922,7 @@ export const esARServidor = {
   "alta.resumen.revision": "- Espacios con el número en revisión o sin número: {n}.",
   "alta.resumen.pruebas": "- Pruebas que vencen en {dias} días o menos: {n}.",
   "alta.resumen.waba": "- WABA de la plataforma: {usados} de {tope} números, quedan {libres} lugares.",
+  "alta.resumen.google": "- Usuarios de Google del proyecto OAuth: {usados} de {tope} (app sin verificar).",
   "alta.resumen.cierre": "El detalle está en {url}. El resumen sale una vez por día y sólo si hay algo que mirar.",
   "alta.recordatorio.asunto": "ClaimMix: seguí conectando tu WhatsApp",
   "alta.recordatorio.paso.P1": "cargar el secreto y el ID de tu app de Meta",

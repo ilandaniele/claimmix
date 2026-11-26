@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { enControl, type TenantContext } from "@/data/scope";
 import { CASILLA_VENCIDA } from "@/core/gmail";
@@ -9,6 +9,7 @@ import { SIN_SERVICIO } from "@/lib/billing/plans";
 import { firstRow } from "@/lib/db/helpers";
 import { logger } from "@/lib/observability/logger";
 import { cifrar, descifrar } from "@/lib/security/cifrado";
+import { codigoPg } from "@/server/core-sync/config";
 
 export interface GmailAccount {
   id: string;
@@ -231,4 +232,22 @@ export async function inquilinoDeLaCasilla(email: string): Promise<string | null
       .limit(1)
   );
   return fila?.tenant_id ?? null;
+}
+
+/**
+ * Cuántas casillas tiene conectadas el ambiente, apagadas o vencidas incluidas: Google ya las contó.
+ * Sólo el número, sin leer token ni correo. Es única por correo entre inquilinos (migración 0047), así
+ * que cada fila es una cuenta de Google distinta. Null si no se pudo leer.
+ */
+export async function casillasConectadas(): Promise<number | null> {
+  try {
+    // sin-inquilino: El resumen del operador cuenta las casillas de todos los inquilinos; sólo sale el número.
+    const [fila] = await db.select({ n: count() }).from(gmailAccounts);
+    return fila?.n ?? 0;
+  } catch (err) {
+    const code = codigoPg(err);
+    // 42P01 = undefined_table: la migración todavía no corrió; sin ruido.
+    if (code !== "42P01") logger.error({ detalle: code ?? "unknown" }, "gmail_accounts.contar_error");
+    return null;
+  }
 }

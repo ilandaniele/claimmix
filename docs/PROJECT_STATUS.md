@@ -5594,13 +5594,21 @@ Siguen a «Una nota de voz que no se escuchó no se da por anotada» (#591), de 
 - **Queda afuera.** Una nota de voz sin transcribir junto con un texto que cerró algo: el pie del audio (`audioSinTranscribir`) reemplaza el acuse y la persona sólo oye que no se pudo escuchar, sin «tomamos nota» ni recordatorio. Es el límite que ya anotó #591 (nada afirma lo que nadie leyó) y #594 no lo cambia, porque el acuse no se tocó: con la lista idéntica, el aviso del audio reemplaza a repetirla. Nombrar además lo que se cerró es decisión del dueño. En `tardio-siniestro-nuevo` [2] del mismo ensayo se pide «El número de póliza (por ejemplo POL-12345)» aunque la persona ya había dado POL-6610-E en el chat.
 - **Pide un ensayo** antes de dar por cerrado. `mail-completo` T2 ahora verifica `avoids: ["patente", "hora aproximada"]`: si vuelve la lista de T1, el ensayo falla. Se comprobó con los pisos nuevos (mail `information-received`, WhatsApp `renderNoted`), que pasan, y con un texto que repite «la patente del vehículo» y «la hora aproximada del hecho», que falla. No se usó `sinPedido`: con el piso nuevo `pideAlgo` ya no marca nada, pero marcaría un acuse redactado con «¿» o «mandanos», y no ve una lista dicha sin verbo («nos falta: la patente…»). Igual una persona tiene que leer el transcripto y ver que el acuse suena bien. Sin redactor el piso no nombra el parte («tomamos nota de lo que nos contaste»); nombrarlo sería la opción (a).
 
+### Usuarios de Google en el resumen diario del operador (26/11, rama `alta/aviso-usuarios-google`, L6)
+
+- D10 quedó en (a): por debajo de 100 usuarios, con la verificación de Google anotada como pendiente. El resumen diario de altas (`resumenDeAltas`) suma una línea con los usuarios de Google del proyecto OAuth contra `ALTA_TOPE_USUARIOS_GOOGLE`: las casillas de `gmail_accounts` del ambiente (`casillasConectadas`, un `count(*)` sin leer token ni correo) más `GOOGLE_USUARIOS_PREVIOS`. Llegar al 80 % hace salir el resumen; sale todos los días mientras siga arriba. Con el tope en 0 o sin poner no hay consulta ni línea. El login con Google no cuenta porque sólo pide `openid`, `email` y `profile`, que no son sensibles (`src/lib/auth/index.ts` no agrega ninguno); si algún día pide un permiso sensible y vive en el mismo proyecto de Google, sus usuarios hay que sumarlos.
+- Es una cota inferior: no ve las conexiones borradas, los consentimientos que el callback rechaza, el remitente del sistema ni el otro ambiente del mismo proyecto (dev y QA comparten); eso va en `GOOGLE_USUARIOS_PREVIOS`, que paridad no compara entre ambientes (regla `libre`).
+- Pendiente del dueño: el «texto OK» de `alta.resumen.google` (L4-texto) y cargar las dos cifras en cada ambiente de Vercel; hasta entonces queda apagado.
+
 ### 🙋 Waiting on you (not code)
 
 - **Puesta en marcha por ambiente.** La guía paso a paso para dejar dev (cuenta del dueño),
   QA (cuenta de Gonzalo) y prd (cliente ficticio) completos e iguales, con quién hace cada
   paso, las decisiones D1 a D15 y el plan para que el alta sea automática, está en
   `docs/PUESTA_EN_MARCHA.md`. Hechos al 19/10: A1, A2, A6, A10, A11 y A12. Faltan A3, A4,
-  A5, A7, A8 y A9 (de A7 sólo entrar una vez con Google en prd), y las decisiones D10 a D13.
+  A5, A7, A8 y A9 (de A7 sólo entrar una vez con Google en prd), y las decisiones D11 a D13
+  (D10 quedó en (a), con la verificación de Google pendiente y las dos cifras de Google
+  por cargar en cada ambiente de Vercel).
   A3 son tres direcciones por ambiente: administrador y analista como alias `+` de Gmail, y
   el mail agente como una Gmail propia. D4 pasó el 21/10 a (d) (#489): no hay dominio propio,
   y el analista se invita como un alias `+` de la misma Gmail que el administrador, sin

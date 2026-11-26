@@ -43,7 +43,8 @@ vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: v
 import { COOKIE_ESTADO_OAUTH } from "@/lib/auth/oauth-state";
 import { urlDeVueltaDeGmail } from "@/lib/auth/base-url";
 import { GET } from "@/app/api/admin/gmail-accounts/connect/route";
-import { listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
+import { casillasConectadas, listEnabledGmailAccounts } from "@/server/email/gmail/accounts";
+import { logger } from "@/lib/observability/logger";
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
 
@@ -233,5 +234,39 @@ describe("listEnabledGmailAccounts: inquilinos sin servicio", () => {
     h.falla = Object.assign(new Error("relation does not exist"), { code: "42P01" });
 
     await expect(listEnabledGmailAccounts()).resolves.toEqual([]);
+  });
+});
+
+describe("casillasConectadas: cuántas casillas tiene el ambiente", () => {
+  it("devuelve sólo el número, de una consulta que no toca token ni correo", async () => {
+    h.filas = [["3"]];
+
+    await expect(casillasConectadas()).resolves.toBe(3);
+
+    expect(h.consultas).toHaveLength(1);
+    expect(h.consultas[0]).toContain("count(*)");
+    expect(h.consultas[0]).toContain('from "gmail_accounts"');
+    expect(h.consultas[0]).not.toContain("refresh_token_encrypted");
+    expect(h.consultas[0]).not.toContain('"email"');
+  });
+
+  it("con la tabla vacía son cero", async () => {
+    h.filas = [[0]];
+
+    await expect(casillasConectadas()).resolves.toBe(0);
+  });
+
+  it("si la migración no corrió devuelve null y no hace ruido", async () => {
+    h.falla = Object.assign(new Error("relation does not exist"), { code: "42P01" });
+
+    await expect(casillasConectadas()).resolves.toBeNull();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("si la base falla por otra cosa devuelve null y lo registra sin datos", async () => {
+    h.falla = Object.assign(new Error("boom"), { code: "57P01" });
+
+    await expect(casillasConectadas()).resolves.toBeNull();
+    expect(logger.error).toHaveBeenCalledWith({ detalle: "57P01" }, "gmail_accounts.contar_error");
   });
 });

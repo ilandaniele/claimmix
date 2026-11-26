@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   operadores: vi.fn(),
   listar: vi.fn(),
   lugares: vi.fn(),
+  casillas: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
 }));
@@ -31,6 +32,7 @@ vi.mock("@/lib/observability/logger", () => ({
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: h.rateLimit, liberarCupo: h.liberarCupo }));
 vi.mock("@/server/alta/panel-operador", () => ({ listarAltas: h.listar, FILAS_MAXIMAS: 200 }));
 vi.mock("@/server/alta/lugares-de-la-waba", () => ({ lugaresDeLaWaba: h.lugares }));
+vi.mock("@/server/email/gmail/accounts", () => ({ casillasConectadas: h.casillas }));
 
 import type { FilaDeAlta, PanelDeAltas } from "@/server/alta/panel-operador";
 import {
@@ -95,6 +97,7 @@ beforeEach(() => {
   h.enviar.mockResolvedValue({ enviado: true });
   h.listar.mockResolvedValue(panel());
   h.lugares.mockResolvedValue(null);
+  h.casillas.mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -279,6 +282,7 @@ describe("resumenDeAltas", () => {
     ["sin remitente", () => h.remitente.mockReturnValue(null)],
     ["sin direcciones de operación", () => h.operadores.mockReturnValue([])],
   ])("%s no toca nada", async (_caso, preparar) => {
+    vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
     h.listar.mockResolvedValue(panel({ creadas24h: 5 }));
     preparar();
 
@@ -286,6 +290,7 @@ describe("resumenDeAltas", () => {
 
     expect(h.listar).not.toHaveBeenCalled();
     expect(h.lugares).not.toHaveBeenCalled();
+    expect(h.casillas).not.toHaveBeenCalled();
     expect(h.rateLimit).not.toHaveBeenCalled();
     expect(h.enviar).not.toHaveBeenCalled();
   });
@@ -314,6 +319,95 @@ describe("resumenDeAltas", () => {
     await expect(resumenDeAltas(AHORA)).resolves.toBe(true);
 
     expect(textoEnviado()).toContain("- WABA de la plataforma: 4 de 5 números, quedan 1 lugares.");
+  });
+
+  describe("usuarios de Google", () => {
+    const LINEA = (usados: number, tope = 100) =>
+      `- Usuarios de Google del proyecto OAuth: ${usados} de ${tope} (app sin verificar).`;
+
+    it.each([undefined, "0"])("apagado (tope %j): ni consulta ni línea, y un día con altas sale como hoy", async (tope) => {
+      if (tope !== undefined) vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", tope);
+      vi.stubEnv("GOOGLE_USUARIOS_PREVIOS", "90");
+      h.casillas.mockResolvedValue(95);
+      h.listar.mockResolvedValue(panel({ creadas24h: 1 }));
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(true);
+
+      expect(h.casillas).not.toHaveBeenCalled();
+      expect(textoEnviado()).not.toContain("Google");
+    });
+
+    it.each([undefined, "0"])("apagado (tope %j): un día vacío no manda aunque haya casillas", async (tope) => {
+      if (tope !== undefined) vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", tope);
+      h.casillas.mockResolvedValue(500);
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(false);
+
+      expect(h.casillas).not.toHaveBeenCalled();
+      expect(h.enviar).not.toHaveBeenCalled();
+    });
+
+    it("al 80 % del tope alcanza para mandar", async () => {
+      vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
+      h.casillas.mockResolvedValue(80);
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(true);
+
+      expect(textoEnviado()).toContain(LINEA(80));
+    });
+
+    it.each([100, 120])("con %i de 100 manda y muestra la cifra", async (usadas) => {
+      vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
+      h.casillas.mockResolvedValue(usadas);
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(true);
+
+      expect(textoEnviado()).toContain(LINEA(usadas));
+    });
+
+    it("debajo del 80 % no manda un día vacío; con altas la línea acompaña", async () => {
+      vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
+      h.casillas.mockResolvedValue(79);
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(false);
+      expect(h.enviar).not.toHaveBeenCalled();
+
+      h.listar.mockResolvedValue(panel({ creadas24h: 1 }));
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(true);
+      expect(textoEnviado()).toContain(LINEA(79));
+    });
+
+    it("suma los usuarios previos que el ambiente no ve", async () => {
+      vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
+      vi.stubEnv("GOOGLE_USUARIOS_PREVIOS", "30");
+      h.casillas.mockResolvedValue(50);
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(true);
+      expect(textoEnviado()).toContain(LINEA(80));
+
+      h.enviar.mockClear();
+      h.casillas.mockResolvedValue(40);
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(false);
+      expect(h.enviar).not.toHaveBeenCalled();
+    });
+
+    it("si no se pudo contar, no hay línea, no lanza y las altas igual salen", async () => {
+      vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
+      vi.stubEnv("GOOGLE_USUARIOS_PREVIOS", "99");
+      h.casillas.mockResolvedValue(null);
+      h.listar.mockResolvedValue(panel({ creadas24h: 1 }));
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(true);
+
+      expect(textoEnviado()).not.toContain("Google");
+    });
+
+    it("sin altas y sin poder contar no manda", async () => {
+      vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
+      h.casillas.mockResolvedValue(null);
+
+      await expect(resumenDeAltas(AHORA)).resolves.toBe(false);
+    });
   });
 
   it("asunto y cuerpo textuales, una vez por día", async () => {
@@ -436,6 +530,7 @@ describe("resumenDeAltas", () => {
   });
 
   it("cupo tomado: no consulta ni manda, y lo devuelve", async () => {
+    vi.stubEnv("ALTA_TOPE_USUARIOS_GOOGLE", "100");
     h.listar.mockResolvedValue(panel({ creadas24h: 1 }));
     h.rateLimit.mockResolvedValue({ allowed: false, ventana: VENTANA });
 
@@ -443,6 +538,7 @@ describe("resumenDeAltas", () => {
 
     expect(h.listar).not.toHaveBeenCalled();
     expect(h.lugares).not.toHaveBeenCalled();
+    expect(h.casillas).not.toHaveBeenCalled();
     expect(h.enviar).not.toHaveBeenCalled();
     expect(h.liberarCupo).toHaveBeenCalledWith(CLAVE_RESUMEN, DIA_MS, VENTANA);
   });

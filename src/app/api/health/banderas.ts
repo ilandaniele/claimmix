@@ -82,6 +82,8 @@ export function leerBanderas(env: Entorno) {
     ALTA_TOPE_INVITACIONES_DIA: topeEnteroEscrito("ALTA_TOPE_INVITACIONES_DIA", env),
     ALTA_TOPE_WABAS_SEMANA: topeEnteroEscrito("ALTA_TOPE_WABAS_SEMANA", env),
     ALTA_TOPE_PLANTILLAS_PRUEBA_DIA: topeEnteroEscrito("ALTA_TOPE_PLANTILLAS_PRUEBA_DIA", env),
+    ALTA_TOPE_USUARIOS_GOOGLE: topeEnteroEscrito("ALTA_TOPE_USUARIOS_GOOGLE", env),
+    GOOGLE_USUARIOS_PREVIOS: topeEnteroEscrito("GOOGLE_USUARIOS_PREVIOS", env),
     MONTHLY_BUDGET_USD: topeDecimalEscrito("MONTHLY_BUDGET_USD", env),
     AI_TENANT_DAILY_TOKEN_CAP: topeDecimalEscrito("AI_TENANT_DAILY_TOKEN_CAP", env),
     TURNSTILE_SITE_KEY: cargada(env.TURNSTILE_SITE_KEY),

@@ -28,7 +28,7 @@ export const NO_ESPERADO = "no-esperado";
 const CLAVE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const MODO = /^[a-z][a-z-]{0,20}$/;
 const COMMIT = /^[0-9a-f]{7,40}$/;
-// Hoy son 46: el tope sólo evita que un cuerpo ajeno llene el log.
+// Hoy son 48: el tope sólo evita que un cuerpo ajeno llene el log.
 const MAX_CLAVES = 200;
 
 /** @param {any} x */
@@ -44,6 +44,7 @@ function congelar(x) {
  * - fijo: el valor de cada ambiente es el de la tabla.
  * - entre: esos ambientes coinciden entre sí; el resto queda libre.
  * - implica-apagada: si la clave está en true, `de` tiene que estar en false en ese ambiente.
+ * - libre: cada ambiente lleva la suya; no se compara.
  */
 export const EXCEPCIONES = congelar({
   BASE_POR_CLIENTE: {
@@ -60,6 +61,10 @@ export const EXCEPCIONES = congelar({
     regla: "entre",
     ambientes: ["dev", "qa"],
     motivo: "D7: dev y QA iguales entre sí (ahí gasta el ensayo), prd libre",
+  },
+  GOOGLE_USUARIOS_PREVIOS: {
+    regla: "libre",
+    motivo: "D10: cada ambiente ve sólo sus casillas; dev y QA comparten proyecto de Google y prd tiene el suyo",
   },
   SIGNUP_ALLOWED_EMAILS: {
     regla: "implica-apagada",
@@ -218,6 +223,7 @@ export function compararParidad(lecturas) {
       } else if (regla.regla === "implica-apagada") {
         malos = presentes.filter((a) => valores[a] === true && lecturas[a].banderas[regla.de] === true);
       }
+      // "libre": no hay nada que comparar.
       if (malos.length > 0) {
         hallazgos.push(hallazgo("regla", regla.regla === "entre" ? malos.join("≠") : malos.join(","), regla.motivo));
       }

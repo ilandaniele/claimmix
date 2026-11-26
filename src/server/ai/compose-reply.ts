@@ -119,6 +119,10 @@ export interface ComposeReplyInput {
    *
    * Los dos valores pueden ser correctos —escribe la hija por el auto del
    * padre—, así que preguntar cuál es el bueno no tiene respuesta.
+   *
+   * También en la derivación que nombra la diferencia con el padrón: ahí cambia
+   * la línea de emergencias («de la póliza») y se prohíbe atribuirle a quien
+   * escribe la póliza, el vehículo, el seguro, la cobertura o la aseguradora.
    */
   titularAjeno?: boolean;
   /**
@@ -228,6 +232,8 @@ const TRASPASO =
 // Con el literal de ejemplo, como TRASPASO: la guarda dropped_emergencias busca «emergencias» y no una paráfrasis.
 const LINEA_DE_EMERGENCIAS =
   `si necesita asistencia urgente llame a la línea de emergencias de su póliza (por ejemplo: «${EMERGENCIAS}»)`;
+// Lo que el redactor no puede decirle a quien escribe por la póliza de otro; titular_ajeno_se_lo_atribuye lo vigila con las mismas palabras.
+const NO_ES_DE_QUIEN_ESCRIBE = "que la póliza, el vehículo, el seguro, la cobertura o la aseguradora son de quien escribe";
 // La del titular ajeno: «su póliza» se la atribuye, y titular_ajeno_se_lo_atribuye la rechaza.
 const LINEA_DE_EMERGENCIAS_AJENA =
   `si necesita asistencia urgente llame a la línea de emergencias de la póliza (por ejemplo: «${EMERGENCIAS_DE_LA_POLIZA}»)`;
@@ -270,18 +276,22 @@ function buildPrompt(input: ComposeReplyInput): string {
       ? `${DIFERENCIA} ${POLIZA_NO_COINCIDE}`
       : POLIZA_NO_COINCIDE;
 
+  const emergenciasDeLaEscalation = input.titularAjeno
+    ? `${LINEA_DE_EMERGENCIAS_AJENA}. No digas ${NO_ES_DE_QUIEN_ESCRIBE}: la póliza está a nombre de otra persona`
+    : LINEA_DE_EMERGENCIAS;
+
   const intentBrief: Record<ReplyIntent, string> = {
     ask: textoBase("redactar.pedir"),
     escalation:
       "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad " +
       "(decí «un especialista», nunca «él» ni «ella»: no sabemos quién es), " +
-      `y que ${LINEA_DE_EMERGENCIAS}. ` +
+      `y que ${emergenciasDeLaEscalation}. ` +
       `NO pidas ningún dato: un especialista se encarga. Avisá también que ${TRASPASO}.`,
     closing: `Avisar que ya tenemos todo lo necesario y que ${TRASPASO}. NO pidas nada.`,
     conflict: input.titularAjeno
       ? "La póliza está a nombre de otra persona que quien escribe —puede ser un familiar—, así " +
         "que los dos valores pueden ser correctos. Señalá la diferencia sin preguntar cuál es el " +
-        "correcto y sin decir que la póliza o el vehículo son de quien escribe. Avisá que un " +
+        "correcto y sin decir " + NO_ES_DE_QUIEN_ESCRIBE + ". Avisá que un " +
         "especialista va a revisar el caso y se va a comunicar (decí «un especialista», nunca " +
         "«él» ni «ella»). " +
         `Decile también que ${LINEA_DE_EMERGENCIAS_AJENA}. ` +
@@ -496,14 +506,15 @@ function violation(text: string, input: ComposeReplyInput): string | null {
 
   // El titular ajeno ya se derivó en esta vuelta: lo que conteste no lo lee el
   // agente, y «¿cuál es el correcto?» salió en un ensayo con los dos correctos.
-  const titularAjeno = input.intent === "conflict" && input.titularAjeno === true;
-  if (titularAjeno && trimmed.includes("?")) return "titular_ajeno_pregunta";
+  const conflictoAjeno = input.intent === "conflict" && input.titularAjeno === true;
+  if (conflictoAjeno && trimmed.includes("?")) return "titular_ajeno_pregunta";
+  const deriva = input.intent === "escalation" || conflictoAjeno;
+  const ajena = deriva && input.titularAjeno === true;
   // Escribió «el auto de mi viejo» y le contestaron «el siniestro de tu auto».
-  // También «la línea de emergencias de tu póliza»: a quien escribe se le dice «de la póliza».
-  if (titularAjeno && /\btu\s+(?:auto|veh[ií]culo|coche|camioneta|moto|p[oó]liza)\b/iu.test(trimmed)) {
+  // También «la línea de emergencias de tu póliza»: a quien escribe se le dice «de la póliza», en toda derivación a quien no es el titular.
+  if (ajena && /\btu\s+(?:auto|veh[ií]culo|coche|camioneta|moto|p[oó]liza|seguro|cobertura|aseguradora)\b/iu.test(trimmed)) {
     return "titular_ajeno_se_lo_atribuye";
   }
-  const deriva = input.intent === "escalation" || titularAjeno;
 
   // An escalation that asks for something contradicts itself — that exact
   // pile-up is why escalated cases send one message and nothing else.
@@ -534,7 +545,7 @@ function violation(text: string, input: ComposeReplyInput): string | null {
   }
 
   // Lo mismo: los pisos de toda derivación la dicen, también la del titular ajeno.
-  if (deriva && !diceEmergencias(trimmed)) return titularAjeno ? "dropped_emergencias_ajeno" : "dropped_emergencias";
+  if (deriva && !diceEmergencias(trimmed)) return ajena ? "dropped_emergencias_ajeno" : "dropped_emergencias";
 
   // Último, para que cualquier otro rechazo conserve su motivo en el reintento.
   // Sin el aviso, la persona sigue escribiendo por acá y ya no lo lee nadie.
@@ -664,7 +675,7 @@ function explain(problem: string): string {
     return "hiciste una pregunta. La póliza es de otra persona y el caso ya lo tiene un especialista: nombrá la diferencia y avisá eso, sin preguntar nada.";
   }
   if (problem === "titular_ajeno_se_lo_atribuye") {
-    return "dijiste que el vehículo o la póliza son de quien escribe, y son del titular. Decí «el auto» o «la póliza».";
+    return "dijiste que el vehículo, la póliza, el seguro, la cobertura o la aseguradora son de quien escribe («tu póliza», «tu seguro»…), y son del titular. Decí «el auto» o «la póliza».";
   }
   return problem;
 }

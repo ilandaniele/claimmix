@@ -646,6 +646,34 @@ describe("specialist_escalation — el titular que no coincide", () => {
     expect(r.html).not.toContain("R*** P***");
     expect(r.text).not.toContain("R*** P***");
   });
+
+  // Al lado de «La póliza figura a nombre de R*** P***», «de tu póliza» se la atribuye a quien escribe.
+  it("con la diferencia, la línea de emergencias es la de la póliza", () => {
+    const r = derivacionDeTitular();
+    for (const salida of [r.text, r.html, r.cuerpo]) {
+      expect(salida).toContain(EMERGENCIAS_DE_LA_POLIZA);
+      expect(salida).not.toContain(EMERGENCIAS);
+    }
+  });
+
+  it("también con heridos", () => {
+    const r = derivacionDeTitular({ severity: "critical", heridos: true });
+    expect(r.cuerpo.split(CUIDADO).length - 1).toBe(1);
+    expect(r.cuerpo).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(r.cuerpo).not.toContain(EMERGENCIAS);
+  });
+
+  it.each([
+    ["sin las iniciales", { titularIniciales: null }],
+    ["sin el nombre", { claimantName: null }],
+    ["con el nombre en blanco", { claimantName: "  " }],
+  ])("%s sigue «de tu póliza»", (_, extra) => {
+    const r = derivacionDeTitular(extra);
+    for (const salida of [r.text, r.html, r.cuerpo]) {
+      expect(salida).toContain(EMERGENCIAS);
+      expect(salida).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+    }
+  });
 });
 
 // ── AC24 strict regex probes ──────────────────────────────────────────────────

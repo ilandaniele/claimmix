@@ -206,6 +206,49 @@ describe("whatsappMessenger — what it says", () => {
     expect(body).toContain("especialista");
   });
 
+  // Al lado de «La póliza figura a nombre de R*** P***», «de tu póliza» se la atribuye a quien escribe.
+  it("la derivación que nombra la diferencia dice «de la póliza»", async () => {
+    await send("specialist_escalation", {
+      caseId: CASE,
+      titularIniciales: "R*** P***",
+      claimantName: "Lucía Paz",
+    });
+
+    const body = sentBody();
+    expect(body).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(body).not.toContain(EMERGENCIAS);
+    expect(body).not.toMatch(/tu\s+p[oó]liza/i);
+    expect(body).toContain("La póliza figura a nombre de R*** P***");
+    expect(body.indexOf(EMERGENCIAS_DE_LA_POLIZA)).toBeLessThan(body.indexOf(AVISO_DE_TRASPASO));
+  });
+
+  it("la misma con heridos", async () => {
+    await send("specialist_escalation", {
+      caseId: CASE,
+      severity: "critical",
+      heridos: true,
+      titularIniciales: "R*** P***",
+      claimantName: "Lucía Paz",
+    });
+
+    const body = sentBody();
+    expect(body.split(CUIDADO).length - 1).toBe(1);
+    expect(body).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(body).not.toContain(EMERGENCIAS);
+  });
+
+  it.each([
+    ["sin titular ni nombre", { severity: "high" }],
+    ["sin las iniciales", { claimantName: "Lucía Paz" }],
+    ["sin el nombre", { titularIniciales: "R*** P***" }],
+    ["con el nombre en blanco", { titularIniciales: "R*** P***", claimantName: "  " }],
+  ])("%s, la derivación sigue «de tu póliza»", async (_, extra) => {
+    await send("specialist_escalation", { caseId: CASE, ...extra });
+
+    expect(sentBody()).toContain(EMERGENCIAS);
+    expect(sentBody()).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+  });
+
   /*
    * escribe-despues-del-cierre, 25/09: un 429 tiró el redactor y el piso
    * mandó "Lamentamos mucho lo que están pasando" sin saludo, aunque quien
@@ -1681,10 +1724,41 @@ describe("whatsappMessenger — la derivación con heridos", () => {
       expect(sentBody()).toBe(`${redactado}\n\n${SI_VOLVES_A_ESCRIBIR}`);
     });
 
+    it("la escalation del titular que no coincide no sale con «de tu póliza»", async () => {
+      redacta(`Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`);
+
+      await send("specialist_escalation", {
+        caseId: CASE,
+        titularIniciales: "R*** P***",
+        claimantName: "Lucía Paz",
+      });
+
+      expect(prompt()).toContain(EMERGENCIAS_DE_LA_POLIZA);
+      // Dos rechazos y sale el piso, que ya dice «de la póliza».
+      expect(sentBody()).not.toContain(EMERGENCIAS);
+      expect(sentBody()).toContain(EMERGENCIAS_DE_LA_POLIZA);
+      expect(sentBody()).toContain("La póliza figura a nombre de R*** P***");
+    });
+
+    // Sin la frase de la diferencia no hay contradicción: el redactor no puede recibir «de la póliza» ni la guarda del titular ajeno.
+    it.each([
+      ["sin el nombre", {}],
+      ["con el nombre en blanco", { claimantName: "  " }],
+    ])("con las iniciales y %s, el redactor no recibe la señal de titular ajeno", async (_, extra) => {
+      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+      redacta(redactado);
+
+      await send("specialist_escalation", { caseId: CASE, titularIniciales: "R*** P***", ...extra });
+
+      expect(prompt()).toContain(EMERGENCIAS);
+      expect(prompt()).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+      expect(sentBody()).toContain(redactado);
+    });
+
     // El nombre que escribió la persona viaja en el piso del titular ajeno: un
     // «Lamentamos» ahí no es alguien que se lastimó.
     it("un nombre con «Lamentamos» no la prende en la del titular ajeno", async () => {
-      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`;
+      const redactado = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS_DE_LA_POLIZA} ${AVISO_DE_TRASPASO}`;
       redacta(redactado);
 
       await send("specialist_escalation", {

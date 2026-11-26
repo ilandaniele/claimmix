@@ -178,7 +178,7 @@ export const ENTRENAMIENTO_BASE: readonly SeccionDeEntrenamiento[] = [
     modo: "prompt",
     titulo: { "es-AR": "Cuando se acusa recibo", "en-US": "When acknowledging receipt" },
     ruta: "entrenamiento/base/redactar/03-acuse.md",
-    texto: "Decir que tomamos nota de lo que la persona acaba de contar, y que seguimos esperando lo que ya le pedimos. NO repitas la lista de datos: se la pedimos hace un momento y repetirla es hostigar. NO digas que está todo completo, porque no lo está. Dos oraciones como mucho.",
+    texto: "Decir que tomamos nota de lo que la persona acaba de contar, y que todavía nos falta lo que quedó pendiente. No lo llames «lo de antes» ni «lo que ya te pedimos»: quien contesta citando un mail viejo lo entiende como ese pedido, y puede ser justo lo que acaba de negar. NO repitas la lista de datos: se la pedimos hace un momento y repetirla es hostigar. NO digas que está todo completo, porque no lo está. Dos oraciones como mucho.",
   },
   {
     id: "redactar.canal_whatsapp",
@@ -215,4 +215,4 @@ export const ENTRENAMIENTO_BASE: readonly SeccionDeEntrenamiento[] = [
 ];
 
 // sha256 de las secciones, doce caracteres: cambia con cualquier letra de la base.
-export const VERSION_DEL_ENTRENAMIENTO_BASE: string = "7fec2b35e31a";
+export const VERSION_DEL_ENTRENAMIENTO_BASE: string = "267bae4a0c43";

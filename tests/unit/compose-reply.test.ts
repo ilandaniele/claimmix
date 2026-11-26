@@ -870,6 +870,15 @@ describe("composeReply — quien escribe no es el titular", () => {
     expect(mockCall.mock.calls[1][0] as string).toContain("son del titular");
   });
 
+  // La guarda también rige acá: las palabras nuevas no se escapan por el camino del conflicto.
+  it.each(["tu seguro", "tu cobertura", "tu aseguradora"])("«lo revisamos con %s» también se lo atribuye", async (frase) => {
+    const SEGURO = `${DICE_LA_DIFERENCIA} Un especialista va a revisar el caso con ${frase}. ${EMERGENCIAS_DE_LA_POLIZA} ${AVISO_DE_TRASPASO}`;
+    responde(SEGURO, SEGURO);
+
+    expect(await composeReply(ajeno())).toBe(FALLBACK);
+    expect(mockCall.mock.calls[1][0] as string).toContain("el seguro, la cobertura o la aseguradora");
+  });
+
   it("tampoco le pone género al especialista", async () => {
     // Con la línea y el aviso: lo único que falla es el género, y el reintento lo dice.
     replies(
@@ -1393,6 +1402,85 @@ describe("composeReply — la línea de emergencias en la derivación", () => {
       expect(mockCall).toHaveBeenCalledTimes(1);
       expect(mockCall.mock.calls[0][0] as string).not.toContain(EMERGENCIAS);
       expect(mockCall.mock.calls[0][0] as string).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+    });
+  });
+
+  describe("la escalation del titular que no coincide", () => {
+    const CON_LA_AJENA = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. ${EMERGENCIAS_DE_LA_POLIZA} ${AVISO_DE_TRASPASO}`;
+    const ajena = () => base({ intent: "escalation", titularAjeno: true });
+
+    it("el brief pide la línea de la póliza", async () => {
+      responde(CON_LA_AJENA);
+
+      await composeReply(ajena());
+
+      const prompt = mockCall.mock.calls[0][0] as string;
+      expect(prompt).toContain(EMERGENCIAS_DE_LA_POLIZA);
+      expect(prompt).not.toContain(EMERGENCIAS);
+      // Prohíbe las mismas palabras que la guarda rechaza.
+      expect(prompt).toContain("el seguro, la cobertura o la aseguradora");
+    });
+
+    it("«de tu póliza» se rechaza", async () => {
+      responde(CON_EMERGENCIAS, CON_EMERGENCIAS);
+
+      expect(await composeReply(ajena())).toBe(FALLBACK);
+      expect(mockCall.mock.calls[1][0] as string).toContain("son del titular");
+    });
+
+    // La paráfrasis más común de la línea: dice lo mismo que «de tu póliza» y la contradice igual.
+    it.each(["tu seguro", "tu cobertura", "tu aseguradora"])("«emergencias de %s» también se rechaza", async (frase) => {
+      const parafraseada = `Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos. Llamá a la línea de emergencias de ${frase}. ${AVISO_DE_TRASPASO}`;
+      responde(parafraseada, parafraseada);
+
+      expect(await composeReply(ajena())).toBe(FALLBACK);
+      const correccion = mockCall.mock.calls[1][0] as string;
+      expect(correccion).toContain("son del titular");
+      // El reintento nombra lo que escribió: sin eso el modelo puede repetirlo.
+      expect(correccion).toContain("el seguro, la cobertura o la aseguradora");
+    });
+
+    it("sin la línea, el reintento pide la de la póliza", async () => {
+      responde(SIN_EMERGENCIAS, CON_LA_AJENA);
+
+      expect(await composeReply(ajena())).toBe(CON_LA_AJENA);
+      expect(mockCall.mock.calls[1][0] as string).toContain(`Decí «${EMERGENCIAS_DE_LA_POLIZA}»`);
+    });
+
+    it("con la línea de la póliza sale al primer intento", async () => {
+      responde(CON_LA_AJENA);
+
+      expect(await composeReply(ajena())).toBe(CON_LA_AJENA);
+      expect(mockCall).toHaveBeenCalledTimes(1);
+    });
+
+    it("una pregunta no dispara titular_ajeno_pregunta en la escalation", async () => {
+      const conPregunta = `¿Ya te llegó el aviso? Un especialista se va a comunicar con vos. ${EMERGENCIAS_DE_LA_POLIZA} ${AVISO_DE_TRASPASO}`;
+      responde(conPregunta);
+
+      expect(await composeReply(ajena())).toBe(conPregunta);
+      expect(mockCall).toHaveBeenCalledTimes(1);
+    });
+
+    it("sin titularAjeno no cambia", async () => {
+      responde(CON_EMERGENCIAS);
+      await composeReply(base({ intent: "escalation", titularAjeno: false }));
+      const conFalse = mockCall.mock.calls[0][0] as string;
+
+      mockCall.mockClear();
+      responde(CON_EMERGENCIAS);
+      await composeReply(base({ intent: "escalation" }));
+      const sinLaClave = mockCall.mock.calls[0][0] as string;
+
+      expect(conFalse).toBe(sinLaClave);
+      expect(conFalse).toContain(EMERGENCIAS);
+      expect(conFalse).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+
+      mockCall.mockClear();
+      const conTuPoliza = `${CON_EMERGENCIAS} Cualquier cosa, escribinos con tu póliza a mano.`;
+      responde(conTuPoliza);
+      expect(await composeReply(base({ intent: "escalation" }))).toBe(conTuPoliza);
+      expect(mockCall).toHaveBeenCalledTimes(1);
     });
   });
 });

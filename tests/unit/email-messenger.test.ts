@@ -62,7 +62,7 @@ import { composeReply } from "@/server/ai/compose-reply";
 import { callGemini } from "@/server/ai/gemini-extractor";
 import { renderTemplate, type EmailTemplate } from "@/server/email/render";
 import { RESPUESTA_PENDIENTE } from "@/core/mensajes/respuesta-pendiente";
-import { CUIDADO, EMERGENCIAS, diceCuidado } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, EMERGENCIAS_DE_LA_POLIZA, diceCuidado } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO } from "@/core/mensajes/traspaso";
 import { SI_NO_FUISTE_VOS } from "@/core/mensajes/origen-web";
 import { AUDIO_SIN_TRANSCRIBIR } from "@/core/mensajes/audio-sin-transcribir";
@@ -544,8 +544,68 @@ describe("emailMessenger — la derivación con heridos", () => {
       expect(String(modelo.mock.calls[0][0])).not.toContain("frase breve de cuidado");
       expect(modelo).toHaveBeenCalledTimes(1);
       expect(cuerpoEnviado()).toContain(redactado);
+      expect(compose.mock.calls[0][0].titularAjeno).toBe(false);
     }
   );
+});
+
+// Al lado de «La póliza figura a nombre de R*** P***», «de tu póliza» se la atribuye a quien escribe.
+describe("emailMessenger — la derivación con la póliza de otro", () => {
+  const AJENA = {
+    caseId: CASE,
+    severity: "high",
+    titularIniciales: "R*** P***",
+    claimantName: "Lucía Paz",
+  };
+  const PROSA = "Ya derivamos tu denuncia a un especialista, que se va a comunicar con vos a la brevedad.";
+
+  it("con el redactor caído, el mail dice «de la póliza» y nombra los dos", async () => {
+    modelo.mockRejectedValue(new Error("sin modelo"));
+
+    await mandar("specialist_escalation", AJENA);
+
+    expect(cuerpoEnviado()).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(cuerpoEnviado()).toContain("R*** P***");
+    expect(cuerpoEnviado()).toContain("Lucía Paz");
+    expect(cuerpoEnviado()).not.toContain(EMERGENCIAS);
+  });
+
+  it("el redactor la recibe como titular ajeno y no deja pasar «de tu póliza»", async () => {
+    escribe(`${PROSA} ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`);
+
+    await mandar("specialist_escalation", AJENA);
+
+    expect(compose.mock.calls[0][0].titularAjeno).toBe(true);
+    expect(String(modelo.mock.calls[0][0])).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(modelo).toHaveBeenCalledTimes(2);
+    expect(cuerpoEnviado()).not.toContain(EMERGENCIAS);
+    expect(cuerpoEnviado()).toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(cuerpoEnviado()).toContain("R*** P***");
+  });
+
+  it.each([
+    ["sin el nombre", { claimantName: null }],
+    ["con el nombre en blanco", { claimantName: "  " }],
+  ])("con las iniciales y %s, el redactor no recibe la señal de titular ajeno", async (_, extra) => {
+    escribe(`${PROSA} ${EMERGENCIAS} ${AVISO_DE_TRASPASO}`);
+
+    await mandar("specialist_escalation", { ...AJENA, ...extra });
+
+    expect(compose.mock.calls[0][0].titularAjeno).toBe(false);
+    expect(String(modelo.mock.calls[0][0])).not.toContain(EMERGENCIAS_DE_LA_POLIZA);
+    expect(modelo).toHaveBeenCalledTimes(1);
+    expect(cuerpoEnviado()).toContain(EMERGENCIAS);
+  });
+
+  it("con «de la póliza» la prosa sale en el primer intento", async () => {
+    escribe(`${PROSA} ${EMERGENCIAS_DE_LA_POLIZA} ${AVISO_DE_TRASPASO}`);
+
+    await mandar("specialist_escalation", AJENA);
+
+    expect(modelo).toHaveBeenCalledTimes(1);
+    expect(cuerpoEnviado()).toContain(PROSA);
+    expect(cuerpoEnviado()).toContain("La póliza figura a nombre de R*** P***");
+  });
 });
 
 /**

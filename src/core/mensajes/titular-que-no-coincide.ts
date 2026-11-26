@@ -11,7 +11,7 @@
  * incumplida en los dos, porque nadie la mira.
  */
 
-import { EMERGENCIAS_DE_LA_POLIZA } from "./derivacion";
+import { EMERGENCIAS, EMERGENCIAS_DE_LA_POLIZA } from "./derivacion";
 import { AVISO_DE_TRASPASO } from "./traspaso";
 
 /*
@@ -24,7 +24,7 @@ import { AVISO_DE_TRASPASO } from "./traspaso";
  */
 export const NO_COINCIDE_CON_EL_TITULAR =
   "Los datos que nos pasaste no coinciden con los del titular de la póliza:";
-// Es una derivación: dice a quién llamar si es urgente, en el mismo orden que ESCALATION_TEXT.
+// Es una derivación: dice a quién llamar si es urgente, en el mismo orden que el piso de WhatsApp (`escalationText`).
 export const LO_REVISA_UN_ESPECIALISTA =
   `Como la póliza está a nombre de otra persona, un especialista va a revisar tu caso y se va a comunicar con vos. ${EMERGENCIAS_DE_LA_POLIZA} ${AVISO_DE_TRASPASO}`;
 
@@ -50,4 +50,9 @@ export function laDiferencia(data: TitularQueNoCoincide): string | null {
     `La póliza figura a nombre de ${padron} y vos nos decís que sos ${dijo}. ` +
     `El especialista va a revisar esa diferencia.`
   );
+}
+
+// Con los dos nombres dichos, «de tu póliza» contradice la frase de al lado: la póliza no es de quien escribe.
+export function emergenciasDeLaDerivacion(data: TitularQueNoCoincide): string {
+  return laDiferencia(data) ? EMERGENCIAS_DE_LA_POLIZA : EMERGENCIAS;
 }

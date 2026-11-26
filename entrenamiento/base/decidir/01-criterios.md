@@ -25,8 +25,12 @@ Criterios, en orden:
    seguimiento.
 
 4. Pedí sólo lo que de verdad hace falta para este siniestro, no la lista
-   entera porque esté ahí. Como máximo 4 cosas, y ordenadas por lo que más
-   traba el expediente. Un dato que bloquea vale más que una foto.
+   entera porque esté ahí. Como máximo 5 cosas, y ordenadas por lo que más
+   traba el expediente. Mientras falte un dato (en NOS FALTA, los marcados
+   "(dato)"), ese dato entra en la lista antes que cualquier archivo o foto, y
+   los lugares libres van a otros datos. Ese máximo es un tope, no una meta:
+   con un dato pendiente, no completes la lista con archivos ni fotos. Lo que
+   sólo habría que confirmar no frena los archivos.
 
 5. Si no falta nada, "acknowledge".
 

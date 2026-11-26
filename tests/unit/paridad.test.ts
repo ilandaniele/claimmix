@@ -253,6 +253,13 @@ describe("compararParidad: las excepciones", () => {
     expect(hallazgosDe(lecturas, "MONTHLY_BUDGET_USD")).toEqual([expect.objectContaining({ tipo: "regla", detalle: "dev≠qa" })]);
   });
 
+  it("D10: GOOGLE_USUARIOS_PREVIOS distinto en cada ambiente está bien", () => {
+    const lecturas = ambientes({ GOOGLE_USUARIOS_PREVIOS: 10 }, { GOOGLE_USUARIOS_PREVIOS: 20 }, { GOOGLE_USUARIOS_PREVIOS: null });
+
+    expect(hallazgosDe(lecturas, "GOOGLE_USUARIOS_PREVIOS")).toEqual([]);
+    expect(hallazgosDe(lecturas).filter((h) => h.tipo === "difiere")).toEqual([]);
+  });
+
   it("una clave con excepción nunca da `difiere`", () => {
     const lecturas = ambientes({ MONTHLY_BUDGET_USD: 1 }, { MONTHLY_BUDGET_USD: 1 }, { MONTHLY_BUDGET_USD: 2 });
 
@@ -458,7 +465,7 @@ describe("EXCEPCIONES", () => {
   });
 
   it("cada una dice de qué decisión sale", () => {
-    for (const [, regla] of REGLAS) expect(regla.motivo).toMatch(/^D[267]: /);
+    for (const [, regla] of REGLAS) expect(regla.motivo).toMatch(/^D(?:2|6|7|10): /);
   });
 
   it("sólo nombra claves que existen en banderas.ts", () => {
@@ -470,7 +477,7 @@ describe("EXCEPCIONES", () => {
 
   it("usa sólo las reglas que el comparador sabe evaluar y ambientes que existen", () => {
     for (const [clave, regla] of REGLAS) {
-      expect(["fijo", "entre", "implica-apagada"], clave).toContain(regla.regla);
+      expect(["fijo", "entre", "implica-apagada", "libre"], clave).toContain(regla.regla);
       if (regla.valores) expect(Object.keys(regla.valores).sort(), clave).toEqual([...AMBIENTES].sort());
       if (regla.ambientes) for (const a of regla.ambientes) expect(AMBIENTES, clave).toContain(a);
     }

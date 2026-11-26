@@ -1,8 +1,8 @@
 diff --git a/index.js b/index.js
-index 10d4fc400f67b952edd6cc268ea467dd210c6edb..2f7717b6e3c6998aa08a2da0255d51eb16910bdf 100644
+index 10d4fc400f67b952edd6cc268ea467dd210c6edb..518e3076cc0b26f8918b98015c417316e9ae480d 100644
 --- a/index.js
 +++ b/index.js
-@@ -1,3 +1,129 @@
+@@ -1,3 +1,139 @@
 -import builtinModules from './builtin-modules.json' with {type: 'json'};
 +// Parchado: el original era
 +//
@@ -27,6 +27,8 @@ index 10d4fc400f67b952edd6cc268ea467dd210c6edb..2f7717b6e3c6998aa08a2da0255d51eb
 +  "assert/strict",
 +  "node:async_hooks",
 +  "async_hooks",
++  "node:bench",
++  "node:bench/reporters",
 +  "node:buffer",
 +  "buffer",
 +  "node:child_process",
@@ -51,6 +53,7 @@ index 10d4fc400f67b952edd6cc268ea467dd210c6edb..2f7717b6e3c6998aa08a2da0255d51eb
 +  "domain",
 +  "node:events",
 +  "events",
++  "node:ffi",
 +  "node:fs",
 +  "fs",
 +  "node:fs/promises",
@@ -69,6 +72,8 @@ index 10d4fc400f67b952edd6cc268ea467dd210c6edb..2f7717b6e3c6998aa08a2da0255d51eb
 +  "module",
 +  "node:net",
 +  "net",
++  "node:net/promises",
++  "net/promises",
 +  "node:os",
 +  "os",
 +  "node:path",
@@ -96,6 +101,8 @@ index 10d4fc400f67b952edd6cc268ea467dd210c6edb..2f7717b6e3c6998aa08a2da0255d51eb
 +  "stream",
 +  "node:stream/consumers",
 +  "stream/consumers",
++  "node:stream/iter",
++  "stream/iter",
 +  "node:stream/promises",
 +  "stream/promises",
 +  "node:stream/web",
@@ -122,6 +129,7 @@ index 10d4fc400f67b952edd6cc268ea467dd210c6edb..2f7717b6e3c6998aa08a2da0255d51eb
 +  "util/types",
 +  "node:v8",
 +  "v8",
++  "node:vfs",
 +  "node:vm",
 +  "vm",
 +  "node:wasi",
@@ -129,7 +137,9 @@ index 10d4fc400f67b952edd6cc268ea467dd210c6edb..2f7717b6e3c6998aa08a2da0255d51eb
 +  "node:worker_threads",
 +  "worker_threads",
 +  "node:zlib",
-+  "zlib"
++  "zlib",
++  "node:zlib/iter",
++  "zlib/iter"
 +];
  
  export default builtinModules;

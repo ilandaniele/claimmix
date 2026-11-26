@@ -80,7 +80,7 @@ import {
   estadoTrasExtraer,
   sePuedeTransicionar,
 } from "@/core/case/status-after-extraction";
-import { CLAIM_FIELD_KEYS } from "@/lib/schemas/extracted-claim";
+import { CLAIM_FIELD_KEYS, type ExtractedField } from "@/lib/schemas/extracted-claim";
 import { canonicalFieldKey } from "@/lib/labels/claim-fields";
 import { polizaParaCompletar } from "@/core/case/poliza-encontrada";
 import { mirarPolizas } from "@/core/case/poliza-vigente";
@@ -1025,12 +1025,16 @@ export async function runEmailExtractionWorker(
     // Ensures fields[] is always the source of truth for DB writes, even if the model
     // populates only one of the two shapes.
     extractedClaim = anclarPolizaAlTexto(extractedClaim, `${emailSubject} ${emailBody}`);
-    const fallbackFields = parseEmailClaimFields({
-      subject: emailSubject,
-      body: emailBody,
-      senderEmail,
-      senderName,
-    });
+    const fallbackFields = await sinPisarLoGuardado(
+      parseEmailClaimFields({
+        subject: emailSubject,
+        body: emailBody,
+        senderEmail,
+        senderName,
+      }),
+      caseId,
+      tenantCtx
+    );
     const hydratedFields = hydrateFieldsFromExtracted(extractedClaim);
     const aiClaimType =
       extractedClaim.extracted_fields?.claim_type ??
@@ -2017,6 +2021,61 @@ async function camposGuardadosDelPuntaje(
   } catch (err) {
     logger.warn({ code: errorCode(err), case_id: caseId }, "email_worker.puntaje_fields_read_error");
     return null;
+  }
+}
+
+/*
+ * El nombre que trae el sobre sólo llena un hueco: no pisa uno guardado con más confianza.
+ *
+ * Es el último recurso del parser y entra a 0.70. El caso que abre un siniestro nuevo
+ * hereda el nombre con una confianza de entre 0.85 y 0.95 y su primera extracción sólo ve
+ * los mensajes que se mudaron: si ahí la persona no se nombra, el alias del perfil de
+ * WhatsApp (otro valor) pisaba lo heredado en el upsert Y entraba al pedido como
+ * confirmación de confianza media, y el agente volvía a preguntar el nombre.
+ *
+ * El dato del sobre se cambia por el guardado, con su confianza, y no se saca: la corrida
+ * es de donde `orchestrate` toma el nombre para saludar, y un nombre que ya tenemos no se
+ * puede olvidar porque esta vez no se lo escribió. Sigue con `source: "canal"`, así que no
+ * se vuelve un hecho del caso donde antes no lo era.
+ *
+ * Sólo lee cuando el sobre trae un nombre. Si la lectura falla, sigue como antes.
+ */
+async function sinPisarLoGuardado(
+  campos: ExtractedField[],
+  caseId: string,
+  tenantCtx: TenantContext
+): Promise<ExtractedField[]> {
+  const delCanal = campos.filter((f) => f.source === "canal");
+  if (delCanal.length === 0) return campos;
+
+  try {
+    const guardados = await enTenant(tenantCtx, (db) =>
+      db
+        .select({
+          field_key: extractedFields.field_key,
+          field_value: extractedFields.field_value,
+          confidence: extractedFields.confidence,
+        })
+        .from(extractedFields)
+        .where(
+          and(
+            eq(extractedFields.case_id, caseId),
+            inArray(extractedFields.field_key, [...new Set(delCanal.map((f) => canonicalFieldKey(f.field_key)))])
+          )
+        )
+    );
+    if (!Array.isArray(guardados)) return campos;
+
+    const guardadoDe = new Map(guardados.map((g) => [g.field_key, g]));
+    return campos.map((f) => {
+      const guardado = f.source === "canal" ? guardadoDe.get(canonicalFieldKey(f.field_key)) : undefined;
+      return guardado && Number(guardado.confidence) > f.confidence
+        ? { ...f, field_value: guardado.field_value, confidence: Number(guardado.confidence) }
+        : f;
+    });
+  } catch (err) {
+    logger.warn({ code: errorCode(err), case_id: caseId }, "email_worker.campos_del_canal_read_error");
+    return campos;
   }
 }
 

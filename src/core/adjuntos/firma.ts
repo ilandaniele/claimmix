@@ -178,11 +178,14 @@ export function paginasPdf(bytes: Uint8Array): number | null {
 /** La página Ogg más larga posible: el último `OggS` está dentro de esto. */
 const COLA_OGG = 65_307;
 
+function esOggOpus(b: Uint8Array): boolean {
+  return new TextDecoder("latin1").decode(b.subarray(0, 64)).includes("OpusHead");
+}
+
 function duracionOgg(b: Uint8Array): number | null {
   // Sólo Opus: su granule siempre cuenta muestras a 48 kHz, sea cual sea la
   // frecuencia original. Vorbis tiene la suya y no vale la pena parsearla.
-  const cabecera = new TextDecoder("latin1").decode(b.subarray(0, 64));
-  if (!cabecera.includes("OpusHead")) return null;
+  if (!esOggOpus(b)) return null;
   const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
   for (let i = b.length - 27; i >= Math.max(0, b.length - COLA_OGG); i--) {
     if (!textoEn(b, i, "OggS")) continue;
@@ -192,6 +195,56 @@ function duracionOgg(b: Uint8Array): number | null {
     return (alto * 2 ** 32 + bajo) / 48_000;
   }
   return null;
+}
+
+/** Menos paquetes que esto no alcanzan para decir que el audio es silencio. */
+const MIN_PAQUETES_MUDOS = 20;
+/** Los del arranque del encoder: placeholder.ogg tiene 2; una sílaba real produce muchos más. */
+const MAX_PAQUETES_DISTINTOS = 3;
+
+/**
+ * Un Ogg Opus que es silencio digital. Con silencio, Opus repite el paquete byte
+ * a byte; con voz, o con el ruido de un micrófono, no. Se cuenta sin decodificar.
+ * Ante cualquier cosa rara (magia faltante, página cortada, pocos paquetes)
+ * devuelve `false` y decide el modelo, como siempre.
+ */
+export function esOpusMudo(b: Uint8Array): boolean {
+  try {
+    const latin1 = new TextDecoder("latin1");
+    if (!esOggOpus(b)) return false;
+    const repeticiones = new Map<string, number>();
+    let paquetes = 0;
+    let actual: Uint8Array[] = [];
+    let i = 0;
+    while (i < b.length) {
+      if (i + 27 > b.length || !textoEn(b, i, "OggS")) return false;
+      const segmentos = b[i + 26];
+      let p = i + 27 + segmentos;
+      if (p > b.length) return false;
+      for (let s = 0; s < segmentos; s++) {
+        const largo = b[i + 27 + s];
+        if (p + largo > b.length) return false;
+        actual.push(b.subarray(p, p + largo));
+        p += largo;
+        if (largo === 255) continue;
+        // Los dos primeros paquetes son OpusHead y OpusTags.
+        if (++paquetes > 2) {
+          const clave = latin1.decode(Uint8Array.from(actual.flatMap((t) => [...t])));
+          repeticiones.set(clave, (repeticiones.get(clave) ?? 0) + 1);
+          // Cada clave de más es al menos un paquete distinto de la más repetida.
+          if (repeticiones.size > MAX_PAQUETES_DISTINTOS + 1) return false;
+        }
+        actual = [];
+      }
+      i = p;
+    }
+    // Un paquete que sigue en una página que no está: el archivo quedó cortado.
+    if (actual.length > 0) return false;
+    const deAudio = paquetes - 2;
+    return deAudio >= MIN_PAQUETES_MUDOS && deAudio - Math.max(...repeticiones.values()) <= MAX_PAQUETES_DISTINTOS;
+  } catch {
+    return false;
+  }
 }
 
 /** PCM, flotante o extensible: los que se miden por bytes sin decodificar. */
@@ -261,9 +314,14 @@ export interface Metadatos {
   plazoAgotado?: { veces: number; en: string };
   /** Por qué no pasó `revisarAdjunto`: se guarda igual, pero no va al modelo. */
   descarte?: string;
+  /** Una nota de voz que la transcripción dio por leída sin sacarle texto (muda, inverosímil o con error). */
+  sinTexto?: true;
   /** Cuándo una corrida tomó la lectura de la carta de este archivo (B24): mientras no venza, otra no la lee. */
   leyendoCarta?: string;
 }
+
+/** La clave de `sinTexto`: la escribe `transcribir.ts` y la lee `orchestrate.ts`. */
+export const METADATO_SIN_TEXTO = "sinTexto" satisfies keyof Metadatos;
 
 export const MAX_PAGINAS_PDF = 10;
 export const MAX_SEGUNDOS_AUDIO = 120;

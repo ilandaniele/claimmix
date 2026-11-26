@@ -97,6 +97,9 @@ el tercero como responsable (`finally.responsabilidad`, que informa `sin_leer`
 si no se escribió opinión). Necesita la migración 0041 aplicada en la base del
 ensayo.
 
+`noAsked` canoniza la clave (`canonicalFieldKey`), así que `policy_number` y
+`numero_poliza` son el mismo dato.
+
 Imprime la conversación completa. **Leela.** La mitad del valor está en que una
 persona note una respuesta que pasa todas las verificaciones y suena mal.
 
@@ -112,7 +115,13 @@ pedido en el texto, con `pideAlgo` (`scripts/lib/pide-algo.mjs`), más ancho que
 la guarda del redactor para que muerda lo que ella deja pasar, sin contar «no te
 pedimos» ni el ofrecimiento de responder con más información— y `no-menciona`
 con «internad», «quemadur», «recuper», «mejoría» y «esté bien»: la frase no
-repite ni pronostica lo que contó de la salud.
+repite ni pronostica lo que contó de la salud. También `menciona:emergencias`:
+la derivación dice a quién llamar si es urgente (`EMERGENCIAS`, en los dos pisos
+y exigida al redactor por la guarda `dropped_emergencias`). Corre también en
+`mail-que-no-coincide-con-el-padron`: la derivación del titular ajeno la dice en
+los dos pisos (vía `LO_REVISA_UN_ESPECIALISTA`) y la guarda se la exige al
+redactor también para `conflict` con `titularAjeno`. No hay escenario de
+WhatsApp del titular ajeno.
 
 Toda conversación con `finally` que termina en `listo_para_core` o
 `requiere_especialista` corre `traspaso`: el último mensaje avisa que la carga
@@ -135,7 +144,15 @@ y otro choque con otra fecha. A la pregunta el agente no contesta, el caso queda
 misma consulta que el estado: `consulta_estado`. Un mensaje reservado sin clase
 se lee como `sin_clasificar`. El otro choque, por WhatsApp, abre un caso nuevo
 que contesta el agente (`casoNuevo: true`) y el derivado no cambia: desde ese
-turno el ensayo sigue el caso nuevo y comprueba el anterior con `anterior`. Por
+turno el ensayo sigue el caso nuevo y comprueba el anterior con `anterior`. El
+caso nuevo hereda el nombre del mismo número: no lo vuelve a pedir (`noAsked`
+sobre `full_name`), ni siquiera cuando el perfil de WhatsApp (`remitente`) dice
+otro nombre que lo escrito, y no cita la póliza del derivado ni el nombre del
+perfil (`avoids` con «6610» y «Paulo»). Que
+lo heredado llegó con su confianza lo comprueba `finally.seguros` (el nombre
+guardado con confianza >= 0.85; `finally.knows` sólo mira que la clave exista, y
+el perfil de WhatsApp la escribiría igual a 0.70). Que la póliza no se herede (es otro vehículo) lo fija `pnpm capa-datos`; el
+ensayo no exige que el mensaje la pida, porque eso lo decide el modelo y varía. Por
 mail no se parte: el hilo es la conversación, y la clase y el aviso al equipo
 quedan como estaban.
 `mail-tardio-pregunta-como-va` es la misma pregunta por mail, contestando en el
@@ -204,7 +221,7 @@ también se borra.
 
 #### La sombra: las líneas ◐ y el resumen
 
-Después de cada vuelta, el ensayo imprime una línea `   ◐ sombra: …` por cada corrida nueva del caso en `agent_runs`: lee `confidence_payload->'sombra'` por `case_id` y recuerda los id ya impresos, sin reloj, así que una retoma que deja dos filas imprime las dos. Al final suma todo en una línea de resumen. **Nada de esto cuenta para el veredicto**: no entra a la lista de fallas, ni al JSON de diferencias (`--reporte`), ni al código de salida. Es un instrumento, no una guarda; las guardas son las comprobaciones de arriba.
+Después de cada vuelta, el ensayo imprime una línea `   ◐ sombra: …` por cada corrida nueva del caso en `agent_runs` que tenga sombra: lee `confidence_payload->'sombra'` por `case_id` y recuerda los id ya impresos, sin reloj, así que una retoma que deja dos filas imprime las dos. La extracción anota la sombra sólo si el mensaje es un siniestro y la salida del modelo se pudo leer (`is_claim` distinto de `false` y sin `parse_failed`); una vuelta sin corrida nueva con sombra no imprime nada. Al final suma todo en una línea de resumen, que sale sólo si sumó al menos una corrida. **Nada de esto cuenta para el veredicto**: no entra a la lista de fallas, ni al JSON de diferencias (`--reporte`), ni al código de salida. Es un instrumento, no una guarda; las guardas son las comprobaciones de arriba.
 
 Cada línea junta, separados por « · », los tramos de las decisiones que se anotaron en esa vuelta (`gravedad`, `derivar`, `pedir`, `responder`):
 
@@ -239,7 +256,7 @@ Viven en la máquina de quien corre el ensayo, en `tests/fixtures/`:
 | `danos.jpg` | Un solo auto visto de afuera con daño moderado (abolladuras, una luz rota), sin techo hundido, fuego ni personas, sin patente ni caras legibles, JPEG sin GPS. La de referencia es «2007 Chevrolet HHR involved in crash» de Wikimedia Commons (CC0) | Que lo reconozca como las fotos de los daños. Con una foto de destrucción total, Gemini 3.8 califica el choque como grave y `choque-completo` deriva |
 | `licencia.jpg` | Una licencia de conducir | El caso difícil: dos documentos de papel pendientes, tiene que elegir el correcto |
 | `irrelevante.jpg` | Cualquier foto que no sea un documento | El caso negativo: no tiene que cerrar ningún pedido |
-| `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo |
+| `nota-de-voz.ogg` | Una nota de voz sintética, en castellano, sin datos de nadie | Que se transcriba (`nota-de-voz-y-pdf`); sin ella va `placeholder.ogg`, un audio mudo que no llega al modelo |
 
 Dos sí están en el repositorio porque no son de nadie: `placeholder.ogg` (dos
 segundos de silencio en Opus, hecho con ffmpeg) y `sintetico-constancia.pdf`
@@ -248,6 +265,24 @@ y una fecha tres días después de la que cuenta la persona). Con ellas
 `nota-de-voz-y-pdf` prueba siempre que los dos archivos se guardan y se leen
 (`leidos`), y que la fecha que no coincide queda como indicio para el analista
 (`indicios`) sin que la respuesta lo mencione.
+
+**El reemplazo es un silencio digital y no llega al modelo.**
+`placeholder.ogg` tiene 101 paquetes de audio, 99 idénticos (-91 dB): en Opus el
+silencio digital repite el paquete byte por byte. `esOpusMudo`
+(`src/core/adjuntos/firma.ts`) lo reconoce y `transcribir.ts` da esa nota por
+leída sin texto sin llamar a Vertex. Una nota real que no se entiende (ruido,
+una voz lejana) sí va al modelo, y ahí la defensa es `leer()`, que descarta lo
+que no tiene letras ni dígitos o es sólo una anotación de ruido («Inaudible.»). Con el reemplazo, el turno 2 de
+`nota-de-voz-y-pdf` exige la clave `conElReemplazo`: que alguna respuesta avise
+que no se pudo escuchar el audio y pida que lo escriban (`avisaDelAudio`, el
+mismo criterio `avisaQueNoSeEscucho` que usa el producto para no repetir el
+aviso) y que no diga «tomamos nota» (`avoids`). Con la nota real en disco se
+transcribe y esa clave no corre.
+
+Costo de esto: sin `nota-de-voz.ogg` el ensayo (QA después del deploy, CI) ya no
+ejercita la llamada real de audio a Vertex, porque el reemplazo se resuelve
+antes. Qué es silencio lo verifica `firma.test.ts`, que lee el `placeholder.ogg`
+del repositorio y exige que `esOpusMudo` lo dé por mudo.
 
 Sin ellas la suite corre igual, avisa cuáles faltan, y no da por probado lo que
 no probó. El caso negativo sí se verifica siempre: una imagen que no
@@ -408,6 +443,13 @@ marcador y una persona descartable, que borra al terminar), así que sólo corre
 en CI contra el ensayo o con `--escribe`, y necesita la 0046 aplicada en esa
 base. Si el trigger falla, `recordUsage` traga el error y los tres topes de
 presupuesto dejan de contar en silencio; esto lo atrapa antes de producción.
+
+Que el caso de un siniestro nuevo hereda la identidad sólo cuando corresponde lo
+prueba la sección 8 de `pnpm capa-datos`, que corre `abrirCasoPorSiniestroNuevo`
+de verdad como `claimmix_app` en dos inquilinos descartables: el mismo número
+hereda `dni` y `full_name` con tope 0.95 y no la póliza, un dato con confianza media o con la confirmación pendiente o rechazada no pasa, con otro número en el
+hilo no hereda nada, y desde otro inquilino no abre ni hereda. Escribe, así que
+sólo corre en CI contra el ensayo o con `--escribe`.
 
 Sobre esa mitad hay **cuatro formas**, y cada una contesta una pregunta
 distinta. Que sean cuatro y no una repetida con otro nombre es el punto: si las

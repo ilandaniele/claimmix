@@ -235,10 +235,16 @@ describe("conTope", () => {
   // El tope por operación no ve la regresión que da consultas de segundos: cada una pasa por debajo.
   // Lo que las corta es el de la celda, que cuenta desde que se arma la operación.
   it("corta la celda que pasa su tope aunque ninguna operación pase el suyo", async () => {
+    vi.useFakeTimers();
     const lenta = conTope("ciclo", 10_000, () => new Promise<void>((r) => setTimeout(r, 30)), 50);
+    const correr = async () => {
+      const vuelta = lenta();
+      await vi.advanceTimersByTimeAsync(30);
+      await vuelta;
+    };
 
-    await lenta();
-    await lenta();
+    await correr();
+    await correr();
     const error = await lenta().catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(OperacionColgada);

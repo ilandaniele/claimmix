@@ -20,6 +20,7 @@ vi.mock("@/lib/observability/logger", () => ({ logger: { error: vi.fn(), warn: m
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pg-proxy";
+import { MEDIUM_CONFIDENCE_HIGH } from "@/server/cases/gap-analyzer";
 import { abrirCasoPorSiniestroNuevo } from "@/server/cases/siniestro-nuevo";
 
 const CASE = "123e4567-e89b-12d3-a456-426614174001";
@@ -39,7 +40,18 @@ const nuevoDe = (i: number) =>
 
 /** Lo que devuelve el lote cuando el caso nuevo se abrió, con dos mensajes movidos. */
 function loteAbierto() {
-  return [[], { rows: [{ id: "nuevo" }] }, [{ id: "m1" }, { id: "m2" }], [], [], [], [], [], [{ case_id: "nuevo" }]];
+  return [
+    [],
+    { rows: [{ id: "nuevo" }] },
+    [{ id: "m1" }, { id: "m2" }],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [{ case_id: "nuevo" }],
+    [{ field_key: "full_name" }],
+  ];
 }
 
 beforeEach(() => {
@@ -52,12 +64,12 @@ beforeEach(() => {
 });
 
 describe("el lote", () => {
-  it("manda nueve sentencias en el contexto del inquilino, con el lock del caso primero", async () => {
+  it("manda diez sentencias en el contexto del inquilino, con el lock del caso primero", async () => {
     await abrir();
 
     expect(m.enTenantVarias).toHaveBeenCalledTimes(1);
     expect(m.enTenantVarias.mock.calls[0][0]).toEqual({ tenantId: TENANT });
-    expect(sentencias).toHaveLength(9);
+    expect(sentencias).toHaveLength(10);
     const lock = sqlDe(0);
     expect(lock.sql).toContain("pg_advisory_xact_lock(hashtext('siniestro_nuevo')");
     expect(lock.params).toContain(CASE);
@@ -133,7 +145,7 @@ describe("el lote", () => {
     await abrir();
 
     const nuevo = nuevoDe(1);
-    for (const i of [2, 3, 4, 5, 6, 7]) expect(sqlDe(i).params).toContain(nuevo);
+    for (const i of [2, 3, 4, 5, 6, 7, 9]) expect(sqlDe(i).params).toContain(nuevo);
   });
 
   it("el caso de antes no cambia de estado: pierde la clase y conserva la marca sólo si le queda un entrante sin contestar", async () => {
@@ -168,6 +180,7 @@ describe("el lote", () => {
     for (const i of [6, 7]) {
       expect(sqlDe(i).sql).toContain("select count(*) from claim_messages m");
       expect(sqlDe(i).sql).not.toContain("body");
+      expect(sqlDe(i).sql).not.toContain("field_value");
     }
   });
 
@@ -180,25 +193,112 @@ describe("el lote", () => {
   });
 });
 
+describe("la identidad que pasa al caso nuevo", () => {
+  it("sólo pasan el nombre y el DNI, nunca la póliza", async () => {
+    await abrir();
+
+    const { sql, params } = sqlDe(9);
+    expect(sql).toContain("insert into extracted_fields");
+    expect(sql).toContain("from extracted_fields f");
+    expect(sql).toContain("f.field_key in ('full_name', 'dni')");
+    expect(sql).not.toContain("policy_number");
+    expect(JSON.stringify(params)).not.toContain("policy_number");
+  });
+
+  it("con tope 0.95 y sin pisar nada: 1.00 es de un analista y el worker no podría corregirlo", async () => {
+    await abrir();
+
+    const { sql } = sqlDe(9);
+    expect(sql).toContain("least(f.confidence, 0.95)");
+    expect(sql).toContain("on conflict (case_id, field_key) do nothing");
+    expect(sql).toContain("returning field_key");
+    expect(sql).not.toContain("do update");
+    expect(sql).not.toContain("1.00");
+  });
+
+  it("sólo datos que el caso de antes daba por ciertos: desde 0.85 y no vacíos", async () => {
+    await abrir();
+
+    const { sql, params } = sqlDe(9);
+    expect(sql).toContain("btrim(f.field_value) <> ''");
+    expect(sql).toContain("f.confidence >= $");
+    expect(params).toContain(MEDIUM_CONFIDENCE_HIGH);
+    expect(MEDIUM_CONFIDENCE_HIGH).toBe(0.85);
+  });
+
+  it("ni un dato con confirmación pendiente ni uno que un analista rechazó", async () => {
+    await abrir();
+
+    const { sql } = sqlDe(9);
+    expect(sql).toContain("from claim_field_confirmations c");
+    expect(sql).toContain("c.case_id = f.case_id and c.field_name = f.field_key");
+    expect(sql).toContain("c.status in ('pending', 'rejected')");
+    expect(sql).toMatch(/not exists \(select 1 from claim_field_confirmations/);
+  });
+
+  it("dentro del inquilino del caso nuevo, que no viaja como parámetro, y sólo si se abrió", async () => {
+    await abrir();
+
+    const { sql, params } = sqlDe(9);
+    expect(sql).toContain("select nc.id, nc.tenant_id");
+    expect(sql).toContain("join cases nc on nc.id = $");
+    expect(sql).toContain("nc.tenant_id = f.tenant_id");
+    expect(nuevoDe(9)).toBe(nuevoDe(1));
+    expect(params).toContain(CASE);
+    expect(params).not.toContain(TENANT);
+  });
+
+  it("sólo si todos los entrantes de los dos casos son del mismo número", async () => {
+    await abrir();
+
+    const { sql, params } = sqlDe(9);
+    expect(sql).toContain("join claim_messages p on p.id = $");
+    expect(sql).toContain("p.case_id = nc.id");
+    expect(sql).toContain("p.from_addr is not null");
+    expect(sql).toContain("v.from_addr is distinct from p.from_addr");
+    expect(sql).toContain("v.case_id in (f.case_id, nc.id)");
+    expect(sql).toContain("v.direction = 'inbound'");
+    expect(sql).toContain("exists (select 1 from claim_messages v where v.case_id = f.case_id");
+    expect(params).toContain(MSG);
+  });
+
+  it("va última, después de mudar los mensajes, y el caso de antes sólo se lee", async () => {
+    await abrir();
+
+    expect(sentencias).toHaveLength(10);
+    expect(sqlDe(2).sql).toContain('update "claim_messages"');
+    expect(sqlDe(9).sql).toContain("insert into extracted_fields");
+    const { sql } = sqlDe(9);
+    expect(sql).not.toContain("update ");
+    expect(sql).not.toContain("delete ");
+  });
+
+  it("compara ids sin pasarlos a texto, para que el índice entre bajo RLS", async () => {
+    await abrir();
+
+    expect(sqlDe(9).sql).not.toMatch(/::text/);
+  });
+});
+
 describe("el resultado", () => {
   it("con el caso nuevo insertado devuelve su id y cuántos mensajes se mudaron", async () => {
     const r = await abrir();
 
     expect(r).toEqual({ tipo: "abierto", casoNuevo: nuevoDe(1), movidos: 2 });
     expect(m.logInfo).toHaveBeenCalledWith(
-      { case_id: CASE, caso_nuevo: nuevoDe(1), movidos: 2 },
+      { case_id: CASE, caso_nuevo: nuevoDe(1), movidos: 2, heredados: 1 },
       "siniestro_nuevo.abierto"
     );
   });
 
   it("sin caso nuevo y con el mensaje en otro caso, otra corrida ya lo mudó", async () => {
-    m.enTenantVarias.mockResolvedValue([[], { rows: [] }, [], [], [], [], [], [], [{ case_id: "otro" }]]);
+    m.enTenantVarias.mockResolvedValue([[], { rows: [] }, [], [], [], [], [], [], [{ case_id: "otro" }], []]);
 
     await expect(abrir()).resolves.toEqual({ tipo: "ya_movido" });
   });
 
   it("sin caso nuevo y con el mensaje todavía acá, sigue como antes", async () => {
-    m.enTenantVarias.mockResolvedValue([[], { rows: [] }, [], [], [], [], [], [], [{ case_id: CASE }]]);
+    m.enTenantVarias.mockResolvedValue([[], { rows: [] }, [], [], [], [], [], [], [{ case_id: CASE }], []]);
 
     await expect(abrir()).resolves.toEqual({ tipo: "sigue" });
     expect(m.logInfo).toHaveBeenCalledWith({ case_id: CASE }, "siniestro_nuevo.no_corresponde");

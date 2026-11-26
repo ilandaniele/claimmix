@@ -32,8 +32,18 @@ import { EMAIL_RE, ENLACE_RE } from "@/core/text/contacto";
 import { repiteDatoDelPadron, tokensDelPadron } from "@/core/text/dato-del-padron";
 import { conRespuestaPendiente } from "@/core/mensajes/respuesta-pendiente";
 import { confirmaLoQueEscribio } from "@/core/mensajes/lo-dicho";
-import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import {
+  CUIDADO,
+  EMERGENCIAS,
+  EMERGENCIAS_DE_LA_POLIZA,
+  diceCuidado,
+  diceEmergencias,
+  hablaDeLaSalud,
+  pideDatos,
+} from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO, mencionaElTraspaso } from "@/core/mensajes/traspaso";
+import { POLIZA_CAMBIADA } from "@/core/mensajes/poliza-cambiada";
+import { AUDIO_SIN_TRANSCRIBIR, daPorAnotadoElAudio, diceQueNoSeEscucho } from "@/core/mensajes/audio-sin-transcribir";
 import { registrarConsumoDelModelo } from "@/server/ai/budget";
 import { logger } from "@/lib/observability/logger";
 
@@ -109,6 +119,10 @@ export interface ComposeReplyInput {
    *
    * Los dos valores pueden ser correctos —escribe la hija por el auto del
    * padre—, así que preguntar cuál es el bueno no tiene respuesta.
+   *
+   * También en la derivación que nombra la diferencia con el padrón: ahí cambia
+   * la línea de emergencias («de la póliza») y se prohíbe atribuirle a quien
+   * escribe la póliza, el vehículo, el seguro, la cobertura o la aseguradora.
    */
   titularAjeno?: boolean;
   /**
@@ -119,6 +133,11 @@ export interface ComposeReplyInput {
    * prompt tapa los números de lo que escribió y la guarda rechaza cualquiera.
    */
   polizaCambiada?: boolean;
+  /**
+   * El mensaje era sólo una nota de voz que no se pudo escuchar: el acuse sale
+   * porque llegó el archivo, y no puede decir que se tomó nota de su contenido.
+   */
+  audioSinTranscribir?: boolean;
   /**
    * Alguien se lastimó: la derivación abre con la frase de cuidado.
    *
@@ -210,11 +229,28 @@ const TRASPASO =
   "con esto se cierra la carga de datos por este medio y una persona del equipo le va a " +
   `escribir, puede ser desde otro número o desde otra dirección de correo (por ejemplo: «${AVISO_DE_TRASPASO}»)`;
 
+// Con el literal de ejemplo, como TRASPASO: la guarda dropped_emergencias busca «emergencias» y no una paráfrasis.
+const LINEA_DE_EMERGENCIAS =
+  `si necesita asistencia urgente llame a la línea de emergencias de su póliza (por ejemplo: «${EMERGENCIAS}»)`;
+// Lo que el redactor no puede decirle a quien escribe por la póliza de otro; titular_ajeno_se_lo_atribuye lo vigila con las mismas palabras.
+const NO_ES_DE_QUIEN_ESCRIBE = "que la póliza, el vehículo, el seguro, la cobertura o la aseguradora son de quien escribe";
+// La del titular ajeno: «su póliza» se la atribuye, y titular_ajeno_se_lo_atribuye la rechaza.
+const LINEA_DE_EMERGENCIAS_AJENA =
+  `si necesita asistencia urgente llame a la línea de emergencias de la póliza (por ejemplo: «${EMERGENCIAS_DE_LA_POLIZA}»)`;
+
 const DIFERENCIA = "Señalar la diferencia entre los dos valores y preguntar cuál es el correcto.";
 
+// Con el literal de ejemplo, como TRASPASO: sin él, el ensayo del 23/11 pidió «¿Nos podrás escribir…?», en futuro.
 const POLIZA_NO_COINCIDE =
   "Decir que el número de póliza que pasó ahora no coincide con el que teníamos para su caso, " +
-  "y pedirle que escriba el correcto.";
+  `y pedirle que escriba el correcto (por ejemplo: «${POLIZA_CAMBIADA}»).`;
+
+// Con el literal de ejemplo, como POLIZA_NO_COINCIDE: sin él la guarda quema reintentos en paráfrasis.
+const AUDIO_NO_ESCUCHADO =
+  "Decir que no pudimos escuchar su nota de voz y pedirle que nos escriba lo que nos quería contar " +
+  `o que la mande de nuevo (por ejemplo: «${AUDIO_SIN_TRANSCRIBIR}»). NO digas que tomamos nota ni ` +
+  "que recibimos lo que contó: nadie lo pudo escuchar. NO agradezcas. NO repitas la lista de datos. " +
+  "Dos oraciones como mucho.";
 
 function buildPrompt(input: ComposeReplyInput): string {
   const enmascarar = (texto: string): string =>
@@ -240,20 +276,26 @@ function buildPrompt(input: ComposeReplyInput): string {
       ? `${DIFERENCIA} ${POLIZA_NO_COINCIDE}`
       : POLIZA_NO_COINCIDE;
 
+  const emergenciasDeLaEscalation = input.titularAjeno
+    ? `${LINEA_DE_EMERGENCIAS_AJENA}. No digas ${NO_ES_DE_QUIEN_ESCRIBE}: la póliza está a nombre de otra persona`
+    : LINEA_DE_EMERGENCIAS;
+
   const intentBrief: Record<ReplyIntent, string> = {
     ask: textoBase("redactar.pedir"),
     escalation:
       "Avisar que la denuncia se derivó a un especialista que se va a comunicar a la brevedad " +
       "(decí «un especialista», nunca «él» ni «ella»: no sabemos quién es), " +
-      "y que si necesita asistencia urgente llame a la línea de emergencias de su póliza. " +
+      `y que ${emergenciasDeLaEscalation}. ` +
       `NO pidas ningún dato: un especialista se encarga. Avisá también que ${TRASPASO}.`,
     closing: `Avisar que ya tenemos todo lo necesario y que ${TRASPASO}. NO pidas nada.`,
     conflict: input.titularAjeno
       ? "La póliza está a nombre de otra persona que quien escribe —puede ser un familiar—, así " +
         "que los dos valores pueden ser correctos. Señalá la diferencia sin preguntar cuál es el " +
-        "correcto y sin decir que la póliza o el vehículo son de quien escribe. Avisá que un " +
+        "correcto y sin decir " + NO_ES_DE_QUIEN_ESCRIBE + ". Avisá que un " +
         "especialista va a revisar el caso y se va a comunicar (decí «un especialista», nunca " +
-        "«él» ni «ella»). NO preguntes ni pidas nada: el caso ya lo tiene un especialista. " +
+        "«él» ni «ella»). " +
+        `Decile también que ${LINEA_DE_EMERGENCIAS_AJENA}. ` +
+        "NO preguntes ni pidas nada: el caso ya lo tiene un especialista. " +
         `Avisá también que ${TRASPASO}.`
       : diferencia,
     // Es la única intención donde la lista de campos se pasa para que NO se
@@ -263,7 +305,7 @@ function buildPrompt(input: ComposeReplyInput): string {
     // el bloque DATOS A PEDIR más abajo. Una lista en el prompt se lee como
     // una lista de cosas para pedir por más que la instrucción diga lo
     // contrario — pasó, y salió el mismo pedido con otras palabras.
-    acknowledgement: textoBase("redactar.acuse"),
+    acknowledgement: input.audioSinTranscribir ? AUDIO_NO_ESCUCHADO : textoBase("redactar.acuse"),
   };
 
   const channelBrief =
@@ -284,7 +326,7 @@ ${input.claimantName ? `\nLa persona se llama ${sinCentinelas(input.claimantName
 ${input.isFollowUp ? "\nYa venimos conversando con esta persona: no la saludes como si fuera el primer contacto." : "\nEs el primer mensaje que le mandamos."}${input.origenWeb && !input.isFollowUp ? "\nLa persona no nos escribió un mail: completó el formulario de denuncia de la aseguradora en la web. Agradecele que lo haya completado y decile que puede contestar este mismo correo." : ""}${input.repitePedido ? `\n${textoBase("redactar.recordatorio")}` : ""}
 ${input.lastMessage ? `\nÚLTIMO MENSAJE DE LA PERSONA (sólo para ajustar el tono, no lo respondas punto por punto ni le preguntes si es correcto algo que escribió ahí: sólo se confirma lo que dice «ya entendimos»):\n"""${enmascarar(input.lastMessage).slice(0, 600)}"""` : ""}
 
-${channelBrief}
+${channelBrief}${input.audioSinTranscribir ? (input.intent === "acknowledgement" ? "\nEn este mensaje no rige lo de agradecer ni lo de «tomamos nota de…» del acuse de arriba: la nota de voz no se pudo escuchar." : "\nLa nota de voz de la persona no se pudo escuchar: no la nombres ni digas «tomamos nota» de ella. El aviso lo agregamos nosotros al final del mensaje.") : ""}
 
 PROHIBIDO, sin excepción:
 - Prometer cobertura, pagos, montos, plazos, reintegros, grúas o turnos. Nadie evaluó el siniestro todavía.
@@ -464,13 +506,15 @@ function violation(text: string, input: ComposeReplyInput): string | null {
 
   // El titular ajeno ya se derivó en esta vuelta: lo que conteste no lo lee el
   // agente, y «¿cuál es el correcto?» salió en un ensayo con los dos correctos.
-  const titularAjeno = input.intent === "conflict" && input.titularAjeno === true;
-  if (titularAjeno && trimmed.includes("?")) return "titular_ajeno_pregunta";
+  const conflictoAjeno = input.intent === "conflict" && input.titularAjeno === true;
+  if (conflictoAjeno && trimmed.includes("?")) return "titular_ajeno_pregunta";
+  const deriva = input.intent === "escalation" || conflictoAjeno;
+  const ajena = deriva && input.titularAjeno === true;
   // Escribió «el auto de mi viejo» y le contestaron «el siniestro de tu auto».
-  if (titularAjeno && /\btu\s+(?:auto|veh[ií]culo|coche|camioneta|moto|p[oó]liza)\b/iu.test(trimmed)) {
+  // También «la línea de emergencias de tu póliza»: a quien escribe se le dice «de la póliza», en toda derivación a quien no es el titular.
+  if (ajena && /\btu\s+(?:auto|veh[ií]culo|coche|camioneta|moto|p[oó]liza|seguro|cobertura|aseguradora)\b/iu.test(trimmed)) {
     return "titular_ajeno_se_lo_atribuye";
   }
-  const deriva = input.intent === "escalation" || titularAjeno;
 
   // An escalation that asks for something contradicts itself — that exact
   // pile-up is why escalated cases send one message and nothing else.
@@ -490,6 +534,18 @@ function violation(text: string, input: ComposeReplyInput): string | null {
     // Ni más: la frase acompaña, no repite ni pronostica lo que contó de la salud.
     if (hablaDeLaSalud(trimmed)) return "care_names_health";
   }
+
+  // Lo mismo: el piso dice que no se escuchó, y «tomamos nota» daría por leído lo que nadie leyó.
+  if (input.intent === "acknowledgement" && input.audioSinTranscribir && !diceQueNoSeEscucho(trimmed)) {
+    return "audio_sin_transcribir";
+  }
+  // En los demás, el pie fijo ya dice que no se escuchó: «tomamos nota» del audio lo contradice.
+  if (input.intent !== "acknowledgement" && input.audioSinTranscribir && daPorAnotadoElAudio(trimmed)) {
+    return "audio_dado_por_anotado";
+  }
+
+  // Lo mismo: los pisos de toda derivación la dicen, también la del titular ajeno.
+  if (deriva && !diceEmergencias(trimmed)) return ajena ? "dropped_emergencias_ajeno" : "dropped_emergencias";
 
   // Último, para que cualquier otro rechazo conserve su motivo en el reintento.
   // Sin el aviso, la persona sigue escribiendo por acá y ya no lo lee nadie.
@@ -586,6 +642,12 @@ function explain(problem: string): string {
   if (problem === "dropped_poliza") {
     return "no dijiste que el número de póliza no coincide. Hay que decirlo y pedirle que escriba el correcto.";
   }
+  if (problem === "audio_sin_transcribir") {
+    return `no dijiste que la nota de voz no se pudo escuchar, la diste por escuchada, anotada o recibida (aunque sea una parte), o no le pediste que lo escriba. No se pudo escuchar: decilo y pedile que nos escriba lo que quería contar o que la mande de nuevo (por ejemplo: «${AUDIO_SIN_TRANSCRIBIR}»).`;
+  }
+  if (problem === "audio_dado_por_anotado") {
+    return "diste por anotada o recibida la nota de voz, y no se pudo escuchar. No la nombres ni digas «tomamos nota» de ella: el aviso lo agregamos nosotros al final.";
+  }
   if (problem === "too_long") return "es demasiado largo. Cortálo.";
   if (problem === "too_short") return "es demasiado corto.";
   if (problem === "escalation_asks_for_data") {
@@ -597,6 +659,12 @@ function explain(problem: string): string {
   if (problem === "care_names_health") {
     return `nombraste las heridas, la internación o la salud de alguien. Alcanza con «${CUIDADO}»: no repitas lo que contó ni digas cómo va a estar nadie.`;
   }
+  if (problem === "dropped_emergencias") {
+    return `no dijiste a quién llamar si es urgente. Decí «${EMERGENCIAS}».`;
+  }
+  if (problem === "dropped_emergencias_ajeno") {
+    return `no dijiste a quién llamar si es urgente. Decí «${EMERGENCIAS_DE_LA_POLIZA}».`;
+  }
   if (problem === "dropped_handoff") {
     return `te faltó avisar que la carga se cierra acá y que una persona le va a escribir, puede ser desde otro número o correo. Podés decirlo así: «${AVISO_DE_TRASPASO}».`;
   }
@@ -607,7 +675,7 @@ function explain(problem: string): string {
     return "hiciste una pregunta. La póliza es de otra persona y el caso ya lo tiene un especialista: nombrá la diferencia y avisá eso, sin preguntar nada.";
   }
   if (problem === "titular_ajeno_se_lo_atribuye") {
-    return "dijiste que el vehículo o la póliza son de quien escribe, y son del titular. Decí «el auto» o «la póliza».";
+    return "dijiste que el vehículo, la póliza, el seguro, la cobertura o la aseguradora son de quien escribe («tu póliza», «tu seguro»…), y son del titular. Decí «el auto» o «la póliza».";
   }
   return problem;
 }

@@ -18,7 +18,7 @@
  *
  * El código del popup vale 30 segundos y una sola vez, y lo que el navegador cuenta del
  * popup es una pista. Por eso `conectarWabaPropia` pide el sello que dejó
- * `iniciarWabaPropia` (de esta sesión, de hace menos de diez minutos y con el número
+ * `iniciarWabaPropia` (de esta sesión, de hace menos de treinta minutos y con el número
  * al azar de la cookie `cm_waba`, que se gasta al usarla): un pedido armado a mano no
  * llega a Graph.
  */
@@ -70,7 +70,8 @@ import { appDeMeta } from "@/server/whatsapp/embedded-signup";
 
 const COOKIE = "cm_waba";
 const INFO_DEL_SELLO = "waba-propia";
-const DURACION_MS = 10 * 60_000;
+/** Lo que valen el sello y la cookie. `FRESCURA_DEL_INICIO_MS` (WabaPropiaPanel.tsx) se corta 10 minutos antes y lo acompaña. */
+const DURACION_MS = 30 * 60_000;
 const EVENTO = /^[A-Z_]{1,60}$/;
 const MAX_CODIGO = 1024;
 const MAX_NOMBRE = 60;
@@ -198,7 +199,7 @@ export async function iniciarWabaPropia(entrada: { nombre?: unknown; web?: unkno
   });
 }
 
-/** ¿El sello es de esta persona, de hace menos de diez minutos y del mismo navegador que lo pidió? */
+/** ¿El sello es de esta persona, de hace menos de treinta minutos y del mismo navegador que lo pidió? */
 function selloVale(inicio: unknown, quien: QuienPide, nonce: string | undefined): boolean {
   const s = abrir(INFO_DEL_SELLO, typeof inicio === "string" ? inicio : undefined) as
     | { t?: unknown; u?: unknown; n?: unknown; exp?: unknown }

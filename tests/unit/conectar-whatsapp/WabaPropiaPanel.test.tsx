@@ -314,7 +314,7 @@ describe("la lista de antes de empezar", () => {
       await u.click(await screen.findByRole("button", { name: "Conectar con Facebook" }));
       await mandar(WWW, cancelo("permissions"));
       const dialogo = await screen.findByRole("dialog");
-      vi.spyOn(Date, "now").mockReturnValue(Date.now() + 9 * 60_000);
+      vi.spyOn(Date, "now").mockReturnValue(Date.now() + 21 * 60_000);
 
       await u.click(within(dialogo).getByRole("button", { name: "Reintentar" }));
 
@@ -621,18 +621,42 @@ describe("si se cancela en el popup", () => {
     expect(h.iniciar).toHaveBeenCalledOnce();
   });
 
-  it("pasados los 8 minutos el inicio ya no sirve: «Reintentar» pide uno nuevo", async () => {
+  it("a los 19 minutos «Reintentar» todavía reusa el inicio: le quedan más de los diez que lleva el popup", async () => {
     const u = await hastaElPopup();
     await mandar(WWW, cancelo("permissions"));
     const dialogo = await screen.findByRole("dialog");
     const ahora = Date.now();
-    vi.spyOn(Date, "now").mockReturnValue(ahora + 9 * 60_000);
+    vi.spyOn(Date, "now").mockReturnValue(ahora + 19 * 60_000);
+
+    await u.click(within(dialogo).getByRole("button", { name: "Reintentar" }));
+
+    expect(h.login).toHaveBeenCalledTimes(2);
+    expect(h.iniciar).toHaveBeenCalledOnce();
+  });
+
+  it("con menos de diez minutos por delante, el inicio ya no sirve: «Reintentar» pide uno nuevo", async () => {
+    const u = await hastaElPopup();
+    await mandar(WWW, cancelo("permissions"));
+    const dialogo = await screen.findByRole("dialog");
+    const ahora = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(ahora + 21 * 60_000);
 
     await u.click(within(dialogo).getByRole("button", { name: "Reintentar" }));
 
     await screen.findByRole("button", { name: "Conectar con Facebook" });
     expect(h.iniciar).toHaveBeenCalledTimes(2);
     expect(h.login).toHaveBeenCalledOnce();
+  });
+
+  it("«Conectar con Facebook» tras 21 minutos en la vista de abrir pide un inicio nuevo en vez de abrir el popup", async () => {
+    const u = await hastaElBoton();
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 21 * 60_000);
+
+    await u.click(screen.getByRole("button", { name: "Conectar con Facebook" }));
+
+    await screen.findByRole("button", { name: "Conectar con Facebook" });
+    expect(h.iniciar).toHaveBeenCalledTimes(2);
+    expect(h.login).not.toHaveBeenCalled();
   });
 
   it("ofrece seguir por mail", async () => {

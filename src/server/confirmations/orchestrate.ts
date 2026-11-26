@@ -28,7 +28,7 @@
  */
 
 import "server-only";
-import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { ESTADOS_DE_ARRANQUE } from "@/core/case/estados-de-arranque";
 import { queHacer, elPedidoQuedaEnEspera } from "@/core/case/reply-decision";
 import {
@@ -45,6 +45,8 @@ import {
 } from "@/core/agente/sombra";
 import { laPreguntaDelMensaje } from "@/core/mensajes/pregunta";
 import { esSoloUnAcuse } from "@/core/mensajes/acuse";
+import { esAudioSinTranscribir } from "@/core/adjuntos/transcripcion";
+import { METADATO_SIN_TEXTO } from "@/core/adjuntos/firma";
 import { esValorVacio, valorLegible } from "@/core/mensajes/valor-legible";
 import { contestaSinHora, dichoRecien, esValorVago } from "@/core/mensajes/lo-dicho";
 import { diaArgentino } from "@/core/fecha/dia-argentino";
@@ -1071,9 +1073,11 @@ export async function orchestratePostExtraction(
   //
   // Y tras un acuse solo, lo que queda de aquel pedido tampoco es un pedido
   // nuevo: si la lista se achicó, fue porque la extracción cambió de idea.
+  const quedaDeAquelPedido = (fields: string[]) =>
+    soloAcuse && fields.every((k) => lastAsked.includes(k));
   const askAlreadyMade =
     askItems.fields.length > 0 &&
-    ((soloAcuse && askItems.fields.every((k) => lastAsked.includes(k))) ||
+    (quedaDeAquelPedido(askItems.fields) ||
       (await alreadyAskedFor(caseId, tenantId, askItems.fields)));
   // The agent can also decide there is nothing worth saying — someone who
   // wrote "ok" after being asked for a document has not moved the claim, and
@@ -1099,13 +1103,29 @@ export async function orchestratePostExtraction(
   // recognise what it was.
   // Una sola lectura de «cuándo hablamos» para las dos preguntas de abajo: no
   // hay ninguna escritura entre ellas. Ver `cuandoHablamosPorUltimaVez`.
-  const { hablamos, nosLoDevolvieron, fallo } = await cuandoHablamosPorUltimaVez(caseId, tenantId);
-  const { llegoUnArchivo: somethingArrived, unArchivoNoEntro } = await archivosDesdeQueHablamos(
-    caseId,
-    tenantId,
-    hablamos,
-    fallo
-  );
+  const { hablamos, nosLoDevolvieron, fallo, ultimaSinLaLista } =
+    await cuandoHablamosPorUltimaVez(caseId, tenantId);
+  const {
+    llegoUnArchivo: somethingArrived,
+    unArchivoNoEntro,
+    audioSinTexto,
+  } = await archivosDesdeQueHablamos(caseId, tenantId, hablamos, fallo);
+  // El marcador cubre la nota del último mensaje; la consulta de adjuntos, la que sigue sin leer
+  // o ya falló, sea por mail o con otro mensaje atrás. Si además un archivo no entró, ese aviso
+  // gana: decir las dos cosas juntas, que no lo recibimos y que se oía mal, confunde. Sólo el
+  // pedido y el acuse lo llevan: el cierre y el conflicto con traspaso dicen que la carga por
+  // este medio terminó, y pedir ahí que escriba o reenvíe se contradice.
+  const audioSinTranscribir = !unArchivoNoEntro && (audioSinTexto || esAudioSinTranscribir(latestMessageText));
+
+  // La lista que la persona no vio en lo último que le dijimos no cuenta como
+  // «ya se la mandamos» cuando lo que cerró contesta esa otra cosa —la póliza que
+  // eligió, el dato que confirmó, o un archivo que acusamos—: entre la lista y su
+  // respuesta hubo otro mensaje, y acusar recibo otra vez sin repetirla dejaría de
+  // nombrarla por varios mensajes (y saldría el mismo acuse dos veces seguidas).
+  // Es una sola condición para el código y para la sombra.
+  // Si no se pudo leer lo último, se manda la lista: callarla de más es peor que repetirla.
+  const listaFueraDeLoUltimo = nosContestoElPedido && (ultimaSinLaLista || fallo);
+  const listaVista = askAlreadyMade && !listaFueraDeLoUltimo;
 
   // La decisión se toma en el núcleo, que es puro y está probado con siete
   // booleanos: src/core/case/reply-decision.ts. Acá sólo se juntan las señales.
@@ -1115,7 +1135,7 @@ export async function orchestratePostExtraction(
   // qué un «ok» no merece acuse— se mudó con la función. Está donde se puede
   // leer al lado de las reglas que describe, y donde hay un test por cada una.
   const señalesBase = {
-    yaSePidio: askAlreadyMade,
+    yaSePidio: listaVista,
     elAgenteEspera: agentIsWaiting,
     nosPreguntoAlgo: owesAnAnswer,
     llegoUnArchivo: somethingArrived,
@@ -1132,13 +1152,16 @@ export async function orchestratePostExtraction(
   // decisión. Antes el `&&` la salteaba por corto circuito y sería una pena
   // perder eso: es una ida a la base por cada caso que no está en espera.
   //
+  // Con una respuesta a lo pedido ya está decidido el acuse —o el pedido, si la
+  // lista cambió—, así que la consulta tampoco cambia la decisión.
+  //
   // Y sin plan tampoco se acusa recibo. El acuse se apoya en que el agente
   // deliberó y no dijo «espero»: eso es un juicio sobre el último mensaje. Si
   // la deliberación se cayó no hay juicio ninguno, y la extracción —que relee
   // la conversación entera en cada vuelta— alcanza para que un «gracias»
   // parezca noticia.
   const aprendimosAlgo =
-    plan && askOnHold && !agentIsWaiting && !derivaSola && !somethingArrived
+    plan && askOnHold && !agentIsWaiting && !derivaSola && !somethingArrived && !nosContestoElPedido
       ? await factsLearnedSinceWeLastSpoke(caseId, tenantId, hablamos)
       : false;
 
@@ -1154,9 +1177,14 @@ export async function orchestratePostExtraction(
         elAgenteEspera: false,
         nosPreguntoAlgo: Boolean(laPreguntaDelMensaje(latestMessageText)),
         datosQueFaltan: sinPlan.length,
+        // Las mismas dos reglas que `listaVista`, con `lastAsked` donde el código
+        // consulta `alreadyAskedFor` (la misma lista, no una parte de ella: una
+        // lista que se achicó es un pedido nuevo y sale) y sin otra ida a la base.
         yaSePidio: igual
-          ? askAlreadyMade
-          : sinPlan.length > 0 && sinPlan.every((k) => lastAsked.includes(k)),
+          ? listaVista
+          : sinPlan.length > 0 &&
+            (quedaDeAquelPedido(sinPlan) || mismaLista(sinPlan, lastAsked)) &&
+            !listaFueraDeLoUltimo,
         aprendimosAlgo: false,
       };
       anotarSombra({
@@ -1196,6 +1224,7 @@ export async function orchestratePostExtraction(
         escritoPorLaPersona,
         // Va al pie, fuera del redactor: no depende de que el modelo se acuerde.
         archivoQueNoEntro: unArchivoNoEntro,
+        audioSinTranscribir,
         // Fourth message in, the reply still opened with "gracias por
         // contactarnos". Thanking someone for getting in touch three rounds
         // after they did is the tell that nobody is really reading.
@@ -1271,6 +1300,8 @@ export async function orchestratePostExtraction(
         isFollowUp: true,
         datosDelPadron,
         escritoPorLaPersona,
+        // El acuse sale porque llegó el archivo, no porque se leyó lo que dijo.
+        audioSinTranscribir,
       },
       inReplyToMessageId,
     });
@@ -1390,10 +1421,15 @@ async function resolveAnsweredConfirmations(
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   const tenantCtx: TenantContext = { tenantId };
   // Una franja del día segura sigue sin ser una hora: la fila queda pendiente.
+  // Lo que viene del sobre (`canal`) no es una respuesta: el nombre guardado
+  // puede subir de confianza sin que la persona haya dicho nada.
   const settled = new Set(
     fields
       .filter(
-        (f) => f.confidence >= MEDIUM_CONFIDENCE_HIGH && !esValorVago(f.field_key, f.field_value)
+        (f) =>
+          f.source !== "canal" &&
+          f.confidence >= MEDIUM_CONFIDENCE_HIGH &&
+          !esValorVago(f.field_key, f.field_value)
       )
       .map((f) => canonicalFieldKey(f.field_key))
   );
@@ -2417,11 +2453,17 @@ async function alreadyAskedFor(
 ): Promise<boolean> {
   if (keys.length === 0) return false;
 
-  const previous = await lastAskedKeys(caseId, tenantId);
-  if (previous.length !== keys.length) return false;
+  return mismaLista(await lastAskedKeys(caseId, tenantId), keys);
+}
 
-  const before = new Set(previous);
-  return keys.every((k) => before.has(k));
+/** Lo que sale sin la lista de lo que falta, con los nombres de todos los canales. */
+const SALIDAS_SIN_LA_LISTA = (
+  ["data_confirmation_request", "information_received", "attachment_too_large"] as const
+).flatMap(nombresEnElLibro);
+
+function mismaLista(a: string[], b: string[]): boolean {
+  const deB = new Set(b);
+  return a.length === b.length && a.every((k) => deB.has(k));
 }
 
 /**
@@ -2453,7 +2495,17 @@ async function alreadyAskedFor(
 async function cuandoHablamosPorUltimaVez(
   caseId: string,
   tenantId: string
-): Promise<{ hablamos: string | null; nosLoDevolvieron: boolean; fallo: boolean }> {
+): Promise<{
+  hablamos: string | null;
+  nosLoDevolvieron: boolean;
+  fallo: boolean;
+  /**
+   * Lo último que dijimos no traía la lista: una pregunta por un dato o una
+   * póliza, un acuse o el aviso de un archivo que no entró (`asked_keys` null
+   * en todos). Con los dos nombres del libro: WhatsApp los guarda con `wa_`.
+   */
+  ultimaSinLaLista: boolean;
+}> {
   /*
    * Atrapa acá, y no en quien llama.
    *
@@ -2472,12 +2524,13 @@ async function cuandoHablamosPorUltimaVez(
    */
   try {
     type Fecha = { created_at: string };
-    const [salidas, devoluciones] = await enTenantVarias<[Fecha[], Fecha[]]>(
+    type Salida = Fecha & { template: string };
+    const [salidas, devoluciones] = await enTenantVarias<[Salida[], Fecha[]]>(
       { tenantId },
       (db) =>
         [
           db
-            .select({ created_at: outboundMessages.created_at })
+            .select({ created_at: outboundMessages.created_at, template: outboundMessages.template })
             .from(outboundMessages)
             .where(
               and(
@@ -2502,20 +2555,22 @@ async function cuandoHablamosPorUltimaVez(
             .limit(1),
         ]
     );
-    const hablamos = firstRow(salidas)?.created_at ?? null;
+    const ultima = firstRow(salidas);
+    const hablamos = ultima?.created_at ?? null;
     const devuelto = firstRow(devoluciones)?.created_at ?? null;
     return {
       hablamos,
       nosLoDevolvieron:
         devuelto !== null && (hablamos === null || Date.parse(devuelto) > Date.parse(hablamos)),
       fallo: false,
+      ultimaSinLaLista: ultima !== null && SALIDAS_SIN_LA_LISTA.includes(ultima.template),
     };
   } catch (err) {
     logger.error(
       { code: errorCode(err) },
       "orchestrate.ultimo_saliente_fallo"
     );
-    return { hablamos: null, nosLoDevolvieron: false, fallo: true };
+    return { hablamos: null, nosLoDevolvieron: false, fallo: true, ultimaSinLaLista: false };
   }
 }
 
@@ -2524,16 +2579,16 @@ async function archivosDesdeQueHablamos(
   tenantId: string,
   hablamos: string | null,
   fallo: boolean
-): Promise<{ llegoUnArchivo: boolean; unArchivoNoEntro: boolean }> {
+): Promise<{ llegoUnArchivo: boolean; unArchivoNoEntro: boolean; audioSinTexto: boolean }> {
   // Sin saber cuándo hablamos, un rechazo viejo ya avisado pasaría por noticia: se calla.
-  if (fallo) return { llegoUnArchivo: false, unArchivoNoEntro: false };
+  if (fallo) return { llegoUnArchivo: false, unArchivoNoEntro: false, audioSinTexto: false };
   // Las consultas de acá ya no llevan filtro por inquilino: lo pone la base.
   try {
     // Sin `hablamos` no hay filtro de fecha, y `and()` se salta el `undefined`.
     const desde = hablamos ? gt(claimAttachments.created_at, hablamos) : undefined;
 
     type Fila = { id: string };
-    const [aceptados, pesados] = await enTenantVarias<[Fila[], Fila[]]>(
+    const [aceptados, pesados, mudos] = await enTenantVarias<[Fila[], Fila[], Fila[]]>(
       { tenantId },
       (db) => [
         db
@@ -2572,6 +2627,27 @@ async function archivosDesdeQueHablamos(
             )
           )
           .limit(1),
+        // Una nota de voz que nadie leyó, llegue por el canal que llegue: la que
+        // sigue pendiente (un plazo agotado, un 429, la tercera de una corrida, la
+        // descartada) o la que la transcripción dio por leída sin sacarle texto
+        // (`transcribir.ts` la marca). La pendiente se cuenta ya: la corrida que
+        // la tome y falle llega después de este acuse, cuando `desde` la deja afuera.
+        db
+          .select({ id: claimAttachments.id })
+          .from(claimAttachments)
+          .where(
+            and(
+              eq(claimAttachments.case_id, caseId),
+              desde,
+              ilike(claimAttachments.content_type, "audio/%"),
+              isNull(claimAttachments.rejected_reason),
+              or(
+                isNull(claimAttachments.resumen),
+                sql`${claimAttachments.metadatos}->>${METADATO_SIN_TEXTO}::text = ${"true"}`
+              )
+            )
+          )
+          .limit(1),
       ]
     );
     return {
@@ -2579,11 +2655,12 @@ async function archivosDesdeQueHablamos(
       llegoUnArchivo: hablamos !== null && aceptados.length > 0,
       // Sin `hablamos` nunca le dijimos nada: el rechazo es noticia cuando haya sido.
       unArchivoNoEntro: pesados.length > 0,
+      audioSinTexto: mudos.length > 0,
     };
   } catch (err) {
     // Speaking is the safe direction here too.
     logger.error({ code: errorCode(err) }, "orchestrate.failed_to_check_for_new_files");
-    return { llegoUnArchivo: false, unArchivoNoEntro: false };
+    return { llegoUnArchivo: false, unArchivoNoEntro: false, audioSinTexto: false };
   }
 }
 

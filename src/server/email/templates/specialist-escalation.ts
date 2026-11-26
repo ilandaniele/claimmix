@@ -1,6 +1,6 @@
 import { escapeHtml } from "@/server/email/render";
 import { textoAHtml } from "@/core/email/html";
-import { laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
+import { emergenciasDeLaDerivacion, laDiferencia } from "@/core/mensajes/titular-que-no-coincide";
 import { CUIDADO } from "@/core/mensajes/derivacion";
 import {
   AVISO_DE_TRASPASO,
@@ -24,7 +24,7 @@ import {
  * ── Por qué ya no promete 24 horas hábiles ──────────────────────────────────
  *
  * Nadie evaluó el siniestro todavía, así que el plazo era una promesa que este
- * producto no puede hacer — el piso de WhatsApp (`ESCALATION_TEXT`) nunca la
+ * producto no puede hacer — el piso de WhatsApp (`escalationText`) nunca la
  * hizo. Y desde que el correo pasa por el redactor tenía un costo extra: la
  * reescritura natural de «en un plazo máximo de 24 horas hábiles» es «en 24
  * horas hábiles», que las guardas de `compose-reply` rechazan. Entregar ese
@@ -71,6 +71,7 @@ export function renderSpecialistEscalation(data: SpecialistEscalationData): {
     ...(data.heridos === true ? [CUIDADO] : []),
     urgencyMsg,
     derivacion,
+    emergenciasDeLaDerivacion(data),
     AVISO_DE_TRASPASO,
   ];
   const cuerpo = parrafos.join("\n\n");

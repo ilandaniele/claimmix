@@ -81,6 +81,7 @@ export function dbSimulado(
     propuestos = {},
     guardados = {},
     guardadosFallan = false,
+    confianzasGuardadas = {},
     faltantesExistentes,
     cabecerasDelUltimo,
     casoMovido = false,
@@ -102,7 +103,8 @@ export function dbSimulado(
     const ultimoPedido = pedido.length > 0 && !!columnas && "asked_keys" in columnas;
     const entrantes = !!columnas && "profile_name" in columnas;
     const pendientes = !!columnas && "suggested_value" in columnas;
-    const deCampos = !!columnas && "field_key" in columnas && "field_value" in columnas;
+    const deConfianzas = !!columnas && "field_key" in columnas && "confidence" in columnas;
+    const deCampos = !deConfianzas && !!columnas && "field_key" in columnas && "field_value" in columnas;
     const deFaltantes = !!faltantesExistentes && !!columnas && "doc_key" in columnas;
     const deLaMarca = pendienteAlSoltar && !!columnas && "pending" in columnas;
 
@@ -126,6 +128,7 @@ export function dbSimulado(
         subject: "Siniestro",
         headers: [] as Cabecera[],
         from_addr: undefined as string | undefined,
+        profile_name: conversacion.nombreDePerfil ?? null,
       }));
       if (cabecerasDelUltimo && filas.length > 0) {
         // El From va con las cabeceras: el veredicto de Gmail se alinea contra él.
@@ -146,9 +149,17 @@ export function dbSimulado(
               ? guardadosFallan
                 ? Promise.reject(new Error("se cayó la base"))
                 : Promise.resolve(Object.entries(guardados).map(([field_key, field_value]) => ({ field_key, field_value })))
-              : deFaltantes
-                ? Promise.resolve(faltantesExistentes.map((doc_key) => ({ doc_key })))
-                : { limit, orderBy, where }
+              : deConfianzas
+                ? Promise.resolve(
+                    Object.entries(confianzasGuardadas).map(([field_key, { valor, confianza }]) => ({
+                      field_key,
+                      field_value: valor,
+                      confidence: confianza.toFixed(2),
+                    }))
+                  )
+                : deFaltantes
+                  ? Promise.resolve(faltantesExistentes.map((doc_key) => ({ doc_key })))
+                  : { limit, orderBy, where }
         ),
         limit,
         orderBy,
@@ -203,13 +214,15 @@ export interface Conversacion {
    * Los mensajes entrantes del caso, `[texto, recibido]`, y cuándo salió el
    * último pedido. Sin esto el worker lee el mensaje crudo, como el simulador.
    */
-  conversacion?: { enviado: string; mensajes: Array<[string, string]> };
+  conversacion?: { enviado: string; mensajes: Array<[string, string]>; nombreDePerfil?: string };
   /** Las confirmaciones pendientes: `{ clave: valor propuesto }`. */
   propuestos?: Record<string, string>;
   /** Lo que `extracted_fields` tiene guardado cuando el puntaje lo lee: `{ clave canónica: valor }`. */
   guardados?: Record<string, string>;
   /** La lectura de los campos guardados falla. */
   guardadosFallan?: boolean;
+  /** Valor y confianza con que `extracted_fields` ya tiene un dato, cuando el worker mira si el sobre lo pisaría. */
+  confianzasGuardadas?: Record<string, { valor: string; confianza: number }>;
   /** Las claves que `missing_docs` ya tiene cuando el worker anota los faltantes. */
   faltantesExistentes?: string[];
   /** Cabeceras del último entrante, para E17: `spf=fail` sale sin autenticar. */
@@ -277,6 +290,7 @@ export function registrarMocks(opciones: {
     propuestos,
     guardados,
     guardadosFallan,
+    confianzasGuardadas,
     faltantesExistentes,
     cabecerasDelUltimo,
     casoMovido,
@@ -289,6 +303,7 @@ export function registrarMocks(opciones: {
     propuestos,
     guardados,
     guardadosFallan,
+    confianzasGuardadas,
     faltantesExistentes,
     cabecerasDelUltimo,
     casoMovido,

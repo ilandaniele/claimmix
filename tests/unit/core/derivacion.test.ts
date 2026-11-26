@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { CUIDADO, diceCuidado, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
+import { CUIDADO, EMERGENCIAS, diceCuidado, diceEmergencias, hablaDeLaSalud, pideDatos } from "@/core/mensajes/derivacion";
 import { AVISO_DE_TRASPASO, SI_RESPONDES_EL_CORREO } from "@/core/mensajes/traspaso";
 
 describe("diceCuidado", () => {
@@ -23,6 +23,22 @@ describe("diceCuidado", () => {
 
   it.each(["Lamentablemente no tengo fotos", "sencillamente"])("no: %s", (texto) => {
     expect(diceCuidado(texto)).toBe(false);
+  });
+});
+
+describe("diceEmergencias", () => {
+  it.each([EMERGENCIAS, "Llamá a la línea de emergencias de tu póliza.", "Emergencias: 0800."])("sí: %s", (texto) => {
+    expect(diceEmergencias(texto)).toBe(true);
+  });
+
+  it.each([
+    "Un especialista se va a comunicar con vos a la brevedad.",
+    "Sin emergenciasXYZ",
+    "Es urgente.",
+    "una emergencia",
+    "Sabemos que es una emergencia.",
+  ])("no: %s", (texto) => {
+    expect(diceEmergencias(texto)).toBe(false);
   });
 });
 

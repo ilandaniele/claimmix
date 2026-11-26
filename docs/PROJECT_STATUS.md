@@ -5594,11 +5594,18 @@ Siguen a «Una nota de voz que no se escuchó no se da por anotada» (#591), de 
 - **Queda afuera.** Una nota de voz sin transcribir junto con un texto que cerró algo: el pie del audio (`audioSinTranscribir`) reemplaza el acuse y la persona sólo oye que no se pudo escuchar, sin «tomamos nota» ni recordatorio. Es el límite que ya anotó #591 (nada afirma lo que nadie leyó) y #594 no lo cambia, porque el acuse no se tocó: con la lista idéntica, el aviso del audio reemplaza a repetirla. Nombrar además lo que se cerró es decisión del dueño. En `tardio-siniestro-nuevo` [2] del mismo ensayo se pide «El número de póliza (por ejemplo POL-12345)» aunque la persona ya había dado POL-6610-E en el chat.
 - **Pide un ensayo** antes de dar por cerrado. `mail-completo` T2 ahora verifica `avoids: ["patente", "hora aproximada"]`: si vuelve la lista de T1, el ensayo falla. Se comprobó con los pisos nuevos (mail `information-received`, WhatsApp `renderNoted`), que pasan, y con un texto que repite «la patente del vehículo» y «la hora aproximada del hecho», que falla. No se usó `sinPedido`: con el piso nuevo `pideAlgo` ya no marca nada, pero marcaría un acuse redactado con «¿» o «mandanos», y no ve una lista dicha sin verbo («nos falta: la patente…»). Igual una persona tiene que leer el transcripto y ver que el acuse suena bien. Sin redactor el piso no nombra el parte («tomamos nota de lo que nos contaste»); nombrarlo sería la opción (a).
 
-### Usuarios de Google en el resumen diario del operador (26/11, rama `alta/aviso-usuarios-google`, L6)
+### Usuarios de Google en el resumen diario del operador (26/11, #596, L6)
 
 - D10 quedó en (a): por debajo de 100 usuarios, con la verificación de Google anotada como pendiente. El resumen diario de altas (`resumenDeAltas`) suma una línea con los usuarios de Google del proyecto OAuth contra `ALTA_TOPE_USUARIOS_GOOGLE`: las casillas de `gmail_accounts` del ambiente (`casillasConectadas`, un `count(*)` sin leer token ni correo) más `GOOGLE_USUARIOS_PREVIOS`. Llegar al 80 % hace salir el resumen; sale todos los días mientras siga arriba. Con el tope en 0 o sin poner no hay consulta ni línea. El login con Google no cuenta porque sólo pide `openid`, `email` y `profile`, que no son sensibles (`src/lib/auth/index.ts` no agrega ninguno); si algún día pide un permiso sensible y vive en el mismo proyecto de Google, sus usuarios hay que sumarlos.
 - Es una cota inferior: no ve las conexiones borradas, los consentimientos que el callback rechaza, el remitente del sistema ni el otro ambiente del mismo proyecto (dev y QA comparten); eso va en `GOOGLE_USUARIOS_PREVIOS`, que paridad no compara entre ambientes (regla `libre`).
-- Pendiente del dueño: el «texto OK» de `alta.resumen.google` (L4-texto) y cargar las dos cifras en cada ambiente de Vercel; hasta entonces queda apagado.
+- El dueño dio el OK al texto de `alta.resumen.google` (L4-texto) el 26/11. Falta que cargue las dos cifras en cada ambiente de Vercel; hasta entonces queda apagado.
+
+### Promoción del 26/11 a prd (#597, #599)
+
+- **Qué llegó.** Lo que estaba en qa y no en main: #529 (tope de tokens de un PDF a 560 por página), #580 (dos tests que fallaban de a ratos), #583 (Dependabot del 16/11: Next 16.4.6, workflow 5.5.0), #586 (sello de la WABA propia a 30 minutos), #587 (el siniestro nuevo hereda nombre y DNI), #588, #590 y #592 (la línea de emergencias en toda derivación), #589 y #593 (criterio 4 de `deliberate`), #591 y #594 (la nota de voz que no se escuchó), #595 (la negativa que no cambia la lista no la repite) y #596 (usuarios de Google en el resumen diario), más la documentación de #531, #581 y #585. Sin migraciones; las dos variables de #596 son opcionales, con omisión 0, y no están cargadas en ningún ambiente.
+- **Camino.** #597 llevó qa (`22ac8118`) a main (`cd13c47c`) y #599 llevó main a prd (`a5b22fb0`), los dos con el árbol `dea7d864`. Antes de abrirlos, una revisión con Fable no encontró bloqueantes.
+- **Verificación.** Post-deploy de QA sobre `22ac8118` verde (45862079073), con las 26 conversaciones. «PR y main · Chequeos del código» sobre `cd13c47c` verde (45882645915). DEV · deploy `cd13c47c` verde (45883077739): Carga del tablero en 3 min 39 s, p95 del peor caso 426 ms; el ensayo no se repitió porque QA ya había ensayado ese árbol. PRD · deploy `a5b22fb0` verde (45884369204): smoke, salud de las bases sin desfase y paridad. La paridad avisa sólo lo ya conocido: `ALTA_WABA_PROPIA` difiere (T7) y `MONTHLY_BUDGET_USD` sigue la regla D7. El smoke de prd marca, como el 23/11, `GMAIL_TENANT_ID` sin configurar.
+- **A mirar.** Con `BASE_POR_CLIENTE` prendida, `prepararBase` va a correr en prd por primera vez sobre workflow 5.5.0 y Next 16.4.6, y QA no recorre ese camino: conviene mirar la primera alta real.
 
 ### 🙋 Waiting on you (not code)
 
@@ -5609,10 +5616,9 @@ Siguen a «Una nota de voz que no se escuchó no se da por anotada» (#591), de 
   A5, A7, A8 y A9 (de A7 sólo entrar una vez con Google en prd), y las decisiones D11 a D13
   (D10 quedó en (a), con la verificación de Google pendiente y las dos cifras de Google
   por cargar en cada ambiente de Vercel).
-  A3 son tres direcciones por ambiente: administrador y analista como alias `+` de Gmail, y
-  el mail agente como una Gmail propia. D4 pasó el 21/10 a (d) (#489): no hay dominio propio,
-  y el analista se invita como un alias `+` de la misma Gmail que el administrador, sin
-  activar el espacio. Desde el 21/10 está en los tres ambientes (#493 a prd).
+  A3 son tres casillas reales por ambiente: administrador, analista y mail agente. El 02/11
+  el dueño descartó los alias `+`: el analista se invita después de activar el espacio desde
+  `/admin/altas` (D4). El código de (d), #489, sigue en los tres ambientes.
 - **Tono de los mails (del transcripto del 17/10).** Cuatro cosas que son copia del producto y
   quedan como están hasta que decidas: el mail no saluda por el nombre (`05-canal-mail.md`), la
   referencia es el UUID entero y no una corta, los mails firman como ClaimMix frente al
